@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyto4ka/vpn/internal/panel/service"
-	"github.com/vyto4ka/vpn/internal/panel/store"
-	nodev1 "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1"
-	"github.com/vyto4ka/vpn/internal/xrayconf"
+	"github.com/vyto4ka/vynnel/internal/panel/service"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
+	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
+	"github.com/vyto4ka/vynnel/internal/xrayconf"
 )
 
 // Stream is the panel side of a node connection: a gRPC server stream or an in-memory pipe.

@@ -20,9 +20,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/vyto4ka/vpn/internal/jointoken"
-	"github.com/vyto4ka/vpn/internal/panel/ca"
-	nodev1 "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1"
+	"github.com/vyto4ka/vynnel/internal/jointoken"
+	"github.com/vyto4ka/vynnel/internal/panel/ca"
+	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
 )
 
 // Credentials are stored in the node data dir after Join.
@@ -125,7 +125,7 @@ func pinnedVerifier(sni, fingerprint string) func(tls.ConnectionState) error {
 	}
 }
 
-// SetPanelAddr changes the panel address the node dials (`vpn node set-panel`, docs/ARCHITECTURE.md §11.3).
+// SetPanelAddr changes the panel address the node dials (`vynnel node set-panel`, docs/ARCHITECTURE.md §11.3).
 func SetPanelAddr(dir, addr string) error {
 	info, err := loadPanelInfo(dir)
 	if err != nil {
@@ -149,7 +149,7 @@ func loadPanelInfo(dir string) (*panelInfo, error) {
 func GRPCDialer(dir string) (Dialer, func(), error) {
 	info, err := loadPanelInfo(dir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("node is not joined (%w); run `vpn node join --token ...`", err)
+		return nil, nil, fmt.Errorf("node is not joined (%w); run `vynnel node join --token ...`", err)
 	}
 	cert, err := tls.LoadX509KeyPair(filepath.Join(dir, fileCert), filepath.Join(dir, fileKey))
 	if err != nil {

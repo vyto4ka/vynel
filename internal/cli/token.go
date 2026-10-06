@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyto4ka/vpn/internal/jointoken"
-	"github.com/vyto4ka/vpn/internal/panel/ca"
-	"github.com/vyto4ka/vpn/internal/panel/service"
-	"github.com/vyto4ka/vpn/internal/panel/store"
+	"github.com/vyto4ka/vynnel/internal/jointoken"
+	"github.com/vyto4ka/vynnel/internal/panel/ca"
+	"github.com/vyto4ka/vynnel/internal/panel/service"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
 )
 
 // printJoinToken prints the one-line join token and the command to run on the node.
@@ -26,14 +26,14 @@ func printJoinToken(ctx context.Context, w io.Writer, s *service.Service, n *sto
 	}
 	if addr == "" || sni == "" {
 		return fmt.Errorf("the gateway address is unknown: start the panel with --public-addr HOST:PORT "+
-			"(or `vpn admin setting gateway.addr HOST:PORT`), then run `vpn admin node token %s`", n.Code)
+			"(or `vynnel admin setting gateway.addr HOST:PORT`), then run `vynnel admin node token %s`", n.Code)
 	}
 	authority, err := ca.LoadOrCreate(filepath.Join(adminDataDir, "ca"))
 	if err != nil {
 		return err
 	}
 	tok := jointoken.Token{Addr: addr, SNI: sni, CAFingerprint: authority.Fingerprint(), Secret: secret}.Encode()
-	fmt.Fprintf(w, "join token for %s (valid %s, single use):\n\n  %s\n\non the node run:\n\n  vpn node run --token %s\n",
+	fmt.Fprintf(w, "join token for %s (valid %s, single use):\n\n  %s\n\non the node run:\n\n  vynnel node run --token %s\n",
 		n.Code, service.InstallTokenTTL, tok, tok)
 	return nil
 }

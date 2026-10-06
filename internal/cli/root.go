@@ -1,4 +1,4 @@
-// Package cli wires the vpn subcommands.
+// Package cli wires the vynnel subcommands.
 package cli
 
 import (
@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyto4ka/vpn/internal/buildinfo"
+	"github.com/vyto4ka/vynnel/internal/buildinfo"
 )
 
 var logLevel string
@@ -20,8 +20,8 @@ var logLevel string
 // Execute runs the CLI and returns the process exit code.
 func Execute() int {
 	root := &cobra.Command{
-		Use:           "vpn",
-		Short:         "VPN panel and node (Xray + Caddy)",
+		Use:           "vynnel",
+		Short:         "vynnel: VPN panel and node (Xray + Caddy)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
@@ -53,7 +53,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprintln(cmd.OutOrStdout(), "vpn", buildinfo.String())
+			fmt.Fprintln(cmd.OutOrStdout(), "vynnel", buildinfo.String())
 		},
 	}
 }
@@ -61,9 +61,9 @@ func versionCmd() *cobra.Command {
 func installCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Interactive installer (stage 9, docs/INSTALL.md)",
+		Short: "Installer (for now: scripts/install-aio.sh, docs/ALL_IN_ONE.md)",
 		RunE: func(*cobra.Command, []string) error {
-			return errors.New("the installer is not implemented yet (roadmap stage 9)")
+			return errors.New("use scripts/install-aio.sh for now (it asks questions); the built-in installer is roadmap stage 9")
 		},
 	}
 }

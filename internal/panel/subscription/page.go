@@ -11,7 +11,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
-	"github.com/vyto4ka/vpn/internal/panel/store"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
 )
 
 // The page shows the subscription URL (QR and deep links), never raw server links: those would

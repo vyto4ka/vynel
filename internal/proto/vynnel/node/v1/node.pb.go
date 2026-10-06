@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: vpn/node/v1/node.proto
+// source: vynnel/node/v1/node.proto
 
 // Panel <-> node protocol (docs/ARCHITECTURE.md §14).
 // The node dials the panel; the panel pushes desired state, the node acknowledges.
@@ -57,11 +57,11 @@ func (x UserOp_Kind) String() string {
 }
 
 func (UserOp_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vpn_node_v1_node_proto_enumTypes[0].Descriptor()
+	return file_vynnel_node_v1_node_proto_enumTypes[0].Descriptor()
 }
 
 func (UserOp_Kind) Type() protoreflect.EnumType {
-	return &file_vpn_node_v1_node_proto_enumTypes[0]
+	return &file_vynnel_node_v1_node_proto_enumTypes[0]
 }
 
 func (x UserOp_Kind) Number() protoreflect.EnumNumber {
@@ -70,7 +70,7 @@ func (x UserOp_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UserOp_Kind.Descriptor instead.
 func (UserOp_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{17, 0}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{17, 0}
 }
 
 type JoinRequest struct {
@@ -83,7 +83,7 @@ type JoinRequest struct {
 
 func (x *JoinRequest) Reset() {
 	*x = JoinRequest{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[0]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -95,7 +95,7 @@ func (x *JoinRequest) String() string {
 func (*JoinRequest) ProtoMessage() {}
 
 func (x *JoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[0]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -108,7 +108,7 @@ func (x *JoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinRequest.ProtoReflect.Descriptor instead.
 func (*JoinRequest) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{0}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *JoinRequest) GetToken() string {
@@ -137,7 +137,7 @@ type JoinResponse struct {
 
 func (x *JoinResponse) Reset() {
 	*x = JoinResponse{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[1]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -149,7 +149,7 @@ func (x *JoinResponse) String() string {
 func (*JoinResponse) ProtoMessage() {}
 
 func (x *JoinResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[1]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -162,7 +162,7 @@ func (x *JoinResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JoinResponse.ProtoReflect.Descriptor instead.
 func (*JoinResponse) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{1}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *JoinResponse) GetCertDer() []byte {
@@ -208,7 +208,7 @@ type NodeMessage struct {
 
 func (x *NodeMessage) Reset() {
 	*x = NodeMessage{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[2]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -220,7 +220,7 @@ func (x *NodeMessage) String() string {
 func (*NodeMessage) ProtoMessage() {}
 
 func (x *NodeMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[2]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -233,7 +233,7 @@ func (x *NodeMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeMessage.ProtoReflect.Descriptor instead.
 func (*NodeMessage) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{2}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *NodeMessage) GetMsg() isNodeMessage_Msg {
@@ -324,7 +324,7 @@ type Hello struct {
 
 func (x *Hello) Reset() {
 	*x = Hello{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[3]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -336,7 +336,7 @@ func (x *Hello) String() string {
 func (*Hello) ProtoMessage() {}
 
 func (x *Hello) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[3]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -349,7 +349,7 @@ func (x *Hello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hello.ProtoReflect.Descriptor instead.
 func (*Hello) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{3}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Hello) GetAgentVersion() string {
@@ -419,7 +419,7 @@ type Address struct {
 
 func (x *Address) Reset() {
 	*x = Address{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[4]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -431,7 +431,7 @@ func (x *Address) String() string {
 func (*Address) ProtoMessage() {}
 
 func (x *Address) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[4]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -444,7 +444,7 @@ func (x *Address) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Address.ProtoReflect.Descriptor instead.
 func (*Address) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{4}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Address) GetIp() string {
@@ -477,7 +477,7 @@ type Addresses struct {
 
 func (x *Addresses) Reset() {
 	*x = Addresses{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[5]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -489,7 +489,7 @@ func (x *Addresses) String() string {
 func (*Addresses) ProtoMessage() {}
 
 func (x *Addresses) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[5]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -502,7 +502,7 @@ func (x *Addresses) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Addresses.ProtoReflect.Descriptor instead.
 func (*Addresses) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{5}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Addresses) GetAddresses() []*Address {
@@ -524,7 +524,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[6]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -536,7 +536,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[6]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -549,7 +549,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{6}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Ack) GetRevision() int64 {
@@ -587,7 +587,7 @@ type PanelMessage struct {
 
 func (x *PanelMessage) Reset() {
 	*x = PanelMessage{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[7]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -599,7 +599,7 @@ func (x *PanelMessage) String() string {
 func (*PanelMessage) ProtoMessage() {}
 
 func (x *PanelMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[7]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -612,7 +612,7 @@ func (x *PanelMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PanelMessage.ProtoReflect.Descriptor instead.
 func (*PanelMessage) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{7}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PanelMessage) GetMsg() isPanelMessage_Msg {
@@ -689,7 +689,7 @@ type StatsBatch struct {
 
 func (x *StatsBatch) Reset() {
 	*x = StatsBatch{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[8]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -701,7 +701,7 @@ func (x *StatsBatch) String() string {
 func (*StatsBatch) ProtoMessage() {}
 
 func (x *StatsBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[8]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -714,7 +714,7 @@ func (x *StatsBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsBatch.ProtoReflect.Descriptor instead.
 func (*StatsBatch) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{8}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *StatsBatch) GetEpoch() string {
@@ -784,7 +784,7 @@ type UserTraffic struct {
 
 func (x *UserTraffic) Reset() {
 	*x = UserTraffic{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[9]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -796,7 +796,7 @@ func (x *UserTraffic) String() string {
 func (*UserTraffic) ProtoMessage() {}
 
 func (x *UserTraffic) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[9]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -809,7 +809,7 @@ func (x *UserTraffic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTraffic.ProtoReflect.Descriptor instead.
 func (*UserTraffic) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{9}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UserTraffic) GetEmail() string {
@@ -843,7 +843,7 @@ type OnlineUser struct {
 
 func (x *OnlineUser) Reset() {
 	*x = OnlineUser{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[10]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -855,7 +855,7 @@ func (x *OnlineUser) String() string {
 func (*OnlineUser) ProtoMessage() {}
 
 func (x *OnlineUser) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[10]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -868,7 +868,7 @@ func (x *OnlineUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OnlineUser.ProtoReflect.Descriptor instead.
 func (*OnlineUser) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{10}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *OnlineUser) GetEmail() string {
@@ -900,7 +900,7 @@ type Metrics struct {
 
 func (x *Metrics) Reset() {
 	*x = Metrics{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[11]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -912,7 +912,7 @@ func (x *Metrics) String() string {
 func (*Metrics) ProtoMessage() {}
 
 func (x *Metrics) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[11]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -925,7 +925,7 @@ func (x *Metrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metrics.ProtoReflect.Descriptor instead.
 func (*Metrics) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{11}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Metrics) GetCpu() float64 {
@@ -987,7 +987,7 @@ type StatsAck struct {
 
 func (x *StatsAck) Reset() {
 	*x = StatsAck{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[12]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -999,7 +999,7 @@ func (x *StatsAck) String() string {
 func (*StatsAck) ProtoMessage() {}
 
 func (x *StatsAck) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[12]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1012,7 +1012,7 @@ func (x *StatsAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsAck.ProtoReflect.Descriptor instead.
 func (*StatsAck) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{12}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *StatsAck) GetEpoch() string {
@@ -1043,7 +1043,7 @@ type Snapshot struct {
 
 func (x *Snapshot) Reset() {
 	*x = Snapshot{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[13]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1055,7 +1055,7 @@ func (x *Snapshot) String() string {
 func (*Snapshot) ProtoMessage() {}
 
 func (x *Snapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[13]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1068,7 +1068,7 @@ func (x *Snapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Snapshot.ProtoReflect.Descriptor instead.
 func (*Snapshot) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{13}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Snapshot) GetRevision() int64 {
@@ -1118,7 +1118,7 @@ type InboundUsers struct {
 
 func (x *InboundUsers) Reset() {
 	*x = InboundUsers{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[14]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1130,7 +1130,7 @@ func (x *InboundUsers) String() string {
 func (*InboundUsers) ProtoMessage() {}
 
 func (x *InboundUsers) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[14]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1143,7 @@ func (x *InboundUsers) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundUsers.ProtoReflect.Descriptor instead.
 func (*InboundUsers) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{14}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *InboundUsers) GetTag() string {
@@ -1184,7 +1184,7 @@ type User struct {
 
 func (x *User) Reset() {
 	*x = User{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[15]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1196,7 +1196,7 @@ func (x *User) String() string {
 func (*User) ProtoMessage() {}
 
 func (x *User) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[15]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1209,7 +1209,7 @@ func (x *User) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use User.ProtoReflect.Descriptor instead.
 func (*User) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{15}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *User) GetEmail() string {
@@ -1239,7 +1239,7 @@ type Delta struct {
 
 func (x *Delta) Reset() {
 	*x = Delta{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[16]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1251,7 +1251,7 @@ func (x *Delta) String() string {
 func (*Delta) ProtoMessage() {}
 
 func (x *Delta) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[16]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1264,7 +1264,7 @@ func (x *Delta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Delta.ProtoReflect.Descriptor instead.
 func (*Delta) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{16}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Delta) GetRevision() int64 {
@@ -1297,7 +1297,7 @@ func (x *Delta) GetOps() []*UserOp {
 
 type UserOp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          UserOp_Kind            `protobuf:"varint,1,opt,name=kind,proto3,enum=vpn.node.v1.UserOp_Kind" json:"kind,omitempty"`
+	Kind          UserOp_Kind            `protobuf:"varint,1,opt,name=kind,proto3,enum=vynnel.node.v1.UserOp_Kind" json:"kind,omitempty"`
 	Tag           string                 `protobuf:"bytes,2,opt,name=tag,proto3" json:"tag,omitempty"`
 	User          *User                  `protobuf:"bytes,3,opt,name=user,proto3" json:"user,omitempty"`
 	Flow          string                 `protobuf:"bytes,4,opt,name=flow,proto3" json:"flow,omitempty"`
@@ -1307,7 +1307,7 @@ type UserOp struct {
 
 func (x *UserOp) Reset() {
 	*x = UserOp{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[17]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1319,7 +1319,7 @@ func (x *UserOp) String() string {
 func (*UserOp) ProtoMessage() {}
 
 func (x *UserOp) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[17]
+	mi := &file_vynnel_node_v1_node_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1332,7 +1332,7 @@ func (x *UserOp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserOp.ProtoReflect.Descriptor instead.
 func (*UserOp) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{17}
+	return file_vynnel_node_v1_node_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UserOp) GetKind() UserOp_Kind {
@@ -1363,11 +1363,11 @@ func (x *UserOp) GetFlow() string {
 	return ""
 }
 
-var File_vpn_node_v1_node_proto protoreflect.FileDescriptor
+var File_vynnel_node_v1_node_proto protoreflect.FileDescriptor
 
-const file_vpn_node_v1_node_proto_rawDesc = "" +
+const file_vynnel_node_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x16vpn/node/v1/node.proto\x12\vvpn.node.v1\"<\n" +
+	"\x19vynnel/node/v1/node.proto\x12\x0evynnel.node.v1\"<\n" +
 	"\vJoinRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x17\n" +
 	"\acsr_der\x18\x02 \x01(\fR\x06csrDer\"v\n" +
@@ -1375,47 +1375,47 @@ const file_vpn_node_v1_node_proto_rawDesc = "" +
 	"\bcert_der\x18\x01 \x01(\fR\acertDer\x12\x15\n" +
 	"\x06ca_der\x18\x02 \x01(\fR\x05caDer\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\x03R\x06nodeId\x12\x1b\n" +
-	"\tnode_code\x18\x04 \x01(\tR\bnodeCode\"\xcf\x01\n" +
-	"\vNodeMessage\x12*\n" +
-	"\x05hello\x18\x01 \x01(\v2\x12.vpn.node.v1.HelloH\x00R\x05hello\x12$\n" +
-	"\x03ack\x18\x02 \x01(\v2\x10.vpn.node.v1.AckH\x00R\x03ack\x126\n" +
-	"\taddresses\x18\x03 \x01(\v2\x16.vpn.node.v1.AddressesH\x00R\taddresses\x12/\n" +
-	"\x05stats\x18\x04 \x01(\v2\x17.vpn.node.v1.StatsBatchH\x00R\x05statsB\x05\n" +
-	"\x03msg\"\x8b\x02\n" +
+	"\tnode_code\x18\x04 \x01(\tR\bnodeCode\"\xdb\x01\n" +
+	"\vNodeMessage\x12-\n" +
+	"\x05hello\x18\x01 \x01(\v2\x15.vynnel.node.v1.HelloH\x00R\x05hello\x12'\n" +
+	"\x03ack\x18\x02 \x01(\v2\x13.vynnel.node.v1.AckH\x00R\x03ack\x129\n" +
+	"\taddresses\x18\x03 \x01(\v2\x19.vynnel.node.v1.AddressesH\x00R\taddresses\x122\n" +
+	"\x05stats\x18\x04 \x01(\v2\x1a.vynnel.node.v1.StatsBatchH\x00R\x05statsB\x05\n" +
+	"\x03msg\"\x8e\x02\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12!\n" +
 	"\fxray_version\x18\x02 \x01(\tR\vxrayVersion\x12!\n" +
 	"\fapplied_hash\x18\x03 \x01(\tR\vappliedHash\x12\x0e\n" +
 	"\x02os\x18\x04 \x01(\tR\x02os\x12\x12\n" +
-	"\x04arch\x18\x05 \x01(\tR\x04arch\x122\n" +
-	"\taddresses\x18\x06 \x03(\v2\x14.vpn.node.v1.AddressR\taddresses\x12#\n" +
+	"\x04arch\x18\x05 \x01(\tR\x04arch\x125\n" +
+	"\taddresses\x18\x06 \x03(\v2\x17.vynnel.node.v1.AddressR\taddresses\x12#\n" +
 	"\rcaddy_version\x18\a \x01(\tR\fcaddyVersion\x12\x1a\n" +
 	"\bwarnings\x18\b \x03(\tR\bwarnings\"Q\n" +
 	"\aAddress\x12\x0e\n" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x18\n" +
-	"\aprimary\x18\x03 \x01(\bR\aprimary\"?\n" +
-	"\tAddresses\x122\n" +
-	"\taddresses\x18\x01 \x03(\v2\x14.vpn.node.v1.AddressR\taddresses\"K\n" +
+	"\aprimary\x18\x03 \x01(\bR\aprimary\"B\n" +
+	"\tAddresses\x125\n" +
+	"\taddresses\x18\x01 \x03(\v2\x17.vynnel.node.v1.AddressR\taddresses\"K\n" +
 	"\x03Ack\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xac\x01\n" +
-	"\fPanelMessage\x123\n" +
-	"\bsnapshot\x18\x01 \x01(\v2\x15.vpn.node.v1.SnapshotH\x00R\bsnapshot\x12*\n" +
-	"\x05delta\x18\x02 \x01(\v2\x12.vpn.node.v1.DeltaH\x00R\x05delta\x124\n" +
-	"\tstats_ack\x18\x03 \x01(\v2\x15.vpn.node.v1.StatsAckH\x00R\bstatsAckB\x05\n" +
-	"\x03msg\"\x8b\x02\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xb5\x01\n" +
+	"\fPanelMessage\x126\n" +
+	"\bsnapshot\x18\x01 \x01(\v2\x18.vynnel.node.v1.SnapshotH\x00R\bsnapshot\x12-\n" +
+	"\x05delta\x18\x02 \x01(\v2\x15.vynnel.node.v1.DeltaH\x00R\x05delta\x127\n" +
+	"\tstats_ack\x18\x03 \x01(\v2\x18.vynnel.node.v1.StatsAckH\x00R\bstatsAckB\x05\n" +
+	"\x03msg\"\x94\x02\n" +
 	"\n" +
 	"StatsBatch\x12\x14\n" +
 	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12\x0e\n" +
-	"\x02ts\x18\x03 \x01(\x03R\x02ts\x12.\n" +
-	"\x05users\x18\x04 \x03(\v2\x18.vpn.node.v1.UserTrafficR\x05users\x12\x17\n" +
+	"\x02ts\x18\x03 \x01(\x03R\x02ts\x121\n" +
+	"\x05users\x18\x04 \x03(\v2\x1b.vynnel.node.v1.UserTrafficR\x05users\x12\x17\n" +
 	"\anode_up\x18\x05 \x01(\x03R\x06nodeUp\x12\x1b\n" +
-	"\tnode_down\x18\x06 \x01(\x03R\bnodeDown\x12/\n" +
-	"\x06online\x18\a \x03(\v2\x17.vpn.node.v1.OnlineUserR\x06online\x12.\n" +
-	"\ametrics\x18\b \x01(\v2\x14.vpn.node.v1.MetricsR\ametrics\"G\n" +
+	"\tnode_down\x18\x06 \x01(\x03R\bnodeDown\x122\n" +
+	"\x06online\x18\a \x03(\v2\x1a.vynnel.node.v1.OnlineUserR\x06online\x121\n" +
+	"\ametrics\x18\b \x01(\v2\x17.vynnel.node.v1.MetricsR\ametrics\"G\n" +
 	"\vUserTraffic\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x0e\n" +
 	"\x02up\x18\x02 \x01(\x03R\x02up\x12\x12\n" +
@@ -1434,97 +1434,97 @@ const file_vpn_node_v1_node_proto_rawDesc = "" +
 	"\x06uptime\x18\a \x01(\x04R\x06uptime\"2\n" +
 	"\bStatsAck\x12\x14\n" +
 	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\xb5\x01\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\xb8\x01\n" +
 	"\bSnapshot\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x1f\n" +
 	"\vxray_config\x18\x03 \x01(\fR\n" +
-	"xrayConfig\x125\n" +
-	"\binbounds\x18\x04 \x03(\v2\x19.vpn.node.v1.InboundUsersR\binbounds\x12!\n" +
-	"\fcaddy_config\x18\x05 \x01(\fR\vcaddyConfig\"y\n" +
+	"xrayConfig\x128\n" +
+	"\binbounds\x18\x04 \x03(\v2\x1c.vynnel.node.v1.InboundUsersR\binbounds\x12!\n" +
+	"\fcaddy_config\x18\x05 \x01(\fR\vcaddyConfig\"|\n" +
 	"\fInboundUsers\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x1a\n" +
 	"\bprotocol\x18\x02 \x01(\tR\bprotocol\x12\x12\n" +
-	"\x04flow\x18\x03 \x01(\tR\x04flow\x12'\n" +
-	"\x05users\x18\x04 \x03(\v2\x11.vpn.node.v1.UserR\x05users\",\n" +
+	"\x04flow\x18\x03 \x01(\tR\x04flow\x12*\n" +
+	"\x05users\x18\x04 \x03(\v2\x14.vynnel.node.v1.UserR\x05users\",\n" +
 	"\x04User\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\"{\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\"~\n" +
 	"\x05Delta\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x1b\n" +
 	"\tbase_hash\x18\x02 \x01(\tR\bbaseHash\x12\x12\n" +
-	"\x04hash\x18\x03 \x01(\tR\x04hash\x12%\n" +
-	"\x03ops\x18\x04 \x03(\v2\x13.vpn.node.v1.UserOpR\x03ops\"\xc3\x01\n" +
-	"\x06UserOp\x12,\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x18.vpn.node.v1.UserOp.KindR\x04kind\x12\x10\n" +
-	"\x03tag\x18\x02 \x01(\tR\x03tag\x12%\n" +
-	"\x04user\x18\x03 \x01(\v2\x11.vpn.node.v1.UserR\x04user\x12\x12\n" +
+	"\x04hash\x18\x03 \x01(\tR\x04hash\x12(\n" +
+	"\x03ops\x18\x04 \x03(\v2\x16.vynnel.node.v1.UserOpR\x03ops\"\xc9\x01\n" +
+	"\x06UserOp\x12/\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x1b.vynnel.node.v1.UserOp.KindR\x04kind\x12\x10\n" +
+	"\x03tag\x18\x02 \x01(\tR\x03tag\x12(\n" +
+	"\x04user\x18\x03 \x01(\v2\x14.vynnel.node.v1.UserR\x04user\x12\x12\n" +
 	"\x04flow\x18\x04 \x01(\tR\x04flow\">\n" +
 	"\x04Kind\x12\x14\n" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\x0f\n" +
 	"\vKIND_UPSERT\x10\x01\x12\x0f\n" +
-	"\vKIND_REMOVE\x10\x022\x8e\x01\n" +
-	"\vNodeGateway\x12;\n" +
-	"\x04Join\x12\x18.vpn.node.v1.JoinRequest\x1a\x19.vpn.node.v1.JoinResponse\x12B\n" +
-	"\aConnect\x12\x18.vpn.node.v1.NodeMessage\x1a\x19.vpn.node.v1.PanelMessage(\x010\x01B:Z8github.com/vyto4ka/vpn/internal/proto/vpn/node/v1;nodev1b\x06proto3"
+	"\vKIND_REMOVE\x10\x022\x9a\x01\n" +
+	"\vNodeGateway\x12A\n" +
+	"\x04Join\x12\x1b.vynnel.node.v1.JoinRequest\x1a\x1c.vynnel.node.v1.JoinResponse\x12H\n" +
+	"\aConnect\x12\x1b.vynnel.node.v1.NodeMessage\x1a\x1c.vynnel.node.v1.PanelMessage(\x010\x01B@Z>github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1;nodev1b\x06proto3"
 
 var (
-	file_vpn_node_v1_node_proto_rawDescOnce sync.Once
-	file_vpn_node_v1_node_proto_rawDescData []byte
+	file_vynnel_node_v1_node_proto_rawDescOnce sync.Once
+	file_vynnel_node_v1_node_proto_rawDescData []byte
 )
 
-func file_vpn_node_v1_node_proto_rawDescGZIP() []byte {
-	file_vpn_node_v1_node_proto_rawDescOnce.Do(func() {
-		file_vpn_node_v1_node_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_vpn_node_v1_node_proto_rawDesc), len(file_vpn_node_v1_node_proto_rawDesc)))
+func file_vynnel_node_v1_node_proto_rawDescGZIP() []byte {
+	file_vynnel_node_v1_node_proto_rawDescOnce.Do(func() {
+		file_vynnel_node_v1_node_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_vynnel_node_v1_node_proto_rawDesc), len(file_vynnel_node_v1_node_proto_rawDesc)))
 	})
-	return file_vpn_node_v1_node_proto_rawDescData
+	return file_vynnel_node_v1_node_proto_rawDescData
 }
 
-var file_vpn_node_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vpn_node_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
-var file_vpn_node_v1_node_proto_goTypes = []any{
-	(UserOp_Kind)(0),     // 0: vpn.node.v1.UserOp.Kind
-	(*JoinRequest)(nil),  // 1: vpn.node.v1.JoinRequest
-	(*JoinResponse)(nil), // 2: vpn.node.v1.JoinResponse
-	(*NodeMessage)(nil),  // 3: vpn.node.v1.NodeMessage
-	(*Hello)(nil),        // 4: vpn.node.v1.Hello
-	(*Address)(nil),      // 5: vpn.node.v1.Address
-	(*Addresses)(nil),    // 6: vpn.node.v1.Addresses
-	(*Ack)(nil),          // 7: vpn.node.v1.Ack
-	(*PanelMessage)(nil), // 8: vpn.node.v1.PanelMessage
-	(*StatsBatch)(nil),   // 9: vpn.node.v1.StatsBatch
-	(*UserTraffic)(nil),  // 10: vpn.node.v1.UserTraffic
-	(*OnlineUser)(nil),   // 11: vpn.node.v1.OnlineUser
-	(*Metrics)(nil),      // 12: vpn.node.v1.Metrics
-	(*StatsAck)(nil),     // 13: vpn.node.v1.StatsAck
-	(*Snapshot)(nil),     // 14: vpn.node.v1.Snapshot
-	(*InboundUsers)(nil), // 15: vpn.node.v1.InboundUsers
-	(*User)(nil),         // 16: vpn.node.v1.User
-	(*Delta)(nil),        // 17: vpn.node.v1.Delta
-	(*UserOp)(nil),       // 18: vpn.node.v1.UserOp
+var file_vynnel_node_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vynnel_node_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_vynnel_node_v1_node_proto_goTypes = []any{
+	(UserOp_Kind)(0),     // 0: vynnel.node.v1.UserOp.Kind
+	(*JoinRequest)(nil),  // 1: vynnel.node.v1.JoinRequest
+	(*JoinResponse)(nil), // 2: vynnel.node.v1.JoinResponse
+	(*NodeMessage)(nil),  // 3: vynnel.node.v1.NodeMessage
+	(*Hello)(nil),        // 4: vynnel.node.v1.Hello
+	(*Address)(nil),      // 5: vynnel.node.v1.Address
+	(*Addresses)(nil),    // 6: vynnel.node.v1.Addresses
+	(*Ack)(nil),          // 7: vynnel.node.v1.Ack
+	(*PanelMessage)(nil), // 8: vynnel.node.v1.PanelMessage
+	(*StatsBatch)(nil),   // 9: vynnel.node.v1.StatsBatch
+	(*UserTraffic)(nil),  // 10: vynnel.node.v1.UserTraffic
+	(*OnlineUser)(nil),   // 11: vynnel.node.v1.OnlineUser
+	(*Metrics)(nil),      // 12: vynnel.node.v1.Metrics
+	(*StatsAck)(nil),     // 13: vynnel.node.v1.StatsAck
+	(*Snapshot)(nil),     // 14: vynnel.node.v1.Snapshot
+	(*InboundUsers)(nil), // 15: vynnel.node.v1.InboundUsers
+	(*User)(nil),         // 16: vynnel.node.v1.User
+	(*Delta)(nil),        // 17: vynnel.node.v1.Delta
+	(*UserOp)(nil),       // 18: vynnel.node.v1.UserOp
 }
-var file_vpn_node_v1_node_proto_depIdxs = []int32{
-	4,  // 0: vpn.node.v1.NodeMessage.hello:type_name -> vpn.node.v1.Hello
-	7,  // 1: vpn.node.v1.NodeMessage.ack:type_name -> vpn.node.v1.Ack
-	6,  // 2: vpn.node.v1.NodeMessage.addresses:type_name -> vpn.node.v1.Addresses
-	9,  // 3: vpn.node.v1.NodeMessage.stats:type_name -> vpn.node.v1.StatsBatch
-	5,  // 4: vpn.node.v1.Hello.addresses:type_name -> vpn.node.v1.Address
-	5,  // 5: vpn.node.v1.Addresses.addresses:type_name -> vpn.node.v1.Address
-	14, // 6: vpn.node.v1.PanelMessage.snapshot:type_name -> vpn.node.v1.Snapshot
-	17, // 7: vpn.node.v1.PanelMessage.delta:type_name -> vpn.node.v1.Delta
-	13, // 8: vpn.node.v1.PanelMessage.stats_ack:type_name -> vpn.node.v1.StatsAck
-	10, // 9: vpn.node.v1.StatsBatch.users:type_name -> vpn.node.v1.UserTraffic
-	11, // 10: vpn.node.v1.StatsBatch.online:type_name -> vpn.node.v1.OnlineUser
-	12, // 11: vpn.node.v1.StatsBatch.metrics:type_name -> vpn.node.v1.Metrics
-	15, // 12: vpn.node.v1.Snapshot.inbounds:type_name -> vpn.node.v1.InboundUsers
-	16, // 13: vpn.node.v1.InboundUsers.users:type_name -> vpn.node.v1.User
-	18, // 14: vpn.node.v1.Delta.ops:type_name -> vpn.node.v1.UserOp
-	0,  // 15: vpn.node.v1.UserOp.kind:type_name -> vpn.node.v1.UserOp.Kind
-	16, // 16: vpn.node.v1.UserOp.user:type_name -> vpn.node.v1.User
-	1,  // 17: vpn.node.v1.NodeGateway.Join:input_type -> vpn.node.v1.JoinRequest
-	3,  // 18: vpn.node.v1.NodeGateway.Connect:input_type -> vpn.node.v1.NodeMessage
-	2,  // 19: vpn.node.v1.NodeGateway.Join:output_type -> vpn.node.v1.JoinResponse
-	8,  // 20: vpn.node.v1.NodeGateway.Connect:output_type -> vpn.node.v1.PanelMessage
+var file_vynnel_node_v1_node_proto_depIdxs = []int32{
+	4,  // 0: vynnel.node.v1.NodeMessage.hello:type_name -> vynnel.node.v1.Hello
+	7,  // 1: vynnel.node.v1.NodeMessage.ack:type_name -> vynnel.node.v1.Ack
+	6,  // 2: vynnel.node.v1.NodeMessage.addresses:type_name -> vynnel.node.v1.Addresses
+	9,  // 3: vynnel.node.v1.NodeMessage.stats:type_name -> vynnel.node.v1.StatsBatch
+	5,  // 4: vynnel.node.v1.Hello.addresses:type_name -> vynnel.node.v1.Address
+	5,  // 5: vynnel.node.v1.Addresses.addresses:type_name -> vynnel.node.v1.Address
+	14, // 6: vynnel.node.v1.PanelMessage.snapshot:type_name -> vynnel.node.v1.Snapshot
+	17, // 7: vynnel.node.v1.PanelMessage.delta:type_name -> vynnel.node.v1.Delta
+	13, // 8: vynnel.node.v1.PanelMessage.stats_ack:type_name -> vynnel.node.v1.StatsAck
+	10, // 9: vynnel.node.v1.StatsBatch.users:type_name -> vynnel.node.v1.UserTraffic
+	11, // 10: vynnel.node.v1.StatsBatch.online:type_name -> vynnel.node.v1.OnlineUser
+	12, // 11: vynnel.node.v1.StatsBatch.metrics:type_name -> vynnel.node.v1.Metrics
+	15, // 12: vynnel.node.v1.Snapshot.inbounds:type_name -> vynnel.node.v1.InboundUsers
+	16, // 13: vynnel.node.v1.InboundUsers.users:type_name -> vynnel.node.v1.User
+	18, // 14: vynnel.node.v1.Delta.ops:type_name -> vynnel.node.v1.UserOp
+	0,  // 15: vynnel.node.v1.UserOp.kind:type_name -> vynnel.node.v1.UserOp.Kind
+	16, // 16: vynnel.node.v1.UserOp.user:type_name -> vynnel.node.v1.User
+	1,  // 17: vynnel.node.v1.NodeGateway.Join:input_type -> vynnel.node.v1.JoinRequest
+	3,  // 18: vynnel.node.v1.NodeGateway.Connect:input_type -> vynnel.node.v1.NodeMessage
+	2,  // 19: vynnel.node.v1.NodeGateway.Join:output_type -> vynnel.node.v1.JoinResponse
+	8,  // 20: vynnel.node.v1.NodeGateway.Connect:output_type -> vynnel.node.v1.PanelMessage
 	19, // [19:21] is the sub-list for method output_type
 	17, // [17:19] is the sub-list for method input_type
 	17, // [17:17] is the sub-list for extension type_name
@@ -1532,18 +1532,18 @@ var file_vpn_node_v1_node_proto_depIdxs = []int32{
 	0,  // [0:17] is the sub-list for field type_name
 }
 
-func init() { file_vpn_node_v1_node_proto_init() }
-func file_vpn_node_v1_node_proto_init() {
-	if File_vpn_node_v1_node_proto != nil {
+func init() { file_vynnel_node_v1_node_proto_init() }
+func file_vynnel_node_v1_node_proto_init() {
+	if File_vynnel_node_v1_node_proto != nil {
 		return
 	}
-	file_vpn_node_v1_node_proto_msgTypes[2].OneofWrappers = []any{
+	file_vynnel_node_v1_node_proto_msgTypes[2].OneofWrappers = []any{
 		(*NodeMessage_Hello)(nil),
 		(*NodeMessage_Ack)(nil),
 		(*NodeMessage_Addresses)(nil),
 		(*NodeMessage_Stats)(nil),
 	}
-	file_vpn_node_v1_node_proto_msgTypes[7].OneofWrappers = []any{
+	file_vynnel_node_v1_node_proto_msgTypes[7].OneofWrappers = []any{
 		(*PanelMessage_Snapshot)(nil),
 		(*PanelMessage_Delta)(nil),
 		(*PanelMessage_StatsAck)(nil),
@@ -1552,18 +1552,18 @@ func file_vpn_node_v1_node_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vpn_node_v1_node_proto_rawDesc), len(file_vpn_node_v1_node_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vynnel_node_v1_node_proto_rawDesc), len(file_vynnel_node_v1_node_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_vpn_node_v1_node_proto_goTypes,
-		DependencyIndexes: file_vpn_node_v1_node_proto_depIdxs,
-		EnumInfos:         file_vpn_node_v1_node_proto_enumTypes,
-		MessageInfos:      file_vpn_node_v1_node_proto_msgTypes,
+		GoTypes:           file_vynnel_node_v1_node_proto_goTypes,
+		DependencyIndexes: file_vynnel_node_v1_node_proto_depIdxs,
+		EnumInfos:         file_vynnel_node_v1_node_proto_enumTypes,
+		MessageInfos:      file_vynnel_node_v1_node_proto_msgTypes,
 	}.Build()
-	File_vpn_node_v1_node_proto = out.File
-	file_vpn_node_v1_node_proto_goTypes = nil
-	file_vpn_node_v1_node_proto_depIdxs = nil
+	File_vynnel_node_v1_node_proto = out.File
+	file_vynnel_node_v1_node_proto_goTypes = nil
+	file_vynnel_node_v1_node_proto_depIdxs = nil
 }

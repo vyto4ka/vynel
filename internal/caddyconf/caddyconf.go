@@ -46,7 +46,7 @@ type Spec struct {
 }
 
 // DecoyDirPlaceholder is expanded by Caddy from the environment the agent sets.
-const DecoyDirPlaceholder = "{env.VPN_DECOY_DIR}"
+const DecoyDirPlaceholder = "{env.VYNNEL_DECOY_DIR}"
 
 // Build renders the Caddy JSON. Sites with the same domain and listener are merged (their
 // routes concatenated in order), e.g. subscriptions and the self-steal decoy on one domain.

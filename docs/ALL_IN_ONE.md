@@ -36,21 +36,40 @@
 ## Установка
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vpn/claude/magical-hamilton-9vnx7n/scripts/install-aio.sh) \
-  --domain nl.example.com \
-  --email you@example.com          # необязательно
-  # --sub-domain sub.example.com   # если хочешь отдельный домен для подписок
-  # --name "Нидерланды" --country NL   # иначе страна определяется по IP
+bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynnel/claude/magical-hamilton-9vnx7n/scripts/install-aio.sh)
 ```
 
-Если репозиторий приватный, склонируй его сам и запусти `scripts/install-aio.sh` из клона. Скрипт склонирует себя в `/opt/vpn-src` (`VPN_REPO` указывает, откуда клонировать).
+Скрипт задаёт вопросы:
+
+```
+  Публичный IP сервера [203.0.113.10]:
+  Домен сервера (A-запись на этот IP; на нём VPN, сайт-заглушка и подписки): nl.example.com
+  ✓ nl.example.com → 203.0.113.10
+  Отдельный домен для подписок? (не обязательно, одного домена достаточно) [y/N]:
+  Email для Let's Encrypt (можно пусто):
+  Код страны сервера, для флага в клиентах [NL]:
+  Название сервера в клиентах [Нидерланды]:
+  Подключать к этой панели другие серверы (ноды) в будущем? Откроет порт 9443 [Y/n]:
+  …сводка…
+  Устанавливаем? [Y/n]:
+```
+
+- **DNS проверяется сразу после ввода домена.** Если A-записи ещё нет, скрипт подскажет, какую создать.
+- **Без вопросов** (для автоматизации) — передай всё флагами:
+
+```bash
+bash <(curl -fsSL …/install-aio.sh) --domain nl.example.com [--sub-domain sub.example.com] \
+  [--email you@example.com] [--name "Нидерланды"] [--country NL] --yes
+```
+
+Если репозиторий приватный, склонируй его сам и запусти `scripts/install-aio.sh` из клона. Исходники скрипт клонирует в `/opt/vynnel-src`; откуда — задаёт `VYNNEL_REPO`.
 
 Что делает скрипт:
 
 1. **Проверки:** ОС, архитектура, DNS доменов, свободные порты 80 и 443.
-2. **Сборка.** Ставит Go и собирает `vpn` из исходников (пока нет релизов, этап 9), скачивает Xray и Caddy. Первый запуск занимает несколько минут.
-3. **Настройка:** `vpn admin setup` создаёт локальную ноду, профиль «Reality» (self-steal) с доступом для группы «Основная», инбаунд `VLESS_<КОД>` со своими ключами и домен подписок.
-4. **Сервис.** Создаёт systemd-юнит `vpn-panel`. Ядро настраивается само: BBR, fq, TCP Fast Open.
+2. **Сборка.** Ставит Go и собирает `vynnel` из исходников (пока нет релизов, этап 9), скачивает Xray и Caddy. Первый запуск занимает несколько минут.
+3. **Настройка:** `vynnel admin setup` создаёт локальную ноду, профиль «Reality» (self-steal) с доступом для группы «Основная», инбаунд `VLESS_<КОД>` со своими ключами и домен подписок.
+4. **Сервис.** Создаёт systemd-юнит `vynnel`. Ядро настраивается само: BBR, fq, TCP Fast Open.
 5. **Ожидание.** Ждёт, пока нода синхронизируется и выпустится сертификат.
 
 Повторный запуск = обновление: код пересобирается, данные сохраняются. Удаление — `--uninstall`, вместе с данными — `--uninstall --purge`.
@@ -58,17 +77,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vpn/claude/magical-h
 ## Работа
 
 ```bash
-vpn admin user add vasya              # +3 месяца, группа «Основная», лимит устройств 3
-vpn admin user show vasya             # ссылка подписки → открыть на телефоне или импортировать в Happ / v2RayTun
-vpn admin user extend vasya --months 1
-vpn admin user devices vasya          # устройства HWID; --rm ID освобождает место
-vpn admin user disable vasya
-vpn admin stats                       # пользователи, онлайн, трафик, топ
-vpn admin node list                   # состояние ноды, CPU/RAM, онлайн, предупреждения
-journalctl -u vpn-panel -f            # логи
+vynnel admin user add vasya              # +3 месяца, группа «Основная», лимит устройств 3
+vynnel admin user show vasya             # ссылка подписки → открыть на телефоне или импортировать в Happ / v2RayTun
+vynnel admin user extend vasya --months 1
+vynnel admin user devices vasya          # устройства HWID; --rm ID освобождает место
+vynnel admin user disable vasya
+vynnel admin stats                       # пользователи, онлайн, трафик, топ
+vynnel admin node list                   # состояние ноды, CPU/RAM, онлайн, предупреждения
+journalctl -u vynnel -f            # логи
 ```
 
-Полезные настройки (`vpn admin setting КЛЮЧ ЗНАЧЕНИЕ`):
+Полезные настройки (`vynnel admin setting КЛЮЧ ЗНАЧЕНИЕ`):
 
 | Ключ | По умолчанию | Что делает |
 |------|--------------|-----------|
@@ -91,10 +110,10 @@ journalctl -u vpn-panel -f            # логи
 На all-in-one сервере открыт порт 9443 для дополнительных нод:
 
 ```bash
-vpn admin node add --name Германия --country de --domain de.example.com   # печатает токен
-vpn admin inbound attach --node DE --profile Reality
-# на новом сервере: Xray + Caddy + vpn, затем
-vpn node run --token vpn1....
+vynnel admin node add --name Германия --country de --domain de.example.com   # печатает токен
+vynnel admin inbound attach --node DE --profile Reality
+# на новом сервере: Xray + Caddy + vynnel, затем
+vynnel node run --token vyn1....
 ```
 
 Скрипт для отдельной ноды и установка по SSH из панели появятся на этапах 9 и 11.

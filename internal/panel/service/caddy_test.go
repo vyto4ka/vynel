@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vyto4ka/vpn/internal/caddyconf"
-	"github.com/vyto4ka/vpn/internal/panel/store"
+	"github.com/vyto4ka/vynnel/internal/caddyconf"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
 )
 
 // layout returns "domain -> listen" for every site of the node's Caddy config.

@@ -19,14 +19,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vyto4ka/vpn/internal/jointoken"
-	"github.com/vyto4ka/vpn/internal/node/agent"
-	"github.com/vyto4ka/vpn/internal/panel/app"
-	"github.com/vyto4ka/vpn/internal/panel/service"
-	"github.com/vyto4ka/vpn/internal/panel/store"
-	nodev1 "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1"
-	"github.com/vyto4ka/vpn/internal/xray"
-	"github.com/vyto4ka/vpn/internal/xray/xraytest"
+	"github.com/vyto4ka/vynnel/internal/jointoken"
+	"github.com/vyto4ka/vynnel/internal/node/agent"
+	"github.com/vyto4ka/vynnel/internal/panel/app"
+	"github.com/vyto4ka/vynnel/internal/panel/service"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
+	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
+	"github.com/vyto4ka/vynnel/internal/xray"
+	"github.com/vyto4ka/vynnel/internal/xray/xraytest"
 )
 
 // testBase lets traffic reach 127.0.0.1 (the default base blocks geoip:private).

@@ -1,4 +1,4 @@
-# vpn
+# vynnel
 
 Панель и нода для своих VPN-серверов на Xray + Caddy — аналог Remnawave с упором на простую установку.
 
@@ -15,14 +15,14 @@
 - Подписки: base64, Mihomo, sing-box, Xray JSON, HTML-страница с QR; HWID-лимиты; заглушки с причиной; неизвестные токены выглядят как обычный сайт.
 - Caddy: self-steal-сайт за Reality, сертификаты Let's Encrypt, XHTTP-origin, домен подписок; BBR/fq/TFO.
 - **All-in-one**: панель + нода + Caddy на одном сервере, одном IP и (минимум) одном домене — `scripts/install-aio.sh`.
-- Временный CLI `vpn admin` вместо веб-интерфейса.
+- Временный CLI `vynnel admin` вместо веб-интерфейса.
 
 Ещё нет: веб-интерфейса, Telegram-бота, бэкапов, установки нод по SSH, полного скрытия (см. ROADMAP).
 
 ## Сборка и тесты
 
 ```bash
-make build              # bin/vpn
+make build              # bin/vynnel
 make test               # быстрые тесты
 make test-integration   # + тесты с настоящими Xray и Caddy (в .cache/)
 make lint
@@ -33,11 +33,11 @@ make lint
 ```bash
 X=.cache/xray; make build xray
 # панель + локальная нода
-bin/vpn panel --data-dir /tmp/vpn --gateway-listen :9443 --public-addr 127.0.0.1:9443 \
+bin/vynnel panel --data-dir /tmp/vynnel --gateway-listen :9443 --public-addr 127.0.0.1:9443 \
   --with-node --node-name Нидерланды --node-country nl --node-domain nl.example.com \
   --xray-bin $X/xray --xray-assets $X &
 
-A="bin/vpn admin --data-dir /tmp/vpn"
+A="bin/vynnel admin --data-dir /tmp/vynnel"
 $A profile add --name "Reality 443"                 # из шаблона, доступ группе «Основная»
 $A inbound attach --node NL --profile "Reality 443"  # создаст VLESS_NL со своими ключами
 $A user add vasya                                     # +3 месяца, группа «Основная»
@@ -45,5 +45,5 @@ $A node list; $A inbound list
 
 # вторая нода
 $A node add --name Германия --country de --domain de.example.com   # печатает токен
-bin/vpn node run --data-dir /tmp/vpn-de --token vpn1.... --xray-bin $X/xray --xray-assets $X
+bin/vynnel node run --data-dir /tmp/vynnel-de --token vyn1.... --xray-bin $X/xray --xray-assets $X
 ```

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vyto4ka/vpn/internal/panel/store"
-	nodev1 "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
+	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
 )
 
 // OnlineWindow is how recently a user must have been seen to count as online.

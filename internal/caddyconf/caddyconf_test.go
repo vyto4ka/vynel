@@ -23,7 +23,7 @@ func TestBuildMergesRoutesOfOneDomain(t *testing.T) {
 	if strings.Count(s, `"host":["nl.example.com"]`) != 2 { // one route + one error route
 		t.Fatalf("domain must be merged: %s", s)
 	}
-	proxy, decoy := strings.Index(s, `"reverse_proxy"`), strings.Index(s, `"file_server","root":"{env.VPN_DECOY_DIR}/cloud"}`)
+	proxy, decoy := strings.Index(s, `"reverse_proxy"`), strings.Index(s, `"file_server","root":"{env.VYNNEL_DECOY_DIR}/cloud"}`)
 	if proxy < 0 || decoy < 0 || proxy > decoy {
 		t.Fatalf("the prefixed proxy route must come before the catch-all decoy: %s", s)
 	}
@@ -74,7 +74,7 @@ func TestCaddyValidates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "validate", "--config", path)
-	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir(), "VPN_DECOY_DIR="+t.TempDir())
+	cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir(), "VYNNEL_DECOY_DIR="+t.TempDir())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("caddy validate: %v\n%s", err, out)
 	}

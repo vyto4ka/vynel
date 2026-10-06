@@ -4,11 +4,11 @@ import (
 	"context"
 	"io"
 
-	nodev1 "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1"
+	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
 )
 
 // PanelEnd and NodeEnd connect an in-process agent to the reconciler without gRPC or TLS
-// (`vpn panel --with-node`, docs/ARCHITECTURE.md §13).
+// (`vynnel panel --with-node`, docs/ARCHITECTURE.md §13).
 type PanelEnd struct {
 	ctx context.Context
 	in  <-chan *nodev1.NodeMessage

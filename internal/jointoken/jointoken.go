@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const prefix = "vpn1."
+const prefix = "vyn1."
 
 // Token is the decoded join token.
 type Token struct {

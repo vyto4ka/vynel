@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: vpn/node/v1/node.proto
+// source: vynnel/node/v1/node.proto
 
 // Panel <-> node protocol (docs/ARCHITECTURE.md §14).
 // The node dials the panel; the panel pushes desired state, the node acknowledges.
@@ -22,8 +22,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NodeGateway_Join_FullMethodName    = "/vpn.node.v1.NodeGateway/Join"
-	NodeGateway_Connect_FullMethodName = "/vpn.node.v1.NodeGateway/Connect"
+	NodeGateway_Join_FullMethodName    = "/vynnel.node.v1.NodeGateway/Join"
+	NodeGateway_Connect_FullMethodName = "/vynnel.node.v1.NodeGateway/Connect"
 )
 
 // NodeGatewayClient is the client API for NodeGateway service.
@@ -141,7 +141,7 @@ type NodeGateway_ConnectServer = grpc.BidiStreamingServer[NodeMessage, PanelMess
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var NodeGateway_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "vpn.node.v1.NodeGateway",
+	ServiceName: "vynnel.node.v1.NodeGateway",
 	HandlerType: (*NodeGatewayServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -157,5 +157,5 @@ var NodeGateway_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "vpn/node/v1/node.proto",
+	Metadata: "vynnel/node/v1/node.proto",
 }

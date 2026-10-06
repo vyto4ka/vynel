@@ -1,9 +1,9 @@
 # Local dev environment: a panel with an in-process node, plus a second node joining over gRPC.
 #
 #   docker compose -f deploy/dev/docker-compose.yml up -d panel
-#   docker compose -f deploy/dev/docker-compose.yml exec panel vpn admin node add --name DE --country de --domain de.example.com
-#   NODE_TOKEN=vpn1.... docker compose -f deploy/dev/docker-compose.yml up -d node
-#   docker compose -f deploy/dev/docker-compose.yml exec panel vpn admin node list
+#   docker compose -f deploy/dev/docker-compose.yml exec panel vynnel admin node add --name DE --country de --domain de.example.com
+#   NODE_TOKEN=vyn1.... docker compose -f deploy/dev/docker-compose.yml up -d node
+#   docker compose -f deploy/dev/docker-compose.yml exec panel vynnel admin node list
 services:
   panel:
     build: { context: ../.., dockerfile: deploy/dev/Dockerfile }

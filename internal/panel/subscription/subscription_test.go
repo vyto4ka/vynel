@@ -13,9 +13,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/vyto4ka/vpn/internal/panel/service"
-	"github.com/vyto4ka/vpn/internal/panel/store"
-	"github.com/vyto4ka/vpn/internal/xray/xraytest"
+	"github.com/vyto4ka/vynnel/internal/panel/service"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
+	"github.com/vyto4ka/vynnel/internal/xray/xraytest"
 )
 
 var actor = service.Actor{Kind: "test"}

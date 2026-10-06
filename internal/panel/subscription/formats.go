@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/vyto4ka/vpn/internal/panel/service"
+	"github.com/vyto4ka/vynnel/internal/panel/service"
 )
 
 // Format is a subscription body format.

@@ -7,13 +7,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyto4ka/vpn/internal/buildinfo"
-	"github.com/vyto4ka/vpn/internal/node/agent"
-	"github.com/vyto4ka/vpn/internal/xray"
+	"github.com/vyto4ka/vynnel/internal/buildinfo"
+	"github.com/vyto4ka/vynnel/internal/node/agent"
+	"github.com/vyto4ka/vynnel/internal/xray"
 )
 
 // DefaultNodeDataDir holds the node credentials and state.
-const DefaultNodeDataDir = "/var/lib/vpn-node"
+const DefaultNodeDataDir = "/var/lib/vynnel-node"
 
 func nodeCmd() *cobra.Command {
 	var dataDir string
@@ -27,7 +27,7 @@ func nodeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "joined as node %s; now run `vpn node run`\n", code)
+			fmt.Fprintf(cmd.OutOrStdout(), "joined as node %s; now run `vynnel node run`\n", code)
 			return nil
 		},
 	}
@@ -40,7 +40,7 @@ func nodeCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !agent.Joined(dataDir) {
 				if token == "" {
-					return errors.New("node is not joined: pass --token or run `vpn node join TOKEN`")
+					return errors.New("node is not joined: pass --token or run `vynnel node join TOKEN`")
 				}
 				code, err := agent.Join(cmd.Context(), dataDir, token)
 				if err != nil {

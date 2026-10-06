@@ -14,15 +14,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyto4ka/vpn/internal/node/agent"
-	"github.com/vyto4ka/vpn/internal/node/caddy"
-	"github.com/vyto4ka/vpn/internal/panel/ca"
-	"github.com/vyto4ka/vpn/internal/panel/gateway"
-	"github.com/vyto4ka/vpn/internal/panel/reconciler"
-	"github.com/vyto4ka/vpn/internal/panel/service"
-	"github.com/vyto4ka/vpn/internal/panel/store"
-	"github.com/vyto4ka/vpn/internal/panel/subscription"
-	"github.com/vyto4ka/vpn/internal/xray"
+	"github.com/vyto4ka/vynnel/internal/node/agent"
+	"github.com/vyto4ka/vynnel/internal/node/caddy"
+	"github.com/vyto4ka/vynnel/internal/panel/ca"
+	"github.com/vyto4ka/vynnel/internal/panel/gateway"
+	"github.com/vyto4ka/vynnel/internal/panel/reconciler"
+	"github.com/vyto4ka/vynnel/internal/panel/service"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
+	"github.com/vyto4ka/vynnel/internal/panel/subscription"
+	"github.com/vyto4ka/vynnel/internal/xray"
 )
 
 // Config configures the panel process.

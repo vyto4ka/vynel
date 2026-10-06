@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vyto4ka/vpn/internal/panel/store"
-	"github.com/vyto4ka/vpn/internal/xrayconf"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
+	"github.com/vyto4ka/vynnel/internal/xrayconf"
 )
 
 // Subscription settings (docs/ARCHITECTURE.md §8, docs/STEALTH.md §2.4).
@@ -219,7 +219,7 @@ func (s *Service) SubscriptionURL(ctx context.Context, u *store.User) (string, e
 		return "", err
 	}
 	if domain == "" {
-		return "", fmt.Errorf("subscription domain is not set: `vpn admin setting %s sub.example.com`", SettingSubDomain)
+		return "", fmt.Errorf("subscription domain is not set: `vynnel admin setting %s sub.example.com`", SettingSubDomain)
 	}
 	port, _ := s.Setting(ctx, SettingSubPort, "443")
 	prefix, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)

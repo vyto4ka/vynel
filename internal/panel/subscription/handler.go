@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vyto4ka/vpn/internal/decoy"
-	"github.com/vyto4ka/vpn/internal/panel/service"
-	"github.com/vyto4ka/vpn/internal/panel/store"
+	"github.com/vyto4ka/vynnel/internal/decoy"
+	"github.com/vyto4ka/vynnel/internal/panel/service"
+	"github.com/vyto4ka/vynnel/internal/panel/store"
 )
 
 // rules map User-Agents to formats (docs/ARCHITECTURE.md §8.3); the first match wins.

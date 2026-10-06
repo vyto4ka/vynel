@@ -1,4 +1,4 @@
-module github.com/vyto4ka/vpn
+module github.com/vyto4ka/vynnel
 
 go 1.26.0
 

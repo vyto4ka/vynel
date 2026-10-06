@@ -2,9 +2,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w \
-	-X github.com/vyto4ka/vpn/internal/buildinfo.Version=$(VERSION) \
-	-X github.com/vyto4ka/vpn/internal/buildinfo.Commit=$(COMMIT) \
-	-X github.com/vyto4ka/vpn/internal/buildinfo.Date=$(DATE)
+	-X github.com/vyto4ka/vynnel/internal/buildinfo.Version=$(VERSION) \
+	-X github.com/vyto4ka/vynnel/internal/buildinfo.Commit=$(COMMIT) \
+	-X github.com/vyto4ka/vynnel/internal/buildinfo.Date=$(DATE)
 
 XRAY_DIR ?= $(CURDIR)/.cache/xray
 CADDY_DIR ?= $(CURDIR)/.cache/caddy
@@ -12,11 +12,11 @@ CADDY_DIR ?= $(CURDIR)/.cache/caddy
 .PHONY: build build-all test test-integration lint proto web xray caddy clean
 
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vpn ./cmd/vpn
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vynnel ./cmd/vynnel
 
 build-all:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vpn-linux-amd64 ./cmd/vpn
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vpn-linux-arm64 ./cmd/vpn
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vynnel-linux-amd64 ./cmd/vynnel
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vynnel-linux-arm64 ./cmd/vynnel
 
 test:
 	go test ./...
