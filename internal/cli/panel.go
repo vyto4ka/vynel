@@ -30,6 +30,8 @@ func panelCmd() *cobra.Command {
 	f.StringVar(&cfg.LocalNode.Country, "node-country", "", "local node country code (first start only)")
 	f.StringVar(&cfg.LocalNode.Domain, "node-domain", "", "local node domain (first start only)")
 	addXrayFlags(c, &cfg.Xray)
+	f.StringVar(&cfg.CaddyBin, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary")
+	f.BoolVar(&cfg.TuneSysctl, "tune-sysctl", true, "apply BBR/fq/TCP Fast Open on the local node (needs root)")
 	return c
 }
 

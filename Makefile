@@ -7,8 +7,9 @@ LDFLAGS := -s -w \
 	-X github.com/vyto4ka/vpn/internal/buildinfo.Date=$(DATE)
 
 XRAY_DIR ?= $(CURDIR)/.cache/xray
+CADDY_DIR ?= $(CURDIR)/.cache/caddy
 
-.PHONY: build build-all test test-integration lint proto web xray clean
+.PHONY: build build-all test test-integration lint proto web xray caddy clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/vpn ./cmd/vpn
@@ -20,9 +21,9 @@ build-all:
 test:
 	go test ./...
 
-# Integration tests run a real Xray binary (downloaded by `make xray`).
-test-integration: xray
-	XRAY_BIN=$(XRAY_DIR)/xray XRAY_LOCATION_ASSET=$(XRAY_DIR) go test -count=1 ./...
+# Integration tests run real Xray and Caddy binaries (`make xray caddy`).
+test-integration: xray caddy
+	XRAY_BIN=$(XRAY_DIR)/xray XRAY_LOCATION_ASSET=$(XRAY_DIR) CADDY_BIN=$(CADDY_DIR)/caddy go test -count=1 ./...
 
 lint:
 	golangci-lint run ./...
@@ -35,6 +36,10 @@ web:
 
 xray:
 	./scripts/fetch-xray.sh $(XRAY_DIR)
+
+# Caddy built from source with the Go toolchain (no extra download hosts needed).
+caddy:
+	@test -x $(CADDY_DIR)/caddy || GOBIN=$(CADDY_DIR) go install github.com/caddyserver/caddy/v2/cmd/caddy@latest
 
 clean:
 	rm -rf bin .cache

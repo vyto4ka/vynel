@@ -25,6 +25,7 @@ type RenderedInbound struct {
 	EgressIP string         `json:"egress_ip,omitempty"`
 	Inbound  map[string]any `json:"inbound"` // without clients
 	Values   map[string]any `json:"-"`       // resolved variables (host rendering, checks)
+	Template *Template      `json:"-"`
 }
 
 // RenderInbound renders template ⊕ profile ⊕ node values ⊕ overrides ⊕ system fields.
@@ -65,6 +66,7 @@ func RenderInbound(spec InboundSpec) (*RenderedInbound, error) {
 		EgressIP: spec.EgressIP,
 		Inbound:  inbound,
 		Values:   vals,
+		Template: t,
 	}
 	if err := Lint(t, r); err != nil {
 		return nil, err

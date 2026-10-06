@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/vyto4ka/vpn/internal/caddyconf"
 	"github.com/vyto4ka/vpn/internal/panel/store"
 	"github.com/vyto4ka/vpn/internal/xrayconf"
 )
@@ -30,6 +31,7 @@ type DesiredInbound struct {
 type DesiredState struct {
 	NodeID   int64
 	Config   []byte
+	Caddy    []byte // Caddy JSON config; nil = Caddy not needed
 	Inbounds []DesiredInbound
 	Users    map[string][]xrayconf.Client // by inbound tag, sorted by email
 	Hash     string
@@ -130,6 +132,15 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 		if ds.Config, err = json.Marshal(cfg); err != nil {
 			return nil, err
 		}
+		spec, problems, err := s.caddySpec(ctx, n, rendered)
+		if err != nil {
+			return nil, err
+		}
+		ds.Problems = append(ds.Problems, problems...)
+		if ds.Caddy, err = caddyconf.Build(spec); err != nil {
+			ds.Problems = append(ds.Problems, "caddy: "+err.Error())
+			ds.Caddy = nil
+		}
 		ds.Hash = hashState(ds)
 		out[n.ID] = ds
 	}
@@ -152,6 +163,8 @@ func (s *Service) DesiredState(ctx context.Context, nodeID int64) (*DesiredState
 func hashState(ds *DesiredState) string {
 	h := sha256.New()
 	h.Write(ds.Config)
+	h.Write([]byte("\x00caddy"))
+	h.Write(ds.Caddy)
 	tags := make([]string, 0, len(ds.Users))
 	for t := range ds.Users {
 		tags = append(tags, t)

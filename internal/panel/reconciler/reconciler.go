@@ -397,7 +397,7 @@ func (s *session) next() *nodev1.PanelMessage {
 		return nil
 	}
 	s.pending, s.pendingAt = ds, now
-	if s.applied != nil && bytes.Equal(s.applied.Config, ds.Config) {
+	if s.applied != nil && bytes.Equal(s.applied.Config, ds.Config) && bytes.Equal(s.applied.Caddy, ds.Caddy) {
 		return &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Delta{Delta: Delta(s.applied, ds, rev)}}
 	}
 	return &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Snapshot{Snapshot: Snapshot(ds, rev)}}
@@ -405,7 +405,7 @@ func (s *session) next() *nodev1.PanelMessage {
 
 // Snapshot converts a desired state to the wire format.
 func Snapshot(ds *service.DesiredState, rev int64) *nodev1.Snapshot {
-	snap := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config}
+	snap := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config, CaddyConfig: ds.Caddy}
 	for _, in := range ds.Inbounds {
 		iu := &nodev1.InboundUsers{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
 		for _, c := range ds.Users[in.Tag] {

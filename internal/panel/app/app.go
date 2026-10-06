@@ -6,13 +6,16 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/vyto4ka/vpn/internal/node/agent"
+	"github.com/vyto4ka/vpn/internal/node/caddy"
 	"github.com/vyto4ka/vpn/internal/panel/ca"
 	"github.com/vyto4ka/vpn/internal/panel/gateway"
 	"github.com/vyto4ka/vpn/internal/panel/reconciler"
@@ -30,6 +33,8 @@ type Config struct {
 	WithNode      bool
 	LocalNode     service.NodeInput
 	Xray          xray.Binary
+	CaddyBin      string
+	TuneSysctl    bool
 	Version       string
 	Log           *slog.Logger
 }
@@ -137,6 +142,7 @@ func Run(ctx context.Context, cfg Config) error {
 		a, err := agent.New(agent.Config{
 			DataDir: filepath.Join(cfg.DataDir, "node"), Xray: cfg.Xray, Version: cfg.Version,
 			Log: cfg.Log.With("component", "local-node"), Dial: LocalDialer(ctx, p.Reconciler, node.ID),
+			CaddyBin: cfg.CaddyBin, TuneSysctl: cfg.TuneSysctl,
 		})
 		if err != nil {
 			return err
@@ -145,6 +151,11 @@ func Run(ctx context.Context, cfg Config) error {
 		p.LocalNode = a
 		cfg.Log.Info("local node enabled", "node", node.Code)
 		run("local node", func() error { return a.Run(ctx) })
+	} else {
+		// No local node: the panel runs Caddy itself for the subscription domain.
+		m := &caddy.Manager{Bin: cfg.CaddyBin, DataDir: filepath.Join(cfg.DataDir, "web"), Log: cfg.Log.With("component", "caddy")}
+		defer m.Close()
+		run("caddy", func() error { return panelCaddyLoop(ctx, p.Service, m, cfg.Log) })
 	}
 	cfg.Log.Info("panel started", "data", cfg.DataDir, "gateway", cfg.GatewayListen)
 	select {
@@ -165,5 +176,33 @@ func LocalDialer(ctx context.Context, rec *reconciler.Reconciler, nodeID int64) 
 			nodeEnd.Close()
 		}()
 		return nodeEnd, nil
+	}
+}
+
+// panelCaddyLoop keeps the panel's own Caddy in line with the subscription settings.
+func panelCaddyLoop(ctx context.Context, svc *service.Service, m *caddy.Manager, log *slog.Logger) error {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	var lastErr string
+	for {
+		cfg, err := svc.PanelCaddyConfig(ctx)
+		if err == nil && len(cfg) > 0 && !m.Available() {
+			err = errors.New("caddy is not installed; the subscription domain is not served")
+		}
+		if err == nil {
+			err = m.Apply(ctx, cfg)
+		}
+		if err != nil && err.Error() != lastErr {
+			log.Error("panel caddy", "err", err)
+		}
+		lastErr = ""
+		if err != nil {
+			lastErr = err.Error()
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
 	}
 }

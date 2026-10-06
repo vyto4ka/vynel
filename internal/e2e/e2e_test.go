@@ -186,6 +186,8 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	apiNL, apiDE := xraytest.FreePort(t), xraytest.FreePort(t)
 	must(t, svc.SetSetting(ctx, actor, service.SettingXrayAPIPort+".NL", strconv.Itoa(apiNL)))
 	must(t, svc.SetSetting(ctx, actor, service.SettingXrayAPIPort+".DE", strconv.Itoa(apiDE)))
+	// Reality targets a test TLS server here; Caddy is covered by TestAllInOneOneIPOneDomain.
+	must(t, svc.SetSetting(ctx, actor, service.SettingCaddyEnabled, "false"))
 
 	prof, err := svc.CreateProfile(ctx, actor, service.ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal",
 		Values: map[string]any{"SELFSTEAL_PORT": target}})
@@ -427,4 +429,9 @@ func fetchSubscriptionLink(t *testing.T, panel *panelRun, u *store.User, tag, hw
 	}
 	t.Fatalf("no link for %s in %s", tag, raw)
 	return ""
+}
+
+func decodeB64(s string) (string, error) {
+	b, err := base64.StdEncoding.DecodeString(s)
+	return string(b), err
 }

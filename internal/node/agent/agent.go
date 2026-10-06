@@ -18,8 +18,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/vyto4ka/vpn/internal/node/caddy"
 	"github.com/vyto4ka/vpn/internal/node/metrics"
 	"github.com/vyto4ka/vpn/internal/node/state"
+	"github.com/vyto4ka/vpn/internal/node/sysctl"
 	nodev1 "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1"
 	"github.com/vyto4ka/vpn/internal/xray"
 	"github.com/vyto4ka/vpn/internal/xrayconf"
@@ -44,22 +46,27 @@ type Config struct {
 	Addresses     func() []*nodev1.Address // defaults to the host's interfaces
 	MaxBackoff    time.Duration            // reconnect backoff cap, default 30s
 	StatsInterval time.Duration            // how often counters are collected, default 10s
+	CaddyBin      string                   // path to caddy ("" = not installed)
+	TuneSysctl    bool                     // apply BBR/fq/TFO on start (needs root)
 }
 
 // Agent applies the panel's desired state to Xray.
 type Agent struct {
-	cfg  Config
-	log  *slog.Logger
-	st   *state.Store
-	proc *xray.Process
+	cfg   Config
+	log   *slog.Logger
+	st    *state.Store
+	proc  *xray.Process
+	caddy *caddy.Manager
 
-	mu      sync.Mutex
-	cur     *state.State
-	api     *xray.API
-	apiAddr string
-	xrayVer string
-	metrics metrics.Collector
-	statsCh chan struct{} // a batch was queued
+	mu       sync.Mutex
+	cur      *state.State
+	api      *xray.API
+	apiAddr  string
+	xrayVer  string
+	caddyVer string
+	warnings []string
+	metrics  metrics.Collector
+	statsCh  chan struct{} // a batch was queued
 }
 
 // New opens the agent's state. Call Run to start.
@@ -84,6 +91,7 @@ func New(cfg Config) (*Agent, error) {
 		return nil, err
 	}
 	a := &Agent{cfg: cfg, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
+		caddy:   &caddy.Manager{Bin: cfg.CaddyBin, DataDir: filepath.Join(cfg.DataDir, "web"), Log: cfg.Log.With("component", "caddy")},
 		statsCh: make(chan struct{}, 1)}
 	if a.cur, err = st.Load(); err != nil {
 		st.Close()
@@ -95,6 +103,7 @@ func New(cfg Config) (*Agent, error) {
 // Close stops Xray and closes the state.
 func (a *Agent) Close() {
 	a.proc.Close()
+	a.caddy.Close()
 	a.mu.Lock()
 	if a.api != nil {
 		a.api.Close()
@@ -120,8 +129,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	} else {
 		a.log.Warn("cannot get xray version", "err", err)
 	}
+	a.warnings = sysctl.Tune(a.cfg.TuneSysctl)
+	a.caddyVer = a.caddy.Version(ctx)
 	a.mu.Lock()
 	if a.cur != nil {
+		if err := a.caddy.Apply(ctx, a.cur.Caddy); err != nil {
+			a.log.Error("cannot start caddy from saved state", "err", err)
+		}
 		if err := a.restartLocked(ctx, a.cur); err != nil {
 			a.log.Error("cannot start xray from saved state", "err", err)
 		} else {
@@ -167,6 +181,7 @@ func (a *Agent) session(ctx context.Context) error {
 	hello := &nodev1.Hello{
 		AgentVersion: a.cfg.Version, XrayVersion: a.xrayVer, AppliedHash: a.AppliedHash(),
 		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: a.cfg.Addresses(),
+		CaddyVersion: a.caddyVer, Warnings: a.warnings,
 	}
 	if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Hello{Hello: hello}}); err != nil {
 		return err
@@ -281,7 +296,7 @@ func (a *Agent) handle(ctx context.Context, m *nodev1.PanelMessage) *nodev1.Ack 
 // ApplySnapshot makes the node run the snapshot. Same structure: users are changed through the
 // Xray API without a restart. Different structure (or API failure): full config and restart.
 func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
-	next := &state.State{Revision: s.Revision, Hash: s.Hash, Config: s.XrayConfig}
+	next := &state.State{Revision: s.Revision, Hash: s.Hash, Config: s.XrayConfig, Caddy: s.CaddyConfig}
 	for _, in := range s.Inbounds {
 		si := state.Inbound{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
 		for _, u := range in.Users {
@@ -291,17 +306,35 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// Caddy first: the Reality target must exist before clients arrive. A Caddy failure does not
+	// stop the VPN config from applying, but the state is saved as "not fully applied" so the
+	// panel keeps retrying and shows the error.
+	caddyErr := a.caddy.Apply(ctx, next.Caddy)
+	if caddyErr != nil {
+		caddyErr = fmt.Errorf("caddy: %w", caddyErr)
+	}
+	commit := func() error {
+		if caddyErr != nil {
+			partial := next.Clone()
+			partial.Hash = ""
+			if err := a.commitLocked(partial); err != nil {
+				return err
+			}
+			return caddyErr
+		}
+		return a.commitLocked(next)
+	}
 	if a.cur != nil && bytes.Equal(a.cur.Config, next.Config) && a.proc.Running() && a.api != nil {
 		err := a.syncUsersLocked(ctx, a.cur, next)
 		if err == nil {
-			return a.commitLocked(next)
+			return commit()
 		}
 		a.log.Warn("hot user sync failed, restarting xray with the full config", "err", err)
 	}
 	if err := a.restartLocked(ctx, next); err != nil {
-		return err
+		return errors.Join(err, caddyErr)
 	}
-	return a.commitLocked(next)
+	return commit()
 }
 
 // ApplyDelta applies user operations on top of the current state.

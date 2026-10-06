@@ -32,7 +32,8 @@ func nodeCmd() *cobra.Command {
 		},
 	}
 
-	var token string
+	var token, caddyBin string
+	var tune bool
 	var bin xray.Binary
 	run := &cobra.Command{
 		Use: "run", Short: "Run the node agent",
@@ -52,7 +53,8 @@ func nodeCmd() *cobra.Command {
 				return err
 			}
 			defer closeFn()
-			a, err := agent.New(agent.Config{DataDir: dataDir, Xray: bin, Version: buildinfo.Version, Dial: dial, Log: slog.Default()})
+			a, err := agent.New(agent.Config{DataDir: dataDir, Xray: bin, Version: buildinfo.Version, Dial: dial, Log: slog.Default(),
+				CaddyBin: caddyBin, TuneSysctl: tune})
 			if err != nil {
 				return err
 			}
@@ -62,6 +64,8 @@ func nodeCmd() *cobra.Command {
 	}
 	run.Flags().StringVar(&token, "token", "", "join token, used only if the node is not joined yet")
 	addXrayFlags(run, &bin)
+	run.Flags().StringVar(&caddyBin, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary")
+	run.Flags().BoolVar(&tune, "tune-sysctl", true, "apply BBR/fq/TCP Fast Open (needs root)")
 
 	setPanel := &cobra.Command{
 		Use: "set-panel HOST:PORT", Short: "Point the node to a moved panel (same CA)", Args: cobra.ExactArgs(1),
