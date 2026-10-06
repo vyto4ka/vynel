@@ -307,7 +307,13 @@ build_from_source() {
 
 TEMP_SWAP=0
 info "downloading vynel ($RELEASE)"
-if install_release_binary; then
+# Right after a push the release is being re-created for about a minute: retry before building.
+got=0
+for attempt in 1 2 3 4; do
+  if install_release_binary 2>/dev/null; then got=1; break; fi
+  [[ $attempt -lt 4 ]] && { echo "  release not available yet, retrying in 20s ($attempt/3)"; sleep 20; }
+done
+if [[ $got -eq 1 ]]; then
   green "  $(/usr/local/bin/vynel version)"
 else
   red "  no prebuilt binary for $RELEASE/$GOARCH, building from source"
@@ -406,7 +412,13 @@ NODE_STATE="$([[ $ok -eq 1 ]] && echo "работает" || echo "запуска
 CERT_STATE="$([[ $cert -eq 1 ]] && echo "выпущен" || echo "ещё нет — проверьте DNS и порт 80")"
 NODES_STATE="$([[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]] && echo "закрыто (только этот сервер)" || echo "порт ${GATEWAY_LISTEN##*:} открыт")"
 
-line() { printf '  %-26s %s\n' "$1" "$2"; }
+# Pads by characters, not bytes (Cyrillic is two bytes per letter in UTF-8).
+line() {
+  local n pad
+  n="$(printf '%s' "$1" | LC_ALL=C.UTF-8 wc -m 2>/dev/null || printf '%s' "$1" | wc -c)"
+  pad=$(( 26 - n )); (( pad < 1 )) && pad=1
+  printf '  %s%*s%s\n' "$1" "$pad" "" "$2"
+}
 echo
 green "══════════════════════════  vynel установлен  ══════════════════════════"
 echo
