@@ -44,4 +44,4 @@ var settingDefs = []settingDef{
 }
 
 // hiddenSettings are internal and not listed (the login is changed on the account page).
-var hiddenSettings = map[string]bool{service.SettingWebLogin: true, service.SettingGatewaySNI: true}
+var hiddenSettings = map[string]bool{service.SettingWebLogin: true, service.SettingGatewaySNI: true, service.SettingInstallCommand: true}

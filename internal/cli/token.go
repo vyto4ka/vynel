@@ -23,8 +23,8 @@ func printJoinToken(ctx context.Context, w io.Writer, s *service.Service, n *sto
 	if err != nil {
 		return fmt.Errorf("%w; then run `vynel admin node token %s`", err, n.Code)
 	}
-	fmt.Fprintf(w, "join token for %s (valid %s, single use):\n\n  %s\n\non the node run:\n\n  vynel node run --token %s\n",
-		n.Code, service.InstallTokenTTL, tok, tok)
+	fmt.Fprintf(w, "join token for %s (valid %s, single use):\n\n  %s\n\non the new server (root, Ubuntu/Debian, ports 80 and 443 free) run:\n\n  %s\n",
+		n.Code, service.InstallTokenTTL, tok, s.NodeInstallCommand(ctx, tok))
 	return nil
 }
 

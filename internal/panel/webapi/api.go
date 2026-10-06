@@ -837,7 +837,7 @@ func (s *Server) joinInfo(r *http.Request, n *store.Node, secret string, warning
 		return out, nil
 	}
 	out["token"] = tok
-	out["command"] = "vynel node run --token " + tok
+	out["command"] = s.svc.NodeInstallCommand(r.Context(), tok)
 	return out, nil
 }
 

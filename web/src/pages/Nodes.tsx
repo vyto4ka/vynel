@@ -178,11 +178,11 @@ function JoinModal({ j, onClose }: { j: JoinInfo; onClose: () => void }) {
       {j.error ? <div className="alert pink">{j.error}</div> : (
         <>
           <p className="text-2" style={{ marginTop: 0 }}>
-            На новом сервере (Ubuntu/Debian, root, свободные порты 80 и 443) установите vynel, Xray и Caddy — по инструкции из
-            <b> docs/USER_GUIDE.md, раздел «Ещё один сервер»</b> — и запустите ноду этой командой:
+            На новом сервере (Ubuntu или Debian, под root, свободные порты 80 и 443, A-запись домена ноды на его IP) выполните одну команду.
+            Она поставит vynel, Xray и Caddy, подключит ноду к панели и запустит её как службу.
           </p>
-          <CopyField value={`systemd-run --unit vynel-node ${j.command}`} wrap />
-          <p className="muted small">Токен одноразовый и действует {j.ttl}. На панели должен быть открыт порт 9443. Нода появится здесь со статусом «работает».</p>
+          <CopyField value={j.command || ''} wrap />
+          <p className="muted small">Токен одноразовый и действует {j.ttl}. На панели должен быть открыт порт 9443. Через минуту нода появится здесь со статусом «работает».</p>
         </>
       )}
     </Modal>
