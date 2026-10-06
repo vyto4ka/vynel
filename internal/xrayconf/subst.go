@@ -116,3 +116,6 @@ func normalizeTree(node any) any {
 	}
 	return node
 }
+
+// Expand substitutes ${VAR} placeholders in a string (tag and remark patterns).
+func Expand(pattern string, vals map[string]any) (string, error) { return substString(pattern, vals) }

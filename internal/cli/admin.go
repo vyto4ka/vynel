@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -86,6 +87,17 @@ func parseSets(sets []string) (map[string]any, error) {
 		}
 	}
 	return out, nil
+}
+
+func parseOverride(s string) (map[string]any, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil, fmt.Errorf("--override must be a JSON object: %w", err)
+	}
+	return m, nil
 }
 
 func ts(p *int64) string {
@@ -226,7 +238,7 @@ func adminProfileCmd() *cobra.Command {
 		},
 	}
 
-	var name, tpl string
+	var name, tpl, override string
 	var sets []string
 	var groups []string
 	add := &cobra.Command{
@@ -236,7 +248,11 @@ func adminProfileCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			p, err := s.CreateProfile(ctx, service.ActorCLI, service.ProfileInput{Name: name, TemplateID: tpl, Values: vals})
+			over, err := parseOverride(override)
+			if err != nil {
+				return err
+			}
+			p, err := s.CreateProfile(ctx, service.ActorCLI, service.ProfileInput{Name: name, TemplateID: tpl, Values: vals, Override: over})
 			if err != nil {
 				return err
 			}
@@ -256,10 +272,12 @@ func adminProfileCmd() *cobra.Command {
 	add.Flags().StringVar(&name, "name", "", "profile name")
 	add.Flags().StringVar(&tpl, "template", "vless-reality-selfsteal", "template id (see `profile templates`)")
 	add.Flags().StringArrayVar(&sets, "set", nil, "profile variable NAME=VALUE (repeatable)")
+	add.Flags().StringVar(&override, "override", "", `JSON merge patch over the template inbound, e.g. '{"sniffing":{"enabled":false}}'`)
 	add.Flags().StringArrayVar(&groups, "group", []string{"Основная"}, "grant these groups access to the whole profile")
 	_ = add.MarkFlagRequired("name")
 
 	var setVals []string
+	var setOverride string
 	set := &cobra.Command{
 		Use: "set NAME", Short: "Change profile variables (applies to every node using it)", Args: cobra.ExactArgs(1),
 		RunE: withService(func(ctx context.Context, s *service.Service, _ *cobra.Command, args []string) error {
@@ -271,11 +289,16 @@ func adminProfileCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = s.UpdateProfile(ctx, service.ActorCLI, p.ID, service.ProfileInput{Values: vals})
+			over, err := parseOverride(setOverride)
+			if err != nil {
+				return err
+			}
+			_, err = s.UpdateProfile(ctx, service.ActorCLI, p.ID, service.ProfileInput{Values: vals, Override: over})
 			return err
 		}),
 	}
 	set.Flags().StringArrayVar(&setVals, "set", nil, "NAME=VALUE; empty value resets to default")
+	set.Flags().StringVar(&setOverride, "override", "", "JSON merge patch replacing the profile override ('{}' clears it)")
 
 	list := &cobra.Command{
 		Use: "list", Short: "List profiles",
@@ -699,7 +722,38 @@ func adminUserCmd() *cobra.Command {
 	reissue.Flags().BoolVar(&newToken, "token", false, "new subscription token")
 	reissue.Flags().BoolVar(&newUUID, "uuid", false, "new VLESS UUID")
 
-	c.AddCommand(add, list, extend, groupsCmd, reissue,
+	var linkAddr string
+	links := &cobra.Command{
+		Use: "links USERNAME", Short: "Print vless:// links to import into a client (preview until subscriptions)", Args: cobra.ExactArgs(1),
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+			u, err := s.UserByUsername(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("user %q: %w", args[0], err)
+			}
+			if u.Status != store.StatusActive {
+				fmt.Fprintf(cmd.OutOrStdout(), "warning: user is %s, nodes will reject it\n", u.Status)
+			}
+			ls, err := s.UserLinks(ctx, u.ID, linkAddr)
+			if err != nil {
+				return err
+			}
+			if len(ls) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no inbounds: check the user's groups and `vpn admin group list`")
+			}
+			for _, l := range ls {
+				if l.URL == "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", l.Tag, l.Why)
+					continue
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s:\n%s\n\n", l.Tag, l.URL)
+			}
+			return nil
+		}),
+	}
+
+	links.Flags().StringVar(&linkAddr, "address", "", "server address to put in links instead of the node domain (e.g. its IP)")
+
+	c.AddCommand(add, list, extend, groupsCmd, reissue, links,
 		byName("show", "Show a user", func(_ context.Context, _ *service.Service, u *store.User) (*store.User, error) { return u, nil }),
 		byName("disable", "Disable a user", func(ctx context.Context, s *service.Service, u *store.User) (*store.User, error) {
 			return s.SetUserEnabled(ctx, service.ActorCLI, u.ID, false)

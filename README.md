@@ -2,7 +2,7 @@
 
 Панель и нода для своих VPN-серверов на Xray + Caddy — аналог Remnawave с упором на простую установку.
 
-Документация по архитектуре — в [docs/](docs/): [ARCHITECTURE](docs/ARCHITECTURE.md), [PROFILES](docs/PROFILES.md),
+Как попробовать руками — [docs/TRYING.md](docs/TRYING.md). Документация по архитектуре — в [docs/](docs/): [ARCHITECTURE](docs/ARCHITECTURE.md), [PROFILES](docs/PROFILES.md),
 [INBOUNDS](docs/INBOUNDS.md), [INSTALL](docs/INSTALL.md), [STEALTH](docs/STEALTH.md), [ROADMAP](docs/ROADMAP.md).
 
 ## Что уже работает (этапы 0–3)

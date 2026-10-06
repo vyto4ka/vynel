@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -246,6 +247,34 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 		return nil
 	}
 	xraytest.Eventually(t, wait, "alice connects through NL", fetchOK)
+
+	// The vless:// link printed by `vpn admin user links` works as is.
+	links, err := svc.UserLinks(ctx, alice.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nlLink string
+	for _, l := range links {
+		if l.Tag == nlIn.Tag {
+			nlLink = l.URL
+		}
+	}
+	u, err := url.Parse(nlLink)
+	if err != nil || u.Scheme != "vless" {
+		t.Fatalf("bad link %q: %v", nlLink, err)
+	}
+	q := u.Query()
+	linkPort, _ := strconv.Atoi(u.Port())
+	linkSocks := xraytest.StartRealityClient(t, bin, xraytest.RealityClient{
+		ServerPort: linkPort, UUID: u.User.Username(), Flow: q.Get("flow"), ServerName: q.Get("sni"),
+		PublicKey: q.Get("pbk"), ShortID: q.Get("sid"),
+	})
+	if b, err := xraytest.Fetch(ctx, linkSocks, origin); err != nil || len(b) != xraytest.OriginSize {
+		t.Fatalf("client built from the link failed: %v (link %s)", err, nlLink)
+	}
+	if u.Fragment != "🇳🇱 Нидерланды" {
+		t.Fatalf("remark %q", u.Fragment)
+	}
 
 	// Disabling removes her everywhere; enabling brings her back.
 	if _, err := svc.SetUserEnabled(ctx, actor, alice.ID, false); err != nil {
