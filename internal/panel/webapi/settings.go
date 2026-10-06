@@ -16,10 +16,6 @@ var settingDefs = []settingDef{
 		Help: "Ссылки подписок строятся на этом домене. A-запись должна вести на сервер панели."},
 	{Key: service.SettingSubPrefix, Section: "Подписки", Title: "Путь подписок", Type: "string", Default: service.DefaultSubPrefix,
 		Help: "Начало пути ссылки, например /s/. После смены старые ссылки перестанут работать."},
-	{Key: service.SettingSubTitle, Section: "Подписки", Title: "Название в приложениях", Type: "string", Default: "VPN"},
-	{Key: service.SettingSubUpdateHours, Section: "Подписки", Title: "Обновлять подписку, часов", Type: "int", Default: "12"},
-	{Key: service.SettingSubSupportURL, Section: "Подписки", Title: "Ссылка на поддержку", Type: "string",
-		Help: "Например https://t.me/your_support — приложения показывают её как кнопку."},
 	{Key: service.SettingSubDecoy, Section: "Подписки", Title: "Сайт-заглушка домена подписок", Type: "select", Default: "docs", Options: decoy.Names(),
 		Help: "Что видит человек, открывший домен в браузере."},
 	{Key: service.SettingSubPort, Section: "Подписки", Title: "Порт подписок", Type: "int", Default: "443"},
@@ -44,4 +40,10 @@ var settingDefs = []settingDef{
 }
 
 // hiddenSettings are internal and not listed (the login is changed on the account page).
-var hiddenSettings = map[string]bool{service.SettingWebLogin: true, service.SettingGatewaySNI: true, service.SettingInstallCommand: true}
+var hiddenSettings = map[string]bool{
+	service.SettingWebLogin: true, service.SettingGatewaySNI: true, service.SettingInstallCommand: true,
+	// edited on the «Подписка» page
+	service.SettingSubTitle: true, service.SettingSubUpdateHours: true, service.SettingSubSupportURL: true,
+	service.SettingSubAnnounce: true, service.SettingSubAnnounceURL: true, service.SettingSubPageURL: true,
+	service.SettingSubHeaders: true, service.SettingSubPage: true,
+}

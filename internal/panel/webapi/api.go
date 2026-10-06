@@ -66,6 +66,8 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/inbounds/{id}", s.detachInbound)
 	s.handle("GET /api/inbounds/{id}/config", s.inboundConfig)
 
+	s.subscriptionRoutes()
+
 	s.handle("GET /api/settings", s.settings)
 	s.handle("PUT /api/settings", s.setSetting)
 }

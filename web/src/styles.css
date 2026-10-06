@@ -285,3 +285,10 @@ pre.code { background: var(--bg-2); border: 1px solid var(--border); border-radi
 .qr { background: #fff; padding: 10px; border-radius: 10px; width: 180px; height: 180px; display: block; }
 .divider { height: 1px; background: var(--border); margin: 4px 0; }
 .list-plain { margin: 0; padding-left: 18px; color: var(--text-2); }
+
+/* ---------- подписка ---------- */
+.sub-split { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 16px; align-items: start; }
+.sub-preview { position: sticky; top: 76px; overflow: hidden; }
+.sub-preview iframe { display: block; width: 100%; height: calc(100vh - 170px); min-height: 520px; border: 0; background: #0f1215; }
+@media (max-width: 1100px) { .sub-split { grid-template-columns: 1fr; } .sub-preview { position: static; } .sub-preview iframe { height: 640px; } }
+.modal-foot .grow { flex: 1; }

@@ -28,6 +28,7 @@ const paths: Record<string, ReactNode> = {
   key: <><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3" /></>,
   link: <><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></>,
   code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
+  sub: <><rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M10 6h4M9.5 11h5M9.5 14.5h5M11 18h2" /></>,
 }
 
 export function Icon({ name, size }: { name: string; size?: number }) {

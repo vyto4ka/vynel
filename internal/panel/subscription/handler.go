@@ -2,14 +2,11 @@ package subscription
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -24,9 +21,25 @@ var rules = []struct {
 	re     *regexp.Regexp
 	format Format
 }{
+	{regexp.MustCompile(`(?i)keqdroid|keqdis`), FormatBase64}, // reads vless:// links best (it also takes Clash)
 	{regexp.MustCompile(`(?i)clash|mihomo|stash|flclash|koala`), FormatMihomo},
 	{regexp.MustCompile(`(?i)sing-?box|\bSF[AIMT]\b|karing`), FormatSingBox},
 	{regexp.MustCompile(`(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`), FormatBase64},
+}
+
+// UARule is a User-Agent rule as the UI shows it.
+type UARule struct {
+	Pattern string `json:"pattern"`
+	Format  string `json:"format"`
+}
+
+// UARules lists the User-Agent rules in order.
+func UARules() []UARule {
+	out := make([]UARule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, UARule{Pattern: r.re.String(), Format: string(r.format)})
+	}
+	return out
 }
 
 // Detect picks the format: explicit URL suffix, then the user's client type, then UA rules,
@@ -120,7 +133,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.TouchSubscription(ctx, u.ID, r.UserAgent()); err != nil {
 		h.log.Warn("touch subscription", "err", err)
 	}
-	h.setUserInfo(ctx, w, u)
+	w.Header().Set("Cache-Control", "no-store")
+	for _, hv := range h.headersFor(ctx, u, r.UserAgent()) {
+		w.Header().Set(hv.Name, hv.Value)
+	}
 	if format == FormatHTML {
 		h.page(ctx, w, r, u)
 		return
@@ -195,28 +211,6 @@ func (h *Handler) hostsFor(ctx context.Context, r *http.Request, u *store.User, 
 		return nil, "Нет серверов для этого приложения"
 	}
 	return out, ""
-}
-
-// setUserInfo writes the headers clients show (traffic, expiry, title, update interval).
-func (h *Handler) setUserInfo(ctx context.Context, w http.ResponseWriter, u *store.User) {
-	var total, expire int64
-	if u.TrafficLimitBytes != nil {
-		total = *u.TrafficLimitBytes
-	}
-	if u.ExpireAt != nil {
-		expire = *u.ExpireAt
-	}
-	w.Header().Set("Subscription-Userinfo", fmt.Sprintf("upload=0; download=%d; total=%d; expire=%d", u.TrafficUsedBytes, total, expire))
-	title, _ := h.svc.Setting(ctx, service.SettingSubTitle, "VPN")
-	w.Header().Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(title)))
-	hours, _ := h.svc.Setting(ctx, service.SettingSubUpdateHours, "12")
-	if _, err := strconv.Atoi(hours); err == nil {
-		w.Header().Set("Profile-Update-Interval", hours)
-	}
-	if support, _ := h.svc.Setting(ctx, service.SettingSubSupportURL, ""); support != "" {
-		w.Header().Set("Support-Url", support)
-	}
-	w.Header().Set("Cache-Control", "no-store")
 }
 
 func (h *Handler) notFound(ctx context.Context, w http.ResponseWriter) {

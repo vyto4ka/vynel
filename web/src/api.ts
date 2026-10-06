@@ -250,3 +250,62 @@ export interface JoinInfo {
   error?: string
   warnings?: string[] | null
 }
+
+// ---- подписка ----
+
+export interface SubHeader {
+  name: string
+  value: string
+  base64: boolean
+  clients: string
+  enabled: boolean
+  note?: string
+}
+
+export interface SubHeaderPreset extends SubHeader {
+  apps: string
+  description: string
+}
+
+export interface SubApp {
+  id: string
+  name: string
+  link: string
+  download: string
+  platforms: string[]
+  enabled: boolean
+  note?: string
+}
+
+export interface SubPage {
+  heading: string
+  description: string
+  instructions: string
+  footer: string
+  theme: 'auto' | 'dark' | 'light'
+  accent: string
+  showQr: boolean
+  showTraffic: boolean
+  apps: SubApp[]
+}
+
+export interface SubBasics {
+  title: string
+  updateHours: number
+  supportUrl: string
+  announce: string
+  announceUrl: string
+  pageUrl: string
+}
+
+export interface SubConfig {
+  basics: SubBasics
+  headers: SubHeader[]
+  page: SubPage
+  headerCatalog: SubHeaderPreset[]
+  appCatalog: SubApp[]
+  defaultHeaders: SubHeader[]
+  defaultPage: SubPage
+  variables: { name: string; description: string; example: string }[]
+  uaRules: { pattern: string; format: string }[]
+}

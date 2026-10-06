@@ -11,6 +11,7 @@ import { Templates } from './pages/Templates'
 import { Nodes } from './pages/Nodes'
 import { Profiles } from './pages/Profiles'
 import { Settings } from './pages/Settings'
+import { Subscription } from './pages/Subscription'
 import { Audit } from './pages/Audit'
 import { Account } from './pages/Account'
 
@@ -24,6 +25,7 @@ const sections: { title: string; pages: Page[] }[] = [
       { id: 'users', title: 'Пользователи', icon: 'users', el: () => <Users /> },
       { id: 'groups', title: 'Группы', icon: 'groups', el: () => <Groups /> },
       { id: 'templates', title: 'Шаблоны', icon: 'templates', el: () => <Templates /> },
+      { id: 'subscription', title: 'Подписка', icon: 'sub', el: () => <Subscription /> },
     ],
   },
   {

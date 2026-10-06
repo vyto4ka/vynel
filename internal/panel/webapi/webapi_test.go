@@ -142,3 +142,36 @@ func TestLoginAndAPI(t *testing.T) {
 }
 
 func itoa(i int64) string { return strconv.FormatInt(i, 10) }
+
+func TestSubscriptionAPI(t *testing.T) {
+	c, _, pw := newServer(t)
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != 200 {
+		t.Fatal("login")
+	}
+	w := c.do("GET", "/api/subscription", "", false)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"keqdroid"`) || !strings.Contains(w.Body.String(), "Subscription-Userinfo") {
+		t.Fatalf("config: %d %.200s", w.Code, w.Body.String())
+	}
+	body := `{"basics":{"title":"Мику","updateHours":3},"headers":[{"name":"Hide-Settings","value":"1","clients":"(?i)happ","enabled":true},{"name":"Profile-Title","value":"{title}","base64":true,"enabled":true}]}`
+	if w := c.do("PUT", "/api/subscription", body, true); w.Code != 200 {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	w = c.do("POST", "/api/subscription/test", `{"userAgent":"Happ/4.1.0"}`, true)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"base64"`) {
+		t.Fatalf("test: %d %s", w.Code, w.Body.String())
+	}
+	w = c.do("POST", "/api/subscription/test", `{"userAgent":"clash-verge/2"}`, true)
+	if strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"mihomo"`) {
+		t.Fatalf("clash test: %s", w.Body.String())
+	}
+	if w := c.do("PUT", "/api/subscription", `{"headers":[{"name":"Content-Type","value":"x","enabled":true}]}`, true); w.Code != 400 {
+		t.Fatalf("reserved header accepted: %d", w.Code)
+	}
+	w = c.do("GET", "/api/subscription/preview", "", false)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatalf("preview: %d %q %.100s", w.Code, w.Header().Get("X-Frame-Options"), w.Body.String())
+	}
+	if w := c.do("POST", "/api/subscription/reset", `{"part":"headers"}`, true); w.Code != 200 || !strings.Contains(w.Body.String(), "Subscription-Userinfo") {
+		t.Fatalf("reset: %d", w.Code)
+	}
+}
