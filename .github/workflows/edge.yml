@@ -1,0 +1,38 @@
+name: edge
+
+# Every push publishes prebuilt binaries as the pre-release "edge-<branch>" (slashes -> dashes),
+# so scripts/install-aio.sh downloads vynnel instead of compiling it on the server.
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: edge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: make build-all VERSION="${GITHUB_SHA::7}"
+      - name: Checksums
+        run: cd bin && sha256sum vynnel-linux-* > SHA256SUMS && cat SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="edge-${GITHUB_REF_NAME//\//-}"
+          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" bin/vynnel-linux-* bin/SHA256SUMS \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "edge: $GITHUB_REF_NAME @ ${GITHUB_SHA::7}" \
+            --notes "Automatic build of \`$GITHUB_REF_NAME\` at ${GITHUB_SHA}. Used by scripts/install-aio.sh."

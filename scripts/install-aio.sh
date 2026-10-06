@@ -6,8 +6,8 @@
 # Without --domain it asks questions (domain, subscriptions, email, name...). With flags it runs
 # unattended:  ... install-aio.sh --domain nl.example.com [--sub-domain sub.example.com] [--email you@example.com] --yes
 #
-# Re-running it updates the code and keeps the data. Until release binaries exist (roadmap
-# stage 9) it builds from source, so the first run takes a few minutes.
+# Re-running it updates the code and keeps the data. The vynnel binary comes from the branch's
+# "edge" release (CI); if there is none, it is built from source (slow on small servers).
 set -euo pipefail
 
 REPO="${VYNNEL_REPO:-https://github.com/vyto4ka/vynnel.git}"
@@ -228,40 +228,105 @@ if [[ -n "$busy" ]]; then
   die "stop the web server / old VPN using them (e.g. systemctl disable --now nginx) and run again"
 fi
 
-# ---- Go toolchain (until release binaries exist) ----
-need_go=1
-if command -v go >/dev/null; then
-  v="$(go env GOVERSION 2>/dev/null | sed 's/go//')"
-  [[ "$(printf '%s\n1.21\n' "$v" | sort -V | head -1)" == "1.21" ]] && need_go=0
-fi
-if [[ $need_go -eq 1 && ! -x /usr/local/go/bin/go ]]; then
-  GOV="$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)"
-  info "installing $GOV"
-  curl -fsSL "https://go.dev/dl/${GOV}.linux-${GOARCH}.tar.gz" | tar -C /usr/local -xz
-fi
-export PATH="/usr/local/go/bin:$PATH"
-export GOTOOLCHAIN=auto GOFLAGS=-mod=mod
+# ---- binaries ----
+# vynnel: a prebuilt binary from the branch's "edge" release (built by .github/workflows/edge.yml).
+# Building from source is the fallback only: on a 1 vCPU / 1 GB VPS it takes 10–20 minutes.
+RELEASE="${VYNNEL_RELEASE:-edge-${REF//\//-}}"
+RELEASE_URL="https://github.com/vyto4ka/vynnel/releases/download/$RELEASE"
 
-# ---- source and binaries ----
-info "fetching source ($REF)"
-if [[ -d "$SRC/.git" ]]; then
-  git -C "$SRC" fetch -q --depth 1 origin "$REF"
-  git -C "$SRC" reset -q --hard FETCH_HEAD
+ensure_go() {
+  export PATH="/usr/local/go/bin:$PATH"
+  export GOTOOLCHAIN=auto GOFLAGS=-mod=mod
+  if command -v go >/dev/null; then
+    local v
+    v="$(go env GOVERSION 2>/dev/null | sed 's/go//')"
+    [[ "$(printf '%s\n1.21\n' "$v" | sort -V | head -1)" == "1.21" ]] && return 0
+  fi
+  local gov
+  gov="$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)"
+  info "installing $gov"
+  rm -rf /usr/local/go
+  curl -fsSL "https://go.dev/dl/${gov}.linux-${GOARCH}.tar.gz" | tar -C /usr/local -xz
+}
+
+# The Go compiler needs ~1.5 GB for this project; small VPSes get a temporary swap file.
+ensure_memory() {
+  local mem swap
+  mem="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+  swap="$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo)"
+  if (( mem + swap < 2000 )) && [[ ! -e /swapfile-vynnel ]]; then
+    info "only ${mem} MB RAM: adding a 2 GB swap file for the build"
+    fallocate -l 2G /swapfile-vynnel 2>/dev/null || dd if=/dev/zero of=/swapfile-vynnel bs=1M count=2048 status=none
+    chmod 600 /swapfile-vynnel
+    mkswap /swapfile-vynnel >/dev/null
+    swapon /swapfile-vynnel
+    TEMP_SWAP=1
+  fi
+}
+
+# with_progress "message" command...: prints a dot every 10 seconds so a long step does not look hung.
+with_progress() {
+  local msg="$1"; shift
+  printf '\033[36m==>\033[0m %s ' "$msg"
+  ( while true; do sleep 10; printf '.'; done ) &
+  local dots=$! rc=0
+  "$@" >/tmp/vynnel-build.log 2>&1 || rc=$?
+  kill "$dots" 2>/dev/null; wait "$dots" 2>/dev/null || true
+  if [[ $rc -eq 0 ]]; then echo " ok"; else echo " failed"; tail -20 /tmp/vynnel-build.log; fi
+  return $rc
+}
+
+install_release_binary() {
+  local tmp
+  tmp="$(mktemp -d)"
+  curl -fsSL --max-time 120 -o "$tmp/vynnel-linux-$GOARCH" "$RELEASE_URL/vynnel-linux-$GOARCH" || { rm -rf "$tmp"; return 1; }
+  curl -fsSL --max-time 30 -o "$tmp/SHA256SUMS" "$RELEASE_URL/SHA256SUMS" || { rm -rf "$tmp"; return 1; }
+  (cd "$tmp" && grep " vynnel-linux-$GOARCH\$" SHA256SUMS | sha256sum -c --quiet -) || { red "checksum mismatch"; rm -rf "$tmp"; return 1; }
+  install -m 755 "$tmp/vynnel-linux-$GOARCH" /usr/local/bin/vynnel.new
+  mv /usr/local/bin/vynnel.new /usr/local/bin/vynnel
+  rm -rf "$tmp"
+}
+
+build_from_source() {
+  ensure_go
+  ensure_memory
+  info "fetching source ($REF)"
+  if [[ -d "$SRC/.git" ]]; then
+    git -C "$SRC" fetch -q --depth 1 origin "$REF"
+    git -C "$SRC" reset -q --hard FETCH_HEAD
+  else
+    rm -rf "$SRC"
+    git clone -q --depth 1 -b "$REF" "$REPO" "$SRC"
+  fi
+  local commit
+  commit="$(git -C "$SRC" rev-parse --short HEAD)"
+  with_progress "building vynnel $commit from source (10–20 minutes on a small VPS)" \
+    bash -c "cd '$SRC' && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X github.com/vyto4ka/vynnel/internal/buildinfo.Version=$commit -X github.com/vyto4ka/vynnel/internal/buildinfo.Commit=$commit' -o /usr/local/bin/vynnel.new ./cmd/vynnel"
+  mv /usr/local/bin/vynnel.new /usr/local/bin/vynnel
+}
+
+TEMP_SWAP=0
+info "downloading vynnel ($RELEASE)"
+if install_release_binary; then
+  green "  $(/usr/local/bin/vynnel version)"
 else
-  rm -rf "$SRC"
-  git clone -q --depth 1 -b "$REF" "$REPO" "$SRC"
+  red "  no prebuilt binary for $RELEASE/$GOARCH, building from source"
+  build_from_source
 fi
-COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
 
-info "building vynnel ($COMMIT)"
-(cd "$SRC" && CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -X github.com/vyto4ka/vynnel/internal/buildinfo.Version=$COMMIT -X github.com/vyto4ka/vynnel/internal/buildinfo.Commit=$COMMIT" \
-  -o /usr/local/bin/vynnel.new ./cmd/vynnel)
-mv /usr/local/bin/vynnel.new /usr/local/bin/vynnel
-
+install_xray() {
+  local asset tmp
+  case "$GOARCH" in amd64) asset=Xray-linux-64.zip ;; arm64) asset=Xray-linux-arm64-v8a.zip ;; esac
+  tmp="$(mktemp)"
+  curl -fsSL -o "$tmp" "https://github.com/XTLS/Xray-core/releases/latest/download/$asset"
+  mkdir -p /usr/local/share/xray
+  unzip -o -q "$tmp" -d /usr/local/share/xray
+  rm -f "$tmp"
+  chmod +x /usr/local/share/xray/xray
+}
 if [[ ! -x /usr/local/share/xray/xray ]]; then
   info "installing Xray"
-  "$SRC/scripts/fetch-xray.sh" /usr/local/share/xray
+  install_xray
 fi
 ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
 
@@ -271,11 +336,17 @@ if [[ ! -x /usr/local/bin/caddy ]]; then
   if [[ -n "$CV" ]] && curl -fsSL "https://github.com/caddyserver/caddy/releases/download/${CV}/caddy_${CV#v}_linux_${GOARCH}.tar.gz" | tar -xz -C /usr/local/bin caddy; then
     :
   else
-    info "GitHub download failed, building Caddy from source"
-    GOBIN=/usr/local/bin go install github.com/caddyserver/caddy/v2/cmd/caddy@latest
+    red "  Caddy download failed, building it from source"
+    ensure_go
+    ensure_memory
+    with_progress "building Caddy (several minutes)" env GOBIN=/usr/local/bin go install github.com/caddyserver/caddy/v2/cmd/caddy@latest
   fi
 fi
 chmod +x /usr/local/bin/caddy
+
+if [[ $TEMP_SWAP -eq 1 ]]; then
+  swapoff /swapfile-vynnel && rm -f /swapfile-vynnel
+fi
 
 # ---- firewall ----
 if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
