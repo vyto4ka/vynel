@@ -1,0 +1,119 @@
+# Template B — VLESS + XHTTP (packet-up) behind VK Cloud CDN (docs/PROFILES.md §4).
+# Data goes in cookies, padding in the query string, so the CDN does not strip it.
+id: vless-xhttp-vkcdn
+version: 1
+title: VLESS XHTTP через VK CDN
+summary: Вход через CDN VK Cloud, когда прямые IP нод недоступны.
+tag_pattern: CDN_${NODE_CODE}
+remark_pattern: ${NODE_FLAG} ${NODE_NAME} · CDN
+protocol: vless
+client:
+  flow: ""
+lint:
+  - xhttp_no_nested_extra
+  - xhttp_cdn_get_only
+  - xhttp_no_header_placement
+  - xhttp_server_max_header_bytes
+
+variables:
+  - name: ORIGIN_DOMAIN
+    scope: node
+    source: input
+    default_from: node.domain
+    validate: domain
+    description: Домен источника (A-запись на ноду), на него ходит CDN.
+  - name: CDN_DOMAIN
+    scope: node
+    source: input
+    validate: domain
+    description: Персональный домен ресурса в VK CDN (CNAME на VK).
+  - name: VK_CNAME
+    scope: node
+    source: input
+    optional: true
+    description: CNAME-цель из вкладки «Информация» в VK, только для проверки DNS.
+  - name: XRAY_PORT
+    scope: profile
+    source: const
+    default: 8085
+    validate: port
+    description: Локальный порт Xray за Caddy.
+  - name: UPLINK_PATH
+    scope: profile
+    source: generate
+    generator: path
+    options: [/upload, /hls, /segment, /media]
+    validate: path
+    description: Путь xhttp без завершающего слеша.
+  - name: MAX_HEADER_BYTES
+    scope: profile
+    source: const
+    default: 131072
+    description: Лимит заголовков на сервере (большие куки).
+
+# Shared between the inbound and the subscription host so they never drift (PROFILES.md §4.3).
+xhttp_extra: |
+  {
+    "seqKey": "offset",
+    "seqPlacement": "query",
+    "sessionKey": "media_sid",
+    "sessionIDKey": "media_sid",
+    "sessionPlacement": "cookie",
+    "sessionIDPlacement": "cookie",
+    "uplinkHTTPMethod": "GET",
+    "uplinkDataPlacement": "cookie",
+    "uplinkDataKey": "pb",
+    "xPaddingObfsMode": true,
+    "xPaddingPlacement": "query",
+    "xPaddingKey": "cb",
+    "noSSEHeader": true,
+    "scMaxEachPostBytes": "4096-8192",
+    "scMinPostsIntervalMs": "5-10",
+    "serverMaxHeaderBytes": "${MAX_HEADER_BYTES}"
+  }
+
+xray_inbound: |
+  {
+    "tag": "${TAG}",
+    "port": "${XRAY_PORT}",
+    "listen": "127.0.0.1",
+    "protocol": "vless",
+    "settings": { "clients": [], "decryption": "none" },
+    "streamSettings": {
+      "network": "xhttp",
+      "sockopt": { "tcpNoDelay": true },
+      "xhttpSettings": {
+        "mode": "packet-up",
+        "path": "${UPLINK_PATH}",
+        "extra": "${XHTTP_EXTRA}"
+      }
+    }
+  }
+
+host:
+  address: ${CDN_DOMAIN}
+  port: 443
+  security: tls
+  sni: ${CDN_DOMAIN}
+  host: ${CDN_DOMAIN}
+  path: ${UPLINK_PATH}/
+  alpn: [h2, http/1.1]
+  fingerprint: chrome
+  xhttp_client_only:
+    xmux:
+      maxConcurrency: 12-24
+      hMaxRequestTimes: 600-900
+      hMaxReusableSecs: 1800
+      hKeepAlivePeriod: 30
+
+caddy:
+  role: reverse_proxy_xhttp
+  domain: ${ORIGIN_DOMAIN}
+  upstream: 127.0.0.1:${XRAY_PORT}
+
+node_requirements:
+  ports: [443/tcp, 80/tcp]
+  dns:
+    - { type: A, name: "${ORIGIN_DOMAIN}" }
+    - { type: CNAME, name: "${CDN_DOMAIN}", target: "${VK_CNAME}" }
+  sysctl: [bbr, fq]

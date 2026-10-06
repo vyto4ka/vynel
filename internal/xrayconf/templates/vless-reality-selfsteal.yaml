@@ -1,0 +1,98 @@
+# Template A — VLESS + Reality, self-steal (docs/PROFILES.md §3).
+# Matches the Remnawave config profile from the RemnaSetup "full node" setup.
+id: vless-reality-selfsteal
+version: 1
+title: VLESS Reality (self-steal)
+summary: Основной профиль. Нода маскируется под собственный сайт на своём домене.
+tag_pattern: VLESS_${NODE_CODE}
+remark_pattern: ${NODE_FLAG} ${NODE_NAME}
+protocol: vless
+client:
+  flow: xtls-rprx-vision
+lint: []
+
+variables:
+  - name: NODE_DOMAIN
+    scope: node
+    source: input
+    default_from: node.domain
+    validate: domain
+    description: Домен ноды (A-запись на IP инбаунда). Идёт в serverNames и в адрес точки подключения.
+  - name: REALITY_PRIVATE_KEY
+    scope: node
+    source: generate
+    generator: x25519
+    secret: true
+    description: Приватный ключ Reality, свой на каждой ноде.
+  - name: REALITY_PUBLIC_KEY
+    scope: node
+    source: derived
+    from: x25519_public(REALITY_PRIVATE_KEY)
+    description: Публичный ключ, уходит в подписку.
+  - name: REALITY_SHORT_ID
+    scope: node
+    source: generate
+    generator: shortid
+    description: shortId (8 байт hex).
+  - name: SELFSTEAL_PORT
+    scope: profile
+    source: const
+    default: 8443
+    validate: port
+    description: Локальный порт Caddy с сайтом-заглушкой.
+  - name: PORT
+    scope: profile
+    source: const
+    default: 443
+    validate: port
+    description: Порт снаружи.
+
+xray_inbound: |
+  {
+    "tag": "${TAG}",
+    "port": "${PORT}",
+    "listen": "${LISTEN_IP}",
+    "protocol": "vless",
+    "settings": { "clients": [], "decryption": "none" },
+    "sniffing": { "enabled": true, "routeOnly": true, "destOverride": ["http", "tls", "quic"] },
+    "streamSettings": {
+      "network": "raw",
+      "sockopt": {
+        "tcpFastOpen": true,
+        "tcpcongestion": "bbr",
+        "tcpKeepAliveIdle": 45,
+        "tcpKeepAliveInterval": 45
+      },
+      "security": "reality",
+      "realitySettings": {
+        "xver": 0,
+        "target": "127.0.0.1:${SELFSTEAL_PORT}",
+        "shortIds": ["${REALITY_SHORT_ID}"],
+        "privateKey": "${REALITY_PRIVATE_KEY}",
+        "serverNames": ["${NODE_DOMAIN}"],
+        "minClientVer": "1.0.0"
+      }
+    }
+  }
+
+# Used by the subscription service (stage 5).
+host:
+  address: ${NODE_DOMAIN}
+  port: ${PORT}
+  security: reality
+  sni: ${NODE_DOMAIN}
+  fingerprint: firefox
+  public_key: ${REALITY_PUBLIC_KEY}
+  short_id: ${REALITY_SHORT_ID}
+  flow: xtls-rprx-vision
+
+# Used by the Caddy integration (stage 6).
+caddy:
+  role: selfsteal
+  domain: ${NODE_DOMAIN}
+  listen: 127.0.0.1:${SELFSTEAL_PORT}
+
+node_requirements:
+  ports: [443/tcp, 80/tcp]
+  dns: [{ type: A, name: "${NODE_DOMAIN}" }]
+  sysctl: [bbr, fq, tcp_fastopen]
