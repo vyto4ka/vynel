@@ -61,9 +61,9 @@ func versionCmd() *cobra.Command {
 func installCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "install",
-		Short: "Installer (for now: scripts/install-aio.sh, docs/ALL_IN_ONE.md)",
+		Short: "Installer (for now: scripts/install.sh, docs/INSTALL_GUIDE.md)",
 		RunE: func(*cobra.Command, []string) error {
-			return errors.New("use scripts/install-aio.sh for now (it asks questions); the built-in installer is roadmap stage 9")
+			return errors.New("use scripts/install.sh for now (menu: all-in-one, panel, node, update, uninstall); the built-in installer is roadmap stage 9")
 		},
 	}
 }

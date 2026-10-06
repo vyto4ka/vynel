@@ -9,7 +9,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
-// SetupInput describes an all-in-one server (docs/ALL_IN_ONE.md).
+// SetupInput describes an all-in-one server (docs/INSTALL_GUIDE.md).
 type SetupInput struct {
 	NodeName  string
 	Country   string

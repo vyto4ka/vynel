@@ -50,7 +50,8 @@ internal/
 web/                        фронтенд: React + Vite + TypeScript (src/pages — разделы, src/ui.tsx — компоненты,
                             src/styles.css — тема); собирается в web/dist и вшивается через web/embed.go
 proto/                      .proto
-scripts/                    install-aio.sh, fetch-xray.sh
+scripts/                    install.sh (установщик: aio, panel, node, update, uninstall), install-aio.sh (переходник
+                            для старых ссылок), fetch-xray.sh
 docs/                       документация
 ```
 
@@ -93,7 +94,7 @@ docs/                       документация
 - **edge** (`.github/workflows/edge.yml`):
   - при каждом push собирает фронтенд (`make web`), затем `vynel-linux-{amd64,arm64}` и `SHA256SUMS`;
   - публикует их как pre-release `edge-<ветка>` (в имени ветки `/` заменяется на `-`);
-  - `scripts/install-aio.sh` берёт бинарь оттуда; другая ветка или релиз задаются через `VYNEL_REF=…` и `VYNEL_RELEASE=…`.
+  - `scripts/install.sh` берёт бинарь оттуда; другая ветка — `--ref ВЕТКА` или `VYNEL_REF=…`, другой релиз — `VYNEL_RELEASE=…`. Команду установки ноды (`install.command`) установщик записывает в настройки панели.
 
 ## Веб-интерфейс
 

@@ -1,6 +1,6 @@
 # Руководство пользователя
 
-Как устроен vynel и как им управлять. Установка описана в [ALL_IN_ONE.md](ALL_IN_ONE.md).
+Как устроен vynel и как им управлять. Установка описана в [INSTALL_GUIDE.md](INSTALL_GUIDE.md).
 
 Управлять можно двумя способами, они равноценны и видят одни и те же данные:
 
@@ -50,6 +50,7 @@ vynel admin web password --login boss   # заодно сменить логин
 | **Дашборд** | Пользователи, онлайн, трафик за сегодня и 30 дней, график по дням, состояние нод, топ по трафику. Обновляется сам |
 | **Пользователи** | Список с фильтрами и поиском. «+ Пользователь» — создать (достаточно имени). Клик по строке — карточка: ссылка подписки с QR, продление в один клик (+1/3/6/12 мес), отключение, сброс трафика, новая ссылка, устройства, график, ссылки по серверам. «Изменить» — срок, лимиты, группы, заметка |
 | **Группы** | Какие серверы видят участники группы. «+ дать доступ…» — профиль (на всех нодах), нода целиком или один инбаунд |
+| **Подписка** | Как подписка выглядит в приложениях и в браузере: название, объявление, страница, кнопки приложений, HTTP-заголовки, проверка ответа (§5) |
 | **Шаблоны** | Наборы настроек для новых пользователей: срок, лимит трафика, устройства, группы. Один из них — по умолчанию |
 | **Ноды** | Серверы: состояние, CPU/RAM, онлайн, трафик, проблемы. «+ Нода» выдаёт токен и команду для нового сервера. У инбаундов — включение, точка подключения (как сервер выглядит в приложении), конфиг, новые ключи Reality |
 | **Профили** | Общие настройки VLESS (Reality self-steal или XHTTP через VK CDN). Изменение профиля применяется на всех нодах |
@@ -143,20 +144,81 @@ vynel admin template add Год --months 12 --group Основная --default  
 
 ## 5. Подписки и приложения
 
-Ссылка подписки выглядит как `https://<домен>/s/<токен>`, её показывает `user show`. Формат ответа выбирается сам:
+Ссылка подписки выглядит как `https://<домен>/s/<токен>`. Её показывают карточка пользователя в панели и `vynel admin user show`. Формат ответа выбирается сам:
 
 | Кто запрашивает | Что получает |
 |-----------------|--------------|
-| Happ, v2RayTun, v2rayN/NG, Streisand, Hiddify, Shadowrocket… | Список `vless://` ссылок (base64) |
-| Clash Verge, Mihomo, FlClash, Stash | Профиль Mihomo (YAML) |
+| **KeqDroid**, Happ, v2RayTun, v2rayN/NG, Streisand, Hiddify, INCY, Shadowrocket… | Список `vless://` ссылок (base64) |
+| Clash Verge, Mihomo, FlClash/FlClashX, Stash | Профиль Mihomo (YAML) |
 | sing-box (SFA/SFI), Karing | Профиль sing-box (JSON) |
 | Браузер | Страница: срок, трафик, QR-код, кнопки «добавить в приложение» |
 
-Формат можно указать явно, добавив его в конец ссылки: `…/s/<токен>/clash`, `/singbox`, `/json` (Xray JSON), `/base64`.
+Формат можно указать явно, добавив его в конец ссылки: `…/s/<токен>/clash`, `/singbox`, `/json` (Xray JSON), `/base64`. Или выбрать у пользователя («Изменить» → «Формат подписки»).
 
 - **Безопасность.** Неверный токен или любой другой путь открывает 404 сайта-заглушки. IP, который перебирает токены, банится на час.
-- **Утечка ссылки.** Если ссылка попала не туда, `vynel admin user reissue vasya` выдаст новую.
-- **Ссылки без подписки.** `vynel admin user links vasya` печатает `vless://` ссылки по одной.
+- **Утечка ссылки.** Кнопка «Новая ссылка» в карточке (или `vynel admin user reissue vasya`) выдаст новую, старая перестанет работать.
+- **Ссылки без подписки.** Внизу карточки пользователя — `vless://` по каждому серверу; в терминале `vynel admin user links vasya`.
+
+### KeqDroid
+
+[KeqDroid](https://github.com/Lemonochka/keqdroid) — клиент для Android, Windows и Linux на Xray/sing-box/Mihomo. Он лучше всего работает со ссылками `vless://`, поэтому по User-Agent `keqdroid/…` получает именно их. Он передаёт HWID (`x-hwid`, модель и ОС устройства), так что лимит устройств работает. Ещё он читает название, трафик, объявление, ссылку поддержки и «открыть в браузере». На странице подписки KeqDroid стоит первым с пометкой «рекомендуем»; кнопка открывает `keqdroid://install-config?url=<ссылка>`.
+
+### Как выглядит подписка: раздел «Подписка» в панели
+
+Все правки видны в предпросмотре справа ещё до сохранения. Приложения получают изменения при следующем обновлении подписки.
+
+| Вкладка | Что настраивается |
+|---------|-------------------|
+| **Основное** | Название подписки в приложениях, как часто обновлять, ссылка на поддержку, **объявление** (строка вверху Happ, v2RayTun, KeqDroid, INCY и плашка на странице) и его ссылка, страница «открыть в браузере» |
+| **Страница** | Заголовок, описание, тема (тёмная, светлая, как в системе), акцентный цвет, QR-код, блок со статусом и трафиком, инструкция, подвал. В тексте можно использовать переменные: `{username}`, `{expire_date}`, `{days_left}`… |
+| **Приложения** | Кнопки «Добавить в …»: включить или выключить, порядок (первая — «рекомендуем»), своя ссылка, где скачать, платформы. Телефон сначала видит приложения для своей системы. Есть KeqDroid, Happ, v2RayTun, Hiddify, Streisand, Clash/Mihomo, v2rayNG, FlClashX, Karing, sing-box, Shadowrocket и своё |
+| **Заголовки** | HTTP-заголовки ответа, которые читают приложения (ниже) |
+| **Проверка** | Что получит конкретное приложение (User-Agent) для конкретного пользователя: формат и все заголовки. Устройство при этом не регистрируется |
+
+### Заголовки
+
+По умолчанию отправляются:
+
+| Заголовок | Значение | Что делает | Кто читает |
+|-----------|----------|------------|------------|
+| `Subscription-Userinfo` | `upload={upload}; download={download}; total={total}; expire={expire}` | Трафик и срок в приложении | все |
+| `Profile-Title` | `{title}`, base64 | Название подписки | Happ, v2RayTun, Hiddify, KeqDroid, INCY, Streisand, Karing |
+| `Profile-Update-Interval` | `{update_hours}` | Автообновление, часов | все |
+| `Support-Url` | `{support_url}` | Кнопка «поддержка» | Happ, v2RayTun, Hiddify, KeqDroid, INCY |
+| `Profile-Web-Page-Url` | `{page_url}` | «Открыть в браузере» | Happ, v2RayTun, Hiddify, KeqDroid, Clash Verge, FlClash |
+| `Announce` | `{announce}`, base64 | Объявление | Happ, v2RayTun, KeqDroid, INCY |
+| `Announce-Url` | `{announce_url}` | Ссылка объявления | Happ, v2RayTun |
+| `Content-Disposition` | `attachment; filename*=UTF-8''{title_url}` | Имя профиля | только Clash-клиенты |
+
+Правила:
+
+- **Пустое значение.** Если значение после подстановки пустое (например, поддержка не задана), заголовок не отправляется.
+- **base64.** Включайте для русского текста и эмодзи: так значение уходит как `base64:…`, как требуют Happ, v2RayTun и KeqDroid.
+- **«Каким приложениям».** Это регулярное выражение по User-Agent, например `(?i)\bhapp\b`. Пусто — всем.
+
+**Каталог** («Из каталога») — заголовки Happ, INCY и v2RayTun, которые включаются по необходимости:
+- `Hide-Settings` — скрыть настройки серверов;
+- `Routing` и `Routing-Enable` — маршрутизация Happ;
+- `Notification-Subs-Expire`, `Sub-Expire` и `Sub-Expire-Button-Link` — напоминания об окончании;
+- `Sub-Info-*` — информационная плашка;
+- `Subscription-Always-Hwid-Enable`;
+- `Ping-Type`;
+- `Subscription-Autoconnect`;
+- `Color-Profile`;
+- `Fallback-Url` и `New-Url` — переезд подписки;
+- `Socks-Auth-Mode`;
+- `Per-App-Proxy-*` — раздельное туннелирование;
+- `ProviderID`;
+- `Update-Always` (v2RayTun).
+
+Часть заголовков Happ работает только с ProviderID из кабинета Happ. Точные значения — в документации приложения. Можно добавить и любой свой заголовок. «Вернуть по умолчанию» сбрасывает список.
+
+**Переменные** в значениях и ссылках приложений (полный список с примерами — во вкладке «Заголовки»):
+- `{title}`, `{username}`, `{status}`;
+- `{upload}`, `{download}`, `{total}`, `{used}`, `{limit}`;
+- `{expire}`, `{expire_date}`, `{days_left}`;
+- `{update_hours}`, `{support_url}`, `{announce}`, `{announce_url}`;
+- `{sub_url}`, `{page_url}`, `{url}`, `{url_enc}`, `{url_b64}`, `{title_url}`.
 
 ## 6. Устройства (HWID)
 
@@ -206,32 +268,28 @@ vynel admin profile set Reality --override '{"streamSettings":{"sockopt":{"tcpKe
 
 ## 9. Ещё один сервер (нода)
 
-На **панели** — в веб-панели «Ноды» → «+ Нода» (название, код страны, домен, профили; токен и команда появятся сразу) или командами:
+1. **В панели:** «Ноды» → «+ Нода» → название, код страны, домен ноды (A-запись на IP нового сервера), профили. Панель покажет команду установки с одноразовым токеном.
+2. **На новом сервере** (Ubuntu/Debian, root, свободные 80/443) выполните эту команду:
+
+   ```bash
+   bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/…/scripts/install.sh) --mode node --token vyn1.…
+   ```
+
+   Она поставит vynel, Xray и Caddy, подключит ноду и запустит службу `vynel-node`. Можно и через меню установщика: пункт 3, затем вставить токен.
+3. Через минуту нода в панели — «работает». Пользователи групп с доступом к профилю получат новый сервер в подписке сами.
+
+Из терминала панели то же самое:
 
 ```bash
-vynel admin node add --name Германия --country de --domain de.example.com   # печатает токен vyn1…
+vynel admin node add --name Германия --country de --domain de.example.com   # печатает токен и команду установки
 vynel admin inbound attach --node DE --profile Reality                      # VLESS_DE со своими ключами
 ```
 
-На **новом сервере** (Ubuntu/Debian, root, свободные 80/443, A-запись `de.example.com` → его IP):
+- **Порт 9443.** На панели он должен быть открыт: ноды подключаются к нему (вопрос при установке).
+- **Токен.** Одноразовый и действует 24 часа. Новый — кнопка с ключом у ноды или `vynel admin node token DE`; старый сертификат ноды при этом отзывается.
+- **Обновление ноды.** Тот же установщик на сервере ноды, пункт 4 (`--mode update`).
 
-```bash
-ARCH=amd64; XRAY=Xray-linux-64.zip          # для arm64: ARCH=arm64; XRAY=Xray-linux-arm64-v8a.zip
-curl -fsSL -o /usr/local/bin/vynel https://github.com/vyto4ka/vynel/releases/download/edge-claude-magical-hamilton-9vnx7n/vynel-linux-$ARCH
-chmod +x /usr/local/bin/vynel
-# Xray
-apt-get install -y unzip && curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/$XRAY
-mkdir -p /usr/local/share/xray && unzip -o /tmp/xray.zip -d /usr/local/share/xray && ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
-# Caddy
-V=$(curl -fsSL https://api.github.com/repos/caddyserver/caddy/releases/latest | grep -o '"tag_name": *"v[^"]*"' | grep -o '[0-9.]*[0-9]')
-curl -fsSL https://github.com/caddyserver/caddy/releases/download/v$V/caddy_${V}_linux_$ARCH.tar.gz | tar -xz -C /usr/local/bin caddy
-# запуск с токеном из `node add`
-systemd-run --unit vynel-node vynel node run --token vyn1…
-```
-
-На панели порт 9443 должен быть открыт (вопрос при установке). Проверка: `vynel admin node list` → `DE … in sync`. Пользователи группы «Основная» получат второй сервер в подписке сами.
-
-Токен одноразовый и действует 24 часа. Новый токен: `vynel admin node token DE` (старый сертификат ноды при этом отзывается). Отдельный установщик нод и установка по SSH из панели — в плане (этапы 9, 11).
+Подробно: [INSTALL_GUIDE.md §5](INSTALL_GUIDE.md#5-отдельная-панель-и-ноды).
 
 ## 10. VLESS через VK CDN
 
@@ -256,9 +314,8 @@ vynel admin inbound attach --node NL --profile CDN \
 | `hwid.allow_missing` | `false` | Пускать приложения без HWID |
 | `sub.domain` | домен установки | Домен в ссылках подписки |
 | `sub.prefix` | `/s/` | Путь подписок, например `/api/v1/client/` |
-| `sub.title` | `VPN` | Название профиля в приложениях |
-| `sub.update_hours` | `12` | Как часто приложения обновляют подписку |
-| `sub.support_url` | — | Ссылка «поддержка» в приложениях |
+| `sub.title`, `sub.update_hours`, `sub.support_url`, `sub.announce`, `sub.announce_url`, `sub.page_url` | | Основное подписки — удобнее менять в панели: «Подписка» → «Основное» |
+| `sub.headers`, `sub.page` | по умолчанию | Заголовки и страница подписки (JSON) — меняются в панели: «Подписка». Пустое значение возвращает умолчания |
 | `sub.decoy` | `docs` | Сайт-заглушка домена подписок: `cloud`, `studio`, `docs` |
 | `caddy.email` | — | Email для Let's Encrypt |
 | `web.path` | случайный | Секретный путь веб-панели |
