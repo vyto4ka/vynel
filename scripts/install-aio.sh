@@ -64,11 +64,11 @@ done
 
 [[ $EUID -eq 0 ]] || die "run as root"
 
+# confirm "question": yes only on an explicit answer; without a terminal only with --yes.
 confirm() {
   [[ $ASSUME_YES -eq 1 ]] && return 0
-  [[ -t 0 || -e /dev/tty ]] || return 0
-  local answer
-  read -r -p "$1 [y/N] " answer </dev/tty || true
+  local answer=""
+  { read -r -p "$1 [y/N] " answer </dev/tty; } 2>/dev/null || { red "no terminal to ask: add --yes"; return 1; }
   [[ "$answer" =~ ^[YyДд] ]]
 }
 
