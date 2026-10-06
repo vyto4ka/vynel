@@ -1,0 +1,25 @@
+# Local dev environment: a panel with an in-process node, plus a second node joining over gRPC.
+#
+#   docker compose -f deploy/dev/docker-compose.yml up -d panel
+#   docker compose -f deploy/dev/docker-compose.yml exec panel vpn admin node add --name DE --country de --domain de.example.com
+#   NODE_TOKEN=vpn1.... docker compose -f deploy/dev/docker-compose.yml up -d node
+#   docker compose -f deploy/dev/docker-compose.yml exec panel vpn admin node list
+services:
+  panel:
+    build: { context: ../.., dockerfile: deploy/dev/Dockerfile }
+    command: >
+      panel --data-dir /data --gateway-listen :9443 --public-addr panel:9443
+      --with-node --node-name "Нидерланды" --node-country nl --node-domain nl.example.com
+    volumes: [panel-data:/data]
+    ports: ["9443:9443"]
+
+  node:
+    build: { context: ../.., dockerfile: deploy/dev/Dockerfile }
+    command: node run --data-dir /data --token ${NODE_TOKEN:-}
+    volumes: [node-data:/data]
+    depends_on: [panel]
+    profiles: [node]
+
+volumes:
+  panel-data:
+  node-data:

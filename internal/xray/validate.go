@@ -27,13 +27,16 @@ func (b Binary) command(ctx context.Context, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// Version returns the first line of `xray version`.
+// Version returns the Xray version, e.g. "26.3.27".
 func (b Binary) Version(ctx context.Context) (string, error) {
 	out, err := b.command(ctx, "version").Output()
 	if err != nil {
 		return "", err
 	}
 	line, _, _ := strings.Cut(string(out), "\n")
+	if f := strings.Fields(line); len(f) >= 2 && f[0] == "Xray" {
+		return f[1], nil
+	}
 	return strings.TrimSpace(line), nil
 }
 

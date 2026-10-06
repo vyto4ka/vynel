@@ -6,6 +6,25 @@ linters:
     - errorlint
     - misspell
     - unconvert
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        - (*google.golang.org/grpc.ClientConn).Close
+        - (*github.com/vyto4ka/vpn/internal/xray.API).Close
+        - (*github.com/vyto4ka/vpn/internal/node/state.Store).Close
+        - (*github.com/vyto4ka/vpn/internal/panel/store.Store).Close
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - os.RemoveAll
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*text/tabwriter.Writer).Flush
+        - (*go.etcd.io/bbolt.DB).Close
   exclusions:
     paths:
       - internal/proto

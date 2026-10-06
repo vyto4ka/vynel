@@ -28,7 +28,7 @@ lint:
 	golangci-lint run ./...
 
 proto:
-	buf generate
+	PATH="$$PATH:$$(go env GOPATH)/bin" buf generate
 
 web:
 	cd web && pnpm install --frozen-lockfile && pnpm build && touch dist/.gitkeep

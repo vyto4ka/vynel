@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+// Panel <-> node protocol (docs/ARCHITECTURE.md §14).
+// The node dials the panel; the panel pushes desired state, the node acknowledges.
+package vpn.node.v1;
+
+option go_package = "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1;nodev1";
+
+service NodeGateway {
+  // One-time registration with an install token (server-auth TLS with a pinned CA, no client cert).
+  rpc Join(JoinRequest) returns (JoinResponse);
+  // Main channel (mTLS with the certificate obtained from Join).
+  rpc Connect(stream NodeMessage) returns (stream PanelMessage);
+}
+
+message JoinRequest {
+  string token = 1;
+  bytes csr_der = 2;
+}
+
+message JoinResponse {
+  bytes cert_der = 1;
+  bytes ca_der = 2;
+  int64 node_id = 3;
+  string node_code = 4;
+}
+
+message NodeMessage {
+  oneof msg {
+    Hello hello = 1;
+    Ack ack = 2;
+    Addresses addresses = 3;
+  }
+}
+
+message Hello {
+  string agent_version = 1;
+  string xray_version = 2;
+  string applied_hash = 3;
+  string os = 4;
+  string arch = 5;
+  repeated Address addresses = 6;
+}
+
+message Address {
+  string ip = 1;
+  string interface = 2;
+  bool primary = 3;
+}
+
+message Addresses {
+  repeated Address addresses = 1;
+}
+
+// Ack confirms (or rejects) a snapshot or delta.
+message Ack {
+  int64 revision = 1;
+  string hash = 2;
+  string error = 3;
+}
+
+message PanelMessage {
+  oneof msg {
+    Snapshot snapshot = 1;
+    Delta delta = 2;
+  }
+}
+
+// Snapshot is the full desired state: Xray config without clients plus users per inbound.
+message Snapshot {
+  int64 revision = 1;
+  string hash = 2;
+  bytes xray_config = 3;
+  repeated InboundUsers inbounds = 4;
+}
+
+message InboundUsers {
+  string tag = 1;
+  string protocol = 2;
+  string flow = 3;
+  repeated User users = 4;
+}
+
+message User {
+  string email = 1;
+  string id = 2;
+}
+
+// Delta changes users only; it applies on top of the state with hash base_hash.
+message Delta {
+  int64 revision = 1;
+  string base_hash = 2;
+  string hash = 3;
+  repeated UserOp ops = 4;
+}
+
+message UserOp {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_UPSERT = 1;
+    KIND_REMOVE = 2;
+  }
+  Kind kind = 1;
+  string tag = 2;
+  User user = 3;
+  string flow = 4;
+}
