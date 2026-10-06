@@ -16,7 +16,7 @@ SRC=/opt/vynel-src
 DATA=/var/lib/vynel
 UNIT=/etc/systemd/system/vynel.service
 
-DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
+DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443" ADMIN_LOGIN="admin"
 ASSUME_YES=0 UNINSTALL=0 PURGE=0 WIZARD=0
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -36,6 +36,7 @@ Usage: install-aio.sh                       (interactive: asks questions)
   --country CC           2-letter country code for the flag (default: detected)
   --ip IP                public IP (default: detected)
   --gateway-listen ADDR  port for additional nodes (default :9443; 127.0.0.1:9443 = none)
+  --admin-login LOGIN    web panel login (default admin; the password is generated)
   --interactive          ask questions even if flags are given
   --yes                  do not ask questions
   --uninstall [--purge]  remove the service (--purge also deletes all data)
@@ -51,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --country) COUNTRY="${2:-}"; shift 2 ;;
     --ip) PUBLIC_IP="${2:-}"; shift 2 ;;
     --gateway-listen) GATEWAY_LISTEN="${2:-}"; shift 2 ;;
+    --admin-login) ADMIN_LOGIN="${2:-}"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --interactive|-i) WIZARD=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
@@ -191,6 +193,8 @@ if [[ $WIZARD -eq 1 ]]; then
   else
     GATEWAY_LISTEN="127.0.0.1:9443"
   fi
+  ask ADMIN_LOGIN "Логин для веб-панели (пароль сгенерируется сам)" "$ADMIN_LOGIN"
+  [[ "$ADMIN_LOGIN" =~ ^[A-Za-z0-9_.@-]{1,64}$ ]] || die "логин — латиница, цифры и _ . - @"
   SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
   echo
   echo "  Сервер:    $PUBLIC_IP"
@@ -198,6 +202,7 @@ if [[ $WIZARD -eq 1 ]]; then
   echo "  Подписки:  https://$SUB_DOMAIN/s/…"
   echo "  Клиенты:   ${NAME} (${COUNTRY:-без флага})"
   echo "  Email:     ${EMAIL:-—}"
+  echo "  Панель:    логин $ADMIN_LOGIN, пароль будет показан в конце"
   echo "  Ноды:      $([[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]] && echo "только этот сервер" || echo "порт 9443 открыт")"
   echo
   ask_yes "Устанавливаем?" y || die "отменено"
@@ -303,6 +308,7 @@ build_from_source() {
   with_progress "building vynel $commit from source (10–20 minutes on a small VPS)" \
     bash -c "cd '$SRC' && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X github.com/vyto4ka/vynel/internal/buildinfo.Version=$commit -X github.com/vyto4ka/vynel/internal/buildinfo.Commit=$commit' -o /usr/local/bin/vynel.new ./cmd/vynel"
   mv /usr/local/bin/vynel.new /usr/local/bin/vynel
+  red "  note: a source build has no web UI inside (it is built in CI); the panel will say so. Use the release when it is available."
 }
 
 TEMP_SWAP=0
@@ -367,6 +373,11 @@ setup_args=(--domain "$DOMAIN" --sub-domain "$SUB_DOMAIN" --name "$NAME")
 [[ -n "$COUNTRY" ]] && setup_args+=(--country "$COUNTRY")
 [[ -n "$EMAIL" ]] && setup_args+=(--email "$EMAIL")
 vynel admin --data-dir "$DATA" setup "${setup_args[@]}"
+# The admin is created once; on updates the login and password stay as they are.
+WEB_INFO="$(vynel admin --data-dir "$DATA" web init --login "$ADMIN_LOGIN")"
+WEB_URL="$(awk '$1=="url" {print $2}' <<<"$WEB_INFO")"
+WEB_LOGIN="$(awk '$1=="login" {print $2}' <<<"$WEB_INFO")"
+WEB_PASSWORD="$(awk '$1=="password" && NF==2 {print $2}' <<<"$WEB_INFO")"
 
 cat >"$UNIT" <<EOF
 [Unit]
@@ -431,9 +442,18 @@ line "Подписки" "https://$SUB_DOMAIN${SUB_PREFIX}<токен>"
 line "Подключение других нод" "$NODES_STATE"
 line "Данные" "$DATA  (бэкап: скопировать папку)"
 echo
-line "Админ-панель" "пока в терминале: vynel admin …  (веб-панель — следующий этап)"
+green "  Веб-панель"
+line "  адрес" "$WEB_URL"
+line "  логин" "$WEB_LOGIN"
+if [[ -n "$WEB_PASSWORD" ]]; then
+  line "  пароль" "$WEB_PASSWORD"
+  red "  Сохраните пароль: он показывается один раз. Адрес секретный — без него панель не найти."
+else
+  line "  пароль" "прежний (новый: vynel admin web password)"
+fi
 echo
-echo "  Пользователи"
+echo "  Пользователи — в панели: «Пользователи» → «+ Пользователь», ввести имя, скопировать ссылку."
+echo "  То же из терминала:"
 line "  добавить" "vynel admin user add vasya"
 line "  ссылка подписки" "vynel admin user show vasya"
 line "  список" "vynel admin user list"
@@ -445,6 +465,8 @@ echo "  Сервер"
 line "  статистика" "vynel admin stats"
 line "  состояние ноды" "vynel admin node list"
 line "  настройки" "vynel admin setting hwid.default_limit 5"
+line "  адрес и логин панели" "vynel admin web"
+line "  новый пароль панели" "vynel admin web password"
 line "  все команды" "vynel admin --help"
 line "  логи" "journalctl -u vynel -f"
 line "  перезапуск" "systemctl restart vynel"

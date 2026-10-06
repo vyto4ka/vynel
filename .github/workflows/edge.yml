@@ -22,6 +22,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build the web UI (embedded into the binary)
+        run: make web && test -f web/dist/index.html
       - name: Build
         run: make build-all VERSION="${GITHUB_SHA::7}"
       - name: Checksums

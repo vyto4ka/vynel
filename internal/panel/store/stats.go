@@ -221,3 +221,28 @@ func UsersDueReset(ctx context.Context, q DBTX) ([]*User, error) {
 	}
 	return out, rows.Err()
 }
+
+// DayTotal is the traffic of one day.
+type DayTotal struct {
+	Day      int64
+	Up, Down int64
+}
+
+// TrafficByDay sums traffic per day since ts, for all users or one (userID > 0).
+func TrafficByDay(ctx context.Context, q DBTX, userID, since int64) ([]DayTotal, error) {
+	rows, err := q.QueryContext(ctx, `SELECT day, sum(up), sum(down) FROM user_traffic_daily WHERE day >= ? AND (? = 0 OR user_id = ?)
+		GROUP BY day ORDER BY day`, Day(since), userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DayTotal
+	for rows.Next() {
+		var t DayTotal
+		if err := rows.Scan(&t.Day, &t.Up, &t.Down); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

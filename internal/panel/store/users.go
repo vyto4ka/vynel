@@ -434,3 +434,22 @@ func ListActiveMembers(ctx context.Context, q DBTX) ([]ActiveMember, error) {
 	}
 	return out, rows.Err()
 }
+
+// GroupMemberCounts returns group id -> number of users in it.
+func GroupMemberCounts(ctx context.Context, q DBTX) (map[int64]int, error) {
+	rows, err := q.QueryContext(ctx, `SELECT group_id, count(*) FROM user_groups GROUP BY group_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var g int64
+		var n int
+		if err := rows.Scan(&g, &n); err != nil {
+			return nil, err
+		}
+		out[g] = n
+	}
+	return out, rows.Err()
+}

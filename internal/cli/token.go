@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyto4ka/vynel/internal/jointoken"
 	"github.com/vyto4ka/vynel/internal/panel/ca"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -16,23 +15,14 @@ import (
 
 // printJoinToken prints the one-line join token and the command to run on the node.
 func printJoinToken(ctx context.Context, w io.Writer, s *service.Service, n *store.Node, secret string) error {
-	addr, err := s.Setting(ctx, service.SettingGatewayAddr, "")
-	if err != nil {
-		return err
-	}
-	sni, err := s.Setting(ctx, service.SettingGatewaySNI, "")
-	if err != nil {
-		return err
-	}
-	if addr == "" || sni == "" {
-		return fmt.Errorf("the gateway address is unknown: start the panel with --public-addr HOST:PORT "+
-			"(or `vynel admin setting gateway.addr HOST:PORT`), then run `vynel admin node token %s`", n.Code)
-	}
 	authority, err := ca.LoadOrCreate(filepath.Join(adminDataDir, "ca"))
 	if err != nil {
 		return err
 	}
-	tok := jointoken.Token{Addr: addr, SNI: sni, CAFingerprint: authority.Fingerprint(), Secret: secret}.Encode()
+	tok, err := s.JoinToken(ctx, authority.Fingerprint(), secret)
+	if err != nil {
+		return fmt.Errorf("%w; then run `vynel admin node token %s`", err, n.Code)
+	}
 	fmt.Fprintf(w, "join token for %s (valid %s, single use):\n\n  %s\n\non the node run:\n\n  vynel node run --token %s\n",
 		n.Code, service.InstallTokenTTL, tok, tok)
 	return nil

@@ -22,6 +22,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
+	"github.com/vyto4ka/vynel/internal/panel/webapi"
 	"github.com/vyto4ka/vynel/internal/xray"
 )
 
@@ -46,6 +47,7 @@ type Panel struct {
 	Reconciler    *reconciler.Reconciler
 	Gateway       *gateway.Server
 	Subscriptions *subscription.Handler
+	Web           *webapi.Server
 	SNI           string
 	LocalNode     *agent.Agent
 }
@@ -64,6 +66,10 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	}
 	svc := service.New(st)
 	if err := svc.EnsureDefaults(ctx); err != nil {
+		st.Close()
+		return nil, nil, err
+	}
+	if err := svc.EnsureWebDefaults(ctx); err != nil {
 		st.Close()
 		return nil, nil, err
 	}
@@ -100,6 +106,8 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	p := &Panel{Service: svc, CA: authority, Reconciler: rec, SNI: sni,
 		Gateway:       gateway.New(svc, authority, rec, sni, cfg.Log.With("component", "gateway")),
 		Subscriptions: subscription.NewHandler(svc, cfg.Log.With("component", "subscriptions"))}
+	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
+		Version: cfg.Version, Log: cfg.Log.With("component", "web")})
 	return p, func() { st.Close() }, nil
 }
 
@@ -134,6 +142,11 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	run("subscriptions", func() error { return p.Subscriptions.Serve(ctx, subListen) })
+	webListen, err := p.Service.Setting(ctx, service.SettingWebListen, service.DefaultWebListen)
+	if err != nil {
+		return err
+	}
+	run("web", func() error { return p.Web.Serve(ctx, webListen) })
 	if cfg.WithNode {
 		node, err := p.Service.EnsureLocalNode(ctx, cfg.LocalNode)
 		if err != nil {

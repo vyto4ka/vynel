@@ -100,3 +100,21 @@ func ListEventsAfter(ctx context.Context, q DBTX, after int64, limit int) ([]Eve
 	}
 	return out, rows.Err()
 }
+
+// ListSettings returns all stored settings.
+func ListSettings(ctx context.Context, q DBTX) (map[string]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}

@@ -149,6 +149,41 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	l, _ := url.Parse(links[0])
 	q := l.Query()
 
+	// The web panel answers under its secret path on the same domain; the login works through Caddy.
+	pw, err := svc.SetAdminCredentials(ctx, actor, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	webURL, err := svc.WebURL(ctx)
+	if err != nil || !strings.HasPrefix(webURL, base+"/") {
+		t.Fatalf("web url %q %v", webURL, err)
+	}
+	login, _ := http.NewRequest(http.MethodPost, webURL+"api/login", strings.NewReader(`{"login":"admin","password":"`+pw+`"}`))
+	login.Header.Set("X-Vynel", "1")
+	resp, err = web.Do(login)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	var session *http.Cookie
+	for _, c := range resp.Cookies() {
+		session = c
+	}
+	if resp.StatusCode != 200 || session == nil || !session.Secure {
+		t.Fatalf("web login through caddy: %d cookie %+v", resp.StatusCode, session)
+	}
+	me, _ := http.NewRequest(http.MethodGet, webURL+"api/users", nil)
+	me.AddCookie(session)
+	resp, err = web.Do(me)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(b), `"alice"`) {
+		t.Fatalf("web api through caddy: %d %s", resp.StatusCode, b)
+	}
+
 	// And the VPN itself works: Reality's target is the real Caddy now.
 	xraytest.Eventually(t, wait, "alice is on the node", inSync(ctx, svc, node.Code))
 	socks := xraytest.StartRealityClient(t, bin, xraytest.RealityClient{

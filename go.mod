@@ -8,6 +8,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/xtls/xray-core v1.260327.0
 	go.etcd.io/bbolt v1.5.0
+	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
@@ -37,7 +38,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

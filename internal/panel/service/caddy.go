@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/vyto4ka/vynel/internal/caddyconf"
 	"github.com/vyto4ka/vynel/internal/decoy"
@@ -113,11 +114,11 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 	}
 
 	if n.Local {
-		if site, ok, err := s.subscriptionSite(ctx); err != nil {
+		panelSites, err := s.panelSites(ctx)
+		if err != nil {
 			return caddyconf.Spec{}, nil, err
-		} else if ok {
-			sites = append(sites, site)
 		}
+		sites = append(sites, panelSites...)
 	}
 
 	// Place public sites: behind a Reality front on the same (IP, port), or directly.
@@ -178,25 +179,46 @@ func (s *Service) nodeSetting(ctx context.Context, key, code, def string) (strin
 	return s.Setting(ctx, key, def)
 }
 
-// subscriptionSite is the subscription domain served by Caddy on the panel's server.
-func (s *Service) subscriptionSite(ctx context.Context) (caddyconf.Site, bool, error) {
+// panelSites are the sites of the panel's own server: the subscription domain with the web
+// panel under its secret path, or the web panel on its own domain (web.domain).
+func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 	domain, err := s.Setting(ctx, SettingSubDomain, "")
-	if err != nil || domain == "" {
-		return caddyconf.Site{}, false, err
+	if err != nil {
+		return nil, err
 	}
-	prefix, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)
-	listen, _ := s.Setting(ctx, SettingSubListen, DefaultSubListen)
+	webDomain, _ := s.Setting(ctx, SettingWebDomain, "")
+	webDomain = strings.ToLower(strings.TrimSpace(webDomain))
+	if domain == "" && webDomain == "" {
+		return nil, nil
+	}
 	bind, _ := s.Setting(ctx, SettingSubAddress, "")
 	portStr, _ := s.Setting(ctx, SettingSubPort, "443")
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return caddyconf.Site{}, false, invalid("sub.port %q is not a number", portStr)
+		return nil, invalid("sub.port %q is not a number", portStr)
 	}
 	d, _ := s.Setting(ctx, SettingSubDecoy, "docs")
-	return caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: []caddyconf.Route{
-		{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix},
-		{Kind: caddyconf.KindDecoy, Decoy: decoyName(d)},
-	}}, true, nil
+	decoyRoute := caddyconf.Route{Kind: caddyconf.KindDecoy, Decoy: decoyName(d)}
+	var webRoute *caddyconf.Route
+	if path, _ := s.WebPath(ctx); path != "" {
+		listen, _ := s.Setting(ctx, SettingWebListen, DefaultWebListen)
+		webRoute = &caddyconf.Route{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: path}
+	}
+	var sites []caddyconf.Site
+	if domain != "" {
+		prefix, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)
+		listen, _ := s.Setting(ctx, SettingSubListen, DefaultSubListen)
+		site := caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: []caddyconf.Route{{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix}}}
+		if webRoute != nil && (webDomain == "" || webDomain == domain) {
+			site.Routes = append(site.Routes, *webRoute)
+		}
+		site.Routes = append(site.Routes, decoyRoute)
+		sites = append(sites, site)
+	}
+	if webRoute != nil && webDomain != "" && webDomain != domain {
+		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: bind, Port: port, Routes: []caddyconf.Route{*webRoute, decoyRoute}})
+	}
+	return sites, nil
 }
 
 // PanelCaddyConfig is the Caddy config for a panel server without a local node.

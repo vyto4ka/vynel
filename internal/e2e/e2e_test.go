@@ -50,14 +50,19 @@ func startPanel(t *testing.T, dir, gwAddr string) *panelRun {
 		t.Fatal(err)
 	}
 	p.Reconciler.Debounce, p.Reconciler.PollInterval = 50*time.Millisecond, 200*time.Millisecond
-	done := make(chan struct{}, 3)
+	done := make(chan struct{}, 4)
 	subAddr := "127.0.0.1:" + strconv.Itoa(xraytest.FreePort(t))
 	if err := p.Service.SetSetting(ctx, actor, service.SettingSubListen, subAddr); err != nil {
+		t.Fatal(err)
+	}
+	webAddr := "127.0.0.1:" + strconv.Itoa(xraytest.FreePort(t))
+	if err := p.Service.SetSetting(ctx, actor, service.SettingWebListen, webAddr); err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = p.Reconciler.Run(ctx); done <- struct{}{} }()
 	go func() { _ = p.Gateway.Serve(ctx, gwAddr); done <- struct{}{} }()
 	go func() { _ = p.Subscriptions.Serve(ctx, subAddr); done <- struct{}{} }()
+	go func() { _ = p.Web.Serve(ctx, webAddr); done <- struct{}{} }()
 	stopped := false
 	stop := func() {
 		if stopped {
@@ -65,9 +70,9 @@ func startPanel(t *testing.T, dir, gwAddr string) *panelRun {
 		}
 		stopped = true
 		cancel()
-		<-done
-		<-done
-		<-done
+		for range 4 {
+			<-done
+		}
 		closeFn()
 	}
 	t.Cleanup(stop)

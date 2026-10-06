@@ -59,7 +59,7 @@ func withService(fn func(ctx context.Context, s *service.Service, cmd *cobra.Com
 func adminCmd() *cobra.Command {
 	c := &cobra.Command{Use: "admin", Short: "Manage the panel from the command line (until the web UI exists)"}
 	c.PersistentFlags().StringVar(&adminDataDir, "data-dir", DefaultPanelDataDir, "panel data directory")
-	c.AddCommand(adminNodeCmd(), adminProfileCmd(), adminInboundCmd(), adminGroupCmd(), adminTemplateCmd(), adminUserCmd(), adminAuditCmd(), adminSettingCmd(), adminStatsCmd(), adminSetupCmd())
+	c.AddCommand(adminNodeCmd(), adminProfileCmd(), adminInboundCmd(), adminGroupCmd(), adminTemplateCmd(), adminUserCmd(), adminAuditCmd(), adminSettingCmd(), adminStatsCmd(), adminSetupCmd(), adminWebCmd())
 	return c
 }
 
@@ -145,19 +145,7 @@ func adminNodeCmd() *cobra.Command {
 			var rows [][]string
 			for _, ns := range nodes {
 				n := ns.Node
-				var state string
-				switch {
-				case !n.Enabled:
-					state = "disabled"
-				case !n.Local && n.CertSerial == "":
-					state = "pending"
-				case !ns.Connected:
-					state = "offline"
-				case n.AppliedHash != "" && n.AppliedHash == n.DesiredHash:
-					state = "in sync"
-				default:
-					state = "syncing"
-				}
+				state := ns.State()
 				cpu, mem, online := "—", "—", "—"
 				if m := ns.Metrics; m != nil {
 					cpu = fmt.Sprintf("%.0f%%", m.CPU)

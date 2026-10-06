@@ -237,3 +237,28 @@ func (s *Service) NodeStatuses(ctx context.Context, connected func(int64) bool) 
 func (s *Service) UserTrafficByNode(ctx context.Context, userID int64, days int) ([]store.NodeTotal, error) {
 	return store.UserTrafficByNode(ctx, s.st.DB, userID, s.now().AddDate(0, 0, -days).Unix())
 }
+
+// Node states shown in the CLI and the web UI.
+const (
+	NodeDisabled = "disabled"
+	NodePending  = "pending" // created, never joined
+	NodeOffline  = "offline"
+	NodeInSync   = "in sync"
+	NodeSyncing  = "syncing"
+)
+
+// State summarizes a node for people.
+func (ns NodeStatus) State() string {
+	n := ns.Node
+	switch {
+	case !n.Enabled:
+		return NodeDisabled
+	case !n.Local && n.CertSerial == "":
+		return NodePending
+	case !ns.Connected:
+		return NodeOffline
+	case n.AppliedHash != "" && n.AppliedHash == n.DesiredHash:
+		return NodeInSync
+	}
+	return NodeSyncing
+}
