@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -28,6 +29,9 @@ var adminDataDir string
 // openService opens the panel database for admin commands. It works while the panel runs:
 // SQLite WAL allows concurrent access and the panel picks up changes from the outbox.
 func openService(ctx context.Context) (*service.Service, func(), error) {
+	if err := os.MkdirAll(adminDataDir, 0o700); err != nil {
+		return nil, nil, err
+	}
 	st, err := store.Open(ctx, filepath.Join(adminDataDir, "panel.db"))
 	if err != nil {
 		return nil, nil, err
@@ -55,7 +59,7 @@ func withService(fn func(ctx context.Context, s *service.Service, cmd *cobra.Com
 func adminCmd() *cobra.Command {
 	c := &cobra.Command{Use: "admin", Short: "Manage the panel from the command line (until the web UI exists)"}
 	c.PersistentFlags().StringVar(&adminDataDir, "data-dir", DefaultPanelDataDir, "panel data directory")
-	c.AddCommand(adminNodeCmd(), adminProfileCmd(), adminInboundCmd(), adminGroupCmd(), adminTemplateCmd(), adminUserCmd(), adminAuditCmd(), adminSettingCmd(), adminStatsCmd())
+	c.AddCommand(adminNodeCmd(), adminProfileCmd(), adminInboundCmd(), adminGroupCmd(), adminTemplateCmd(), adminUserCmd(), adminAuditCmd(), adminSettingCmd(), adminStatsCmd(), adminSetupCmd())
 	return c
 }
 
@@ -914,6 +918,40 @@ func adminStatsCmd() *cobra.Command {
 			return nil
 		}),
 	}
+}
+
+func adminSetupCmd() *cobra.Command {
+	var in service.SetupInput
+	c := &cobra.Command{
+		Use:   "setup",
+		Short: "Configure an all-in-one server: local node, Reality self-steal, subscriptions (idempotent)",
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
+			res, err := s.SetupAllInOne(ctx, service.ActorCLI, in)
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			for _, c := range res.Created {
+				fmt.Fprintln(w, "created", c)
+			}
+			fmt.Fprintf(w, "node %s (%s), inbound %s, subscriptions on https://%s\n", res.Node.Code, res.Node.Domain, res.Inbound.Tag, firstNonEmptyStr(in.SubDomain, in.Domain))
+			return nil
+		}),
+	}
+	c.Flags().StringVar(&in.Domain, "domain", "", "node domain (A record to this server)")
+	c.Flags().StringVar(&in.SubDomain, "sub-domain", "", "subscription domain (default: the node domain)")
+	c.Flags().StringVar(&in.Email, "email", "", "email for Let's Encrypt (optional)")
+	c.Flags().StringVar(&in.NodeName, "name", "", "node name shown in clients")
+	c.Flags().StringVar(&in.Country, "country", "", "2-letter country code (flag in clients)")
+	_ = c.MarkFlagRequired("domain")
+	return c
+}
+
+func firstNonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func printUser(w io.Writer, u *store.User) {
