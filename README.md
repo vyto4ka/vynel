@@ -2,26 +2,29 @@
 
 Панель и нода для своих VPN-серверов на Xray + Caddy — аналог Remnawave с упором на простую установку.
 
-Как попробовать руками — [docs/TRYING.md](docs/TRYING.md). Документация по архитектуре — в [docs/](docs/): [ARCHITECTURE](docs/ARCHITECTURE.md), [PROFILES](docs/PROFILES.md),
+**Развернуть всё на одном сервере (один IP, один домен):** [docs/ALL_IN_ONE.md](docs/ALL_IN_ONE.md). Как попробовать руками — [docs/TRYING.md](docs/TRYING.md). Документация по архитектуре — в [docs/](docs/): [ARCHITECTURE](docs/ARCHITECTURE.md), [PROFILES](docs/PROFILES.md),
 [INBOUNDS](docs/INBOUNDS.md), [INSTALL](docs/INSTALL.md), [STEALTH](docs/STEALTH.md), [ROADMAP](docs/ROADMAP.md).
 
-## Что уже работает (этапы 0–3)
+## Что уже работает (этапы 0–6)
 
-- Шаблоны профилей A (VLESS Reality self-steal) и B (VLESS XHTTP через VK CDN); рендер совпадает с рабочими конфигами (golden-тесты).
-- Профиль → свой инбаунд на каждой ноде (`VLESS_NL`, `VLESS_DE`): свои ключи Reality и shortId, наследование с override, мульти-IP (`listen` и `sendThrough`).
-- Пользователи, группы с правилами доступа (инбаунд / профиль целиком / нода), шаблоны пользователей — создание по одному имени.
-- Связь панель ↔ нода: нода регистрируется одной строкой-токеном, дальше gRPC + mTLS; изменения пользователей применяются без перезапуска Xray, изменения структуры — снапшотом с перезапуском.
-- Нода работает без панели на сохранённом состоянии; режим `panel --with-node`.
+- Шаблоны профилей A (VLESS Reality self-steal) и B (VLESS XHTTP через VK CDN); рендер совпадает с рабочими конфигами.
+- Профиль → свой инбаунд на каждой ноде (`VLESS_NL`, `VLESS_DE`): свои ключи, наследование с override, мульти-IP.
+- Пользователи по одному имени (шаблоны), группы с правилами доступа, статусы, продление, сбросы трафика.
+- Связь панель ↔ нода по токену (gRPC + mTLS), изменения без перезапуска Xray, работа ноды без панели.
+- Статистика: трафик по пользователям и нодам, онлайн, CPU/RAM/сеть, лимиты трафика.
+- Подписки: base64, Mihomo, sing-box, Xray JSON, HTML-страница с QR; HWID-лимиты; заглушки с причиной; неизвестные токены выглядят как обычный сайт.
+- Caddy: self-steal-сайт за Reality, сертификаты Let's Encrypt, XHTTP-origin, домен подписок; BBR/fq/TFO.
+- **All-in-one**: панель + нода + Caddy на одном сервере, одном IP и (минимум) одном домене — `scripts/install-aio.sh`.
 - Временный CLI `vpn admin` вместо веб-интерфейса.
 
-Ещё нет: статистики, подписок, Caddy, веб-интерфейса, бота, установщика (см. ROADMAP).
+Ещё нет: веб-интерфейса, Telegram-бота, бэкапов, установки нод по SSH, полного скрытия (см. ROADMAP).
 
 ## Сборка и тесты
 
 ```bash
 make build              # bin/vpn
 make test               # быстрые тесты
-make test-integration   # + тесты с настоящим Xray (скачивается в .cache/xray)
+make test-integration   # + тесты с настоящими Xray и Caddy (в .cache/)
 make lint
 ```
 
