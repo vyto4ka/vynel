@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/vyto4ka/vynnel/internal/caddyconf"
-	"github.com/vyto4ka/vynnel/internal/panel/store"
-	"github.com/vyto4ka/vynnel/internal/xrayconf"
+	"github.com/vyto4ka/vynel/internal/caddyconf"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // DefaultXrayAPIPort is the Xray API port on nodes (127.0.0.1 only).

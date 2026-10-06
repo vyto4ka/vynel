@@ -4,7 +4,7 @@ import (
 	"net"
 	"strings"
 
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 )
 
 // virtualPrefixes are interfaces whose addresses are never useful for inbounds.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 )
 
 // Collector keeps the previous sample to compute rates.

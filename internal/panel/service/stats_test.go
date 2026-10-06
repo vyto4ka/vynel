@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vyto4ka/vynnel/internal/panel/store"
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 )
 
 func TestIngestStatsIdempotentAndLimits(t *testing.T) {

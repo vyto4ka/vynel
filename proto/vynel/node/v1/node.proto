@@ -2,9 +2,9 @@ syntax = "proto3";
 
 // Panel <-> node protocol (docs/ARCHITECTURE.md §14).
 // The node dials the panel; the panel pushes desired state, the node acknowledges.
-package vynnel.node.v1;
+package vynel.node.v1;
 
-option go_package = "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1;nodev1";
+option go_package = "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1;nodev1";
 
 service NodeGateway {
   // One-time registration with an install token (server-auth TLS with a pinned CA, no client cert).

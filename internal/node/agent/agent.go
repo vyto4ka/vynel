@@ -18,13 +18,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/vyto4ka/vynnel/internal/node/caddy"
-	"github.com/vyto4ka/vynnel/internal/node/metrics"
-	"github.com/vyto4ka/vynnel/internal/node/state"
-	"github.com/vyto4ka/vynnel/internal/node/sysctl"
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
-	"github.com/vyto4ka/vynnel/internal/xray"
-	"github.com/vyto4ka/vynnel/internal/xrayconf"
+	"github.com/vyto4ka/vynel/internal/node/caddy"
+	"github.com/vyto4ka/vynel/internal/node/metrics"
+	"github.com/vyto4ka/vynel/internal/node/state"
+	"github.com/vyto4ka/vynel/internal/node/sysctl"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/xray"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // Conn is the node side of a panel connection (gRPC client stream or in-memory pipe).
@@ -158,7 +158,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		if status.Code(err) == codes.PermissionDenied {
 			// Revoked or deleted on the panel: retrying fast is pointless.
 			backoff = a.cfg.MaxBackoff
-			a.log.Error("the panel rejected this node; get a new token and run `vynnel node join TOKEN`", "err", err)
+			a.log.Error("the panel rejected this node; get a new token and run `vynel node join TOKEN`", "err", err)
 		} else {
 			a.log.Warn("panel session ended, reconnecting", "err", err, "in", backoff)
 		}

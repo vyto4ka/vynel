@@ -1,49 +1,58 @@
-# vynnel
+# vynel
 
-Панель и нода для своих VPN-серверов на Xray + Caddy — аналог Remnawave с упором на простую установку.
+**vynel** — панель и ноды для собственного VPN на [Xray](https://github.com/XTLS/Xray-core) (VLESS + Reality) и [Caddy](https://caddyserver.com/). Идея та же, что у Remnawave: серверы, профили, группы, пользователи, подписки, лимиты устройств. Отличия — установка одной командой и конфиг, который собирается сам: Reality-ключи, SNI, точки подключения и сертификаты руками настраивать не нужно.
 
-**Развернуть всё на одном сервере (один IP, один домен):** [docs/ALL_IN_ONE.md](docs/ALL_IN_ONE.md). Как попробовать руками — [docs/TRYING.md](docs/TRYING.md). Документация по архитектуре — в [docs/](docs/): [ARCHITECTURE](docs/ARCHITECTURE.md), [PROFILES](docs/PROFILES.md),
-[INBOUNDS](docs/INBOUNDS.md), [INSTALL](docs/INSTALL.md), [STEALTH](docs/STEALTH.md), [ROADMAP](docs/ROADMAP.md).
+> Статус: работает в режиме **all-in-one** (всё на одном сервере) и с дополнительными нодами. Управление пока через терминал (`vynel admin`), веб-панель и Telegram-бот — следующие этапы ([ROADMAP](docs/ROADMAP.md)).
 
-## Что уже работает (этапы 0–6)
+## Быстрый старт
 
-- Шаблоны профилей A (VLESS Reality self-steal) и B (VLESS XHTTP через VK CDN); рендер совпадает с рабочими конфигами.
-- Профиль → свой инбаунд на каждой ноде (`VLESS_NL`, `VLESS_DE`): свои ключи, наследование с override, мульти-IP.
-- Пользователи по одному имени (шаблоны), группы с правилами доступа, статусы, продление, сбросы трафика.
-- Связь панель ↔ нода по токену (gRPC + mTLS), изменения без перезапуска Xray, работа ноды без панели.
-- Статистика: трафик по пользователям и нодам, онлайн, CPU/RAM/сеть, лимиты трафика.
-- Подписки: base64, Mihomo, sing-box, Xray JSON, HTML-страница с QR; HWID-лимиты; заглушки с причиной; неизвестные токены выглядят как обычный сайт.
-- Caddy: self-steal-сайт за Reality, сертификаты Let's Encrypt, XHTTP-origin, домен подписок; BBR/fq/TFO.
-- **All-in-one**: панель + нода + Caddy на одном сервере, одном IP и (минимум) одном домене — `scripts/install-aio.sh`.
-- Временный CLI `vynnel admin` вместо веб-интерфейса.
-
-Ещё нет: веб-интерфейса, Telegram-бота, бэкапов, установки нод по SSH, полного скрытия (см. ROADMAP).
-
-## Сборка и тесты
+Нужны VPS с Ubuntu или Debian, root, свободные порты 80/443 и **один домен** с A-записью на IP сервера.
 
 ```bash
-make build              # bin/vynnel
-make test               # быстрые тесты
-make test-integration   # + тесты с настоящими Xray и Caddy (в .cache/)
-make lint
+bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/claude/magical-hamilton-9vnx7n/scripts/install-aio.sh)
 ```
 
-## Попробовать вручную
+Скрипт задаст несколько вопросов (домен, email, название сервера), установит всё и покажет итоговую таблицу. Дальше:
 
 ```bash
-X=.cache/xray; make build xray
-# панель + локальная нода
-bin/vynnel panel --data-dir /tmp/vynnel --gateway-listen :9443 --public-addr 127.0.0.1:9443 \
-  --with-node --node-name Нидерланды --node-country nl --node-domain nl.example.com \
-  --xray-bin $X/xray --xray-assets $X &
-
-A="bin/vynnel admin --data-dir /tmp/vynnel"
-$A profile add --name "Reality 443"                 # из шаблона, доступ группе «Основная»
-$A inbound attach --node NL --profile "Reality 443"  # создаст VLESS_NL со своими ключами
-$A user add vasya                                     # +3 месяца, группа «Основная»
-$A node list; $A inbound list
-
-# вторая нода
-$A node add --name Германия --country de --domain de.example.com   # печатает токен
-bin/vynnel node run --data-dir /tmp/vynnel-de --token vyn1.... --xray-bin $X/xray --xray-assets $X
+vynel admin user add vasya     # создать пользователя: +3 месяца, до 3 устройств
+vynel admin user show vasya    # ссылка подписки → открыть на телефоне → кнопка «Happ» / «v2RayTun»
 ```
+
+Пошагово, с объяснением каждого шага и решением проблем: **[docs/ALL_IN_ONE.md](docs/ALL_IN_ONE.md)**.
+
+## Как это устроено
+
+```
+                   ┌──────────────────────── сервер ─────────────────────────┐
+ телефон (Happ) ──►│ :443  Xray (VLESS + Reality)                            │
+                   │        ├─ VPN-клиент ──────────────────────────────► интернет
+ браузер ─────────►│        └─ всё остальное ─► Caddy 127.0.0.1:8443         │
+                   │                             ├─ /s/<токен> → подписка    │
+                   │                             └─ остальное → сайт-заглушка│
+                   │ :80   Caddy: сертификат Let's Encrypt                   │
+                   │ vynel panel: пользователи, статистика, подписки (SQLite)│
+                   └─────────────────────────────────────────────────────────┘
+```
+
+- **Reality self-steal.** Для всех, кроме VPN-клиентов, сервер выглядит как обычный сайт с настоящим сертификатом на своём домене.
+- **Подписка.** Одна ссылка на пользователя. Приложение само получает нужный формат: ссылки, Clash/Mihomo, sing-box или Xray JSON. В браузере открывается страница с QR-кодом.
+- **Лимиты.** Срок, трафик и число устройств (HWID). Изменения применяются на сервере за секунды, без перезапуска.
+- **Ноды.** Можно подключить ещё серверы. Каждый получит свой VLESS-инбаунд (`VLESS_NL`, `VLESS_DE`), а пользователи — доступ ко всем серверам их группы.
+
+## Документация
+
+| Кому | Документ | О чём |
+|------|----------|-------|
+| Поставить и пользоваться | [ALL_IN_ONE.md](docs/ALL_IN_ONE.md) | Установка на один сервер, домены, проверка, частые проблемы |
+| | [USER_GUIDE.md](docs/USER_GUIDE.md) | Понятия (нода, профиль, группа…), все команды `vynel admin`, настройки, вторая нода, CDN |
+| Разрабатывать | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Структура кода, сборка, тесты, релизы, как добавить шаблон |
+| Проект целиком | [ROADMAP.md](docs/ROADMAP.md) | Что готово, что дальше |
+| | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Общая архитектура (включая ещё не сделанное: веб, бот, бэкапы) |
+| | [PROFILES.md](docs/PROFILES.md) | Шаблоны профилей: Reality self-steal и XHTTP через VK CDN |
+| | [INBOUNDS.md](docs/INBOUNDS.md) | Инбаунды нод, наследование, несколько IP на сервере |
+| | [INSTALL.md](docs/INSTALL.md), [STEALTH.md](docs/STEALTH.md) | План полноценного установщика, скрытия и входа через Telegram |
+
+## Откуда шаблоны
+
+Шаблоны профилей повторяют рабочие схемы: Remnawave + RemnaSetup (Reality self-steal) и гайд «xHTTP за VK Cloud CDN».

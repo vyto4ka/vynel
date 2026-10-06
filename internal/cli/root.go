@@ -1,4 +1,4 @@
-// Package cli wires the vynnel subcommands.
+// Package cli wires the vynel subcommands.
 package cli
 
 import (
@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyto4ka/vynnel/internal/buildinfo"
+	"github.com/vyto4ka/vynel/internal/buildinfo"
 )
 
 var logLevel string
@@ -20,8 +20,8 @@ var logLevel string
 // Execute runs the CLI and returns the process exit code.
 func Execute() int {
 	root := &cobra.Command{
-		Use:           "vynnel",
-		Short:         "vynnel: VPN panel and node (Xray + Caddy)",
+		Use:           "vynel",
+		Short:         "vynel: VPN panel and node (Xray + Caddy)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
@@ -53,7 +53,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the version",
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprintln(cmd.OutOrStdout(), "vynnel", buildinfo.String())
+			fmt.Fprintln(cmd.OutOrStdout(), "vynel", buildinfo.String())
 		},
 	}
 }

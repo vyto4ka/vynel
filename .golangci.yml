@@ -14,9 +14,9 @@ linters:
         - (*database/sql.Rows).Close
         - (*database/sql.Tx).Rollback
         - (*google.golang.org/grpc.ClientConn).Close
-        - (*github.com/vyto4ka/vynnel/internal/xray.API).Close
-        - (*github.com/vyto4ka/vynnel/internal/node/state.Store).Close
-        - (*github.com/vyto4ka/vynnel/internal/panel/store.Store).Close
+        - (*github.com/vyto4ka/vynel/internal/xray.API).Close
+        - (*github.com/vyto4ka/vynel/internal/node/state.Store).Close
+        - (*github.com/vyto4ka/vynel/internal/panel/store.Store).Close
         - (net.Conn).Close
         - (*os.File).Close
         - (net.Listener).Close

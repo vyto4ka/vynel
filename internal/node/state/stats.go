@@ -8,7 +8,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
 
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 )
 
 var (

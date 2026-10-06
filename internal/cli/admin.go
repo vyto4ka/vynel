@@ -15,14 +15,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyto4ka/vynnel/internal/panel/service"
-	"github.com/vyto4ka/vynnel/internal/panel/store"
-	"github.com/vyto4ka/vynnel/internal/panel/subscription"
-	"github.com/vyto4ka/vynnel/internal/xrayconf"
+	"github.com/vyto4ka/vynel/internal/panel/service"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/panel/subscription"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // DefaultPanelDataDir holds panel.db and the internal CA.
-const DefaultPanelDataDir = "/var/lib/vynnel"
+const DefaultPanelDataDir = "/var/lib/vynel"
 
 var adminDataDir string
 
@@ -795,7 +795,7 @@ func adminUserCmd() *cobra.Command {
 				return err
 			}
 			if len(hosts) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no inbounds: check the user's groups and `vynnel admin group list`")
+				fmt.Fprintln(cmd.OutOrStdout(), "no inbounds: check the user's groups and `vynel admin group list`")
 			}
 			for _, h := range hosts {
 				if linkAddr != "" {

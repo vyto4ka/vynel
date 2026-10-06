@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vyto4ka/vynnel/internal/panel/store"
-	"github.com/vyto4ka/vynnel/internal/xrayconf"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 var usernameRe = regexp.MustCompile(`^[\p{L}\p{N}_.\-@]{1,64}$`)

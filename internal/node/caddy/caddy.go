@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vyto4ka/vynnel/internal/decoy"
+	"github.com/vyto4ka/vynel/internal/decoy"
 )
 
 // Manager runs Caddy as a child process and reloads it through the admin API.
@@ -137,7 +137,7 @@ func (m *Manager) env() []string {
 	data := filepath.Join(m.DataDir, "caddy")
 	return append(os.Environ(),
 		"XDG_DATA_HOME="+data, "XDG_CONFIG_HOME="+data, "HOME="+data,
-		"VYNNEL_DECOY_DIR="+filepath.Join(m.DataDir, "decoy"))
+		"VYNEL_DECOY_DIR="+filepath.Join(m.DataDir, "decoy"))
 }
 
 func (m *Manager) startLocked(path, admin string) error {

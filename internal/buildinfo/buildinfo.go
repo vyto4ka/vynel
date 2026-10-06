@@ -1,7 +1,7 @@
 // Package buildinfo holds values injected at link time.
 package buildinfo
 
-// Set via -ldflags "-X github.com/vyto4ka/vynnel/internal/buildinfo.Version=...".
+// Set via -ldflags "-X github.com/vyto4ka/vynel/internal/buildinfo.Version=...".
 var (
 	Version = "dev"
 	Commit  = "none"

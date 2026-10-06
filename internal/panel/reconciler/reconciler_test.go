@@ -3,9 +3,9 @@ package reconciler
 import (
 	"testing"
 
-	"github.com/vyto4ka/vynnel/internal/panel/service"
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
-	"github.com/vyto4ka/vynnel/internal/xrayconf"
+	"github.com/vyto4ka/vynel/internal/panel/service"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 func TestDelta(t *testing.T) {

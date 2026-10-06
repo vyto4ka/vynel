@@ -6,10 +6,10 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/vyto4ka/vynnel/internal/caddyconf"
-	"github.com/vyto4ka/vynnel/internal/decoy"
-	"github.com/vyto4ka/vynnel/internal/panel/store"
-	"github.com/vyto4ka/vynnel/internal/xrayconf"
+	"github.com/vyto4ka/vynel/internal/caddyconf"
+	"github.com/vyto4ka/vynel/internal/decoy"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // Caddy settings.

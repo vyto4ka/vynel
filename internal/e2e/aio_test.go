@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vyto4ka/vynnel/internal/node/agent"
-	"github.com/vyto4ka/vynnel/internal/panel/app"
-	"github.com/vyto4ka/vynnel/internal/panel/service"
-	"github.com/vyto4ka/vynnel/internal/panel/store"
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
-	"github.com/vyto4ka/vynnel/internal/xray/xraytest"
+	"github.com/vyto4ka/vynel/internal/node/agent"
+	"github.com/vyto4ka/vynel/internal/panel/app"
+	"github.com/vyto4ka/vynel/internal/panel/service"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/xray/xraytest"
 )
 
 // TestAllInOneOneIPOneDomain: panel + node on one server, one IP, one domain. Reality owns the

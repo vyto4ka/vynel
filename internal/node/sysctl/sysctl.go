@@ -17,7 +17,7 @@ var Settings = []struct{ Key, Value string }{
 }
 
 // ConfPath persists the settings across reboots.
-const ConfPath = "/etc/sysctl.d/90-vynnel.conf"
+const ConfPath = "/etc/sysctl.d/90-vynel.conf"
 
 func procPath(key string) string {
 	return filepath.Join("/proc/sys", strings.ReplaceAll(key, ".", "/"))
@@ -39,7 +39,7 @@ func Tune(apply bool) []string {
 			_ = exec.Command("modprobe", "tcp_bbr").Run()
 		}
 		var conf strings.Builder
-		conf.WriteString("# managed by vynnel\n")
+		conf.WriteString("# managed by vynel\n")
 		for _, s := range Settings {
 			conf.WriteString(s.Key + " = " + s.Value + "\n")
 			_ = os.WriteFile(procPath(s.Key), []byte(s.Value), 0o644)

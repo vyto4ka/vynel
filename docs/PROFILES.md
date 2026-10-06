@@ -1,5 +1,7 @@
 # Шаблоны профилей
 
+> **Статус:** шаблоны A и B, переменные, наследование, lint, Caddy и проверки конфигов реализованы. Не реализованы: внешние шаги VK на странице-инструкции (§4.6), автопроверки edge CDN (§4.7), режим отладки (§2, §4.9).
+
 Описание встроенных шаблонов профилей Xray: технические характеристики, что используется и как это автоматизировано.
 Основа — две реальные рабочие схемы:
 
@@ -199,7 +201,7 @@ https://${NODE_DOMAIN}:8443 {
     tls {
         issuer acme { disable_tlsalpn_challenge }   # 443 занят Xray → только HTTP-01
     }
-    root * /var/lib/vynnel-node/decoy/${DECOY_SITE}
+    root * /var/lib/vynel-node/decoy/${DECOY_SITE}
     file_server
     header -Server
 }
@@ -339,7 +341,7 @@ https://${ORIGIN_DOMAIN} {
         }
     }
     request_body { max_size 0 }           # = client_max_body_size 0
-    log { output file /var/log/vynnel-node/xhttp_access.log }   # только в режиме отладки
+    log { output file /var/log/vynel-node/xhttp_access.log }   # только в режиме отладки
 }
 ```
 
@@ -464,9 +466,9 @@ https://${ORIGIN_DOMAIN} {
 
 | Что | Как | Источник |
 |-----|-----|----------|
-| BBR + fq | `/etc/sysctl.d/90-vynnel.conf`: `net.core.default_qdisc=fq`, `net.ipv4.tcp_congestion_control=bbr` | RemnaSetup «BBR», гайд B шаг 8 |
+| BBR + fq | `/etc/sysctl.d/90-vynel.conf`: `net.core.default_qdisc=fq`, `net.ipv4.tcp_congestion_control=bbr` | RemnaSetup «BBR», гайд B шаг 8 |
 | TCP Fast Open | `net.ipv4.tcp_fastopen=3` | под `tcpFastOpen: true` в шаблоне A |
-| Лимит файлов | `LimitNOFILE=1048576` в юните `vynnel-node` и Xray | много соединений |
+| Лимит файлов | `LimitNOFILE=1048576` в юните `vynel-node` и Xray | много соединений |
 | Время | `systemd-timesyncd` или chrony, проверка смещения < 1 с | Reality |
 | IPv6 | Переключатель в карточке ноды: оставить / отключить | RemnaSetup «Управление IPv6» |
 | Обновление ОС | Флаг `--upgrade` в команде установки | PDF «Подготовка на ноде» |

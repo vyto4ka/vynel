@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/vyto4ka/vynnel/internal/buildinfo"
-	"github.com/vyto4ka/vynnel/internal/panel/app"
-	"github.com/vyto4ka/vynnel/internal/xray"
+	"github.com/vyto4ka/vynel/internal/buildinfo"
+	"github.com/vyto4ka/vynel/internal/panel/app"
+	"github.com/vyto4ka/vynel/internal/xray"
 )
 
 func panelCmd() *cobra.Command {

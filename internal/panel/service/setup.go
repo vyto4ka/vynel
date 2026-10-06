@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/vyto4ka/vynnel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
 // SetupInput describes an all-in-one server (docs/ALL_IN_ONE.md).

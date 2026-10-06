@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # All-in-one install: panel + node + Caddy on ONE server and ONE IP (docs/ALL_IN_ONE.md).
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynnel/claude/magical-hamilton-9vnx7n/scripts/install-aio.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/claude/magical-hamilton-9vnx7n/scripts/install-aio.sh)
 #
 # Without --domain it asks questions (domain, subscriptions, email, name...). With flags it runs
 # unattended:  ... install-aio.sh --domain nl.example.com [--sub-domain sub.example.com] [--email you@example.com] --yes
 #
-# Re-running it updates the code and keeps the data. The vynnel binary comes from the branch's
+# Re-running it updates the code and keeps the data. The vynel binary comes from the branch's
 # "edge" release (CI); if there is none, it is built from source (slow on small servers).
 set -euo pipefail
 
-REPO="${VYNNEL_REPO:-https://github.com/vyto4ka/vynnel.git}"
-REF="${VYNNEL_REF:-claude/magical-hamilton-9vnx7n}"
-SRC=/opt/vynnel-src
-DATA=/var/lib/vynnel
-UNIT=/etc/systemd/system/vynnel.service
+REPO="${VYNEL_REPO:-https://github.com/vyto4ka/vynel.git}"
+REF="${VYNEL_REF:-claude/magical-hamilton-9vnx7n}"
+SRC=/opt/vynel-src
+DATA=/var/lib/vynel
+UNIT=/etc/systemd/system/vynel.service
 
 DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
 ASSUME_YES=0 UNINSTALL=0 PURGE=0 WIZARD=0
@@ -71,13 +71,13 @@ confirm() {
 }
 
 if [[ $UNINSTALL -eq 1 ]]; then
-  info "removing vynnel service"
-  systemctl disable --now vynnel 2>/dev/null || true
+  info "removing vynel service"
+  systemctl disable --now vynel 2>/dev/null || true
   rm -f "$UNIT"
   systemctl daemon-reload
   if [[ $PURGE -eq 1 ]]; then
     confirm "delete $DATA (users, keys, certificates)?" || die "aborted"
-    rm -rf "$DATA" /etc/sysctl.d/90-vynnel.conf
+    rm -rf "$DATA" /etc/sysctl.d/90-vynel.conf
   fi
   green "removed"
   exit 0
@@ -171,7 +171,7 @@ ask_domain() {
 
 if [[ $WIZARD -eq 1 ]]; then
   echo
-  green "Установка vynnel: панель + нода на этом сервере"
+  green "Установка vynel: панель + нода на этом сервере"
   echo "  Enter — оставить значение в скобках."
   echo
   ask PUBLIC_IP "Публичный IP сервера" "$PUBLIC_IP"
@@ -220,7 +220,7 @@ for d in "${domains[@]}"; do
 done
 
 # Ports 80/443 must be free (except for our own service when updating).
-systemctl stop vynnel 2>/dev/null || true
+systemctl stop vynel 2>/dev/null || true
 busy="$(ss -Hltnp '( sport = :443 or sport = :80 )' 2>/dev/null || true)"
 if [[ -n "$busy" ]]; then
   red "ports 80/443 are in use:"
@@ -229,10 +229,10 @@ if [[ -n "$busy" ]]; then
 fi
 
 # ---- binaries ----
-# vynnel: a prebuilt binary from the branch's "edge" release (built by .github/workflows/edge.yml).
+# vynel: a prebuilt binary from the branch's "edge" release (built by .github/workflows/edge.yml).
 # Building from source is the fallback only: on a 1 vCPU / 1 GB VPS it takes 10–20 minutes.
-RELEASE="${VYNNEL_RELEASE:-edge-${REF//\//-}}"
-RELEASE_URL="https://github.com/vyto4ka/vynnel/releases/download/$RELEASE"
+RELEASE="${VYNEL_RELEASE:-edge-${REF//\//-}}"
+RELEASE_URL="https://github.com/vyto4ka/vynel/releases/download/$RELEASE"
 
 ensure_go() {
   export PATH="/usr/local/go/bin:$PATH"
@@ -254,12 +254,12 @@ ensure_memory() {
   local mem swap
   mem="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
   swap="$(awk '/SwapTotal/ {print int($2/1024)}' /proc/meminfo)"
-  if (( mem + swap < 2000 )) && [[ ! -e /swapfile-vynnel ]]; then
+  if (( mem + swap < 2000 )) && [[ ! -e /swapfile-vynel ]]; then
     info "only ${mem} MB RAM: adding a 2 GB swap file for the build"
-    fallocate -l 2G /swapfile-vynnel 2>/dev/null || dd if=/dev/zero of=/swapfile-vynnel bs=1M count=2048 status=none
-    chmod 600 /swapfile-vynnel
-    mkswap /swapfile-vynnel >/dev/null
-    swapon /swapfile-vynnel
+    fallocate -l 2G /swapfile-vynel 2>/dev/null || dd if=/dev/zero of=/swapfile-vynel bs=1M count=2048 status=none
+    chmod 600 /swapfile-vynel
+    mkswap /swapfile-vynel >/dev/null
+    swapon /swapfile-vynel
     TEMP_SWAP=1
   fi
 }
@@ -270,20 +270,20 @@ with_progress() {
   printf '\033[36m==>\033[0m %s ' "$msg"
   ( while true; do sleep 10; printf '.'; done ) &
   local dots=$! rc=0
-  "$@" >/tmp/vynnel-build.log 2>&1 || rc=$?
+  "$@" >/tmp/vynel-build.log 2>&1 || rc=$?
   kill "$dots" 2>/dev/null; wait "$dots" 2>/dev/null || true
-  if [[ $rc -eq 0 ]]; then echo " ok"; else echo " failed"; tail -20 /tmp/vynnel-build.log; fi
+  if [[ $rc -eq 0 ]]; then echo " ok"; else echo " failed"; tail -20 /tmp/vynel-build.log; fi
   return $rc
 }
 
 install_release_binary() {
   local tmp
   tmp="$(mktemp -d)"
-  curl -fsSL --max-time 120 -o "$tmp/vynnel-linux-$GOARCH" "$RELEASE_URL/vynnel-linux-$GOARCH" || { rm -rf "$tmp"; return 1; }
+  curl -fsSL --max-time 120 -o "$tmp/vynel-linux-$GOARCH" "$RELEASE_URL/vynel-linux-$GOARCH" || { rm -rf "$tmp"; return 1; }
   curl -fsSL --max-time 30 -o "$tmp/SHA256SUMS" "$RELEASE_URL/SHA256SUMS" || { rm -rf "$tmp"; return 1; }
-  (cd "$tmp" && grep " vynnel-linux-$GOARCH\$" SHA256SUMS | sha256sum -c --quiet -) || { red "checksum mismatch"; rm -rf "$tmp"; return 1; }
-  install -m 755 "$tmp/vynnel-linux-$GOARCH" /usr/local/bin/vynnel.new
-  mv /usr/local/bin/vynnel.new /usr/local/bin/vynnel
+  (cd "$tmp" && grep " vynel-linux-$GOARCH\$" SHA256SUMS | sha256sum -c --quiet -) || { red "checksum mismatch"; rm -rf "$tmp"; return 1; }
+  install -m 755 "$tmp/vynel-linux-$GOARCH" /usr/local/bin/vynel.new
+  mv /usr/local/bin/vynel.new /usr/local/bin/vynel
   rm -rf "$tmp"
 }
 
@@ -300,15 +300,15 @@ build_from_source() {
   fi
   local commit
   commit="$(git -C "$SRC" rev-parse --short HEAD)"
-  with_progress "building vynnel $commit from source (10–20 minutes on a small VPS)" \
-    bash -c "cd '$SRC' && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X github.com/vyto4ka/vynnel/internal/buildinfo.Version=$commit -X github.com/vyto4ka/vynnel/internal/buildinfo.Commit=$commit' -o /usr/local/bin/vynnel.new ./cmd/vynnel"
-  mv /usr/local/bin/vynnel.new /usr/local/bin/vynnel
+  with_progress "building vynel $commit from source (10–20 minutes on a small VPS)" \
+    bash -c "cd '$SRC' && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X github.com/vyto4ka/vynel/internal/buildinfo.Version=$commit -X github.com/vyto4ka/vynel/internal/buildinfo.Commit=$commit' -o /usr/local/bin/vynel.new ./cmd/vynel"
+  mv /usr/local/bin/vynel.new /usr/local/bin/vynel
 }
 
 TEMP_SWAP=0
-info "downloading vynnel ($RELEASE)"
+info "downloading vynel ($RELEASE)"
 if install_release_binary; then
-  green "  $(/usr/local/bin/vynnel version)"
+  green "  $(/usr/local/bin/vynel version)"
 else
   red "  no prebuilt binary for $RELEASE/$GOARCH, building from source"
   build_from_source
@@ -345,7 +345,7 @@ fi
 chmod +x /usr/local/bin/caddy
 
 if [[ $TEMP_SWAP -eq 1 ]]; then
-  swapoff /swapfile-vynnel && rm -f /swapfile-vynnel
+  swapoff /swapfile-vynel && rm -f /swapfile-vynel
 fi
 
 # ---- firewall ----
@@ -360,7 +360,7 @@ info "configuring the panel"
 setup_args=(--domain "$DOMAIN" --sub-domain "$SUB_DOMAIN" --name "$NAME")
 [[ -n "$COUNTRY" ]] && setup_args+=(--country "$COUNTRY")
 [[ -n "$EMAIL" ]] && setup_args+=(--email "$EMAIL")
-vynnel admin --data-dir "$DATA" setup "${setup_args[@]}"
+vynel admin --data-dir "$DATA" setup "${setup_args[@]}"
 
 cat >"$UNIT" <<EOF
 [Unit]
@@ -369,7 +369,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/vynnel panel --data-dir $DATA --gateway-listen $GATEWAY_LISTEN --public-addr $PUBLIC_IP:${GATEWAY_LISTEN##*:} --with-node
+ExecStart=/usr/local/bin/vynel panel --data-dir $DATA --gateway-listen $GATEWAY_LISTEN --public-addr $PUBLIC_IP:${GATEWAY_LISTEN##*:} --with-node
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -378,17 +378,17 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable --now vynnel >/dev/null 2>&1
-systemctl restart vynnel
+systemctl enable --now vynel >/dev/null 2>&1
+systemctl restart vynel
 
 info "waiting for the node to start"
 ok=0
 for _ in $(seq 1 60); do
-  if vynnel admin --data-dir "$DATA" node list 2>/dev/null | grep -q "in sync"; then ok=1; break; fi
+  if vynel admin --data-dir "$DATA" node list 2>/dev/null | grep -q "in sync"; then ok=1; break; fi
   sleep 2
 done
-vynnel admin --data-dir "$DATA" node list || true
-[[ $ok -eq 1 ]] || red "the node is not in sync yet: journalctl -u vynnel -e"
+vynel admin --data-dir "$DATA" node list || true
+[[ $ok -eq 1 ]] || red "the node is not in sync yet: journalctl -u vynel -e"
 
 info "waiting for the certificate of $SUB_DOMAIN"
 cert=0
@@ -397,14 +397,48 @@ for _ in $(seq 1 45); do
   if [[ "$code" == "200" ]]; then cert=1; break; fi
   sleep 2
 done
-[[ $cert -eq 1 ]] || red "https://$SUB_DOMAIN/ does not answer yet (DNS or port 80 not reachable?). Caddy keeps retrying; see journalctl -u vynnel"
+[[ $cert -eq 1 ]] || red "https://$SUB_DOMAIN/ does not answer yet (DNS or port 80 not reachable?). Caddy keeps retrying; see journalctl -u vynel"
 
-green "done"
-cat <<EOF
+VERSION="$(vynel version 2>/dev/null | awk '{print $2}')"
+SUB_PREFIX="$(vynel admin --data-dir "$DATA" setting sub.prefix 2>/dev/null)"
+SUB_PREFIX="${SUB_PREFIX:-/s/}"
+NODE_STATE="$([[ $ok -eq 1 ]] && echo "работает" || echo "запускается — см. логи")"
+CERT_STATE="$([[ $cert -eq 1 ]] && echo "выпущен" || echo "ещё нет — проверьте DNS и порт 80")"
+NODES_STATE="$([[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]] && echo "закрыто (только этот сервер)" || echo "порт ${GATEWAY_LISTEN##*:} открыт")"
 
-  Create a user:        vynnel admin user add vasya
-  Subscription link:    vynnel admin user show vasya      (open it on the phone or import into Happ / v2RayTun)
-  Users and traffic:    vynnel admin user list ; vynnel admin stats
-  Logs:                 journalctl -u vynnel -f
-  Update:               run this script again
-EOF
+line() { printf '  %-26s %s\n' "$1" "$2"; }
+echo
+green "══════════════════════════  vynel установлен  ══════════════════════════"
+echo
+line "Версия" "$VERSION"
+line "Сервер" "$PUBLIC_IP ($NAME${COUNTRY:+, $COUNTRY})"
+line "Нода (VPN)" "$DOMAIN:443 — $NODE_STATE"
+line "Сертификат" "$CERT_STATE"
+line "Сайт-заглушка" "https://$DOMAIN/"
+line "Подписки" "https://$SUB_DOMAIN${SUB_PREFIX}<токен>"
+line "Подключение других нод" "$NODES_STATE"
+line "Данные" "$DATA  (бэкап: скопировать папку)"
+echo
+line "Админ-панель" "пока в терминале: vynel admin …  (веб-панель — следующий этап)"
+echo
+echo "  Пользователи"
+line "  добавить" "vynel admin user add vasya"
+line "  ссылка подписки" "vynel admin user show vasya"
+line "  список" "vynel admin user list"
+line "  продлить" "vynel admin user extend vasya --months 1"
+line "  отключить / включить" "vynel admin user disable vasya / enable vasya"
+line "  устройства (HWID)" "vynel admin user devices vasya [--rm ID]"
+echo
+echo "  Сервер"
+line "  статистика" "vynel admin stats"
+line "  состояние ноды" "vynel admin node list"
+line "  настройки" "vynel admin setting hwid.default_limit 5"
+line "  все команды" "vynel admin --help"
+line "  логи" "journalctl -u vynel -f"
+line "  перезапуск" "systemctl restart vynel"
+line "  обновить" "запустить этот скрипт ещё раз"
+line "  удалить" "install-aio.sh --uninstall [--purge]"
+echo
+echo "  Ссылку подписки откройте на телефоне — там QR-код и кнопки для Happ, v2RayTun, Hiddify."
+echo "  Подробно: https://github.com/vyto4ka/vynel/blob/$REF/docs/ALL_IN_ONE.md"
+echo

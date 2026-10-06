@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vyto4ka/vynnel/internal/xray"
-	"github.com/vyto4ka/vynnel/internal/xray/xraytest"
-	"github.com/vyto4ka/vynnel/internal/xrayconf"
+	"github.com/vyto4ka/vynel/internal/xray"
+	"github.com/vyto4ka/vynel/internal/xray/xraytest"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // testBase lets traffic reach 127.0.0.1 (the default base blocks geoip:private).

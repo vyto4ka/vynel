@@ -24,7 +24,7 @@ import (
 
 	"golang.org/x/net/proxy"
 
-	"github.com/vyto4ka/vynnel/internal/xray"
+	"github.com/vyto4ka/vynel/internal/xray"
 )
 
 // Binary returns the Xray binary from XRAY_BIN or skips the test.

@@ -1,4 +1,4 @@
-module github.com/vyto4ka/vynnel
+module github.com/vyto4ka/vynel
 
 go 1.26.0
 

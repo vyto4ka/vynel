@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vyto4ka/vynnel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
 // ErrInvalid marks input validation failures.

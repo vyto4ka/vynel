@@ -18,11 +18,11 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/vyto4ka/vynnel/internal/panel/ca"
-	"github.com/vyto4ka/vynnel/internal/panel/reconciler"
-	"github.com/vyto4ka/vynnel/internal/panel/service"
-	"github.com/vyto4ka/vynnel/internal/panel/store"
-	nodev1 "github.com/vyto4ka/vynnel/internal/proto/vynnel/node/v1"
+	"github.com/vyto4ka/vynel/internal/panel/ca"
+	"github.com/vyto4ka/vynel/internal/panel/reconciler"
+	"github.com/vyto4ka/vynel/internal/panel/service"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 )
 
 // Server implements NodeGateway.
