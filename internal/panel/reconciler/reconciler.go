@@ -88,6 +88,7 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	defer poll.Stop()
 	statuses := time.NewTicker(r.StatusEvery)
 	defer statuses.Stop()
+	lastPrune := -1
 	for {
 		select {
 		case <-ctx.Done():
@@ -109,9 +110,12 @@ func (r *Reconciler) Run(ctx context.Context) error {
 				continue
 			}
 		case <-statuses.C:
-			// Status changes go through service.mutate and kick us via OnChange.
-			if _, err := r.svc.RefreshStatuses(ctx); err != nil {
-				r.log.Error("refresh statuses", "err", err)
+			// Expiry, traffic resets and (daily) pruning. Status changes kick us via OnChange.
+			day := time.Now().YearDay()
+			if err := r.svc.Maintenance(ctx, day != lastPrune); err != nil {
+				r.log.Error("maintenance", "err", err)
+			} else {
+				lastPrune = day
 			}
 			continue
 		}
@@ -187,6 +191,7 @@ type session struct {
 	nodeID int64
 	stream Stream
 	wakeCh chan struct{}
+	out    chan *nodev1.PanelMessage // replies (stats acks) sent by the push loop
 	cancel context.CancelFunc
 
 	mu        sync.Mutex
@@ -211,7 +216,7 @@ func (r *Reconciler) Serve(nodeID int64, stream Stream) error {
 	<-r.ready
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
-	s := &session{r: r, nodeID: nodeID, stream: stream, wakeCh: make(chan struct{}, 1), cancel: cancel}
+	s := &session{r: r, nodeID: nodeID, stream: stream, wakeCh: make(chan struct{}, 1), out: make(chan *nodev1.PanelMessage, 64), cancel: cancel}
 
 	r.mu.Lock()
 	if old, ok := r.sessions[nodeID]; ok {
@@ -280,8 +285,24 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		if err := store.SetNodeRuntime(ctx, svc.Store().DB, s.nodeID, store.NodeRuntime{AgentVersion: h.AgentVersion, XrayVersion: h.XrayVersion, AppliedHash: h.AppliedHash}); err != nil {
 			return err
 		}
+		if err := store.SetNodeFacts(ctx, svc.Store().DB, s.nodeID, h.CaddyVersion, h.Warnings); err != nil {
+			return err
+		}
+		for _, w := range h.Warnings {
+			s.r.log.Warn("node warning", "node", s.nodeID, "warning", w)
+		}
 	case *nodev1.NodeMessage_Addresses:
 		return svc.SyncAddresses(ctx, s.nodeID, toReported(m.Addresses.Addresses))
+	case *nodev1.NodeMessage_Stats:
+		b := m.Stats
+		if err := svc.IngestStats(ctx, s.nodeID, b); err != nil {
+			return err // no ack: the node resends the batch
+		}
+		select {
+		case s.out <- &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_StatsAck{StatsAck: &nodev1.StatsAck{Epoch: b.Epoch, Seq: b.Seq}}}:
+		case <-ctx.Done():
+		}
+		return nil
 	case *nodev1.NodeMessage_Ack:
 		a := m.Ack
 		s.mu.Lock()
@@ -330,6 +351,13 @@ func (s *session) pushLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case reply := <-s.out:
+			// Only this goroutine sends on the stream.
+			if err := s.stream.Send(reply); err != nil {
+				s.r.log.Warn("send to node failed", "node", s.nodeID, "err", err)
+				return
+			}
+			continue
 		case <-s.wakeCh:
 		case <-tick.C:
 		}

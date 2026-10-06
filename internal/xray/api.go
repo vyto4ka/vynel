@@ -149,3 +149,47 @@ func (a *API) UserTrafficDeltas(ctx context.Context) ([]UserTraffic, error) {
 	}
 	return out, nil
 }
+
+// OnlineUser is a user with live connections and the number of distinct IPs.
+type OnlineUser struct {
+	Email string
+	IPs   int
+}
+
+// OnlineUsers lists users with live connections (needs policy statsUserOnline).
+func (a *API) OnlineUsers(ctx context.Context) ([]OnlineUser, error) {
+	resp, err := a.stats.GetAllOnlineUsers(ctx, &stats.GetAllOnlineUsersRequest{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OnlineUser, 0, len(resp.Users))
+	for _, name := range resp.Users {
+		email := name
+		if parts := strings.Split(name, ">>>"); len(parts) >= 2 && parts[0] == "user" {
+			email = parts[1]
+		}
+		ou := OnlineUser{Email: email}
+		if ips, err := a.stats.GetStatsOnlineIpList(ctx, &stats.GetStatsRequest{Name: "user>>>" + email + ">>>online"}); err == nil {
+			ou.IPs = len(ips.Ips)
+		}
+		out = append(out, ou)
+	}
+	return out, nil
+}
+
+// InboundTrafficDeltas reads and resets the sum of all inbound counters.
+func (a *API) InboundTrafficDeltas(ctx context.Context) (up, down int64, err error) {
+	st, err := a.QueryStats(ctx, "inbound>>>", true)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, s := range st {
+		switch {
+		case strings.HasSuffix(s.Name, ">>>traffic>>>uplink"):
+			up += s.Value
+		case strings.HasSuffix(s.Name, ">>>traffic>>>downlink"):
+			down += s.Value
+		}
+	}
+	return up, down, nil
+}

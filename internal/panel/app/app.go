@@ -18,6 +18,7 @@ import (
 	"github.com/vyto4ka/vpn/internal/panel/reconciler"
 	"github.com/vyto4ka/vpn/internal/panel/service"
 	"github.com/vyto4ka/vpn/internal/panel/store"
+	"github.com/vyto4ka/vpn/internal/panel/subscription"
 	"github.com/vyto4ka/vpn/internal/xray"
 )
 
@@ -35,12 +36,13 @@ type Config struct {
 
 // Panel is a running panel (exposed for tests).
 type Panel struct {
-	Service    *service.Service
-	CA         *ca.CA
-	Reconciler *reconciler.Reconciler
-	Gateway    *gateway.Server
-	SNI        string
-	LocalNode  *agent.Agent
+	Service       *service.Service
+	CA            *ca.CA
+	Reconciler    *reconciler.Reconciler
+	Gateway       *gateway.Server
+	Subscriptions *subscription.Handler
+	SNI           string
+	LocalNode     *agent.Agent
 }
 
 // Open prepares everything without starting network listeners.
@@ -91,7 +93,8 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	rec := reconciler.New(svc, cfg.Log.With("component", "reconciler"))
 	svc.OnChange = rec.Notify
 	p := &Panel{Service: svc, CA: authority, Reconciler: rec, SNI: sni,
-		Gateway: gateway.New(svc, authority, rec, sni, cfg.Log.With("component", "gateway"))}
+		Gateway:       gateway.New(svc, authority, rec, sni, cfg.Log.With("component", "gateway")),
+		Subscriptions: subscription.NewHandler(svc, cfg.Log.With("component", "subscriptions"))}
 	return p, func() { st.Close() }, nil
 }
 
@@ -109,7 +112,7 @@ func Run(ctx context.Context, cfg Config) error {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
 	run := func(name string, fn func() error) {
 		wg.Add(1)
 		go func() {
@@ -121,6 +124,11 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	run("reconciler", func() error { return p.Reconciler.Run(ctx) })
 	run("gateway", func() error { return p.Gateway.Serve(ctx, cfg.GatewayListen) })
+	subListen, err := p.Service.Setting(ctx, service.SettingSubListen, service.DefaultSubListen)
+	if err != nil {
+		return err
+	}
+	run("subscriptions", func() error { return p.Subscriptions.Serve(ctx, subListen) })
 	if cfg.WithNode {
 		node, err := p.Service.EnsureLocalNode(ctx, cfg.LocalNode)
 		if err != nil {

@@ -86,7 +86,7 @@ type NodeContext struct {
 // builtinVars are always available and cannot be declared by templates.
 var builtinVars = map[string]struct{}{
 	"TAG": {}, "LISTEN_IP": {}, "NODE_CODE": {}, "NODE_NAME": {}, "NODE_FLAG": {},
-	"NODE_COUNTRY": {}, "XHTTP_EXTRA": {},
+	"NODE_COUNTRY": {}, "XHTTP_EXTRA": {}, "INBOUND_PORT": {},
 }
 
 func (c NodeContext) builtins() map[string]any {

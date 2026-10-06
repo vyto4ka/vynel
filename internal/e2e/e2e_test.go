@@ -4,14 +4,18 @@ package e2e_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +38,8 @@ var actor = service.Actor{Kind: "test"}
 
 type panelRun struct {
 	*app.Panel
-	stop func()
+	stop    func()
+	subAddr string
 }
 
 func startPanel(t *testing.T, dir, gwAddr string) *panelRun {
@@ -45,9 +50,14 @@ func startPanel(t *testing.T, dir, gwAddr string) *panelRun {
 		t.Fatal(err)
 	}
 	p.Reconciler.Debounce, p.Reconciler.PollInterval = 50*time.Millisecond, 200*time.Millisecond
-	done := make(chan struct{}, 2)
+	done := make(chan struct{}, 3)
+	subAddr := "127.0.0.1:" + strconv.Itoa(xraytest.FreePort(t))
+	if err := p.Service.SetSetting(ctx, actor, service.SettingSubListen, subAddr); err != nil {
+		t.Fatal(err)
+	}
 	go func() { _ = p.Reconciler.Run(ctx); done <- struct{}{} }()
 	go func() { _ = p.Gateway.Serve(ctx, gwAddr); done <- struct{}{} }()
+	go func() { _ = p.Subscriptions.Serve(ctx, subAddr); done <- struct{}{} }()
 	stopped := false
 	stop := func() {
 		if stopped {
@@ -57,10 +67,11 @@ func startPanel(t *testing.T, dir, gwAddr string) *panelRun {
 		cancel()
 		<-done
 		<-done
+		<-done
 		closeFn()
 	}
 	t.Cleanup(stop)
-	return &panelRun{Panel: p, stop: stop}
+	return &panelRun{Panel: p, stop: stop, subAddr: subAddr}
 }
 
 func logger(component string) *slog.Logger {
@@ -81,7 +92,7 @@ func startAgent(t *testing.T, bin xray.Binary, dir string, dial agent.Dialer, ap
 	t.Helper()
 	a, err := agent.New(agent.Config{
 		DataDir: dir, Xray: bin, Version: "test", Dial: dial, Log: logger("agent-" + filepath.Base(dir)),
-		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond,
+		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond, StatsInterval: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -248,17 +259,8 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	}
 	xraytest.Eventually(t, wait, "alice connects through NL", fetchOK)
 
-	// The vless:// link printed by `vpn admin user links` works as is.
-	links, err := svc.UserLinks(ctx, alice.ID, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var nlLink string
-	for _, l := range links {
-		if l.Tag == nlIn.Tag {
-			nlLink = l.URL
-		}
-	}
+	// The subscription (Happ user agent, with HWID) gives a link that works as is.
+	nlLink := fetchSubscriptionLink(t, panel, alice, nlIn.Tag, "dev-1")
 	u, err := url.Parse(nlLink)
 	if err != nil || u.Scheme != "vless" {
 		t.Fatalf("bad link %q: %v", nlLink, err)
@@ -270,7 +272,7 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 		PublicKey: q.Get("pbk"), ShortID: q.Get("sid"),
 	})
 	if b, err := xraytest.Fetch(ctx, linkSocks, origin); err != nil || len(b) != xraytest.OriginSize {
-		t.Fatalf("client built from the link failed: %v (link %s)", err, nlLink)
+		t.Fatalf("client built from the subscription failed: %v (link %s)", err, nlLink)
 	}
 	if u.Fragment != "🇳🇱 Нидерланды" {
 		t.Fatalf("remark %q", u.Fragment)
@@ -333,6 +335,44 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	}
 	xraytest.Eventually(t, wait, "carol from another process", wantUsers(ctx, nodeNL, nlIn.Tag, ea, eb, service.UserEmail(carol.ID)))
 
+	// Traffic reaches the panel; crossing the limit removes the user from the nodes.
+	xraytest.Eventually(t, wait, "alice's traffic is counted", func() error {
+		u, err := svc.User(ctx, alice.ID)
+		if err != nil {
+			return err
+		}
+		if u.TrafficUsedBytes < xraytest.OriginSize {
+			return fmt.Errorf("used %d", u.TrafficUsedBytes)
+		}
+		return nil
+	})
+	cur, err := svc.User(ctx, alice.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := cur.TrafficUsedBytes + 1000
+	if _, err := svc.SetUserTrafficLimit(ctx, actor, alice.ID, &limit); err != nil {
+		t.Fatal(err)
+	}
+	if err := fetchOK(); err != nil {
+		t.Fatalf("still under the limit: %v", err)
+	}
+	xraytest.Eventually(t, wait, "alice becomes limited", func() error {
+		u, err := svc.User(ctx, alice.ID)
+		if err != nil {
+			return err
+		}
+		if u.Status != store.StatusLimited {
+			return fmt.Errorf("status %s used %d limit %d", u.Status, u.TrafficUsedBytes, limit)
+		}
+		return nil
+	})
+	xraytest.Eventually(t, wait, "limited alice removed from NL", wantUsers(ctx, nodeNL, nlIn.Tag, eb, service.UserEmail(carol.ID)))
+	ov, err := svc.Overview(ctx)
+	if err != nil || ov.TodayBytes < 2*xraytest.OriginSize {
+		t.Fatalf("overview %+v %v", ov, err)
+	}
+
 	// Revoking the node certificate drops the session and blocks reconnects.
 	if _, err := svc.ReissueInstallToken(ctx, actor, nl.ID); err != nil {
 		t.Fatal(err)
@@ -354,4 +394,37 @@ func must(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// fetchSubscriptionLink downloads the user's subscription as Happ would and returns the link of tag.
+func fetchSubscriptionLink(t *testing.T, panel *panelRun, u *store.User, tag, hwid string) string {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, "http://"+panel.subAddr+service.DefaultSubPrefix+u.SubToken, nil)
+	req.Header.Set("User-Agent", "Happ/3.0")
+	req.Header.Set("x-hwid", hwid)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(resp.Header.Get("Subscription-Userinfo"), "expire=") {
+		t.Fatalf("subscription status %d headers %v", resp.StatusCode, resp.Header)
+	}
+	raw, err := base64.StdEncoding.DecodeString(string(body))
+	if err != nil {
+		t.Fatalf("not base64: %q", body)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, "pbk=") && strings.Contains(line, "@"+domain+":") {
+			l, _ := url.Parse(line)
+			p, _ := strconv.Atoi(l.Port())
+			ni, err := panel.Service.NodeInboundByTag(context.Background(), tag)
+			if err == nil && p == ni.PortOverride {
+				return line
+			}
+		}
+	}
+	t.Fatalf("no link for %s in %s", tag, raw)
+	return ""
 }

@@ -215,15 +215,16 @@ type NodeInbound struct {
 	Sort            int64
 	CreatedAt       int64
 	UpdatedAt       int64
+	Host            map[string]any // overrides of the connection point (remark, address, port, sni, fingerprint, hidden)
 }
 
-const nodeInboundCols = `id, node_id, profile_id, tag, listen_address_id, egress_address_id, port_override, values_json, override_json, enabled, sort, created_at, updated_at`
+const nodeInboundCols = `id, node_id, profile_id, tag, listen_address_id, egress_address_id, port_override, values_json, override_json, enabled, sort, created_at, updated_at, host_json`
 
 func scanNodeInbound(sc interface{ Scan(...any) error }) (*NodeInbound, error) {
 	ni := &NodeInbound{}
 	var listen, egress sql.NullInt64
-	var vals, over string
-	if err := sc.Scan(&ni.ID, &ni.NodeID, &ni.ProfileID, &ni.Tag, &listen, &egress, &ni.PortOverride, &vals, &over, &ni.Enabled, &ni.Sort, &ni.CreatedAt, &ni.UpdatedAt); err != nil {
+	var vals, over, host string
+	if err := sc.Scan(&ni.ID, &ni.NodeID, &ni.ProfileID, &ni.Tag, &listen, &egress, &ni.PortOverride, &vals, &over, &ni.Enabled, &ni.Sort, &ni.CreatedAt, &ni.UpdatedAt, &host); err != nil {
 		return nil, mapErr(err)
 	}
 	ni.ListenAddressID, ni.EgressAddressID = ptrInt(listen), ptrInt(egress)
@@ -232,6 +233,9 @@ func scanNodeInbound(sc interface{ Scan(...any) error }) (*NodeInbound, error) {
 		return nil, err
 	}
 	if ni.Override, err = fromJSONMap(over); err != nil {
+		return nil, err
+	}
+	if ni.Host, err = fromJSONMap(host); err != nil {
 		return nil, err
 	}
 	return ni, nil
@@ -254,9 +258,12 @@ func CreateNodeInbound(ctx context.Context, q DBTX, ni *NodeInbound) error {
 // UpdateNodeInbound saves a node inbound.
 func UpdateNodeInbound(ctx context.Context, q DBTX, ni *NodeInbound) error {
 	ni.UpdatedAt = unix()
-	return execOne(ctx, q, `UPDATE node_inbounds SET tag=?, listen_address_id=?, egress_address_id=?, port_override=?, values_json=?, override_json=?, enabled=?, sort=?, updated_at=?
+	if ni.Host == nil {
+		ni.Host = map[string]any{}
+	}
+	return execOne(ctx, q, `UPDATE node_inbounds SET tag=?, listen_address_id=?, egress_address_id=?, port_override=?, values_json=?, override_json=?, enabled=?, sort=?, updated_at=?, host_json=?
 		WHERE id=?`, ni.Tag, nullInt(ni.ListenAddressID), nullInt(ni.EgressAddressID), ni.PortOverride, toJSON(ni.Values), toJSON(ni.Override),
-		ni.Enabled, ni.Sort, ni.UpdatedAt, ni.ID)
+		ni.Enabled, ni.Sort, ni.UpdatedAt, toJSON(ni.Host), ni.ID)
 }
 
 // GetNodeInbound loads a node inbound.

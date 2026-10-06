@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/vyto4ka/vpn/internal/node/metrics"
 	"github.com/vyto4ka/vpn/internal/node/state"
 	nodev1 "github.com/vyto4ka/vpn/internal/proto/vpn/node/v1"
 	"github.com/vyto4ka/vpn/internal/xray"
@@ -35,13 +36,14 @@ type Dialer func(ctx context.Context) (Conn, error)
 
 // Config configures an agent.
 type Config struct {
-	DataDir    string // state.db and xray config live here
-	Xray       xray.Binary
-	Version    string
-	Dial       Dialer
-	Log        *slog.Logger
-	Addresses  func() []*nodev1.Address // defaults to the host's interfaces
-	MaxBackoff time.Duration            // reconnect backoff cap, default 30s
+	DataDir       string // state.db and xray config live here
+	Xray          xray.Binary
+	Version       string
+	Dial          Dialer
+	Log           *slog.Logger
+	Addresses     func() []*nodev1.Address // defaults to the host's interfaces
+	MaxBackoff    time.Duration            // reconnect backoff cap, default 30s
+	StatsInterval time.Duration            // how often counters are collected, default 10s
 }
 
 // Agent applies the panel's desired state to Xray.
@@ -56,6 +58,8 @@ type Agent struct {
 	api     *xray.API
 	apiAddr string
 	xrayVer string
+	metrics metrics.Collector
+	statsCh chan struct{} // a batch was queued
 }
 
 // New opens the agent's state. Call Run to start.
@@ -69,6 +73,9 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.MaxBackoff == 0 {
 		cfg.MaxBackoff = 30 * time.Second
 	}
+	if cfg.StatsInterval == 0 {
+		cfg.StatsInterval = 10 * time.Second
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -76,7 +83,8 @@ func New(cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &Agent{cfg: cfg, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log)}
+	a := &Agent{cfg: cfg, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
+		statsCh: make(chan struct{}, 1)}
 	if a.cur, err = st.Load(); err != nil {
 		st.Close()
 		return nil, err
@@ -121,6 +129,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 	a.mu.Unlock()
+	go a.collectLoop(ctx)
 
 	backoff := min(time.Second, a.cfg.MaxBackoff)
 	for ctx.Err() == nil {
@@ -182,18 +191,56 @@ func (a *Agent) session(ctx context.Context) error {
 	}()
 	addrTick := time.NewTicker(5 * time.Minute)
 	defer addrTick.Stop()
+	resendTick := time.NewTicker(time.Minute)
+	defer resendTick.Stop()
+	var sentUpTo uint64 // highest seq sent in this session
+	sendStats := func() error {
+		batches, err := a.st.Pending(sentUpTo, 50)
+		if err != nil {
+			return err
+		}
+		for _, b := range batches {
+			if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Stats{Stats: b}}); err != nil {
+				return err
+			}
+			sentUpTo = b.Seq
+		}
+		return nil
+	}
+	if err := sendStats(); err != nil {
+		return err
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-errs:
 			return err
+		case <-a.statsCh:
+			if err := sendStats(); err != nil {
+				return err
+			}
+		case <-resendTick.C:
+			// Anything still queued after a minute was lost or rejected: send it again.
+			sentUpTo = 0
+			if err := sendStats(); err != nil {
+				return err
+			}
 		case <-addrTick.C:
 			msg := &nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Addresses{Addresses: &nodev1.Addresses{Addresses: a.cfg.Addresses()}}}
 			if err := conn.Send(msg); err != nil {
 				return err
 			}
 		case m := <-msgs:
+			if sa, ok := m.Msg.(*nodev1.PanelMessage_StatsAck); ok {
+				if err := a.st.AckStats(sa.StatsAck.Epoch, sa.StatsAck.Seq); err != nil {
+					return err
+				}
+				if err := sendStats(); err != nil {
+					return err
+				}
+				continue
+			}
 			ack := a.handle(ctx, m)
 			if ack == nil {
 				continue
@@ -350,6 +397,10 @@ func (a *Agent) restartLocked(ctx context.Context, st *state.State) error {
 	if err != nil {
 		return err
 	}
+	if a.api != nil && a.proc.Running() {
+		// Xray counters live in memory: collect them before the restart drops them.
+		a.collectLocked(ctx)
+	}
 	if err := a.proc.Apply(ctx, full); err != nil {
 		return err
 	}
@@ -425,4 +476,53 @@ func short(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+func (a *Agent) collectLoop(ctx context.Context) {
+	t := time.NewTicker(a.cfg.StatsInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.mu.Lock()
+			a.collectLocked(ctx)
+			a.mu.Unlock()
+		}
+	}
+}
+
+// collectLocked reads and resets Xray counters, samples host metrics and queues a batch.
+func (a *Agent) collectLocked(ctx context.Context) {
+	b := &nodev1.StatsBatch{Ts: time.Now().Unix(), Metrics: a.metrics.Sample()}
+	if a.api != nil && a.proc.Running() {
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		users, err := a.api.UserTrafficDeltas(cctx)
+		if err != nil {
+			a.log.Warn("cannot read user stats", "err", err)
+		}
+		for _, u := range users {
+			b.Users = append(b.Users, &nodev1.UserTraffic{Email: u.Email, Up: u.Uplink, Down: u.Downlink})
+		}
+		if b.NodeUp, b.NodeDown, err = a.api.InboundTrafficDeltas(cctx); err != nil {
+			a.log.Warn("cannot read inbound stats", "err", err)
+		}
+		online, err := a.api.OnlineUsers(cctx)
+		if err != nil {
+			a.log.Debug("cannot read online users", "err", err)
+		}
+		for _, o := range online {
+			b.Online = append(b.Online, &nodev1.OnlineUser{Email: o.Email, Ips: int32(o.IPs)})
+		}
+	}
+	if err := a.st.Enqueue(b); err != nil {
+		a.log.Error("cannot queue stats", "err", err)
+		return
+	}
+	select {
+	case a.statsCh <- struct{}{}:
+	default:
+	}
 }

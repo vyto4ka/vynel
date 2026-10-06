@@ -119,3 +119,13 @@ func normalizeTree(node any) any {
 
 // Expand substitutes ${VAR} placeholders in a string (tag and remark patterns).
 func Expand(pattern string, vals map[string]any) (string, error) { return substString(pattern, vals) }
+
+// ExpandTree substitutes placeholders in a copy of a decoded YAML/JSON tree.
+func ExpandTree(tree map[string]any, vals map[string]any) (map[string]any, error) {
+	out, err := substitute(deepCopy(tree), vals)
+	if err != nil {
+		return nil, err
+	}
+	m, _ := normalizeTree(out).(map[string]any)
+	return m, nil
+}

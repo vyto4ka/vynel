@@ -30,6 +30,7 @@ message NodeMessage {
     Hello hello = 1;
     Ack ack = 2;
     Addresses addresses = 3;
+    StatsBatch stats = 4;
   }
 }
 
@@ -40,6 +41,9 @@ message Hello {
   string os = 4;
   string arch = 5;
   repeated Address addresses = 6;
+  string caddy_version = 7;
+  // Host problems the panel should show: missing BBR, clock skew, no caddy binary...
+  repeated string warnings = 8;
 }
 
 message Address {
@@ -63,7 +67,47 @@ message PanelMessage {
   oneof msg {
     Snapshot snapshot = 1;
     Delta delta = 2;
+    StatsAck stats_ack = 3;
   }
+}
+
+// StatsBatch carries counters collected since the previous batch. Batches are queued on the
+// node and resent until acknowledged; (epoch, seq) makes ingestion idempotent.
+message StatsBatch {
+  string epoch = 1; // random id of the node's queue; changes when the node state is reset
+  uint64 seq = 2;
+  int64 ts = 3;
+  repeated UserTraffic users = 4;
+  int64 node_up = 5;
+  int64 node_down = 6;
+  repeated OnlineUser online = 7;
+  Metrics metrics = 8;
+}
+
+message UserTraffic {
+  string email = 1;
+  int64 up = 2;
+  int64 down = 3;
+}
+
+message OnlineUser {
+  string email = 1;
+  int32 ips = 2;
+}
+
+message Metrics {
+  double cpu = 1; // percent of all cores
+  uint64 mem_used = 2;
+  uint64 mem_total = 3;
+  double load1 = 4;
+  uint64 rx_bps = 5;
+  uint64 tx_bps = 6;
+  uint64 uptime = 7; // seconds
+}
+
+message StatsAck {
+  string epoch = 1;
+  uint64 seq = 2;
 }
 
 // Snapshot is the full desired state: Xray config without clients plus users per inbound.
@@ -72,6 +116,7 @@ message Snapshot {
   string hash = 2;
   bytes xray_config = 3;
   repeated InboundUsers inbounds = 4;
+  bytes caddy_config = 5; // Caddy JSON config; empty = Caddy not needed
 }
 
 message InboundUsers {

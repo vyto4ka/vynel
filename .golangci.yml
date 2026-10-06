@@ -18,6 +18,7 @@ linters:
         - (*github.com/vyto4ka/vpn/internal/node/state.Store).Close
         - (*github.com/vyto4ka/vpn/internal/panel/store.Store).Close
         - (net.Conn).Close
+        - (*os.File).Close
         - (net.Listener).Close
         - os.RemoveAll
         - fmt.Fprint

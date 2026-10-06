@@ -46,6 +46,13 @@ variables:
     default: 443
     validate: port
     description: Порт снаружи.
+  - name: DECOY_SITE
+    scope: node
+    source: generate
+    generator: path
+    options: [cloud, studio, docs]
+    default: cloud
+    description: Сайт-заглушка, который видит всё, что не является Reality-клиентом.
 
 xray_inbound: |
   {
@@ -78,7 +85,7 @@ xray_inbound: |
 # Used by the subscription service (stage 5).
 host:
   address: ${NODE_DOMAIN}
-  port: ${PORT}
+  port: ${INBOUND_PORT}
   security: reality
   sni: ${NODE_DOMAIN}
   fingerprint: firefox
@@ -90,7 +97,8 @@ host:
 caddy:
   role: selfsteal
   domain: ${NODE_DOMAIN}
-  listen: 127.0.0.1:${SELFSTEAL_PORT}
+  local_port: ${SELFSTEAL_PORT}
+  decoy: ${DECOY_SITE}
 
 node_requirements:
   ports: [443/tcp, 80/tcp]

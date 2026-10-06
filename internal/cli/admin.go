@@ -16,6 +16,7 @@ import (
 
 	"github.com/vyto4ka/vpn/internal/panel/service"
 	"github.com/vyto4ka/vpn/internal/panel/store"
+	"github.com/vyto4ka/vpn/internal/panel/subscription"
 	"github.com/vyto4ka/vpn/internal/xrayconf"
 )
 
@@ -54,7 +55,7 @@ func withService(fn func(ctx context.Context, s *service.Service, cmd *cobra.Com
 func adminCmd() *cobra.Command {
 	c := &cobra.Command{Use: "admin", Short: "Manage the panel from the command line (until the web UI exists)"}
 	c.PersistentFlags().StringVar(&adminDataDir, "data-dir", DefaultPanelDataDir, "panel data directory")
-	c.AddCommand(adminNodeCmd(), adminProfileCmd(), adminInboundCmd(), adminGroupCmd(), adminTemplateCmd(), adminUserCmd(), adminAuditCmd(), adminSettingCmd())
+	c.AddCommand(adminNodeCmd(), adminProfileCmd(), adminInboundCmd(), adminGroupCmd(), adminTemplateCmd(), adminUserCmd(), adminAuditCmd(), adminSettingCmd(), adminStatsCmd())
 	return c
 }
 
@@ -131,26 +132,44 @@ func adminNodeCmd() *cobra.Command {
 	_ = add.MarkFlagRequired("name")
 
 	list := &cobra.Command{
-		Use: "list", Short: "List nodes",
+		Use: "list", Short: "List nodes with live numbers",
 		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
-			nodes, err := s.Nodes(ctx)
+			nodes, err := s.NodeStatuses(ctx, nil)
 			if err != nil {
 				return err
 			}
 			var rows [][]string
-			for _, n := range nodes {
-				state := "pending"
+			for _, ns := range nodes {
+				n := ns.Node
+				var state string
 				switch {
 				case !n.Enabled:
 					state = "disabled"
-				case (n.Local || n.CertSerial != "") && n.AppliedHash != "" && n.AppliedHash == n.DesiredHash:
+				case !n.Local && n.CertSerial == "":
+					state = "pending"
+				case !ns.Connected:
+					state = "offline"
+				case n.AppliedHash != "" && n.AppliedHash == n.DesiredHash:
 					state = "in sync"
-				case n.Local || n.CertSerial != "":
-					state = "registered"
+				default:
+					state = "syncing"
 				}
-				rows = append(rows, []string{n.Code, xrayconf.CountryFlag(n.Country) + " " + n.Name, n.Domain, state, ts(n.LastSeenAt), n.XrayVersion, n.LastError})
+				cpu, mem, online := "—", "—", "—"
+				if m := ns.Metrics; m != nil {
+					cpu = fmt.Sprintf("%.0f%%", m.CPU)
+					if m.MemTotal > 0 {
+						mem = fmt.Sprintf("%.0f%%", 100*float64(m.MemUsed)/float64(m.MemTotal))
+					}
+					online = strconv.FormatInt(m.Online, 10)
+				}
+				problems := n.LastError
+				if len(n.Warnings) > 0 {
+					problems = strings.TrimSpace(problems + " " + strings.Join(n.Warnings, "; "))
+				}
+				rows = append(rows, []string{n.Code, xrayconf.CountryFlag(n.Country) + " " + n.Name, n.Domain, state, ts(n.LastSeenAt),
+					cpu, mem, online, gib(ns.TodayBytes), n.XrayVersion, problems})
 			}
-			table(cmd.OutOrStdout(), "CODE\tNAME\tDOMAIN\tSTATE\tLAST SEEN\tXRAY\tERROR", rows)
+			table(cmd.OutOrStdout(), "CODE\tNAME\tDOMAIN\tSTATE\tLAST SEEN\tCPU\tRAM\tONLINE\tTODAY\tXRAY\tPROBLEMS", rows)
 			return nil
 		}),
 	}
@@ -448,7 +467,41 @@ func adminInboundCmd() *cobra.Command {
 			return s.DetachInbound(ctx, service.ActorCLI, ni.ID)
 		}),
 	}
-	c.AddCommand(attach, list, show, set, detach)
+	var hostSets []string
+	host := &cobra.Command{
+		Use: "host TAG", Short: "Show or override the connection point (remark, address, port, sni, fingerprint, hidden)", Args: cobra.ExactArgs(1),
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+			ni, err := s.NodeInboundByTag(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			if len(hostSets) > 0 {
+				patch, err := parseSets(hostSets)
+				if err != nil {
+					return err
+				}
+				if v, ok := patch["hidden"]; ok {
+					patch["hidden"] = v == "true" || v == 1
+				}
+				if err := s.SetHostOverride(ctx, service.ActorCLI, ni.ID, patch); err != nil {
+					return err
+				}
+				if ni, err = s.NodeInboundByTag(ctx, args[0]); err != nil {
+					return err
+				}
+			}
+			h, err := s.HostFor(ctx, ni)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "remark   %s\naddress  %s:%d\nnetwork  %s/%s\nsni      %s\nfp       %s\nhidden   %v\noverride %v\n",
+				h.Remark, h.Address, h.Port, h.Network, h.Security, h.SNI, h.Fingerprint, h.Hidden, ni.Host)
+			return nil
+		}),
+	}
+	host.Flags().StringArrayVar(&hostSets, "set", nil, "FIELD=VALUE; empty value returns the field to automatic")
+
+	c.AddCommand(attach, list, show, set, detach, host)
 	return c
 }
 
@@ -733,19 +786,18 @@ func adminUserCmd() *cobra.Command {
 			if u.Status != store.StatusActive {
 				fmt.Fprintf(cmd.OutOrStdout(), "warning: user is %s, nodes will reject it\n", u.Status)
 			}
-			ls, err := s.UserLinks(ctx, u.ID, linkAddr)
+			hosts, err := s.UserHosts(ctx, u.ID)
 			if err != nil {
 				return err
 			}
-			if len(ls) == 0 {
+			if len(hosts) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "no inbounds: check the user's groups and `vpn admin group list`")
 			}
-			for _, l := range ls {
-				if l.URL == "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", l.Tag, l.Why)
-					continue
+			for _, h := range hosts {
+				if linkAddr != "" {
+					h.Address = linkAddr
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s:\n%s\n\n", l.Tag, l.URL)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s):\n%s\n\n", h.Tag, h.Remark, subscription.Link(h, u.UUID))
 			}
 			return nil
 		}),
@@ -753,8 +805,69 @@ func adminUserCmd() *cobra.Command {
 
 	links.Flags().StringVar(&linkAddr, "address", "", "server address to put in links instead of the node domain (e.g. its IP)")
 
-	c.AddCommand(add, list, extend, groupsCmd, reissue, links,
-		byName("show", "Show a user", func(_ context.Context, _ *service.Service, u *store.User) (*store.User, error) { return u, nil }),
+	var rmDevice int64
+	devices := &cobra.Command{
+		Use: "devices USERNAME", Short: "List HWID devices, or free one with --rm ID", Args: cobra.ExactArgs(1),
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+			u, err := s.UserByUsername(ctx, args[0])
+			if err != nil {
+				return fmt.Errorf("user %q: %w", args[0], err)
+			}
+			if rmDevice != 0 {
+				if err := s.DeleteDevice(ctx, service.ActorCLI, u.ID, rmDevice); err != nil {
+					return err
+				}
+			}
+			ds, err := s.Devices(ctx, u.ID)
+			if err != nil {
+				return err
+			}
+			var rows [][]string
+			for _, d := range ds {
+				last := d.LastSeen
+				rows = append(rows, []string{strconv.FormatInt(d.ID, 10), d.Model, d.Platform + " " + d.OSVersion, ts(&last), d.LastIP, d.UserAgent})
+			}
+			table(cmd.OutOrStdout(), "ID\tMODEL\tOS\tLAST SEEN\tIP\tAPP", rows)
+			return nil
+		}),
+	}
+	devices.Flags().Int64Var(&rmDevice, "rm", 0, "device id to remove")
+
+	c.AddCommand(add, list, extend, groupsCmd, reissue, links, devices,
+		&cobra.Command{
+			Use: "show USERNAME", Short: "Show a user with traffic per node and the subscription URL", Args: cobra.ExactArgs(1),
+			RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+				u, err := s.UserByUsername(ctx, args[0])
+				if err != nil {
+					return fmt.Errorf("user %q: %w", args[0], err)
+				}
+				w := cmd.OutOrStdout()
+				printUser(w, u)
+				online := "never"
+				if u.OnlineAt != nil {
+					online = ts(u.OnlineAt)
+				}
+				fmt.Fprintf(w, "online    %s\n", online)
+				if url, err := s.SubscriptionURL(ctx, u); err == nil {
+					fmt.Fprintf(w, "sub url   %s\n", url)
+				} else {
+					fmt.Fprintf(w, "sub url   — (%v)\n", err)
+				}
+				byNode, err := s.UserTrafficByNode(ctx, u.ID, 30)
+				if err != nil {
+					return err
+				}
+				if len(byNode) > 0 {
+					fmt.Fprintln(w, "\ntraffic per node, 30 days:")
+					var rows [][]string
+					for _, t := range byNode {
+						rows = append(rows, []string{t.Code, gib(t.Bytes)})
+					}
+					table(w, "NODE\tTRAFFIC", rows)
+				}
+				return nil
+			}),
+		},
 		byName("disable", "Disable a user", func(ctx context.Context, s *service.Service, u *store.User) (*store.User, error) {
 			return s.SetUserEnabled(ctx, service.ActorCLI, u.ID, false)
 		}),
@@ -769,6 +882,38 @@ func adminUserCmd() *cobra.Command {
 		}),
 	)
 	return c
+}
+
+func gib(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.2f GiB", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(b)/(1<<20))
+	}
+	return fmt.Sprintf("%d KiB", b>>10)
+}
+
+func adminStatsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use: "stats", Short: "Dashboard: users, online, traffic, top users",
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
+			o, err := s.Overview(ctx)
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			fmt.Fprintf(w, "users: %d active, %d limited, %d expired, %d disabled\nonline now: %d\ntraffic: %s today, %s last 30 days\n\ntop users (30 days):\n",
+				o.UsersByStatus[store.StatusActive], o.UsersByStatus[store.StatusLimited], o.UsersByStatus[store.StatusExpired], o.UsersByStatus[store.StatusDisabled],
+				o.OnlineNow, gib(o.TodayBytes), gib(o.MonthBytes))
+			var rows [][]string
+			for _, u := range o.TopUsers {
+				rows = append(rows, []string{u.Username, gib(u.Bytes)})
+			}
+			table(w, "USER\tTRAFFIC", rows)
+			return nil
+		}),
+	}
 }
 
 func printUser(w io.Writer, u *store.User) {

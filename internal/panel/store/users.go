@@ -259,19 +259,24 @@ type User struct {
 	CreatedBy         string
 	CreatedAt         int64
 	UpdatedAt         int64
+	SubLastAt         *int64
+	SubLastUA         string
 }
 
 const userCols = `id, username, uuid, sub_token, disabled, status, expire_at, traffic_limit_bytes, traffic_used_bytes, lifetime_used_bytes,
-	reset_strategy, last_reset_at, hwid_limit, client_type, template_id, telegram_id, external_id, note, online_at, created_by, created_at, updated_at`
+	reset_strategy, last_reset_at, hwid_limit, client_type, template_id, telegram_id, external_id, note, online_at, created_by, created_at, updated_at,
+	sub_last_at, sub_last_ua`
 
 func scanUser(sc interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
-	var expire, limit, reset, hwid, tpl, tg, online sql.NullInt64
+	var expire, limit, reset, hwid, tpl, tg, online, subAt sql.NullInt64
 	var ext sql.NullString
 	if err := sc.Scan(&u.ID, &u.Username, &u.UUID, &u.SubToken, &u.Disabled, &u.Status, &expire, &limit, &u.TrafficUsedBytes, &u.LifetimeUsedBytes,
-		&u.ResetStrategy, &reset, &hwid, &u.ClientType, &tpl, &tg, &ext, &u.Note, &online, &u.CreatedBy, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		&u.ResetStrategy, &reset, &hwid, &u.ClientType, &tpl, &tg, &ext, &u.Note, &online, &u.CreatedBy, &u.CreatedAt, &u.UpdatedAt,
+		&subAt, &u.SubLastUA); err != nil {
 		return nil, mapErr(err)
 	}
+	u.SubLastAt = ptrInt(subAt)
 	u.ExpireAt, u.TrafficLimitBytes, u.LastResetAt, u.HWIDLimit = ptrInt(expire), ptrInt(limit), ptrInt(reset), ptrInt(hwid)
 	u.TemplateID, u.TelegramID, u.OnlineAt, u.ExternalID = ptrInt(tpl), ptrInt(tg), ptrInt(online), ptrStr(ext)
 	return u, nil
@@ -310,6 +315,17 @@ func SetUserStatus(ctx context.Context, q DBTX, id int64, status string) error {
 // GetUser loads a user by id.
 func GetUser(ctx context.Context, q DBTX, id int64) (*User, error) {
 	return scanUser(q.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id=?`, id))
+}
+
+// GetUserBySubToken loads a user by subscription token.
+func GetUserBySubToken(ctx context.Context, q DBTX, token string) (*User, error) {
+	return scanUser(q.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE sub_token=?`, token))
+}
+
+// TouchSubscription records the last subscription fetch.
+func TouchSubscription(ctx context.Context, q DBTX, id, ts int64, ua string) error {
+	_, err := q.ExecContext(ctx, `UPDATE users SET sub_last_at=?, sub_last_ua=? WHERE id=?`, ts, ua, id)
+	return err
 }
 
 // GetUserByUsername loads a user by username.

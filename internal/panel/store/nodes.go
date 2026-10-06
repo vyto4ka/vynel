@@ -28,24 +28,29 @@ type Node struct {
 	Sort            int64
 	CreatedAt       int64
 	UpdatedAt       int64
+	StatsEpoch      string
+	StatsSeq        int64
+	Warnings        []string
+	CaddyVersion    string
 }
 
 const nodeCols = `id, name, code, country, domain, base_config_id, tags, local, enabled, cert_serial,
 	agent_version, xray_version, last_seen_at, desired_revision, desired_hash, applied_hash, last_error, sort,
-	created_at, updated_at`
+	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version`
 
 func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	n := &Node{}
 	var base, seen sql.NullInt64
-	var tags string
+	var tags, warnings string
 	err := sc.Scan(&n.ID, &n.Name, &n.Code, &n.Country, &n.Domain, &base, &tags, &n.Local, &n.Enabled, &n.CertSerial,
 		&n.AgentVersion, &n.XrayVersion, &seen, &n.DesiredRevision, &n.DesiredHash, &n.AppliedHash, &n.LastError, &n.Sort,
-		&n.CreatedAt, &n.UpdatedAt)
+		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion)
 	if err != nil {
 		return nil, mapErr(err)
 	}
 	n.BaseConfigID, n.LastSeenAt = ptrInt(base), ptrInt(seen)
 	_ = json.Unmarshal([]byte(tags), &n.Tags)
+	_ = json.Unmarshal([]byte(warnings), &n.Warnings)
 	return n, nil
 }
 
@@ -139,6 +144,14 @@ type NodeRuntime struct {
 func SetNodeRuntime(ctx context.Context, q DBTX, id int64, rt NodeRuntime) error {
 	return execOne(ctx, q, `UPDATE nodes SET agent_version=?, xray_version=?, applied_hash=?, last_error=?, last_seen_at=? WHERE id=?`,
 		rt.AgentVersion, rt.XrayVersion, rt.AppliedHash, rt.LastError, unix(), id)
+}
+
+// SetNodeFacts stores host facts reported in Hello.
+func SetNodeFacts(ctx context.Context, q DBTX, id int64, caddyVersion string, warnings []string) error {
+	if warnings == nil {
+		warnings = []string{}
+	}
+	return execOne(ctx, q, `UPDATE nodes SET caddy_version=?, warnings=? WHERE id=?`, caddyVersion, toJSON(warnings), id)
 }
 
 // TouchNode updates last_seen_at.

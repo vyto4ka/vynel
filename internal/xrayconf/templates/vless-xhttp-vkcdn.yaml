@@ -110,6 +110,7 @@ caddy:
   role: reverse_proxy_xhttp
   domain: ${ORIGIN_DOMAIN}
   upstream: 127.0.0.1:${XRAY_PORT}
+  path: ${UPLINK_PATH}
 
 node_requirements:
   ports: [443/tcp, 80/tcp]

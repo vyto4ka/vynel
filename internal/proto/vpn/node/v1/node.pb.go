@@ -70,7 +70,7 @@ func (x UserOp_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UserOp_Kind.Descriptor instead.
 func (UserOp_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{12, 0}
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{17, 0}
 }
 
 type JoinRequest struct {
@@ -200,6 +200,7 @@ type NodeMessage struct {
 	//	*NodeMessage_Hello
 	//	*NodeMessage_Ack
 	//	*NodeMessage_Addresses
+	//	*NodeMessage_Stats
 	Msg           isNodeMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -269,6 +270,15 @@ func (x *NodeMessage) GetAddresses() *Addresses {
 	return nil
 }
 
+func (x *NodeMessage) GetStats() *StatsBatch {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_Stats); ok {
+			return x.Stats
+		}
+	}
+	return nil
+}
+
 type isNodeMessage_Msg interface {
 	isNodeMessage_Msg()
 }
@@ -285,20 +295,29 @@ type NodeMessage_Addresses struct {
 	Addresses *Addresses `protobuf:"bytes,3,opt,name=addresses,proto3,oneof"`
 }
 
+type NodeMessage_Stats struct {
+	Stats *StatsBatch `protobuf:"bytes,4,opt,name=stats,proto3,oneof"`
+}
+
 func (*NodeMessage_Hello) isNodeMessage_Msg() {}
 
 func (*NodeMessage_Ack) isNodeMessage_Msg() {}
 
 func (*NodeMessage_Addresses) isNodeMessage_Msg() {}
 
+func (*NodeMessage_Stats) isNodeMessage_Msg() {}
+
 type Hello struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentVersion  string                 `protobuf:"bytes,1,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
-	XrayVersion   string                 `protobuf:"bytes,2,opt,name=xray_version,json=xrayVersion,proto3" json:"xray_version,omitempty"`
-	AppliedHash   string                 `protobuf:"bytes,3,opt,name=applied_hash,json=appliedHash,proto3" json:"applied_hash,omitempty"`
-	Os            string                 `protobuf:"bytes,4,opt,name=os,proto3" json:"os,omitempty"`
-	Arch          string                 `protobuf:"bytes,5,opt,name=arch,proto3" json:"arch,omitempty"`
-	Addresses     []*Address             `protobuf:"bytes,6,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	AgentVersion string                 `protobuf:"bytes,1,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
+	XrayVersion  string                 `protobuf:"bytes,2,opt,name=xray_version,json=xrayVersion,proto3" json:"xray_version,omitempty"`
+	AppliedHash  string                 `protobuf:"bytes,3,opt,name=applied_hash,json=appliedHash,proto3" json:"applied_hash,omitempty"`
+	Os           string                 `protobuf:"bytes,4,opt,name=os,proto3" json:"os,omitempty"`
+	Arch         string                 `protobuf:"bytes,5,opt,name=arch,proto3" json:"arch,omitempty"`
+	Addresses    []*Address             `protobuf:"bytes,6,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	CaddyVersion string                 `protobuf:"bytes,7,opt,name=caddy_version,json=caddyVersion,proto3" json:"caddy_version,omitempty"`
+	// Host problems the panel should show: missing BBR, clock skew, no caddy binary...
+	Warnings      []string `protobuf:"bytes,8,rep,name=warnings,proto3" json:"warnings,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -371,6 +390,20 @@ func (x *Hello) GetArch() string {
 func (x *Hello) GetAddresses() []*Address {
 	if x != nil {
 		return x.Addresses
+	}
+	return nil
+}
+
+func (x *Hello) GetCaddyVersion() string {
+	if x != nil {
+		return x.CaddyVersion
+	}
+	return ""
+}
+
+func (x *Hello) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
 	}
 	return nil
 }
@@ -546,6 +579,7 @@ type PanelMessage struct {
 	//
 	//	*PanelMessage_Snapshot
 	//	*PanelMessage_Delta
+	//	*PanelMessage_StatsAck
 	Msg           isPanelMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -606,6 +640,15 @@ func (x *PanelMessage) GetDelta() *Delta {
 	return nil
 }
 
+func (x *PanelMessage) GetStatsAck() *StatsAck {
+	if x != nil {
+		if x, ok := x.Msg.(*PanelMessage_StatsAck); ok {
+			return x.StatsAck
+		}
+	}
+	return nil
+}
+
 type isPanelMessage_Msg interface {
 	isPanelMessage_Msg()
 }
@@ -618,9 +661,373 @@ type PanelMessage_Delta struct {
 	Delta *Delta `protobuf:"bytes,2,opt,name=delta,proto3,oneof"`
 }
 
+type PanelMessage_StatsAck struct {
+	StatsAck *StatsAck `protobuf:"bytes,3,opt,name=stats_ack,json=statsAck,proto3,oneof"`
+}
+
 func (*PanelMessage_Snapshot) isPanelMessage_Msg() {}
 
 func (*PanelMessage_Delta) isPanelMessage_Msg() {}
+
+func (*PanelMessage_StatsAck) isPanelMessage_Msg() {}
+
+// StatsBatch carries counters collected since the previous batch. Batches are queued on the
+// node and resent until acknowledged; (epoch, seq) makes ingestion idempotent.
+type StatsBatch struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Epoch         string                 `protobuf:"bytes,1,opt,name=epoch,proto3" json:"epoch,omitempty"` // random id of the node's queue; changes when the node state is reset
+	Seq           uint64                 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
+	Ts            int64                  `protobuf:"varint,3,opt,name=ts,proto3" json:"ts,omitempty"`
+	Users         []*UserTraffic         `protobuf:"bytes,4,rep,name=users,proto3" json:"users,omitempty"`
+	NodeUp        int64                  `protobuf:"varint,5,opt,name=node_up,json=nodeUp,proto3" json:"node_up,omitempty"`
+	NodeDown      int64                  `protobuf:"varint,6,opt,name=node_down,json=nodeDown,proto3" json:"node_down,omitempty"`
+	Online        []*OnlineUser          `protobuf:"bytes,7,rep,name=online,proto3" json:"online,omitempty"`
+	Metrics       *Metrics               `protobuf:"bytes,8,opt,name=metrics,proto3" json:"metrics,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatsBatch) Reset() {
+	*x = StatsBatch{}
+	mi := &file_vpn_node_v1_node_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatsBatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatsBatch) ProtoMessage() {}
+
+func (x *StatsBatch) ProtoReflect() protoreflect.Message {
+	mi := &file_vpn_node_v1_node_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatsBatch.ProtoReflect.Descriptor instead.
+func (*StatsBatch) Descriptor() ([]byte, []int) {
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *StatsBatch) GetEpoch() string {
+	if x != nil {
+		return x.Epoch
+	}
+	return ""
+}
+
+func (x *StatsBatch) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
+
+func (x *StatsBatch) GetTs() int64 {
+	if x != nil {
+		return x.Ts
+	}
+	return 0
+}
+
+func (x *StatsBatch) GetUsers() []*UserTraffic {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
+func (x *StatsBatch) GetNodeUp() int64 {
+	if x != nil {
+		return x.NodeUp
+	}
+	return 0
+}
+
+func (x *StatsBatch) GetNodeDown() int64 {
+	if x != nil {
+		return x.NodeDown
+	}
+	return 0
+}
+
+func (x *StatsBatch) GetOnline() []*OnlineUser {
+	if x != nil {
+		return x.Online
+	}
+	return nil
+}
+
+func (x *StatsBatch) GetMetrics() *Metrics {
+	if x != nil {
+		return x.Metrics
+	}
+	return nil
+}
+
+type UserTraffic struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	Up            int64                  `protobuf:"varint,2,opt,name=up,proto3" json:"up,omitempty"`
+	Down          int64                  `protobuf:"varint,3,opt,name=down,proto3" json:"down,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserTraffic) Reset() {
+	*x = UserTraffic{}
+	mi := &file_vpn_node_v1_node_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserTraffic) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserTraffic) ProtoMessage() {}
+
+func (x *UserTraffic) ProtoReflect() protoreflect.Message {
+	mi := &file_vpn_node_v1_node_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserTraffic.ProtoReflect.Descriptor instead.
+func (*UserTraffic) Descriptor() ([]byte, []int) {
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UserTraffic) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *UserTraffic) GetUp() int64 {
+	if x != nil {
+		return x.Up
+	}
+	return 0
+}
+
+func (x *UserTraffic) GetDown() int64 {
+	if x != nil {
+		return x.Down
+	}
+	return 0
+}
+
+type OnlineUser struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	Ips           int32                  `protobuf:"varint,2,opt,name=ips,proto3" json:"ips,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OnlineUser) Reset() {
+	*x = OnlineUser{}
+	mi := &file_vpn_node_v1_node_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OnlineUser) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OnlineUser) ProtoMessage() {}
+
+func (x *OnlineUser) ProtoReflect() protoreflect.Message {
+	mi := &file_vpn_node_v1_node_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OnlineUser.ProtoReflect.Descriptor instead.
+func (*OnlineUser) Descriptor() ([]byte, []int) {
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *OnlineUser) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *OnlineUser) GetIps() int32 {
+	if x != nil {
+		return x.Ips
+	}
+	return 0
+}
+
+type Metrics struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cpu           float64                `protobuf:"fixed64,1,opt,name=cpu,proto3" json:"cpu,omitempty"` // percent of all cores
+	MemUsed       uint64                 `protobuf:"varint,2,opt,name=mem_used,json=memUsed,proto3" json:"mem_used,omitempty"`
+	MemTotal      uint64                 `protobuf:"varint,3,opt,name=mem_total,json=memTotal,proto3" json:"mem_total,omitempty"`
+	Load1         float64                `protobuf:"fixed64,4,opt,name=load1,proto3" json:"load1,omitempty"`
+	RxBps         uint64                 `protobuf:"varint,5,opt,name=rx_bps,json=rxBps,proto3" json:"rx_bps,omitempty"`
+	TxBps         uint64                 `protobuf:"varint,6,opt,name=tx_bps,json=txBps,proto3" json:"tx_bps,omitempty"`
+	Uptime        uint64                 `protobuf:"varint,7,opt,name=uptime,proto3" json:"uptime,omitempty"` // seconds
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Metrics) Reset() {
+	*x = Metrics{}
+	mi := &file_vpn_node_v1_node_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Metrics) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Metrics) ProtoMessage() {}
+
+func (x *Metrics) ProtoReflect() protoreflect.Message {
+	mi := &file_vpn_node_v1_node_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Metrics.ProtoReflect.Descriptor instead.
+func (*Metrics) Descriptor() ([]byte, []int) {
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *Metrics) GetCpu() float64 {
+	if x != nil {
+		return x.Cpu
+	}
+	return 0
+}
+
+func (x *Metrics) GetMemUsed() uint64 {
+	if x != nil {
+		return x.MemUsed
+	}
+	return 0
+}
+
+func (x *Metrics) GetMemTotal() uint64 {
+	if x != nil {
+		return x.MemTotal
+	}
+	return 0
+}
+
+func (x *Metrics) GetLoad1() float64 {
+	if x != nil {
+		return x.Load1
+	}
+	return 0
+}
+
+func (x *Metrics) GetRxBps() uint64 {
+	if x != nil {
+		return x.RxBps
+	}
+	return 0
+}
+
+func (x *Metrics) GetTxBps() uint64 {
+	if x != nil {
+		return x.TxBps
+	}
+	return 0
+}
+
+func (x *Metrics) GetUptime() uint64 {
+	if x != nil {
+		return x.Uptime
+	}
+	return 0
+}
+
+type StatsAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Epoch         string                 `protobuf:"bytes,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	Seq           uint64                 `protobuf:"varint,2,opt,name=seq,proto3" json:"seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StatsAck) Reset() {
+	*x = StatsAck{}
+	mi := &file_vpn_node_v1_node_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatsAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatsAck) ProtoMessage() {}
+
+func (x *StatsAck) ProtoReflect() protoreflect.Message {
+	mi := &file_vpn_node_v1_node_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatsAck.ProtoReflect.Descriptor instead.
+func (*StatsAck) Descriptor() ([]byte, []int) {
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *StatsAck) GetEpoch() string {
+	if x != nil {
+		return x.Epoch
+	}
+	return ""
+}
+
+func (x *StatsAck) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
+}
 
 // Snapshot is the full desired state: Xray config without clients plus users per inbound.
 type Snapshot struct {
@@ -629,13 +1036,14 @@ type Snapshot struct {
 	Hash          string                 `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
 	XrayConfig    []byte                 `protobuf:"bytes,3,opt,name=xray_config,json=xrayConfig,proto3" json:"xray_config,omitempty"`
 	Inbounds      []*InboundUsers        `protobuf:"bytes,4,rep,name=inbounds,proto3" json:"inbounds,omitempty"`
+	CaddyConfig   []byte                 `protobuf:"bytes,5,opt,name=caddy_config,json=caddyConfig,proto3" json:"caddy_config,omitempty"` // Caddy JSON config; empty = Caddy not needed
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Snapshot) Reset() {
 	*x = Snapshot{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[8]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -647,7 +1055,7 @@ func (x *Snapshot) String() string {
 func (*Snapshot) ProtoMessage() {}
 
 func (x *Snapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[8]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -660,7 +1068,7 @@ func (x *Snapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Snapshot.ProtoReflect.Descriptor instead.
 func (*Snapshot) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{8}
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *Snapshot) GetRevision() int64 {
@@ -691,6 +1099,13 @@ func (x *Snapshot) GetInbounds() []*InboundUsers {
 	return nil
 }
 
+func (x *Snapshot) GetCaddyConfig() []byte {
+	if x != nil {
+		return x.CaddyConfig
+	}
+	return nil
+}
+
 type InboundUsers struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tag           string                 `protobuf:"bytes,1,opt,name=tag,proto3" json:"tag,omitempty"`
@@ -703,7 +1118,7 @@ type InboundUsers struct {
 
 func (x *InboundUsers) Reset() {
 	*x = InboundUsers{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[9]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -715,7 +1130,7 @@ func (x *InboundUsers) String() string {
 func (*InboundUsers) ProtoMessage() {}
 
 func (x *InboundUsers) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[9]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -728,7 +1143,7 @@ func (x *InboundUsers) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundUsers.ProtoReflect.Descriptor instead.
 func (*InboundUsers) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{9}
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *InboundUsers) GetTag() string {
@@ -769,7 +1184,7 @@ type User struct {
 
 func (x *User) Reset() {
 	*x = User{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[10]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -781,7 +1196,7 @@ func (x *User) String() string {
 func (*User) ProtoMessage() {}
 
 func (x *User) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[10]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -794,7 +1209,7 @@ func (x *User) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use User.ProtoReflect.Descriptor instead.
 func (*User) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{10}
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *User) GetEmail() string {
@@ -824,7 +1239,7 @@ type Delta struct {
 
 func (x *Delta) Reset() {
 	*x = Delta{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[11]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -836,7 +1251,7 @@ func (x *Delta) String() string {
 func (*Delta) ProtoMessage() {}
 
 func (x *Delta) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[11]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -849,7 +1264,7 @@ func (x *Delta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Delta.ProtoReflect.Descriptor instead.
 func (*Delta) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{11}
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Delta) GetRevision() int64 {
@@ -892,7 +1307,7 @@ type UserOp struct {
 
 func (x *UserOp) Reset() {
 	*x = UserOp{}
-	mi := &file_vpn_node_v1_node_proto_msgTypes[12]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -904,7 +1319,7 @@ func (x *UserOp) String() string {
 func (*UserOp) ProtoMessage() {}
 
 func (x *UserOp) ProtoReflect() protoreflect.Message {
-	mi := &file_vpn_node_v1_node_proto_msgTypes[12]
+	mi := &file_vpn_node_v1_node_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -917,7 +1332,7 @@ func (x *UserOp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserOp.ProtoReflect.Descriptor instead.
 func (*UserOp) Descriptor() ([]byte, []int) {
-	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{12}
+	return file_vpn_node_v1_node_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UserOp) GetKind() UserOp_Kind {
@@ -960,19 +1375,22 @@ const file_vpn_node_v1_node_proto_rawDesc = "" +
 	"\bcert_der\x18\x01 \x01(\fR\acertDer\x12\x15\n" +
 	"\x06ca_der\x18\x02 \x01(\fR\x05caDer\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\x03R\x06nodeId\x12\x1b\n" +
-	"\tnode_code\x18\x04 \x01(\tR\bnodeCode\"\x9e\x01\n" +
+	"\tnode_code\x18\x04 \x01(\tR\bnodeCode\"\xcf\x01\n" +
 	"\vNodeMessage\x12*\n" +
 	"\x05hello\x18\x01 \x01(\v2\x12.vpn.node.v1.HelloH\x00R\x05hello\x12$\n" +
 	"\x03ack\x18\x02 \x01(\v2\x10.vpn.node.v1.AckH\x00R\x03ack\x126\n" +
-	"\taddresses\x18\x03 \x01(\v2\x16.vpn.node.v1.AddressesH\x00R\taddressesB\x05\n" +
-	"\x03msg\"\xca\x01\n" +
+	"\taddresses\x18\x03 \x01(\v2\x16.vpn.node.v1.AddressesH\x00R\taddresses\x12/\n" +
+	"\x05stats\x18\x04 \x01(\v2\x17.vpn.node.v1.StatsBatchH\x00R\x05statsB\x05\n" +
+	"\x03msg\"\x8b\x02\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12!\n" +
 	"\fxray_version\x18\x02 \x01(\tR\vxrayVersion\x12!\n" +
 	"\fapplied_hash\x18\x03 \x01(\tR\vappliedHash\x12\x0e\n" +
 	"\x02os\x18\x04 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x05 \x01(\tR\x04arch\x122\n" +
-	"\taddresses\x18\x06 \x03(\v2\x14.vpn.node.v1.AddressR\taddresses\"Q\n" +
+	"\taddresses\x18\x06 \x03(\v2\x14.vpn.node.v1.AddressR\taddresses\x12#\n" +
+	"\rcaddy_version\x18\a \x01(\tR\fcaddyVersion\x12\x1a\n" +
+	"\bwarnings\x18\b \x03(\tR\bwarnings\"Q\n" +
 	"\aAddress\x12\x0e\n" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x18\n" +
@@ -982,17 +1400,48 @@ const file_vpn_node_v1_node_proto_rawDesc = "" +
 	"\x03Ack\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"v\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xac\x01\n" +
 	"\fPanelMessage\x123\n" +
 	"\bsnapshot\x18\x01 \x01(\v2\x15.vpn.node.v1.SnapshotH\x00R\bsnapshot\x12*\n" +
-	"\x05delta\x18\x02 \x01(\v2\x12.vpn.node.v1.DeltaH\x00R\x05deltaB\x05\n" +
-	"\x03msg\"\x92\x01\n" +
+	"\x05delta\x18\x02 \x01(\v2\x12.vpn.node.v1.DeltaH\x00R\x05delta\x124\n" +
+	"\tstats_ack\x18\x03 \x01(\v2\x15.vpn.node.v1.StatsAckH\x00R\bstatsAckB\x05\n" +
+	"\x03msg\"\x8b\x02\n" +
+	"\n" +
+	"StatsBatch\x12\x14\n" +
+	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\x12\x0e\n" +
+	"\x02ts\x18\x03 \x01(\x03R\x02ts\x12.\n" +
+	"\x05users\x18\x04 \x03(\v2\x18.vpn.node.v1.UserTrafficR\x05users\x12\x17\n" +
+	"\anode_up\x18\x05 \x01(\x03R\x06nodeUp\x12\x1b\n" +
+	"\tnode_down\x18\x06 \x01(\x03R\bnodeDown\x12/\n" +
+	"\x06online\x18\a \x03(\v2\x17.vpn.node.v1.OnlineUserR\x06online\x12.\n" +
+	"\ametrics\x18\b \x01(\v2\x14.vpn.node.v1.MetricsR\ametrics\"G\n" +
+	"\vUserTraffic\x12\x14\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12\x0e\n" +
+	"\x02up\x18\x02 \x01(\x03R\x02up\x12\x12\n" +
+	"\x04down\x18\x03 \x01(\x03R\x04down\"4\n" +
+	"\n" +
+	"OnlineUser\x12\x14\n" +
+	"\x05email\x18\x01 \x01(\tR\x05email\x12\x10\n" +
+	"\x03ips\x18\x02 \x01(\x05R\x03ips\"\xaf\x01\n" +
+	"\aMetrics\x12\x10\n" +
+	"\x03cpu\x18\x01 \x01(\x01R\x03cpu\x12\x19\n" +
+	"\bmem_used\x18\x02 \x01(\x04R\amemUsed\x12\x1b\n" +
+	"\tmem_total\x18\x03 \x01(\x04R\bmemTotal\x12\x14\n" +
+	"\x05load1\x18\x04 \x01(\x01R\x05load1\x12\x15\n" +
+	"\x06rx_bps\x18\x05 \x01(\x04R\x05rxBps\x12\x15\n" +
+	"\x06tx_bps\x18\x06 \x01(\x04R\x05txBps\x12\x16\n" +
+	"\x06uptime\x18\a \x01(\x04R\x06uptime\"2\n" +
+	"\bStatsAck\x12\x14\n" +
+	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x10\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\xb5\x01\n" +
 	"\bSnapshot\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x1f\n" +
 	"\vxray_config\x18\x03 \x01(\fR\n" +
 	"xrayConfig\x125\n" +
-	"\binbounds\x18\x04 \x03(\v2\x19.vpn.node.v1.InboundUsersR\binbounds\"y\n" +
+	"\binbounds\x18\x04 \x03(\v2\x19.vpn.node.v1.InboundUsersR\binbounds\x12!\n" +
+	"\fcaddy_config\x18\x05 \x01(\fR\vcaddyConfig\"y\n" +
 	"\fInboundUsers\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x1a\n" +
 	"\bprotocol\x18\x02 \x01(\tR\bprotocol\x12\x12\n" +
@@ -1032,7 +1481,7 @@ func file_vpn_node_v1_node_proto_rawDescGZIP() []byte {
 }
 
 var file_vpn_node_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vpn_node_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_vpn_node_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_vpn_node_v1_node_proto_goTypes = []any{
 	(UserOp_Kind)(0),     // 0: vpn.node.v1.UserOp.Kind
 	(*JoinRequest)(nil),  // 1: vpn.node.v1.JoinRequest
@@ -1043,34 +1492,44 @@ var file_vpn_node_v1_node_proto_goTypes = []any{
 	(*Addresses)(nil),    // 6: vpn.node.v1.Addresses
 	(*Ack)(nil),          // 7: vpn.node.v1.Ack
 	(*PanelMessage)(nil), // 8: vpn.node.v1.PanelMessage
-	(*Snapshot)(nil),     // 9: vpn.node.v1.Snapshot
-	(*InboundUsers)(nil), // 10: vpn.node.v1.InboundUsers
-	(*User)(nil),         // 11: vpn.node.v1.User
-	(*Delta)(nil),        // 12: vpn.node.v1.Delta
-	(*UserOp)(nil),       // 13: vpn.node.v1.UserOp
+	(*StatsBatch)(nil),   // 9: vpn.node.v1.StatsBatch
+	(*UserTraffic)(nil),  // 10: vpn.node.v1.UserTraffic
+	(*OnlineUser)(nil),   // 11: vpn.node.v1.OnlineUser
+	(*Metrics)(nil),      // 12: vpn.node.v1.Metrics
+	(*StatsAck)(nil),     // 13: vpn.node.v1.StatsAck
+	(*Snapshot)(nil),     // 14: vpn.node.v1.Snapshot
+	(*InboundUsers)(nil), // 15: vpn.node.v1.InboundUsers
+	(*User)(nil),         // 16: vpn.node.v1.User
+	(*Delta)(nil),        // 17: vpn.node.v1.Delta
+	(*UserOp)(nil),       // 18: vpn.node.v1.UserOp
 }
 var file_vpn_node_v1_node_proto_depIdxs = []int32{
 	4,  // 0: vpn.node.v1.NodeMessage.hello:type_name -> vpn.node.v1.Hello
 	7,  // 1: vpn.node.v1.NodeMessage.ack:type_name -> vpn.node.v1.Ack
 	6,  // 2: vpn.node.v1.NodeMessage.addresses:type_name -> vpn.node.v1.Addresses
-	5,  // 3: vpn.node.v1.Hello.addresses:type_name -> vpn.node.v1.Address
-	5,  // 4: vpn.node.v1.Addresses.addresses:type_name -> vpn.node.v1.Address
-	9,  // 5: vpn.node.v1.PanelMessage.snapshot:type_name -> vpn.node.v1.Snapshot
-	12, // 6: vpn.node.v1.PanelMessage.delta:type_name -> vpn.node.v1.Delta
-	10, // 7: vpn.node.v1.Snapshot.inbounds:type_name -> vpn.node.v1.InboundUsers
-	11, // 8: vpn.node.v1.InboundUsers.users:type_name -> vpn.node.v1.User
-	13, // 9: vpn.node.v1.Delta.ops:type_name -> vpn.node.v1.UserOp
-	0,  // 10: vpn.node.v1.UserOp.kind:type_name -> vpn.node.v1.UserOp.Kind
-	11, // 11: vpn.node.v1.UserOp.user:type_name -> vpn.node.v1.User
-	1,  // 12: vpn.node.v1.NodeGateway.Join:input_type -> vpn.node.v1.JoinRequest
-	3,  // 13: vpn.node.v1.NodeGateway.Connect:input_type -> vpn.node.v1.NodeMessage
-	2,  // 14: vpn.node.v1.NodeGateway.Join:output_type -> vpn.node.v1.JoinResponse
-	8,  // 15: vpn.node.v1.NodeGateway.Connect:output_type -> vpn.node.v1.PanelMessage
-	14, // [14:16] is the sub-list for method output_type
-	12, // [12:14] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	9,  // 3: vpn.node.v1.NodeMessage.stats:type_name -> vpn.node.v1.StatsBatch
+	5,  // 4: vpn.node.v1.Hello.addresses:type_name -> vpn.node.v1.Address
+	5,  // 5: vpn.node.v1.Addresses.addresses:type_name -> vpn.node.v1.Address
+	14, // 6: vpn.node.v1.PanelMessage.snapshot:type_name -> vpn.node.v1.Snapshot
+	17, // 7: vpn.node.v1.PanelMessage.delta:type_name -> vpn.node.v1.Delta
+	13, // 8: vpn.node.v1.PanelMessage.stats_ack:type_name -> vpn.node.v1.StatsAck
+	10, // 9: vpn.node.v1.StatsBatch.users:type_name -> vpn.node.v1.UserTraffic
+	11, // 10: vpn.node.v1.StatsBatch.online:type_name -> vpn.node.v1.OnlineUser
+	12, // 11: vpn.node.v1.StatsBatch.metrics:type_name -> vpn.node.v1.Metrics
+	15, // 12: vpn.node.v1.Snapshot.inbounds:type_name -> vpn.node.v1.InboundUsers
+	16, // 13: vpn.node.v1.InboundUsers.users:type_name -> vpn.node.v1.User
+	18, // 14: vpn.node.v1.Delta.ops:type_name -> vpn.node.v1.UserOp
+	0,  // 15: vpn.node.v1.UserOp.kind:type_name -> vpn.node.v1.UserOp.Kind
+	16, // 16: vpn.node.v1.UserOp.user:type_name -> vpn.node.v1.User
+	1,  // 17: vpn.node.v1.NodeGateway.Join:input_type -> vpn.node.v1.JoinRequest
+	3,  // 18: vpn.node.v1.NodeGateway.Connect:input_type -> vpn.node.v1.NodeMessage
+	2,  // 19: vpn.node.v1.NodeGateway.Join:output_type -> vpn.node.v1.JoinResponse
+	8,  // 20: vpn.node.v1.NodeGateway.Connect:output_type -> vpn.node.v1.PanelMessage
+	19, // [19:21] is the sub-list for method output_type
+	17, // [17:19] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vpn_node_v1_node_proto_init() }
@@ -1082,10 +1541,12 @@ func file_vpn_node_v1_node_proto_init() {
 		(*NodeMessage_Hello)(nil),
 		(*NodeMessage_Ack)(nil),
 		(*NodeMessage_Addresses)(nil),
+		(*NodeMessage_Stats)(nil),
 	}
 	file_vpn_node_v1_node_proto_msgTypes[7].OneofWrappers = []any{
 		(*PanelMessage_Snapshot)(nil),
 		(*PanelMessage_Delta)(nil),
+		(*PanelMessage_StatsAck)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1093,7 +1554,7 @@ func file_vpn_node_v1_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vpn_node_v1_node_proto_rawDesc), len(file_vpn_node_v1_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
