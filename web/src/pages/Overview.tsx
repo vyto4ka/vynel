@@ -43,7 +43,7 @@ export function Overview() {
         <div className="card">
           <div className="card-head"><h3>Ноды</h3><a href="#/nodes" className="small">все →</a></div>
           {data.nodes.length === 0 ? <Empty>Нод пока нет</Empty> : (
-            <table className="table">
+            <div className="table-wrap"><table className="table">
               <tbody>
                 {data.nodes.map((n) => {
                   const st = nodeStateInfo[n.state] || { label: n.state, color: '' }
@@ -51,13 +51,13 @@ export function Overview() {
                     <tr key={n.id} className="click" onClick={() => (location.hash = '#/nodes')}>
                       <td className="nowrap"><span style={{ fontSize: 18 }}>{n.flag}</span> {n.name} <span className="muted small">{n.code}</span></td>
                       <td><Badge color={st.color} dot>{st.label}</Badge></td>
-                      <td className="nowrap text-2">{n.metrics ? `${n.metrics.online} онлайн` : ''}</td>
+                      <td className="nowrap text-2 small">{n.metrics ? `${n.metrics.online} онлайн` : ''}</td>
                       <td className="nowrap text-2">{bytes(n.todayBytes)}</td>
                     </tr>
                   )
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
         <div className="card">

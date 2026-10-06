@@ -172,7 +172,7 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .card-head h3 { margin: 0; font-size: 15px; font-weight: 650; }
 .card-sub { color: var(--muted); font-size: 12.5px; }
 .cards { display: grid; gap: 16px; }
-.cards.cols { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.cards.cols { grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr)); }
 .section-gap { margin-top: 18px; }
 
 .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
