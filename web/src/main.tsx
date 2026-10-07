@@ -13,6 +13,7 @@ import { Profiles } from './pages/Profiles'
 import { Settings } from './pages/Settings'
 import { Subscription } from './pages/Subscription'
 import { Audit } from './pages/Audit'
+import { Telegram } from './pages/Telegram'
 import { Account } from './pages/Account'
 
 type Page = { id: string; title: string; icon: string; el: () => ReactElement }
@@ -39,6 +40,7 @@ const sections: { title: string; pages: Page[] }[] = [
     title: 'Система',
     pages: [
       { id: 'settings', title: 'Настройки', icon: 'settings', el: () => <Settings /> },
+      { id: 'telegram', title: 'Telegram', icon: 'telegram', el: () => <Telegram /> },
       { id: 'audit', title: 'Журнал', icon: 'audit', el: () => <Audit /> },
       { id: 'account', title: 'Аккаунт', icon: 'account', el: () => <Account /> },
     ],
@@ -139,16 +141,28 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
 
 function App() {
   const [session, setSession] = useState<{ login: string; version: string } | null | undefined>(undefined)
+  const [magicError, setMagicError] = useState('')
   const check = useCallback(() => {
     get('session').then(setSession, () => setSession(null))
   }, [])
   useEffect(() => {
     setUnauthorizedHandler(() => setSession(null))
+    // Одноразовая ссылка из Telegram-бота: токен во фрагменте адреса (#/magic/…). Сразу убрать его
+    // из адресной строки и истории, затем обменять на сессию.
+    const m = location.hash.match(/^#\/magic\/([A-Za-z0-9_-]+)/)
+    if (m) {
+      history.replaceState(null, '', location.pathname + '#/overview')
+      post('login/magic', { token: m[1] }).then(check, (e) => {
+        setMagicError(e.message)
+        check()
+      })
+      return
+    }
     check()
   }, [check])
 
   if (session === undefined) return null
-  if (session === null) return <Login onLogin={check} />
+  if (session === null) return <Login onLogin={check} error={magicError} />
   return (
     <Shell login={session.login} version={session.version}
       onLogout={() => post('logout').finally(() => setSession(null))} />

@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/web"
 )
@@ -30,7 +31,8 @@ type Config struct {
 	Connected     func(int64) bool // live node sessions; nil = guess from last_seen
 	Version       string
 	Log           *slog.Logger
-	UI            fs.FS // built UI; nil = web.Dist
+	UI            fs.FS    // built UI; nil = web.Dist
+	Bot           *bot.Bot // Telegram bot (status, backups); nil in tests
 }
 
 // Server is the web panel.

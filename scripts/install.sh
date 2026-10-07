@@ -25,7 +25,7 @@ PANEL_UNIT=/etc/systemd/system/vynel.service
 NODE_UNIT=/etc/systemd/system/vynel-node.service
 
 MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
-ADMIN_LOGIN="admin" TOKEN="" ASSUME_YES=0 PURGE=0 WIZARD=0
+ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -55,6 +55,8 @@ Options:
   --gateway-listen ADDR  port for additional nodes (default :9443; 127.0.0.1:9443 = none)
   --admin-login LOGIN    web panel login (default admin; the password is generated)
   --token TOKEN          node: join token from the panel
+  --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
+  --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz)
   --ref REF              git branch whose release to install (default $REF)
   --purge                uninstall: also delete data and binaries
   --yes                  do not ask questions
@@ -72,6 +74,8 @@ while [[ $# -gt 0 ]]; do
     --ip) PUBLIC_IP="${2:-}"; shift 2 ;;
     --gateway-listen) GATEWAY_LISTEN="${2:-}"; shift 2 ;;
     --admin-login) ADMIN_LOGIN="${2:-}"; shift 2 ;;
+    --bot-token) BOT_TOKEN="${2:-}"; shift 2 ;;
+    --restore) RESTORE="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
     --ref) REF="${2:-}"; shift 2 ;;
     --yes|-y) ASSUME_YES=1; shift ;;
@@ -531,6 +535,65 @@ web_admin() {
   WEB_PASSWORD="$(awk '$1=="password" && NF==2 {print $2}' <<<"$out")"
 }
 
+# ---- Telegram bot and restore (aio, panel) ----
+
+ask_bot_and_restore() {
+  echo "  Telegram-бот: пользователи из чата, вход в панель без пароля, ночные бэкапы, сообщения о нодах."
+  ask BOT_TOKEN "Токен бота от @BotFather (Enter — настроить потом)" "$BOT_TOKEN"
+  if [[ -z "$RESTORE" && ! -f "$DATA/panel.db" ]] && ask_yes "Восстановить пользователей и ноды из бэкапа?" n; then
+    ask RESTORE "Путь к файлу бэкапа (.tar.gz)" ""
+  fi
+}
+
+# restore_backup: before the panel is configured, so setup adapts the restored data to this server.
+RESTORED=""
+restore_backup() {
+  [[ -n "$RESTORE" ]] || return 0
+  [[ -f "$RESTORE" ]] || die "backup file $RESTORE not found"
+  info "restoring from $RESTORE"
+  systemctl stop vynel 2>/dev/null || true
+  RESTORED="$(vynel restore --data-dir "$DATA" --yes "$RESTORE" | head -1)"
+  green "  $RESTORED"
+}
+
+# setup_bot: stores the token and makes a bind code -> BOT_CODE BOT_LINK
+BOT_CODE="" BOT_LINK=""
+setup_bot() {
+  if [[ -n "$BOT_TOKEN" ]]; then
+    admin bot token "$BOT_TOKEN" >/dev/null || { red "  the bot token was not accepted; set it later in the panel (Telegram)"; return 0; }
+  fi
+  admin bot 2>/dev/null | grep -q "^token    set" || return 0
+  admin bot 2>/dev/null | grep -q "^admin " && return 0 # already bound (update or restore)
+  BOT_CODE="$(admin bot code | awk '$1=="code" {print $2}')"
+  local tok user
+  tok="${BOT_TOKEN}"
+  if [[ -n "$tok" ]]; then
+    user="$(curl -fsS --max-time 10 "https://api.telegram.org/bot${tok}/getMe" 2>/dev/null | grep -o '"username":"[^"]*"' | cut -d'"' -f4 || true)"
+    [[ -n "$user" ]] && BOT_LINK="https://t.me/${user}?start=${BOT_CODE}"
+  fi
+}
+
+print_bot_block() {
+  if [[ -n "$BOT_CODE" ]]; then
+    pink "  Telegram-бот"
+    if [[ -n "$BOT_LINK" ]]; then
+      line "  привязать себя" "$BOT_LINK"
+    fi
+    line "  или отправьте боту" "/start $BOT_CODE"
+    echo "  Код действует 15 минут; новый: vynel admin bot code (или в панели: Telegram)."
+    echo
+  elif ! admin bot 2>/dev/null | grep -q "^token    set"; then
+    echo "  Telegram-бот не настроен: панель → «Telegram» (токен от @BotFather)."
+    echo
+  fi
+  if [[ -n "$RESTORED" ]]; then
+    pink "  Восстановлено из бэкапа"
+    echo "  $RESTORED"
+    echo "  Если у панели новый IP, на каждой ноде: vynel node set-panel ${PUBLIC_IP}:${GATEWAY_LISTEN##*:}"
+    echo
+  fi
+}
+
 print_web_block() {
   pink "  Веб-панель"
   line "  адрес" "$WEB_URL"
@@ -581,6 +644,7 @@ do_aio() {
       GATEWAY_LISTEN="127.0.0.1:9443"
     fi
     ask ADMIN_LOGIN "Логин для веб-панели (пароль сгенерируется сам)" "$ADMIN_LOGIN"
+    ask_bot_and_restore
     SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
     echo
     echo "  Сервер:    $PUBLIC_IP"
@@ -607,6 +671,7 @@ do_aio() {
   drop_temp_swap
   if [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]]; then open_ports 80 443; else open_ports 80 443 "${GATEWAY_LISTEN##*:}"; fi
 
+  restore_backup
   info "configuring the panel"
   local setup_args=(--domain "$DOMAIN" --sub-domain "$SUB_DOMAIN" --name "$NAME")
   [[ -n "$COUNTRY" ]] && setup_args+=(--country "$COUNTRY")
@@ -614,6 +679,7 @@ do_aio() {
   admin setup "${setup_args[@]}"
   admin setting install.command "$(script_command)" >/dev/null
   web_admin
+  setup_bot
 
   write_panel_unit " --with-node"
   start_unit vynel
@@ -644,6 +710,7 @@ do_aio() {
   echo
   print_web_block
   echo
+  print_bot_block
   echo "  Пользователи — в панели: «Пользователи» → «+ Пользователь», ввести имя, скопировать ссылку."
   echo "  Внешний вид подписки и заголовки для приложений — в панели: «Подписка»."
   echo "  Из терминала:"
@@ -672,6 +739,7 @@ do_panel() {
     ask_domain DOMAIN "Домен панели и подписок (A-запись на этот IP)" "$DOMAIN"
     ask EMAIL "Email для Let's Encrypt (можно пусто)" "$EMAIL"
     ask ADMIN_LOGIN "Логин для веб-панели (пароль сгенерируется сам)" "$ADMIN_LOGIN"
+    ask_bot_and_restore
     echo
     echo "  Сервер:    $PUBLIC_IP, ноды подключаются на порт ${GATEWAY_LISTEN##*:}"
     echo "  Домен:     $DOMAIN (панель по секретному пути, подписки, сайт-заглушка)"
@@ -691,6 +759,7 @@ do_panel() {
   drop_temp_swap
   open_ports 80 443 "${GATEWAY_LISTEN##*:}"
 
+  restore_backup
   info "configuring the panel"
   admin setting sub.domain "$DOMAIN" >/dev/null
   [[ -n "$EMAIL" ]] && admin setting caddy.email "$EMAIL" >/dev/null
@@ -700,6 +769,7 @@ do_panel() {
     admin profile add --name Reality >/dev/null
   fi
   web_admin
+  setup_bot
 
   write_panel_unit ""
   start_unit vynel
@@ -719,6 +789,7 @@ do_panel() {
   echo
   print_web_block
   echo
+  print_bot_block
   pink "  Дальше: добавьте VPN-ноду"
   echo "  1. В панели: «Ноды» → «+ Нода» → название, страна, домен ноды (A-запись на IP нового сервера)."
   echo "  2. Панель покажет команду вида:"

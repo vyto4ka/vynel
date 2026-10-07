@@ -16,6 +16,7 @@ import (
 
 	"github.com/vyto4ka/vynel/internal/node/agent"
 	"github.com/vyto4ka/vynel/internal/node/caddy"
+	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/ca"
 	"github.com/vyto4ka/vynel/internal/panel/gateway"
 	"github.com/vyto4ka/vynel/internal/panel/reconciler"
@@ -48,6 +49,7 @@ type Panel struct {
 	Gateway       *gateway.Server
 	Subscriptions *subscription.Handler
 	Web           *webapi.Server
+	Bot           *bot.Bot
 	SNI           string
 	LocalNode     *agent.Agent
 }
@@ -106,8 +108,10 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	p := &Panel{Service: svc, CA: authority, Reconciler: rec, SNI: sni,
 		Gateway:       gateway.New(svc, authority, rec, sni, cfg.Log.With("component", "gateway")),
 		Subscriptions: subscription.NewHandler(svc, cfg.Log.With("component", "subscriptions"))}
+	p.Bot = bot.New(bot.Config{Service: svc, DataDir: cfg.DataDir, Version: cfg.Version, Connected: rec.Connected,
+		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
-		Version: cfg.Version, Log: cfg.Log.With("component", "web")})
+		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot})
 	return p, func() { st.Close() }, nil
 }
 
@@ -125,7 +129,7 @@ func Run(ctx context.Context, cfg Config) error {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	errs := make(chan error, 4)
+	errs := make(chan error, 8) // one slot per runner: a failing runner never blocks
 	run := func(name string, fn func() error) {
 		wg.Add(1)
 		go func() {
@@ -147,6 +151,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	run("web", func() error { return p.Web.Serve(ctx, webListen) })
+	run("bot", func() error { return p.Bot.Run(ctx) })
 	if cfg.WithNode {
 		node, err := p.Service.EnsureLocalNode(ctx, cfg.LocalNode)
 		if err != nil {

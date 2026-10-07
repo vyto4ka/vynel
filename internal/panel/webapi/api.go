@@ -68,6 +68,7 @@ func (s *Server) routes() {
 	s.editorRoutes()
 
 	s.subscriptionRoutes()
+	s.botRoutes()
 
 	s.handle("GET /api/settings", s.settings)
 	s.handle("PUT /api/settings", s.setSetting)

@@ -3,6 +3,7 @@ package main
 
 import (
 	"os"
+	_ "time/tzdata" // timezones for the bot on servers without tzdata
 
 	"github.com/vyto4ka/vynel/internal/cli"
 )

@@ -46,4 +46,7 @@ var hiddenSettings = map[string]bool{
 	service.SettingSubTitle: true, service.SettingSubUpdateHours: true, service.SettingSubSupportURL: true,
 	service.SettingSubAnnounce: true, service.SettingSubAnnounceURL: true, service.SettingSubPageURL: true,
 	service.SettingSubHeaders: true, service.SettingSubPage: true,
+	// edited on the «Telegram» page
+	service.SettingBotAdmins: true, service.SettingBotBackupTime: true, service.SettingBotTimezone: true,
+	service.SettingBotAlerts: true, service.SettingBotAlertDelay: true, service.SettingBotAlertState: true, "bot.backup_last": true,
 }

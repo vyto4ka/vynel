@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -214,5 +215,36 @@ func TestTemplateEditorAPI(t *testing.T) {
 	}
 	if w := c.do("GET", "/api/profiles/1", "", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"templateId":"mine"`) {
 		t.Fatalf("profile: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMagicLogin(t *testing.T) {
+	c, svc, _ := newServer(t)
+	ctx := context.Background()
+	tok, _, err := svc.CreateLoginToken(ctx, service.Actor{Kind: "bot", ID: "42"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"token":"` + tok + `"}`
+	if w := c.do("POST", "/api/login/magic", body, false); w.Code != 403 {
+		t.Fatalf("without csrf header: %d", w.Code)
+	}
+	if w := c.do("POST", "/api/login/magic", body, true); w.Code != 200 || c.cookie == nil {
+		t.Fatalf("magic login: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("GET", "/api/session", "", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"login":"boss"`) {
+		t.Fatalf("session after magic login: %d %s", w.Code, w.Body.String())
+	}
+	c.cookie = nil
+	if w := c.do("POST", "/api/login/magic", body, true); w.Code != 401 {
+		t.Fatalf("token used twice: %d", w.Code)
+	}
+	// Expired.
+	now := time.Now()
+	svc.SetClock(func() time.Time { return now.Add(-2 * time.Minute) })
+	old, _, _ := svc.CreateLoginToken(ctx, service.Actor{Kind: "bot", ID: "42"})
+	svc.SetClock(time.Now)
+	if w := c.do("POST", "/api/login/magic", `{"token":"`+old+`"}`, true); w.Code != 401 {
+		t.Fatalf("expired token accepted: %d", w.Code)
 	}
 }

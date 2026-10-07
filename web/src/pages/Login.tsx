@@ -1,10 +1,10 @@
 import { FormEvent, useState } from 'react'
 import { post } from '../api'
 
-export function Login({ onLogin }: { onLogin: () => void }) {
+export function Login({ onLogin, error: initialError }: { onLogin: () => void; error?: string }) {
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError || '')
   const [busy, setBusy] = useState(false)
 
   const submit = async (e: FormEvent) => {
@@ -40,6 +40,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
         {error && <div className="alert pink" style={{ marginBottom: 14 }}>{error}</div>}
         <button className="btn primary" style={{ width: '100%' }} disabled={busy || !login || !password}>Войти</button>
         <p className="muted small" style={{ marginBottom: 0 }}>
+          Без пароля: команда <code>/login</code> в Telegram-боте панели.<br />
           Забыли пароль? На сервере: <code>vynel admin web password</code>
         </p>
       </form>

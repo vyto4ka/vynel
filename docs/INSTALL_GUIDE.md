@@ -87,6 +87,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/claude/magical
   Название сервера в клиентах [Нидерланды]:
   Подключать к этой панели другие серверы (ноды) в будущем? Откроет порт 9443 [Y/n]:
   Логин для веб-панели (пароль сгенерируется сам) [admin]:
+  Токен бота от @BotFather (Enter — настроить потом):
+  Восстановить пользователей и ноды из бэкапа? [y/N]:
   …сводка…
   Устанавливаем? [Y/n]:
 ```
@@ -174,6 +176,9 @@ vynel admin user show vasya     # печатает sub url https://nl.example.co
 
 ## 6. Обновление и удаление
 
+- **Telegram-бот** настраивается при установке (токен) или позже в панели «Telegram». После установки в таблице будет ссылка `t.me/бот?start=КОД`: откройте её, чтобы привязать себя ([USER_GUIDE §13](USER_GUIDE.md#13-telegram-бот)).
+- **Перенос или восстановление панели** из бэкапа: `--restore файл.tar.gz` (или вопрос в мастере), подробно — [USER_GUIDE §14](USER_GUIDE.md#14-бэкапы-и-восстановление).
+
 - **Обновление:** запустите установщик и выберите **4** (он предложит его сам, если на сервере уже что-то стоит). Или `install.sh --mode update`. Обновляются vynel, Xray и Caddy; пользователи, ключи, настройки, логин и пароль сохраняются. Обновлять нужно каждый сервер: панель и каждую ноду.
 - **Удаление:** пункт **5** или `install.sh --mode uninstall`. Скрипт спросит, удалять ли данные; без вопросов: `--mode uninstall --purge --yes` (удаляет и данные, и программы).
 
@@ -217,10 +222,11 @@ vynel admin user show vasya     # печатает sub url https://nl.example.co
 |------|-----|
 | `/var/lib/vynel/panel.db` | База: пользователи, ноды, статистика |
 | `/var/lib/vynel/ca/` | Внутренние сертификаты для связи с нодами |
+| `/var/lib/vynel/backups/` | Последние 7 ночных бэкапов |
 | `/var/lib/vynel/node/` | Локальная нода: конфиг Xray, сертификаты Caddy, сайты-заглушки |
 | `/etc/systemd/system/vynel.service` | Служба панели (`journalctl -u vynel`) |
 | `/var/lib/vynel-node/` | Отдельная нода: сертификат для связи с панелью, состояние |
 | `/etc/systemd/system/vynel-node.service` | Служба отдельной ноды (`journalctl -u vynel-node`) |
 | `/usr/local/bin/{vynel,xray,caddy}` | Программы |
 
-**Бэкап** (пока вручную, автоматический через Telegram — этап 10): `systemctl stop vynel && tar czf vynel-backup.tgz /var/lib/vynel && systemctl start vynel`.
+**Бэкап**: каждый вечер в Telegram, кнопкой в панели или `vynel admin backup`; восстановление — `--restore` у установщика или `vynel restore` ([USER_GUIDE §14](USER_GUIDE.md#14-бэкапы-и-восстановление)).
