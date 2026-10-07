@@ -1,12 +1,13 @@
 # Шаблоны профилей
 
-> **Статус:** шаблоны A и B, переменные, наследование, lint, Caddy и проверки конфигов реализованы. Свои шаблоны пишутся в веб-панели («Профили» → «Шаблоны профилей»): копия встроенного → правка YAML → проверка пробной сборкой; хранятся в базе панели (таблица `profile_templates`). Не реализованы: внешние шаги VK на странице-инструкции (§4.6), автопроверки edge CDN (§4.7), режим отладки (§2, §4.9).
+> **Статус:** шаблоны A, B и C, переменные, наследование, lint, Caddy и проверки конфигов реализованы. Свои шаблоны пишутся в веб-панели («Профили» → «Шаблоны профилей»): копия встроенного → правка YAML → проверка пробной сборкой; хранятся в базе панели (таблица `profile_templates`). Не реализованы: внешние шаги VK на странице-инструкции (§4.6), автопроверки edge CDN (§4.7), режим отладки (§2, §4.9).
 
 Описание встроенных шаблонов профилей Xray: технические характеристики, что используется и как это автоматизировано.
 Основа — две реальные рабочие схемы:
 
 - **A. VLESS + Reality, self-steal.** Как ставилось через Remnawave + RemnaSetup (Remnanode → «полная установка»: Caddy self-steal + BBR, без WARP).
 - **B. VLESS + XHTTP через VK Cloud CDN.** По гайду «Узел xHTTP за VK Cloud CDN» (packet-up, данные в куках, набивка в query).
+- **C. VLESS + XHTTP + REALITY, self-steal.** По ТЗ «XHTTP + REALITY» (stream-up, резервный packet-up): XHTTP напрямую на ноду, без CDN, под маской своего сайта (§8).
 
 Цель — чтобы в нашей панели оба профиля ставились **выбором шаблона и заполнением 1–3 полей**. Всё, что в Remnawave делается руками (ключи, shortIds, SNI, extra в хосте, nginx/certbot, BBR, видимость хоста), делает панель.
 
@@ -498,7 +499,79 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 
 ---
 
-## 8. Будущие шаблоны (не в MVP)
+## 8. Шаблон C — VLESS + XHTTP + REALITY (self-steal)
+
+Файл: `internal/xrayconf/templates/vless-xhttp-reality.yaml`. Источник — ТЗ «XHTTP + REALITY» (Remnawave + Nginx); Nginx заменён на Caddy из шаблона A.
+
+### 8.1 Технические характеристики
+
+| Что | Значение |
+|-----|----------|
+| Вход | TCP `:443`, Xray REALITY; всё «чужое» уходит на свой сайт в Caddy `127.0.0.1:8443` (как в A) |
+| Транспорт | XHTTP, режим `stream-up` (основной) или `packet-up` (резервный) — переменная `XHTTP_MODE` |
+| Flow | пусто: Vision поверх XHTTP не работает |
+| Маскировка запросов | сессия в куке `media_sid`, номер пакета `offset` и набивка `cb` в query (`repeat-x`, 100–1000 байт) |
+| Сертификат | не нужен Xray: REALITY; сайт в Caddy получает сертификат сам (ACME на `:80`) |
+| Fingerprint | `chrome` |
+| Mihomo | отдаётся (`xhttp-opts`, `reuse-settings`, `support-x25519mlkem768: true`); нужен Mihomo 1.19+ |
+| sing-box | не отдаётся: в sing-box нет XHTTP |
+
+### 8.2 Переменные
+
+| Переменная | Где | Откуда |
+|------------|-----|--------|
+| `NODE_DOMAIN` | нода | домен ноды |
+| `REALITY_PRIVATE_KEY`, `REALITY_SHORT_ID` | нода | генерируются, свои на каждой ноде |
+| `XHTTP_PATH` | профиль | случайный из `/assets/sync`, `/api/stream`, `/static/chunks`, `/media/feed` |
+| `XHTTP_MODE` | профиль | `stream-up` (по умолчанию) или `packet-up` — выпадающий список |
+| `SELFSTEAL_PORT`, `PORT` | профиль | `8443`, `443` |
+
+### 8.3 Серверный и клиентский extra
+
+Серверный `extra` (в инбаунде) — дословно из ТЗ: `uplinkDataPlacement: auto` (принимает и body, и куки), `noSSEHeader`, `scMaxEachPostBytes: "262144"`, `serverMaxHeaderBytes: 32768`. Рендер шаблона совпадает с инбаундом ТЗ (golden-тест `TestGoldenXHTTPRealityMatchesGuide`; сверх него только `sniffing` и `sockopt`).
+
+Клиентский `extra` — **отдельный полный объект** (`host.xhttp_client_extra`), а не слияние с серверным, как требует ТЗ: клиенту не уходят серверные ключи. Один объект подходит для обоих режимов:
+
+```json
+{ "sessionIDPlacement": "cookie", "sessionIDKey": "media_sid", "sessionPlacement": "cookie", "sessionKey": "media_sid",
+  "seqPlacement": "query", "seqKey": "offset",
+  "xPaddingObfsMode": true, "xPaddingPlacement": "query", "xPaddingKey": "cb", "xPaddingMethod": "repeat-x", "xPaddingBytes": "100-1000",
+  "mode": "${XHTTP_MODE}", "uplinkHTTPMethod": "POST", "uplinkDataPlacement": "body",
+  "scMaxEachPostBytes": "65536-262144", "scMinPostsIntervalMs": "5-15",
+  "xmux": { "maxConcurrency": "4-8", "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "600-1800" },
+  "noGRPCHeader": true }
+```
+
+`scMinPostsIntervalMs` и `scMaxEachPostBytes` действуют только в packet-up, `noGRPCHeader` — только в stream-up. Режим стоит и в `mode=` ссылки, и в `xhttpSettings.mode`, и в `xhttp-opts.mode` у Mihomo.
+
+### 8.4 Точка подключения
+
+| Поле | Значение |
+|------|----------|
+| Название | `🇳🇱 Нидерланды · XHTTP` |
+| Адрес, SNI, Host | `${NODE_DOMAIN}` (адрес можно заменить на IP в карточке ноды) |
+| Path | `${XHTTP_PATH}/` — со слешем |
+| Security | REALITY, `pbk` и `sid` из ключей ноды |
+
+Слеш в пути обязателен для Mihomo. Xray-сервер обслуживает путь `/assets/sync/`. Клиенты Xray добавляют слеш сами, а Mihomo шлёт путь как есть и получает `failed to validate path`. Это поймал тест с настоящим Mihomo.
+
+### 8.5 Ограничения
+
+- Один режим на один `IP:443`. Шаблоны A и C тоже не встанут на один IP: оба хотят Xray на внешнем `:443`. Панель покажет конфликт портов. Для C нужен второй IP ноды или другой порт.
+- Шаблон B (CDN) с C совмещается так же, как с A (§5): CDN-домен уходит в Caddy за REALITY.
+- На ноде должна быть A-запись `NODE_DOMAIN`, иначе Caddy не получит сертификат и маскировочный сайт не откроется.
+
+### 8.6 Как проверено
+
+`TestXHTTPRealityTrafficOnXray` запускает настоящий Xray с конфигом, который панель собирает для ноды. Пользователи добавляются через API, как это делает агент. Дальше трафик гоняется в обоих режимах:
+- клиентом Xray из JSON-подписки;
+- если задан `MIHOMO_BIN` — ещё и Mihomo из YAML-подписки.
+
+Трафик сверяется по статистике пользователя на инбаунде.
+
+---
+
+## 9. Будущие шаблоны (не в MVP)
 
 | Шаблон | Зачем |
 |--------|-------|

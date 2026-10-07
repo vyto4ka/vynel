@@ -53,10 +53,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/claude/magical
 | Разрабатывать | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Структура кода, сборка, тесты, релизы, как добавить шаблон |
 | Проект целиком | [ROADMAP.md](docs/ROADMAP.md) | Что готово, что дальше |
 | | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Общая архитектура (включая ещё не сделанное: веб, бот, бэкапы) |
-| | [PROFILES.md](docs/PROFILES.md) | Шаблоны профилей: Reality self-steal и XHTTP через VK CDN |
+| | [PROFILES.md](docs/PROFILES.md) | Шаблоны профилей: Reality self-steal, XHTTP через VK CDN, XHTTP + REALITY |
 | | [INBOUNDS.md](docs/INBOUNDS.md) | Инбаунды нод, наследование, несколько IP на сервере |
 | | [INSTALL.md](docs/INSTALL.md), [STEALTH.md](docs/STEALTH.md) | План полноценного установщика, скрытия и входа через Telegram |
 
 ## Откуда шаблоны
 
-Шаблоны профилей повторяют рабочие схемы: Remnawave + RemnaSetup (Reality self-steal) и гайд «xHTTP за VK Cloud CDN».
+Шаблоны профилей повторяют рабочие схемы: Remnawave + RemnaSetup (Reality self-steal), гайд «xHTTP за VK Cloud CDN» и ТЗ «XHTTP + REALITY» (stream-up / packet-up).

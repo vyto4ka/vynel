@@ -128,16 +128,22 @@ func StartRealityClient(t testing.TB, bin xray.Binary, c RealityClient) int {
 		}},
 	}
 	raw, _ := json.Marshal(cfg)
+	return StartClient(t, bin, raw, socks)
+}
+
+// StartClient runs an Xray client config and waits until its SOCKS inbound on socksPort listens.
+func StartClient(t testing.TB, bin xray.Binary, config []byte, socksPort int) int {
+	t.Helper()
 	p := xray.NewProcess(bin, filepath.Join(t.TempDir(), "client.json"), nil)
-	if err := p.Apply(context.Background(), raw); err != nil {
+	if err := p.Apply(context.Background(), config); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(p.Close)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(socks)); err == nil {
+		if conn, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(socksPort)); err == nil {
 			conn.Close()
-			return socks
+			return socksPort
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

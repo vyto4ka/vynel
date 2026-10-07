@@ -51,8 +51,12 @@ type Host struct {
 	Flow        string
 	PublicKey   string
 	ShortID     string
-	Extra       map[string]any // xhttp extra for the client (server extra + client-only xmux)
+	Extra       map[string]any // xhttp extra for the client (server extra + client-only xmux, or the template's full client extra)
 	Hidden      bool
+	// Mihomo: the host may be given to Mihomo/Clash Meta even when it is not plain TCP
+	// (xhttp needs Mihomo 1.19+, so templates opt in). MLKEM: support-x25519mlkem768 in reality-opts.
+	Mihomo bool
+	MLKEM  bool
 }
 
 // UserInbounds returns the enabled node inbounds (on enabled nodes) a user can use.
@@ -149,7 +153,7 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 		Tag: ni.Tag, NodeCode: node.Code, Remark: strings.TrimSpace(remark), Protocol: r.Protocol, Flow: r.Flow,
 		Address: str(hm["address"]), Port: toInt(hm["port"]), Security: str(hm["security"]),
 		SNI: str(hm["sni"]), HostHeader: str(hm["host"]), Path: str(hm["path"]), Fingerprint: str(hm["fingerprint"]),
-		Hidden: hm["hidden"] == true,
+		Hidden: hm["hidden"] == true, Mihomo: hm["mihomo"] == true, MLKEM: hm["mihomo_x25519mlkem768"] == true,
 	}
 	if v := str(hm["remark"]); v != "" {
 		h.Remark = v
@@ -183,6 +187,10 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 		h.Mode = str(xs["mode"])
 		extra, _ := xs["extra"].(map[string]any)
 		h.Extra = copyMap(extra)
+		if full, ok := hm["xhttp_client_extra"].(map[string]any); ok {
+			// A complete client object: the server extra holds keys a client must not get.
+			h.Extra = full
+		}
 		if co, ok := hm["xhttp_client_only"].(map[string]any); ok {
 			for k, v := range co {
 				h.Extra[k] = v
@@ -198,7 +206,8 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 // SetHostOverride changes the connection point overrides of a node inbound
 // (keys: remark, address, port, sni, fingerprint, hidden; null deletes).
 func (s *Service) SetHostOverride(ctx context.Context, actor Actor, niID int64, patch map[string]any) error {
-	allowed := map[string]bool{"remark": true, "address": true, "port": true, "sni": true, "host": true, "fingerprint": true, "hidden": true, "alpn": true}
+	allowed := map[string]bool{"remark": true, "address": true, "port": true, "sni": true, "host": true, "fingerprint": true, "hidden": true, "alpn": true,
+		"mihomo": true, "mihomo_x25519mlkem768": true}
 	for k := range patch {
 		if !allowed[k] {
 			return invalid("connection point field %q cannot be overridden", k)

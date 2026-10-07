@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -232,6 +233,9 @@ var (
 
 func validateValue(v Variable, val any) error {
 	bad := func(why string) error { return fmt.Errorf("variable %s: %v %s", v.Name, val, why) }
+	if len(v.Options) > 0 && v.Source != SourceGenerate && !slices.Contains(v.Options, fmt.Sprint(val)) {
+		return bad("is not one of " + strings.Join(v.Options, ", "))
+	}
 	switch v.Validate {
 	case "":
 	case "domain":

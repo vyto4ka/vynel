@@ -432,7 +432,7 @@ function TemplateHelp({ r }: { r?: Reference['reference'] }) {
         <li><code>variables</code> — переменные: <code>name</code>, <code>scope</code> (profile — одна на профиль, node — своя на каждой ноде), <code>source</code> (input, const, generate, derived), <code>default</code>, <code>default_from: node.domain</code>, <code>generator</code>, <code>from</code>, <code>validate</code>, <code>options</code>, <code>secret</code>, <code>optional</code>, <code>description</code>.</li>
         <li><code>xray_inbound</code> — JSON инбаунда Xray с <code>{'${ПЕРЕМЕННЫМИ}'}</code>. Клиенты подставляются сами.</li>
         <li><code>xhttp_extra</code> — JSON extra для XHTTP (доступен как <code>{'${XHTTP_EXTRA}'}</code>).</li>
-        <li><code>host</code> — точка подключения в подписке: address, port, security, sni, fingerprint, public_key, short_id, flow, network, path, host, mode, alpn.</li>
+        <li><code>host</code> — точка подключения в подписке: address, port, security, sni, fingerprint, public_key, short_id, flow, network, path, host, mode, alpn. Для XHTTP: <code>xhttp_client_extra</code> — полный клиентский extra вместо серверного, <code>xhttp_client_only</code> — ключи поверх серверного (например xmux). <code>mihomo: true</code> — отдавать XHTTP в Mihomo (1.19+), <code>mihomo_x25519mlkem768: true</code> — для REALITY.</li>
         <li><code>caddy</code> — что поднять в Caddy: <code>role</code> ({list(r?.caddyRoles)}), domain, local_port/upstream, decoy, path.</li>
         <li><code>lint</code> — дополнительные проверки.</li>
       </ul>

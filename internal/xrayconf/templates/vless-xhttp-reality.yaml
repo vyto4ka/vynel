@@ -1,0 +1,170 @@
+# Template C — VLESS + XHTTP + REALITY self-steal (docs/PROFILES.md §8).
+# Xray owns public TCP 443; everything that is not a REALITY client is passed to the node's own
+# Caddy site on 127.0.0.1:8443, like template A. The traffic is HTTP requests (XHTTP) instead of
+# one long raw TLS stream: session id in a cookie, sequence and padding in the query string.
+id: vless-xhttp-reality
+version: 1
+title: VLESS XHTTP + REALITY (self-steal)
+summary: XHTTP поверх REALITY на 443, маскировка под собственный сайт. Без Vision.
+tag_pattern: XHTTP_${NODE_CODE}
+remark_pattern: ${NODE_FLAG} ${NODE_NAME} · XHTTP
+protocol: vless
+client:
+  flow: ""
+lint:
+  - xhttp_no_nested_extra
+  - xhttp_no_header_placement
+
+variables:
+  - name: NODE_DOMAIN
+    scope: node
+    source: input
+    default_from: node.domain
+    validate: domain
+    description: Домен ноды (A-запись на IP инбаунда). Идёт в serverNames, SNI и HTTP Host.
+  - name: REALITY_PRIVATE_KEY
+    scope: node
+    source: generate
+    generator: x25519
+    secret: true
+    description: Приватный ключ REALITY, свой на каждой ноде.
+  - name: REALITY_PUBLIC_KEY
+    scope: node
+    source: derived
+    from: x25519_public(REALITY_PRIVATE_KEY)
+    description: Публичный ключ (password / pbk), уходит в подписку.
+  - name: REALITY_SHORT_ID
+    scope: node
+    source: generate
+    generator: shortid
+    description: shortId (8 байт hex).
+  - name: SELFSTEAL_PORT
+    scope: profile
+    source: const
+    default: 8443
+    validate: port
+    description: Локальный порт Caddy с собственным сайтом (TLS 1.3 + HTTP/2).
+  - name: PORT
+    scope: profile
+    source: const
+    default: 443
+    validate: port
+    description: Порт снаружи (TCP).
+  - name: XHTTP_PATH
+    scope: profile
+    source: generate
+    generator: path
+    options: [/assets/sync, /api/stream, /static/chunks, /media/feed]
+    validate: path
+    description: Путь XHTTP без завершающего слеша. Одинаковый на сервере и в подписке.
+  - name: XHTTP_MODE
+    scope: profile
+    source: const
+    default: stream-up
+    options: [stream-up, packet-up]
+    description: stream-up — основной (длинный POST вверх); packet-up — резервный, отдельные POST-пакеты. Один режим на IP:443.
+  - name: DECOY_SITE
+    scope: node
+    source: generate
+    generator: path
+    options: [cloud, studio, docs]
+    default: cloud
+    description: Сайт, который видит всё, что не является REALITY-клиентом.
+
+# Server side of the XHTTP settings (the "extra" of the inbound).
+xhttp_extra: |
+  {
+    "sessionIDPlacement": "cookie",
+    "sessionIDKey": "media_sid",
+    "sessionPlacement": "cookie",
+    "sessionKey": "media_sid",
+    "seqPlacement": "query",
+    "seqKey": "offset",
+    "xPaddingObfsMode": true,
+    "xPaddingPlacement": "query",
+    "xPaddingKey": "cb",
+    "xPaddingMethod": "repeat-x",
+    "xPaddingBytes": "100-1000",
+    "noSSEHeader": true,
+    "uplinkDataPlacement": "auto",
+    "uplinkDataKey": "pb",
+    "scMaxEachPostBytes": "262144",
+    "serverMaxHeaderBytes": 32768
+  }
+
+xray_inbound: |
+  {
+    "tag": "${TAG}",
+    "port": "${PORT}",
+    "listen": "${LISTEN_IP}",
+    "protocol": "vless",
+    "settings": { "clients": [], "decryption": "none" },
+    "sniffing": { "enabled": true, "routeOnly": true, "destOverride": ["http", "tls", "quic"] },
+    "streamSettings": {
+      "network": "xhttp",
+      "security": "reality",
+      "sockopt": { "tcpFastOpen": true, "tcpcongestion": "bbr" },
+      "realitySettings": {
+        "xver": 0,
+        "target": "127.0.0.1:${SELFSTEAL_PORT}",
+        "serverNames": ["${NODE_DOMAIN}"],
+        "privateKey": "${REALITY_PRIVATE_KEY}",
+        "shortIds": ["${REALITY_SHORT_ID}"]
+      },
+      "xhttpSettings": {
+        "path": "${XHTTP_PATH}",
+        "mode": "${XHTTP_MODE}",
+        "extra": "${XHTTP_EXTRA}"
+      }
+    }
+  }
+
+host:
+  address: ${NODE_DOMAIN}
+  port: ${INBOUND_PORT}
+  security: reality
+  sni: ${NODE_DOMAIN}
+  host: ${NODE_DOMAIN}
+  path: ${XHTTP_PATH}/   # Xray serves "<path>/"; Mihomo sends the path as is
+  fingerprint: chrome
+  public_key: ${REALITY_PUBLIC_KEY}
+  short_id: ${REALITY_SHORT_ID}
+  # Mihomo 1.19.x understands xhttp-opts; older Clash cores do not, so it is opt-in per template.
+  mihomo: true
+  mihomo_x25519mlkem768: true
+  # The client "extra" is a complete object, not merged with the server one: the client must not
+  # receive server-only keys (noSSEHeader, serverMaxHeaderBytes, uplinkDataPlacement: auto).
+  # One object works for both modes: scMinPostsIntervalMs is packet-up only, noGRPCHeader stream-up only.
+  xhttp_client_extra:
+    sessionIDPlacement: cookie
+    sessionIDKey: media_sid
+    sessionPlacement: cookie
+    sessionKey: media_sid
+    seqPlacement: query
+    seqKey: offset
+    xPaddingObfsMode: true
+    xPaddingPlacement: query
+    xPaddingKey: cb
+    xPaddingMethod: repeat-x
+    xPaddingBytes: 100-1000
+    mode: ${XHTTP_MODE}
+    uplinkHTTPMethod: POST
+    uplinkDataPlacement: body
+    scMaxEachPostBytes: 65536-262144
+    scMinPostsIntervalMs: 5-15
+    xmux:
+      maxConcurrency: 4-8
+      hMaxRequestTimes: 600-900
+      hMaxReusableSecs: 600-1800
+    noGRPCHeader: true
+
+caddy:
+  role: selfsteal
+  domain: ${NODE_DOMAIN}
+  local_port: ${SELFSTEAL_PORT}
+  decoy: ${DECOY_SITE}
+
+node_requirements:
+  ports: [443/tcp, 80/tcp]
+  dns: [{ type: A, name: "${NODE_DOMAIN}" }]
+  sysctl: [bbr, fq, tcp_fastopen]

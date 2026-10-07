@@ -332,6 +332,22 @@ vynel admin inbound attach --node NL --profile CDN \
 
 Остальное делается в кабинете VK Cloud: CDN-ресурс с источником `origin.example.com`, CNAME `cdn.example.com`, кэш выключен. Пошагово — в [PROFILES.md §4.6](PROFILES.md). Caddy на ноде настраивается сам: прокси для `origin.example.com` за Reality на том же порту 443. В подписке появится второй сервер «🇳🇱 Нидерланды · CDN». Mihomo и sing-box этот вариант не поддерживают и его не получают.
 
+### XHTTP + REALITY напрямую
+
+Третий встроенный шаблон, `vless-xhttp-reality`. Это XHTTP прямо на ноду, без CDN, под маской своего сайта, как Reality в шаблоне A. Трафик выглядит как обычные HTTP-запросы к сайту: кука сессии, номер пакета и набивка в query. Подробно схема описана в [PROFILES.md §8](PROFILES.md).
+
+```bash
+vynel admin profile add --name XHTTP --template vless-xhttp-reality            # stream-up
+vynel admin profile add --name XHTTP-P --template vless-xhttp-reality --set XHTTP_MODE=packet-up
+vynel admin inbound attach --node NL --profile XHTTP --listen 203.0.113.11
+```
+
+- Режим (`stream-up` или `packet-up`) выбирается в профиле. На одном IP:443 может работать только один режим, и шаблон A тоже занимает IP:443. Поэтому для C нужен второй IP ноды или другой порт.
+- В подписке появится «🇳🇱 Нидерланды · XHTTP».
+- Happ, v2RayTun, v2rayN, KeqDroid и Karing получают ссылку с `extra`.
+- Mihomo (FlClashX, Clash Verge, 1.19+) получает `xhttp-opts`. Проверено на настоящем Mihomo.
+- sing-box этот вариант не получает.
+
 ## 11. Настройки
 
 `vynel admin setting КЛЮЧ` показывает значение, `vynel admin setting КЛЮЧ ЗНАЧЕНИЕ` меняет.

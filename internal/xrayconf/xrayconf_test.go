@@ -82,8 +82,8 @@ func TestTemplatesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 2 {
-		t.Fatalf("want 2 templates, got %d", len(ts))
+	if len(ts) != 3 {
+		t.Fatalf("want 3 templates, got %d", len(ts))
 	}
 }
 
@@ -138,6 +138,55 @@ func TestGoldenXHTTPMatchesGuide(t *testing.T) {
 	assertJSONEqual(t, readFixture(t, "guide_xhttp_inbound.json"), r.Inbound)
 	if r.Values["ORIGIN_DOMAIN"] != "origin.example.com" {
 		t.Fatalf("ORIGIN_DOMAIN not taken from node domain: %v", r.Values["ORIGIN_DOMAIN"])
+	}
+}
+
+func xhttpRealitySpec() InboundSpec {
+	return InboundSpec{
+		TemplateID:    "vless-xhttp-reality",
+		ProfileValues: map[string]any{"XHTTP_PATH": "/assets/sync"},
+		NodeValues: map[string]any{
+			"REALITY_PRIVATE_KEY": fixturePriv,
+			"REALITY_SHORT_ID":    "0123456789abcdef",
+		},
+		Context: NodeContext{Code: "NL", Name: "Нидерланды", Country: "NL", Domain: "node.example.com", Tag: "VLESS_XHTTP_STREAM_REALITY"},
+	}
+}
+
+// The rendered template C must equal the stream-up inbound from the XHTTP + REALITY guide,
+// apart from the sniffing and sockopt the template adds on top.
+func TestGoldenXHTTPRealityMatchesGuide(t *testing.T) {
+	r, err := RenderInbound(xhttpRealitySpec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Flow != "" {
+		t.Fatalf("flow %q: Vision does not work over XHTTP", r.Flow)
+	}
+	in := normJSON(t, r.Inbound).(map[string]any)
+	if in["sniffing"] == nil {
+		t.Fatal("sniffing missing")
+	}
+	delete(in, "sniffing")
+	ss := in["streamSettings"].(map[string]any)
+	if ss["sockopt"] == nil {
+		t.Fatal("sockopt missing")
+	}
+	delete(ss, "sockopt")
+	assertJSONEqual(t, readFixture(t, "guide_xhttp_reality_inbound.json"), in)
+
+	spec := xhttpRealitySpec()
+	spec.ProfileValues["XHTTP_MODE"] = "packet-up"
+	r, err = RenderInbound(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := r.Inbound["streamSettings"].(map[string]any)["xhttpSettings"].(map[string]any)["mode"]; m != "packet-up" {
+		t.Fatalf("mode %v", m)
+	}
+	spec.ProfileValues["XHTTP_MODE"] = "stream-one"
+	if _, err := RenderInbound(spec); err == nil || !strings.Contains(err.Error(), "not one of") {
+		t.Fatalf("mode outside options accepted: %v", err)
 	}
 }
 

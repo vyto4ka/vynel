@@ -45,12 +45,15 @@ func ParseFormat(s string) (Format, bool) {
 	return "", false
 }
 
-// Supports reports whether a format can express a host. Mihomo and sing-box get Reality hosts
-// only: XHTTP with the CDN extra (cookies/query placement) is not supported there, and a
+// Supports reports whether a format can express a host. sing-box gets plain TCP hosts only: it
+// has no XHTTP. Mihomo gets XHTTP hosts only when the template opts in (host.mihomo): xhttp-opts
+// needs Mihomo 1.19+, and an older core rejects the whole profile over one unknown network, so a
 // half-working point is worse than none (docs/PROFILES.md §4.5).
 func (f Format) Supports(h service.Host) bool {
 	switch f {
-	case FormatMihomo, FormatSingBox:
+	case FormatMihomo:
+		return h.Network == "tcp" || (h.Network == "xhttp" && h.Mihomo)
+	case FormatSingBox:
 		return h.Network == "tcp"
 	}
 	return true
@@ -140,14 +143,32 @@ func Mihomo(hosts []service.Host, uuid string) ([]byte, error) {
 			"name": names[i], "type": "vless", "server": h.Address, "port": h.Port, "uuid": uuid,
 			"network": "tcp", "udp": true,
 		}
-		if h.Security == "reality" {
+		switch h.Security {
+		case "reality":
 			p["tls"] = true
 			p["servername"] = h.SNI
-			p["reality-opts"] = map[string]any{"public-key": h.PublicKey, "short-id": h.ShortID}
+			ro := map[string]any{"public-key": h.PublicKey, "short-id": h.ShortID}
+			if h.MLKEM {
+				ro["support-x25519mlkem768"] = true
+			}
+			p["reality-opts"] = ro
 			p["client-fingerprint"] = h.Fingerprint
+		case "tls":
+			p["tls"] = true
+			p["servername"] = h.SNI
+			if h.Fingerprint != "" {
+				p["client-fingerprint"] = h.Fingerprint
+			}
+			if len(h.ALPN) > 0 {
+				p["alpn"] = h.ALPN
+			}
 		}
 		if h.Flow != "" {
 			p["flow"] = h.Flow
+		}
+		if h.Network == "xhttp" {
+			p["network"] = "xhttp"
+			p["xhttp-opts"] = mihomoXHTTP(h)
 		}
 		proxies = append(proxies, p)
 	}
@@ -158,6 +179,75 @@ func Mihomo(hosts []service.Host, uuid string) ([]byte, error) {
 		"rules":        []string{"GEOIP,private,DIRECT,no-resolve", "MATCH,VPN"},
 	}
 	return yaml.Marshal(doc)
+}
+
+// mihomoXHTTPKeys maps Xray xhttp extra keys to Mihomo xhttp-opts (adapter/outbound/vless.go).
+// sessionIDPlacement/sessionIDKey have no Mihomo twin: session-placement/session-key cover both.
+var mihomoXHTTPKeys = map[string]string{
+	"noGRPCHeader": "no-grpc-header", "xPaddingBytes": "x-padding-bytes", "xPaddingObfsMode": "x-padding-obfs-mode",
+	"xPaddingKey": "x-padding-key", "xPaddingHeader": "x-padding-header", "xPaddingPlacement": "x-padding-placement",
+	"xPaddingMethod": "x-padding-method", "uplinkHTTPMethod": "uplink-http-method", "sessionPlacement": "session-placement",
+	"sessionKey": "session-key", "seqPlacement": "seq-placement", "seqKey": "seq-key",
+	"uplinkDataPlacement": "uplink-data-placement", "uplinkDataKey": "uplink-data-key", "uplinkChunkSize": "uplink-chunk-size",
+	"scMaxEachPostBytes": "sc-max-each-post-bytes", "scMinPostsIntervalMs": "sc-min-posts-interval-ms",
+	"headers": "headers",
+}
+
+var mihomoXmuxKeys = map[string]string{
+	"maxConcurrency": "max-concurrency", "maxConnections": "max-connections", "cMaxReuseTimes": "c-max-reuse-times",
+	"hMaxRequestTimes": "h-max-request-times", "hMaxReusableSecs": "h-max-reusable-secs", "hKeepAlivePeriod": "h-keep-alive-period",
+}
+
+// mihomoXHTTP converts the client xhttp settings into Mihomo xhttp-opts. Mihomo wants range
+// fields as strings and h-keep-alive-period as a number; the mode must be explicit (the guide's
+// warning: "mode" inside extra does not survive conversion on its own).
+func mihomoXHTTP(h service.Host) map[string]any {
+	// Xray clients add the trailing slash the server expects ("/sync" is served as "/sync/");
+	// Mihomo sends the path verbatim and gets "failed to validate path".
+	path := h.Path
+	if !strings.HasSuffix(path, "/") && !strings.Contains(path, "?") {
+		path += "/"
+	}
+	o := map[string]any{"path": path}
+	if h.HostHeader != "" {
+		o["host"] = h.HostHeader
+	}
+	mode := h.Mode
+	if m, ok := h.Extra["mode"].(string); ok && m != "" {
+		mode = m
+	}
+	if mode != "" {
+		o["mode"] = mode
+	}
+	for k, v := range h.Extra {
+		if mk, ok := mihomoXHTTPKeys[k]; ok {
+			o[mk] = mihomoValue(v, mk != "x-padding-obfs-mode" && mk != "no-grpc-header" && mk != "headers")
+		}
+	}
+	if xm, ok := h.Extra["xmux"].(map[string]any); ok {
+		rs := map[string]any{}
+		for k, v := range xm {
+			if mk, ok := mihomoXmuxKeys[k]; ok {
+				rs[mk] = mihomoValue(v, mk != "h-keep-alive-period")
+			}
+		}
+		if len(rs) > 0 {
+			o["reuse-settings"] = rs
+		}
+	}
+	return o
+}
+
+// mihomoValue renders numbers as strings for Mihomo's string range fields.
+func mihomoValue(v any, asString bool) any {
+	if !asString {
+		return v
+	}
+	switch n := v.(type) {
+	case int, int64, float64:
+		return fmt.Sprint(n)
+	}
+	return v
 }
 
 // SingBox renders a sing-box (1.11+) profile with a TUN inbound.
