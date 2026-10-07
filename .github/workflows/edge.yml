@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: edge-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false # a cancelled publish could leave files of two builds
 
 jobs:
   release:
@@ -39,10 +39,19 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+        # The release is never deleted: installers running during a publish would get 404 and
+        # fall back to slow source builds. Files are replaced one by one, binaries first and
+        # SHA256SUMS last, so a downloader sees either the old or the new checksums; a mismatch
+        # in between is retried by the installer.
         run: |
           tag="edge-${GITHUB_REF_NAME//\//-}"
-          gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$tag" bin/vynel-linux-* bin/SHA256SUMS \
-            --prerelease --target "$GITHUB_SHA" \
-            --title "edge: $GITHUB_REF_NAME @ ${GITHUB_SHA::7}" \
-            --notes "Automatic build of \`$GITHUB_REF_NAME\` at ${GITHUB_SHA}. Used by scripts/install-aio.sh."
+          title="edge: $GITHUB_REF_NAME @ ${GITHUB_SHA::7}"
+          notes="Automatic build of \`$GITHUB_REF_NAME\` at ${GITHUB_SHA}. Used by scripts/install.sh."
+          git push -f origin "$GITHUB_SHA:refs/tags/$tag"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" bin/vynel-linux-* --clobber
+            gh release upload "$tag" bin/SHA256SUMS --clobber
+            gh release edit "$tag" --title "$title" --notes "$notes" --prerelease
+          else
+            gh release create "$tag" bin/vynel-linux-* bin/SHA256SUMS --prerelease --verify-tag --title "$title" --notes "$notes"
+          fi

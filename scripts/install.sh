@@ -26,6 +26,7 @@ NODE_UNIT=/etc/systemd/system/vynel-node.service
 
 MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
 ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
+GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -58,6 +59,9 @@ Options:
   --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
   --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz)
   --ref REF              git branch whose release to install (default $REF)
+  --gh-proxy URL         prefix for github.com downloads when GitHub is slow or blocked,
+                         e.g. https://ghfast.top/ (also VYNEL_GH_PROXY)
+  --build-from-source    allow compiling vynel when no prebuilt release can be downloaded
   --purge                uninstall: also delete data and binaries
   --yes                  do not ask questions
 EOF
@@ -78,6 +82,8 @@ while [[ $# -gt 0 ]]; do
     --restore) RESTORE="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
     --ref) REF="${2:-}"; shift 2 ;;
+    --gh-proxy) GH_PROXY="${2:-}"; shift 2 ;;
+    --build-from-source) FROM_SOURCE=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
     --interactive|-i) WIZARD=1; shift ;;
     --uninstall) MODE=uninstall; shift ;;
@@ -231,7 +237,7 @@ if [[ "$MODE" == uninstall ]]; then
   systemctl daemon-reload
   if [[ $PURGE -eq 1 ]]; then
     rm -rf "$DATA" "$NODE_DATA" /etc/sysctl.d/90-vynel.conf "$SRC" \
-      /usr/local/bin/vynel /usr/local/bin/xray /usr/local/bin/caddy /usr/local/share/xray
+      /usr/local/bin/vynel /usr/local/bin/vynel.prev /usr/local/bin/xray /usr/local/bin/caddy /usr/local/share/xray
   fi
   green "removed$([[ $PURGE -eq 1 ]] && echo " with all data")"
   exit 0
@@ -256,10 +262,20 @@ if [[ ( "$MODE" == aio || "$MODE" == panel ) && $NODE_INSTALLED -eq 1 ]]; then
   die "this server runs a node of another panel; remove it first (install.sh --mode uninstall)"
 fi
 
-info "installing packages"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq git curl unzip ca-certificates iproute2 >/dev/null
+# apt waits for a lock held by unattended-upgrades instead of failing, and gives up on a mirror
+# that stops answering instead of hanging.
+APT_OPTS=(-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+need_pkgs=0
+for c in git curl unzip ip; do command -v "$c" >/dev/null || need_pkgs=1; done
+if [[ $need_pkgs -eq 1 || "$MODE" != update ]]; then
+  info "installing packages (apt)"
+  if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+    echo "  apt is busy (automatic updates?) — waiting for it, up to 5 minutes"
+  fi
+  timeout 600 apt-get "${APT_OPTS[@]}" update -qq || red "  apt-get update failed or timed out — trying to install anyway"
+  timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq git curl unzip ca-certificates iproute2 psmisc >/dev/null || die "apt-get install failed"
+fi
 
 detect_ip() {
   [[ -n "$PUBLIC_IP" ]] && return 0
@@ -308,7 +324,7 @@ check_ports() {
 # vynel: a prebuilt binary from the branch's "edge" release (built by .github/workflows/edge.yml).
 # Building from source is the fallback only: on a 1 vCPU / 1 GB VPS it takes 10–20 minutes.
 RELEASE="${VYNEL_RELEASE:-edge-${REF//\//-}}"
-RELEASE_URL="https://github.com/vyto4ka/vynel/releases/download/$RELEASE"
+RELEASE_URL="${VYNEL_RELEASE_URL:-https://github.com/vyto4ka/vynel/releases/download/$RELEASE}"
 TEMP_SWAP=0
 
 ensure_go() {
@@ -320,10 +336,15 @@ ensure_go() {
     [[ "$(printf '%s\n1.21\n' "$v" | sort -V | head -1)" == "1.21" ]] && return 0
   fi
   local gov
-  gov="$(curl -fsSL 'https://go.dev/VERSION?m=text' | head -1)"
+  gov="$(curl -fsSL --connect-timeout 15 --max-time 30 'https://go.dev/VERSION?m=text' | head -1)"
+  [[ -n "$gov" ]] || die "cannot reach go.dev to install Go"
   info "installing $gov"
+  local tgz
+  tgz="$(mktemp)"
+  fetch "https://go.dev/dl/${gov}.linux-${GOARCH}.tar.gz" "$tgz" "Go" || die "cannot download Go"
   rm -rf /usr/local/go
-  curl -fsSL "https://go.dev/dl/${gov}.linux-${GOARCH}.tar.gz" | tar -C /usr/local -xz
+  tar -C /usr/local -xzf "$tgz"
+  rm -f "$tgz"
 }
 
 # The Go compiler needs ~1.5 GB for this project; small VPSes get a temporary swap file.
@@ -353,15 +374,77 @@ with_progress() {
   return $rc
 }
 
+# ---- downloads ----
+
+# gh URL: a github.com URL through the optional mirror (--gh-proxy).
+gh() { printf '%s%s' "$GH_PROXY" "$1"; }
+
+# fetch URL FILE [LABEL]: download with a visible progress bar. It never hangs: the connection
+# must open within 20 s and a transfer slower than 2 KB/s for 30 s is aborted, with 2 retries.
+# A slow but moving download is allowed to finish. Returns curl's code (22 = HTTP error).
+STALL_SECS="${VYNEL_STALL_SECS:-30}"
+fetch() {
+  local url="$1" out="$2" label="${3:-}" progress=(-sS)
+  [[ -t 1 && -n "$label" ]] && progress=(--progress-bar)
+  [[ -n "$label" ]] && echo "  $label: $url"
+  curl -fL "${progress[@]}" --connect-timeout 20 --speed-limit 2048 --speed-time "$STALL_SECS" \
+    --retry 2 --retry-delay 3 --retry-connrefused -o "$out" "$url"
+}
+
+# gh_latest OWNER/REPO [ASSET]: the latest release tag, or nothing. Tried in order: the
+# redirect of releases/latest/download/ASSET, the redirect of /releases/latest (neither has the
+# API's 60 requests/hour limit, both work through --gh-proxy), then the API.
+gh_latest() {
+  local loc tag=""
+  if [[ -n "${2:-}" ]]; then
+    loc="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{redirect_url}' "$(gh "https://github.com/$1/releases/latest/download/$2")" 2>/dev/null || true)"
+    [[ "$loc" == */releases/download/*/* ]] && tag="${loc#*/releases/download/}" && tag="${tag%%/*}"
+  fi
+  if [[ -z "$tag" ]]; then
+    loc="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{redirect_url}' "$(gh "https://github.com/$1/releases/latest")" 2>/dev/null || true)"
+    [[ "$loc" == */tag/* ]] && tag="${loc##*/tag/}"
+  fi
+  if [[ -z "$tag" ]]; then
+    tag="$(curl -fsS --connect-timeout 15 --max-time 30 "https://api.github.com/repos/$1/releases/latest" 2>/dev/null | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4 || true)"
+  fi
+  printf '%s' "$tag"
+}
+
+# install_release_binary: 0 = installed, 2 = already this version, 1 = not available (yet),
+# 3 = network trouble (timeout, reset: GitHub is slow or blocked from here).
 install_release_binary() {
-  local tmp
+  local tmp want have rc=0
   tmp="$(mktemp -d)"
-  curl -fsSL --max-time 120 -o "$tmp/vynel-linux-$GOARCH" "$RELEASE_URL/vynel-linux-$GOARCH" || { rm -rf "$tmp"; return 1; }
-  curl -fsSL --max-time 30 -o "$tmp/SHA256SUMS" "$RELEASE_URL/SHA256SUMS" || { rm -rf "$tmp"; return 1; }
-  (cd "$tmp" && grep " vynel-linux-$GOARCH\$" SHA256SUMS | sha256sum -c --quiet -) || { red "checksum mismatch"; rm -rf "$tmp"; return 1; }
-  install -m 755 "$tmp/vynel-linux-$GOARCH" /usr/local/bin/vynel.new
-  mv /usr/local/bin/vynel.new /usr/local/bin/vynel
+  fetch "$(gh "$RELEASE_URL/SHA256SUMS")" "$tmp/SHA256SUMS" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    rm -rf "$tmp"
+    [[ $rc -eq 22 ]] && return 1
+    return 3
+  fi
+  want="$(awk -v f="vynel-linux-$GOARCH" '$2 == f {print $1}' "$tmp/SHA256SUMS")"
+  [[ -n "$want" ]] || { rm -rf "$tmp"; return 1; }
+  have="$(sha256sum /usr/local/bin/vynel 2>/dev/null | awk '{print $1}' || true)"
+  if [[ "$have" == "$want" ]]; then
+    rm -rf "$tmp"
+    return 2
+  fi
+  fetch "$(gh "$RELEASE_URL/vynel-linux-$GOARCH")" "$tmp/vynel" "vynel" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    rm -rf "$tmp"
+    [[ $rc -eq 22 ]] && return 1
+    return 3
+  fi
+  if [[ "$(sha256sum "$tmp/vynel" | awk '{print $1}')" != "$want" ]]; then
+    # CI replaces the release file by file: a binary and checksums from different builds.
+    echo "  checksum does not match yet (the release is being updated)"
+    rm -rf "$tmp"
+    return 1
+  fi
+  [[ -x /usr/local/bin/vynel ]] && cp -f /usr/local/bin/vynel /usr/local/bin/vynel.prev
+  install -m 755 "$tmp/vynel" /usr/local/bin/vynel.new
+  mv -f /usr/local/bin/vynel.new /usr/local/bin/vynel
   rm -rf "$tmp"
+  return 0
 }
 
 build_from_source() {
@@ -369,55 +452,92 @@ build_from_source() {
   ensure_memory
   info "fetching source ($REF)"
   if [[ -d "$SRC/.git" ]]; then
-    git -C "$SRC" fetch -q --depth 1 origin "$REF"
+    timeout 600 git -C "$SRC" fetch -q --depth 1 origin "$REF"
     git -C "$SRC" reset -q --hard FETCH_HEAD
   else
     rm -rf "$SRC"
-    git clone -q --depth 1 -b "$REF" "$REPO" "$SRC"
+    timeout 600 git clone -q --depth 1 -b "$REF" "$REPO" "$SRC"
   fi
   local commit
   commit="$(git -C "$SRC" rev-parse --short HEAD)"
   with_progress "building vynel $commit from source (10–20 minutes on a small VPS)" \
     bash -c "cd '$SRC' && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w -X github.com/vyto4ka/vynel/internal/buildinfo.Version=$commit -X github.com/vyto4ka/vynel/internal/buildinfo.Commit=$commit' -o /usr/local/bin/vynel.new ./cmd/vynel"
+  [[ -x /usr/local/bin/vynel ]] && cp -f /usr/local/bin/vynel /usr/local/bin/vynel.prev
   mv /usr/local/bin/vynel.new /usr/local/bin/vynel
   red "  note: a source build has no web UI inside (it is built in CI); the panel will say so. Use the release when it is available."
 }
 
+# install_vynel: VYNEL_CHANGED=1 when a new binary was put in place.
+VYNEL_CHANGED=0
 install_vynel() {
-  info "downloading vynel ($RELEASE)"
-  # Right after a push the release is being re-created for about a minute: retry before building.
-  local got=0 attempt
-  for attempt in 1 2 3 4; do
-    if install_release_binary 2>/dev/null; then got=1; break; fi
-    [[ $attempt -lt 4 ]] && { echo "  release not available yet, retrying in 20s ($attempt/3)"; sleep 20; }
+  info "vynel: checking the release $RELEASE"
+  # Right after a push CI rebuilds the release (2–3 minutes): wait for it instead of compiling.
+  local attempt rc tries="${VYNEL_RELEASE_TRIES:-10}" netfail=0
+  for ((attempt = 1; attempt <= tries; attempt++)); do
+    rc=0
+    install_release_binary || rc=$?
+    case $rc in
+      0) VYNEL_CHANGED=1; green "  installed $(/usr/local/bin/vynel version)"; return 0 ;;
+      2) green "  already the latest: $(/usr/local/bin/vynel version)"; return 0 ;;
+      3) netfail=$((netfail + 1))
+         if [[ $netfail -ge 2 ]]; then
+           red "  GitHub does not answer from this server (timeouts)."
+           break
+         fi ;;
+    esac
+    if [[ $attempt -lt $tries ]]; then
+      if [[ $rc -eq 3 ]]; then echo "  GitHub is slow or unreachable, retrying in 20 s"
+      else echo "  release not available yet (CI rebuilds it after a push), retrying in 20 s ($attempt/$((tries - 1)))"; fi
+      sleep 20
+    fi
   done
-  if [[ $got -eq 1 ]]; then
-    green "  $(/usr/local/bin/vynel version)"
-  else
-    red "  no prebuilt binary for $RELEASE/$GOARCH, building from source"
-    build_from_source
+  if [[ -x /usr/local/bin/vynel && $FROM_SOURCE -eq 0 ]]; then
+    red "  cannot download the release: nothing changed, vynel keeps running."
+    red "  Check https://github.com/vyto4ka/vynel/releases/tag/$RELEASE and run the update again;"
+    red "  if GitHub is slow from this server, add --gh-proxy https://ghfast.top/"
+    return 1
   fi
+  if [[ $FROM_SOURCE -eq 0 && $ASSUME_YES -eq 0 ]] && have_tty; then
+    ask_yes "Собрать vynel из исходников? Это 10–20 минут на маленьком сервере" n || die "отменено: запустите позже или с --gh-proxy"
+  fi
+  build_from_source
+  VYNEL_CHANGED=1
 }
 
-# install_xray [force]: latest Xray release; an update keeps the old one if the download fails.
+# install_xray [force]: latest Xray release; skipped when it is already installed. An update keeps
+# the old one if the download fails.
 install_xray() {
   if [[ -x /usr/local/share/xray/xray && "${1:-}" != force ]]; then
     ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
     return 0
   fi
-  info "installing Xray"
-  local asset tmp
+  info "Xray: checking the latest release"
+  local asset tmp latest have
   case "$GOARCH" in amd64) asset=Xray-linux-64.zip ;; arm64) asset=Xray-linux-arm64-v8a.zip ;; esac
+  latest="$(gh_latest XTLS/Xray-core "$asset")"
+  have="$(/usr/local/share/xray/xray version 2>/dev/null | awk 'NR==1 {print "v"$2}' || true)"
+  if [[ -n "$latest" && "$latest" == "$have" ]]; then
+    ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
+    green "  already the latest: Xray ${have#v}"
+    return 0
+  fi
   tmp="$(mktemp)"
-  if curl -fsSL -o "$tmp" "https://github.com/XTLS/Xray-core/releases/latest/download/$asset"; then
+  local url="https://github.com/XTLS/Xray-core/releases/latest/download/$asset"
+  [[ -n "$latest" ]] && url="https://github.com/XTLS/Xray-core/releases/download/$latest/$asset"
+  if fetch "$(gh "$url")" "$tmp" "Xray ${latest:-latest}" && unzip -tq "$tmp" >/dev/null 2>&1; then
+    # Unpack aside and swap files: writing over a running xray fails with "Text file busy".
+    local dir
+    dir="$(mktemp -d)"
+    unzip -o -q "$tmp" -d "$dir"
     mkdir -p /usr/local/share/xray
-    unzip -o -q "$tmp" -d /usr/local/share/xray
-    chmod +x /usr/local/share/xray/xray
+    local f
+    for f in "$dir"/*; do install -m "$([[ "$(basename "$f")" == xray ]] && echo 755 || echo 644)" "$f" /usr/local/share/xray/; done
+    rm -rf "$dir"
   elif [[ -x /usr/local/share/xray/xray ]]; then
     red "  Xray download failed, keeping the installed one"
   else
     rm -f "$tmp"
-    die "cannot download Xray"
+    die "cannot download Xray (slow GitHub? try --gh-proxy https://ghfast.top/)"
   fi
   rm -f "$tmp"
   ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
@@ -429,11 +549,19 @@ install_caddy() {
   if [[ -x /usr/local/bin/caddy && "${1:-}" != force ]]; then
     return 0
   fi
-  info "installing Caddy"
-  local cv tmp
+  info "Caddy: checking the latest release"
+  local cv tmp have
   tmp="$(mktemp -d)"
-  cv="$(curl -fsSL https://api.github.com/repos/caddyserver/caddy/releases/latest 2>/dev/null | grep -o '"tag_name": *"v[^"]*"' | grep -o 'v[0-9.]*' || true)"
-  if [[ -n "$cv" ]] && curl -fsSL "https://github.com/caddyserver/caddy/releases/download/${cv}/caddy_${cv#v}_linux_${GOARCH}.tar.gz" | tar -xz -C "$tmp" caddy; then
+  cv="$(gh_latest caddyserver/caddy)"
+  have="$(/usr/local/bin/caddy version 2>/dev/null | awk '{print $1}' || true)"
+  if [[ -n "$cv" && "$cv" == "$have" ]]; then
+    rm -rf "$tmp"
+    green "  already the latest: Caddy $have"
+    return 0
+  fi
+  [[ -n "$cv" ]] || echo "  cannot find out the latest Caddy version (GitHub unreachable?)"
+  if [[ -n "$cv" ]] && fetch "$(gh "https://github.com/caddyserver/caddy/releases/download/${cv}/caddy_${cv#v}_linux_${GOARCH}.tar.gz")" "$tmp/caddy.tgz" "Caddy $cv" \
+    && tar -xzf "$tmp/caddy.tgz" -C "$tmp" caddy; then
     install -m 755 "$tmp/caddy" /usr/local/bin/caddy
   elif [[ -x /usr/local/bin/caddy ]]; then
     red "  Caddy download failed, keeping the installed one"
@@ -870,21 +998,52 @@ do_node() {
 }
 
 # ================================================================== update
+# wait_active UNIT SECONDS: the unit is active and stays up (a crash loop would flip it back).
+wait_active() {
+  local i
+  for ((i = 0; i < $2; i++)); do
+    sleep 1
+    if [[ "$(systemctl is-active "$1" 2>/dev/null)" == active ]] && (( i >= 4 )); then
+      sleep 2
+      [[ "$(systemctl is-active "$1" 2>/dev/null)" == active ]] && return 0
+    fi
+  done
+  return 1
+}
+
 do_update() {
-  echo "  installed: $(installed_text)"
+  echo "  installed: $(installed_text) · $(vynel version 2>/dev/null || echo '?')"
   if [[ $WIZARD -eq 1 ]]; then
     ask_yes "Обновить vynel, Xray и Caddy до свежих версий? Данные сохранятся" y || die "отменено"
   fi
-  install_vynel
+  install_vynel || exit 1
   if [[ $PANEL_WITH_NODE -eq 1 || $NODE_INSTALLED -eq 1 ]]; then install_xray force; fi
   install_caddy force
   drop_temp_swap
+
+  local units=() u failed=()
+  [[ $PANEL_INSTALLED -eq 1 ]] && units+=(vynel)
+  [[ $NODE_INSTALLED -eq 1 ]] && units+=(vynel-node)
   if [[ $PANEL_INSTALLED -eq 1 ]]; then
-    admin setting install.command "$(script_command)" >/dev/null
-    systemctl restart vynel
+    admin setting install.command "$(script_command)" >/dev/null || true
   fi
-  [[ $NODE_INSTALLED -eq 1 ]] && systemctl restart vynel-node
-  sleep 3
+  for u in "${units[@]}"; do
+    info "restarting $u"
+    systemctl restart "$u" || true
+    wait_active "$u" 30 || failed+=("$u")
+  done
+  if [[ ${#failed[@]} -gt 0 ]]; then
+    red "  did not start: ${failed[*]}"
+    journalctl -u "${failed[0]}" -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+    if [[ $VYNEL_CHANGED -eq 1 && -x /usr/local/bin/vynel.prev ]]; then
+      red "  rolling back to the previous vynel"
+      cp -f /usr/local/bin/vynel.prev /usr/local/bin/vynel.new && mv -f /usr/local/bin/vynel.new /usr/local/bin/vynel
+      for u in "${units[@]}"; do systemctl restart "$u" || true; done
+      for u in "${units[@]}"; do wait_active "$u" 30 || die "$u does not start even with the previous version: journalctl -u $u -n 50"; done
+      die "the new version did not start and was rolled back ($(vynel version 2>/dev/null)); send the log above"
+    fi
+    die "${failed[*]} not running: journalctl -u ${failed[0]} -n 50"
+  fi
   echo
   pink "══════════════════════════  vynel обновлён  ══════════════════════════"
   echo
