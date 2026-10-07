@@ -18,7 +18,7 @@ import (
 //go:embed templates/*.yaml
 var templatesFS embed.FS
 
-// Template is a built-in profile template.
+// Template is a profile template: built-in (embedded YAML) or written in the panel.
 type Template struct {
 	ID            string         `yaml:"id" json:"id"`
 	Version       int            `yaml:"version" json:"version"`
@@ -35,6 +35,9 @@ type Template struct {
 	Host          map[string]any `yaml:"host" json:"host,omitempty"`
 	Caddy         map[string]any `yaml:"caddy" json:"caddy,omitempty"`
 	Requirements  map[string]any `yaml:"node_requirements" json:"node_requirements,omitempty"`
+
+	Custom bool   `yaml:"-" json:"custom"` // written in the panel, editable
+	Source string `yaml:"-" json:"source"` // the YAML it came from
 
 	inbound map[string]any // parsed XrayInbound
 	extra   map[string]any // parsed XHTTPExtra
@@ -105,11 +108,8 @@ func load() {
 		if err != nil {
 			return err
 		}
-		t := &Template{}
-		if err := yaml.Unmarshal(raw, t); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
-		}
-		if err := t.parse(); err != nil {
+		t, err := ParseTemplate(raw)
+		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 		if _, dup := templates[t.ID]; dup {
@@ -120,7 +120,28 @@ func load() {
 	})
 }
 
-// Templates returns all built-in templates sorted by id.
+// ParseTemplate parses and checks a template written in YAML.
+func ParseTemplate(raw []byte) (*Template, error) {
+	t := &Template{}
+	if err := yaml.Unmarshal(raw, t); err != nil {
+		return nil, fmt.Errorf("YAML: %w", err)
+	}
+	if err := t.parse(); err != nil {
+		return nil, err
+	}
+	t.Source = string(raw)
+	return t, nil
+}
+
+// IsBuiltin reports whether id is a built-in template.
+func IsBuiltin(id string) bool {
+	loadOnce.Do(load)
+	_, ok := templates[id]
+	return ok
+}
+
+// Templates returns the built-in templates sorted by id. Templates written in the panel live
+// in its database (service.ProfileTemplates).
 func Templates() ([]*Template, error) {
 	loadOnce.Do(load)
 	if loadErr != nil {

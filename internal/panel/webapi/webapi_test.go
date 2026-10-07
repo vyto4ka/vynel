@@ -175,3 +175,44 @@ func TestSubscriptionAPI(t *testing.T) {
 		t.Fatalf("reset: %d", w.Code)
 	}
 }
+
+func TestTemplateEditorAPI(t *testing.T) {
+	c, _, pw := newServer(t)
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != 200 {
+		t.Fatal("login")
+	}
+	w := c.do("GET", "/api/profile-templates", "", false)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"source":"`) {
+		t.Fatalf("list: %d", w.Code)
+	}
+	var list []struct {
+		ID     string `json:"id"`
+		Source string `json:"source"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &list)
+	src := strings.Replace(list[0].Source, "id: "+list[0].ID, "id: mine", 1)
+	body, _ := json.Marshal(map[string]string{"source": src})
+	if w := c.do("POST", "/api/profile-templates/check", string(body), true); !strings.Contains(w.Body.String(), `"ok":true`) || strings.Contains(w.Body.String(), "PRIVATE_KEY\":\"") {
+		t.Fatalf("check: %s", w.Body.String())
+	}
+	bad, _ := json.Marshal(map[string]string{"source": "id: x\nxray_inbound: '{'"})
+	if w := c.do("POST", "/api/profile-templates/check", string(bad), true); !strings.Contains(w.Body.String(), `"ok":false`) {
+		t.Fatalf("bad check: %s", w.Body.String())
+	}
+	if w := c.do("POST", "/api/profile-templates", string(body), true); w.Code != 200 {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("POST", "/api/profiles", `{"name":"P","templateId":"mine"}`, true); w.Code != 200 {
+		t.Fatalf("profile on custom template: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("DELETE", "/api/profile-templates/mine", "", true); w.Code != 400 {
+		t.Fatalf("deleted a template in use: %d", w.Code)
+	}
+	w = c.do("POST", "/api/profiles/1/preview", `{"override":{"sniffing":{"enabled":false}}}`, true)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"inbounds":[]`) {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("GET", "/api/profiles/1", "", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"templateId":"mine"`) {
+		t.Fatalf("profile: %d %s", w.Code, w.Body.String())
+	}
+}

@@ -67,6 +67,11 @@ func (v *Variable) check() error {
 	default:
 		return fmt.Errorf("variable %s: bad source %q", v.Name, v.Source)
 	}
+	switch v.Validate {
+	case "", "domain", "port", "path", "ip":
+	default:
+		return fmt.Errorf("variable %s: unknown validate %q (domain, port, path, ip)", v.Name, v.Validate)
+	}
 	if v.DefaultFrom != "" && v.DefaultFrom != "node.domain" {
 		return fmt.Errorf("variable %s: unsupported default_from %q", v.Name, v.DefaultFrom)
 	}

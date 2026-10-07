@@ -114,6 +114,9 @@ func (s *Service) UserHosts(ctx context.Context, userID int64) ([]Host, error) {
 
 // HostFor builds the connection point of one node inbound.
 func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, error) {
+	if err := s.syncTemplates(ctx); err != nil {
+		return Host{}, err
+	}
 	q := s.st.DB
 	r, err := s.renderNodeInbound(ctx, q, ni)
 	if err != nil {
@@ -127,7 +130,7 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 	if err != nil {
 		return Host{}, err
 	}
-	tpl, err := xrayconf.GetTemplate(p.TemplateID)
+	tpl, err := s.template(ctx, p.TemplateID)
 	if err != nil {
 		return Host{}, err
 	}

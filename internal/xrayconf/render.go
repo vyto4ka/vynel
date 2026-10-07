@@ -8,6 +8,7 @@ import (
 // InboundSpec is everything needed to render one node inbound (docs/INBOUNDS.md §1.4).
 type InboundSpec struct {
 	TemplateID      string
+	Template        *Template      // used instead of TemplateID when set (checking an unsaved template)
 	ProfileValues   map[string]any // scope=profile values stored on the profile
 	NodeValues      map[string]any // scope=node values stored on the node inbound
 	ProfileOverride map[string]any // merge patch stored on the profile
@@ -30,9 +31,12 @@ type RenderedInbound struct {
 
 // RenderInbound renders template ⊕ profile ⊕ node values ⊕ overrides ⊕ system fields.
 func RenderInbound(spec InboundSpec) (*RenderedInbound, error) {
-	t, err := GetTemplate(spec.TemplateID)
-	if err != nil {
-		return nil, err
+	t := spec.Template
+	if t == nil {
+		var err error
+		if t, err = GetTemplate(spec.TemplateID); err != nil {
+			return nil, err
+		}
 	}
 	vals, err := t.ResolveValues(spec.ProfileValues, spec.NodeValues, spec.Context)
 	if err != nil {

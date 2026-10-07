@@ -1,5 +1,7 @@
-import { FormEvent, useState } from 'react'
-import { api, del, get, Inbound, JoinInfo, Node, patch, post, Profile, ProfileTemplate } from '../api'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate } from '../api'
+import { CodeEditor, parseObject, pretty } from '../code'
+import { VariableTable } from './Profiles'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
 import { Badge, Bar, CopyField, Empty, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 
@@ -103,7 +105,7 @@ export function Nodes() {
                           </div>
                           <div className="row" style={{ marginTop: 8, gap: 6 }}>
                             <button className="btn sm" onClick={() => setHostOf(i)}><Icon name="edit" /> Точка подключения</button>
-                            <button className="btn sm" onClick={() => setConfigOf(i)}><Icon name="code" /> Конфиг</button>
+                            <button className="btn sm primary" onClick={() => setConfigOf(i)}><Icon name="code" /> Настроить</button>
                             <button className="btn sm" onClick={async () => {
                               if (await confirm('Сгенерировать новые ключи Reality и shortId? Клиенты получат их при следующем обновлении подписки, до этого не подключатся.', 'Сгенерировать'))
                                 act(() => patch(`inbounds/${i.id}`, { regenerateKeys: true }), 'Ключи обновлены').then(reload)
@@ -129,7 +131,7 @@ export function Nodes() {
       {editNode && <EditNode n={editNode} onClose={() => setEditNode(null)} onSaved={() => { setEditNode(null); reload() }} />}
       {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}
       {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
-      {configOf && <ConfigModal i={configOf} onClose={() => setConfigOf(null)} />}
+      {configOf && <InboundEditor i={configOf} onClose={() => setConfigOf(null)} onSaved={reload} />}
     </>
   )
 }
@@ -288,12 +290,107 @@ function HostForm({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; on
   )
 }
 
-function ConfigModal({ i, onClose }: { i: Inbound; onClose: () => void }) {
-  const { data, error } = useLoad(() => api<any>('GET', `inbounds/${i.id}/config`), [i.id])
+function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; onSaved: () => void }) {
+  const loaded = useLoad(() => get<InboundDetails>(`inbounds/${i.id}`), [i.id])
+  const [tag, setTag] = useState(i.tag)
+  const [port, setPort] = useState('')
+  const [listen, setListen] = useState(0)
+  const [egress, setEgress] = useState(0)
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [overrideText, setOverrideText] = useState('')
+  const [regenerate, setRegenerate] = useState(false)
+  const [preview, setPreview] = useState<{ inbound?: Record<string, unknown>; error?: string } | null>(null)
+  const act = useAction()
+  const confirm = useConfirm()
+
+  useEffect(() => {
+    const d = loaded.data
+    if (!d) return
+    setTag(d.tag)
+    setPort(d.port ? String(d.port) : '')
+    setListen(d.listenAddressId || 0)
+    setEgress(d.egressAddressId || 0)
+    setValues(Object.fromEntries(Object.entries(d.values).map(([k, v]) => [k, v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)])))
+    setOverrideText(Object.keys(d.override).length ? pretty(d.override) : '')
+  }, [loaded.data])
+
+  const override = parseObject(overrideText)
+  const vars = loaded.data?.variables || []
+  const body = useMemo(() => {
+    const vals: Record<string, string> = {}
+    for (const v of vars) if (v.scope === 'node' && v.source !== 'derived' && values[v.name] !== undefined) vals[v.name] = values[v.name]
+    return {
+      tag, port: Number(port) || 0, values: vals, override: override.value ?? {}, regenerateKeys: regenerate,
+      // Адреса задаются целиком: сначала сбросить, потом выставить выбранные ("как у входа" = IP входа).
+      clearAddresses: true,
+      ...(listen ? { listenAddressId: listen } : {}), ...(egress || listen ? { egressAddressId: egress || listen } : {}),
+    }
+  }, [tag, port, values, overrideText, regenerate, listen, egress, vars])
+
+  useEffect(() => {
+    if (!loaded.data || override.error) return
+    const t = setTimeout(() => {
+      post<{ inbound?: Record<string, unknown>; error?: string }>(`inbounds/${i.id}/preview`, body).then(setPreview).catch((e) => setPreview({ error: e.message }))
+    }, 500)
+    return () => clearTimeout(t)
+  }, [JSON.stringify(body), loaded.data])
+
+  if (!loaded.data) return <Modal title={i.tag} onClose={onClose}><Loading error={loaded.error} /></Modal>
+  const d = loaded.data
+
+  const save = async () => {
+    if (regenerate && !(await confirm('Новые ключи Reality и shortId: клиенты не подключатся, пока не обновят подписку.', 'Сгенерировать'))) return
+    const r = await act(() => patch(`inbounds/${i.id}`, body), 'Инбаунд сохранён — нода применит его за несколько секунд')
+    if (r !== undefined) {
+      onSaved()
+      onClose()
+    }
+  }
+
   return (
-    <Modal title={`Конфиг ${i.tag}`} wide onClose={onClose}>
-      {!data ? <Loading error={error} /> : <pre className="code">{JSON.stringify(data, null, 2)}</pre>}
-      <div className="muted small" style={{ marginTop: 8 }}>Так инбаунд выглядит в конфиге Xray на ноде (без пользователей; приватный ключ скрыт).</div>
+    <Modal title={<>Инбаунд <span className="mono">{d.tag}</span> <span className="muted small" style={{ fontWeight: 400 }}>· профиль {d.profile.name}</span></>} xl onClose={onClose}
+      footer={<>
+        {preview?.error ? <span className="pink-text small grow">Есть ошибка — сохранить не получится</span> : <span className="muted small grow">Общие настройки — в профиле «{d.profile.name}»; здесь — то, что только у этой ноды</span>}
+        <button className="btn ghost" onClick={onClose}>Отмена</button>
+        <button className="btn primary" disabled={!!override.error || !!preview?.error} onClick={save}>Сохранить</button>
+      </>}>
+      <div className="editor-split">
+        <div>
+          <div className="grid2">
+            <Field label="Тег"><input className="input mono" value={tag} onChange={(e) => setTag(e.target.value)} /></Field>
+            <Field label="Порт" help="Пусто — из профиля"><input className="input" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
+            <Field label="Слушать IP" help="Все — на всех адресах сервера">
+              <select className="input" value={listen} onChange={(e) => setListen(Number(e.target.value))}>
+                <option value={0}>все адреса</option>
+                {d.addresses.map((a) => <option key={a.id} value={a.id}>{a.ip}{a.primary ? ' (основной)' : ''}</option>)}
+              </select>
+            </Field>
+            <Field label="Выходной IP" help="С какого адреса уходит трафик пользователей">
+              <select className="input" value={egress} onChange={(e) => setEgress(Number(e.target.value))}>
+                <option value={0}>{listen ? 'как у входа' : 'по умолчанию'}</option>
+                {d.addresses.map((a) => <option key={a.id} value={a.id}>{a.ip}</option>)}
+              </select>
+            </Field>
+          </div>
+          <div className="label" style={{ margin: '6px 0 8px' }}>Параметры этой ноды</div>
+          <VariableTable vars={vars.filter((v) => v.scope === 'node')} values={values} onChange={setValues} empty="У шаблона нет параметров уровня ноды" />
+          {vars.some((v) => v.scope === 'node' && v.source === 'generate') && (
+            <label className="check" style={{ margin: '8px 0 14px' }}>
+              <input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} /> Сгенерировать ключи и прочие значения заново
+            </label>
+          )}
+          <Field label="Ручная правка JSON только для этой ноды" help="Накладывается поверх профиля. null удаляет поле. Пусто — без правок.">
+            <CodeEditor lang="json" value={overrideText} onChange={setOverrideText} height={160} />
+            {override.error && <div className="small pink-text" style={{ marginTop: 6 }}>{override.error}</div>}
+          </Field>
+        </div>
+        <div className="preview-pane">
+          <div className="label" style={{ marginBottom: 8 }}>Инбаунд в конфиге Xray на ноде</div>
+          {!preview ? <Loading /> : preview.error ? <div className="alert pink">{preview.error}</div> :
+            <CodeEditor lang="json" value={pretty(preview.inbound)} readOnly height="calc(100vh - 300px)" />}
+          <div className="muted small" style={{ marginTop: 6 }}>Без пользователей; приватный ключ скрыт.</div>
+        </div>
+      </div>
     </Modal>
   )
 }

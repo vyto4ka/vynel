@@ -18,13 +18,18 @@ type ProfileInput struct {
 	Override      map[string]any // merge patch over the template
 	TagPattern    string         // optional, defaults to the template's
 	RemarkPattern string         // optional
+	// RegenerateKeys re-creates the profile's generated values (e.g. a random path).
+	RegenerateKeys bool
 }
 
 // CreateProfile creates a profile from a template.
 func (s *Service) CreateProfile(ctx context.Context, actor Actor, in ProfileInput) (*store.Profile, error) {
-	tpl, err := xrayconf.GetTemplate(in.TemplateID)
+	if err := s.syncTemplates(ctx); err != nil {
+		return nil, err
+	}
+	tpl, err := s.template(ctx, in.TemplateID)
 	if err != nil {
-		return nil, invalid("%v", err)
+		return nil, err
 	}
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, invalid("profile name is required")
@@ -57,55 +62,120 @@ func (s *Service) CreateProfile(ctx context.Context, actor Actor, in ProfileInpu
 // re-rendered first; any error aborts the change (docs/INBOUNDS.md §1.4).
 func (s *Service) UpdateProfile(ctx context.Context, actor Actor, id int64, in ProfileInput) (*store.Profile, error) {
 	var p *store.Profile
-	err := s.mutate(ctx, change{actor: actor, action: "profile.update", entity: "profile", entityID: func() int64 { return id }, event: EvProfileChanged, diff: in},
+	err := s.mutate(ctx, change{actor: actor, action: "profile.update", entity: "profile", entityID: func() int64 { return id }, event: EvProfileChanged,
+		diff: map[string]any{"name": in.Name, "values": redactedKeys(in.Values), "override": in.Override != nil, "regenerate": in.RegenerateKeys}},
 		func(q store.DBTX) error {
 			var err error
-			if p, err = store.GetProfile(ctx, q, id); err != nil {
-				return err
-			}
-			tpl, err := xrayconf.GetTemplate(p.TemplateID)
+			p, err = s.applyProfile(ctx, q, id, in)
 			if err != nil {
 				return err
 			}
-			if in.Name != "" {
-				p.Name = strings.TrimSpace(in.Name)
-			}
-			if in.Values != nil {
-				if err := checkScope(tpl, in.Values, xrayconf.ScopeProfile); err != nil {
-					return err
-				}
-				for k, v := range in.Values {
-					if v == nil {
-						delete(p.Values, k)
-					} else {
-						p.Values[k] = v
-					}
-				}
-			}
-			if in.Override != nil {
-				p.Override = in.Override
-			}
-			if in.TagPattern != "" {
-				p.TagPattern = in.TagPattern
-			}
-			if in.RemarkPattern != "" {
-				p.RemarkPattern = in.RemarkPattern
-			}
-			if err := store.UpdateProfile(ctx, q, p); err != nil {
-				return err
-			}
-			inbounds, err := store.ListNodeInbounds(ctx, q, 0, p.ID)
-			if err != nil {
-				return err
-			}
-			for _, ni := range inbounds {
-				if _, err := s.renderNodeInbound(ctx, q, ni); err != nil {
-					return fmt.Errorf("inbound %s: %w", ni.Tag, err)
+			for _, r := range s.renderProfileInbounds(ctx, q, p.ID) {
+				if r.Err != nil {
+					return fmt.Errorf("inbound %s: %w", r.Inbound.Tag, r.Err)
 				}
 			}
 			return nil
 		})
 	return p, err
+}
+
+// InboundPreview is a node inbound rendered with unsaved changes.
+type InboundPreview struct {
+	Inbound  *store.NodeInbound
+	Node     *store.Node
+	Rendered *xrayconf.RenderedInbound
+	Err      error
+}
+
+// PreviewProfile shows what every node inbound of the profile becomes with the changes, without
+// saving anything.
+func (s *Service) PreviewProfile(ctx context.Context, id int64, in ProfileInput) (*store.Profile, []InboundPreview, error) {
+	var p *store.Profile
+	var out []InboundPreview
+	err := s.dryRun(ctx, func(q store.DBTX) error {
+		var err error
+		if p, err = s.applyProfile(ctx, q, id, in); err != nil {
+			return err
+		}
+		out = s.renderProfileInbounds(ctx, q, p.ID)
+		return nil
+	})
+	return p, out, err
+}
+
+func (s *Service) renderProfileInbounds(ctx context.Context, q store.DBTX, profileID int64) []InboundPreview {
+	inbounds, err := store.ListNodeInbounds(ctx, q, 0, profileID)
+	if err != nil {
+		return []InboundPreview{{Err: err, Inbound: &store.NodeInbound{}}}
+	}
+	out := make([]InboundPreview, 0, len(inbounds))
+	for _, ni := range inbounds {
+		pv := InboundPreview{Inbound: ni}
+		pv.Node, _ = store.GetNode(ctx, q, ni.NodeID)
+		pv.Rendered, pv.Err = s.renderNodeInboundWith(ctx, q, ni, nil)
+		out = append(out, pv)
+	}
+	return out
+}
+
+// applyProfile changes a profile inside a transaction.
+func (s *Service) applyProfile(ctx context.Context, q store.DBTX, id int64, in ProfileInput) (*store.Profile, error) {
+	p, err := store.GetProfile(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	tpl, err := s.template(ctx, p.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if name := strings.TrimSpace(in.Name); name != "" {
+		p.Name = name
+	}
+	if in.Values != nil {
+		if err := checkScope(tpl, in.Values, xrayconf.ScopeProfile); err != nil {
+			return nil, err
+		}
+		for k, v := range in.Values {
+			if v == nil {
+				delete(p.Values, k)
+			} else {
+				p.Values[k] = v
+			}
+		}
+	}
+	if in.RegenerateKeys {
+		for _, v := range tpl.Variables {
+			if v.Scope == xrayconf.ScopeProfile && v.Source == xrayconf.SourceGenerate {
+				delete(p.Values, v.Name)
+			}
+		}
+	}
+	// Generated values a template added later (or that were just cleared) are filled in.
+	gen, err := tpl.GenerateValues(xrayconf.ScopeProfile, p.Values)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range gen {
+		p.Values[k] = v
+	}
+	if in.Override != nil {
+		p.Override = in.Override
+	}
+	if in.TagPattern != "" {
+		if !strings.Contains(in.TagPattern, "${NODE_CODE}") && !strings.Contains(in.TagPattern, "${NODE_COUNTRY}") {
+			return nil, invalid("the tag pattern must contain ${NODE_CODE} or ${NODE_COUNTRY}: every node needs its own tag")
+		}
+		p.TagPattern = in.TagPattern
+	}
+	if in.RemarkPattern != "" {
+		p.RemarkPattern = in.RemarkPattern
+	}
+	p.TemplateVersion = tpl.Version
+	if err := store.UpdateProfile(ctx, q, p); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // DeleteProfile removes an unused profile.
@@ -165,7 +235,7 @@ func (s *Service) AttachProfile(ctx context.Context, actor Actor, in AttachInput
 			if err != nil {
 				return err
 			}
-			tpl, err := xrayconf.GetTemplate(p.TemplateID)
+			tpl, err := s.template(ctx, p.TemplateID)
 			if err != nil {
 				return err
 			}
@@ -216,79 +286,100 @@ func (s *Service) UpdateNodeInbound(ctx context.Context, actor Actor, id int64, 
 		diff: map[string]any{"values": redactedKeys(in.Values), "override": in.Override != nil, "regenerate": in.RegenerateKeys}},
 		func(q store.DBTX) error {
 			var err error
-			if ni, err = store.GetNodeInbound(ctx, q, id); err != nil {
-				return err
-			}
-			p, err := store.GetProfile(ctx, q, ni.ProfileID)
-			if err != nil {
-				return err
-			}
-			tpl, err := xrayconf.GetTemplate(p.TemplateID)
-			if err != nil {
-				return err
-			}
-			if in.Values != nil {
-				if err := checkScope(tpl, in.Values, xrayconf.ScopeNode); err != nil {
-					return err
-				}
-				for k, v := range in.Values {
-					if v == nil {
-						delete(ni.Values, k)
-					} else {
-						ni.Values[k] = v
-					}
-				}
-			}
-			if in.RegenerateKeys {
-				for _, v := range tpl.Variables {
-					if v.Scope == xrayconf.ScopeNode && v.Source == xrayconf.SourceGenerate {
-						delete(ni.Values, v.Name)
-					}
-				}
-				gen, err := tpl.GenerateValues(xrayconf.ScopeNode, ni.Values)
-				if err != nil {
-					return err
-				}
-				for k, v := range gen {
-					ni.Values[k] = v
-				}
-			}
-			if in.Override != nil {
-				ni.Override = in.Override
-			}
-			if in.ClearAddresses {
-				ni.ListenAddressID, ni.EgressAddressID = nil, nil
-			}
-			if in.ListenAddressID != nil {
-				ni.ListenAddressID = in.ListenAddressID
-			}
-			if in.EgressAddressID != nil {
-				ni.EgressAddressID = in.EgressAddressID
-			}
-			if err := s.checkAddresses(ctx, q, ni.NodeID, ni.ListenAddressID, ni.EgressAddressID); err != nil {
-				return err
-			}
-			if in.PortOverride != nil {
-				ni.PortOverride = *in.PortOverride
-			}
-			if in.Enabled != nil {
-				ni.Enabled = *in.Enabled
-			}
-			if in.Tag != "" && in.Tag != ni.Tag {
-				if exists, err := store.TagExists(ctx, q, in.Tag); err != nil {
-					return err
-				} else if exists {
-					return fmt.Errorf("%w: tag %s", ErrConflict, in.Tag)
-				}
-				ni.Tag = in.Tag
-			}
-			if err := store.UpdateNodeInbound(ctx, q, ni); err != nil {
-				return err
-			}
-			_, err = s.renderNodeInbound(ctx, q, ni)
+			ni, _, err = s.applyNodeInbound(ctx, q, id, in)
 			return err
 		})
 	return ni, err
+}
+
+// PreviewNodeInbound renders a node inbound with unsaved changes.
+func (s *Service) PreviewNodeInbound(ctx context.Context, id int64, in NodeInboundInput) (*store.NodeInbound, *xrayconf.RenderedInbound, error) {
+	var ni *store.NodeInbound
+	var r *xrayconf.RenderedInbound
+	err := s.dryRun(ctx, func(q store.DBTX) error {
+		var err error
+		ni, r, err = s.applyNodeInbound(ctx, q, id, in)
+		return err
+	})
+	return ni, r, err
+}
+
+func (s *Service) applyNodeInbound(ctx context.Context, q store.DBTX, id int64, in NodeInboundInput) (*store.NodeInbound, *xrayconf.RenderedInbound, error) {
+	ni, err := store.GetNodeInbound(ctx, q, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	p, err := store.GetProfile(ctx, q, ni.ProfileID)
+	if err != nil {
+		return nil, nil, err
+	}
+	tpl, err := s.template(ctx, p.TemplateID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if in.Values != nil {
+		if err := checkScope(tpl, in.Values, xrayconf.ScopeNode); err != nil {
+			return nil, nil, err
+		}
+		for k, v := range in.Values {
+			if v == nil {
+				delete(ni.Values, k)
+			} else {
+				ni.Values[k] = v
+			}
+		}
+	}
+	if in.RegenerateKeys {
+		for _, v := range tpl.Variables {
+			if v.Scope == xrayconf.ScopeNode && v.Source == xrayconf.SourceGenerate {
+				delete(ni.Values, v.Name)
+			}
+		}
+		gen, err := tpl.GenerateValues(xrayconf.ScopeNode, ni.Values)
+		if err != nil {
+			return nil, nil, err
+		}
+		for k, v := range gen {
+			ni.Values[k] = v
+		}
+	}
+	if in.Override != nil {
+		ni.Override = in.Override
+	}
+	if in.ClearAddresses {
+		ni.ListenAddressID, ni.EgressAddressID = nil, nil
+	}
+	if in.ListenAddressID != nil {
+		ni.ListenAddressID = in.ListenAddressID
+	}
+	if in.EgressAddressID != nil {
+		ni.EgressAddressID = in.EgressAddressID
+	}
+	if err := s.checkAddresses(ctx, q, ni.NodeID, ni.ListenAddressID, ni.EgressAddressID); err != nil {
+		return nil, nil, err
+	}
+	if in.PortOverride != nil {
+		ni.PortOverride = *in.PortOverride
+	}
+	if in.Enabled != nil {
+		ni.Enabled = *in.Enabled
+	}
+	if in.Tag != "" && in.Tag != ni.Tag {
+		if exists, err := store.TagExists(ctx, q, in.Tag); err != nil {
+			return nil, nil, err
+		} else if exists {
+			return nil, nil, fmt.Errorf("%w: tag %s", ErrConflict, in.Tag)
+		}
+		ni.Tag = in.Tag
+	}
+	if err := store.UpdateNodeInbound(ctx, q, ni); err != nil {
+		return nil, nil, err
+	}
+	r, err := s.renderNodeInbound(ctx, q, ni)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ni, r, nil
 }
 
 // DetachInbound removes a node inbound.
@@ -309,6 +400,9 @@ func (s *Service) NodeInboundByTag(ctx context.Context, tag string) (*store.Node
 
 // RenderNodeInbound renders one node inbound (preview, host generation).
 func (s *Service) RenderNodeInbound(ctx context.Context, id int64) (*xrayconf.RenderedInbound, error) {
+	if err := s.syncTemplates(ctx); err != nil {
+		return nil, err
+	}
 	ni, err := store.GetNodeInbound(ctx, s.st.DB, id)
 	if err != nil {
 		return nil, err
@@ -317,6 +411,11 @@ func (s *Service) RenderNodeInbound(ctx context.Context, id int64) (*xrayconf.Re
 }
 
 func (s *Service) renderNodeInbound(ctx context.Context, q store.DBTX, ni *store.NodeInbound) (*xrayconf.RenderedInbound, error) {
+	return s.renderNodeInboundWith(ctx, q, ni, nil)
+}
+
+// renderNodeInboundWith renders with candidate instead of the stored template of the same id.
+func (s *Service) renderNodeInboundWith(ctx context.Context, q store.DBTX, ni *store.NodeInbound, candidate *xrayconf.Template) (*xrayconf.RenderedInbound, error) {
 	node, err := store.GetNode(ctx, q, ni.NodeID)
 	if err != nil {
 		return nil, err
@@ -341,8 +440,14 @@ func (s *Service) renderNodeInbound(ctx context.Context, q store.DBTX, ni *store
 		}
 		egress = a.IP
 	}
+	tpl := candidate
+	if tpl == nil || tpl.ID != p.TemplateID {
+		if tpl, err = s.template(ctx, p.TemplateID); err != nil {
+			return nil, err
+		}
+	}
 	r, err := xrayconf.RenderInbound(xrayconf.InboundSpec{
-		TemplateID: p.TemplateID, ProfileValues: p.Values, NodeValues: ni.Values,
+		TemplateID: p.TemplateID, Template: tpl, ProfileValues: p.Values, NodeValues: ni.Values,
 		ProfileOverride: p.Override, NodeOverride: ni.Override, PortOverride: ni.PortOverride,
 		EgressIP: egress, Context: nctx,
 	})

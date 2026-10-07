@@ -53,6 +53,7 @@ const (
 type Service struct {
 	st  *store.Store
 	now func() time.Time
+	tpl templateCache
 	// OnChange is called after every committed change (the reconciler hooks in here for instant pushes).
 	OnChange func()
 }
@@ -83,6 +84,9 @@ type change struct {
 }
 
 func (s *Service) mutate(ctx context.Context, c change, fn func(q store.DBTX) error) error {
+	if err := s.syncTemplates(ctx); err != nil {
+		return err
+	}
 	err := s.st.Tx(ctx, func(q store.DBTX) error {
 		if err := fn(q); err != nil {
 			return err

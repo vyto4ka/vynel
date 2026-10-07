@@ -24,7 +24,7 @@ const sections: { title: string; pages: Page[] }[] = [
     pages: [
       { id: 'users', title: 'Пользователи', icon: 'users', el: () => <Users /> },
       { id: 'groups', title: 'Группы', icon: 'groups', el: () => <Groups /> },
-      { id: 'templates', title: 'Шаблоны', icon: 'templates', el: () => <Templates /> },
+      { id: 'templates', title: 'Шаблоны пользователей', icon: 'templates', el: () => <Templates /> },
       { id: 'subscription', title: 'Подписка', icon: 'sub', el: () => <Subscription /> },
     ],
   },

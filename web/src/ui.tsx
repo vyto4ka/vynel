@@ -116,7 +116,7 @@ export function Loading({ error }: { error?: string | null }) {
 
 // ---------- оверлеи ----------
 
-export function Modal({ title, children, footer, onClose, wide }: { title: ReactNode; children: ReactNode; footer?: ReactNode; onClose: () => void; wide?: boolean }) {
+export function Modal({ title, children, footer, onClose, wide, xl }: { title: ReactNode; children: ReactNode; footer?: ReactNode; onClose: () => void; wide?: boolean; xl?: boolean }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', h)
@@ -124,7 +124,7 @@ export function Modal({ title, children, footer, onClose, wide }: { title: React
   }, [onClose])
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={'modal' + (wide ? ' wide' : '')} role="dialog">
+      <div className={'modal' + (wide ? ' wide' : '') + (xl ? ' xl' : '')} role="dialog">
         <div className="modal-head">
           <h2>{title}</h2>
           <button className="btn ghost icon sm" onClick={onClose} aria-label="Закрыть"><Icon name="close" /></button>

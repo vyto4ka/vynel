@@ -233,20 +233,27 @@ func adminProfileCmd() *cobra.Command {
 	c := &cobra.Command{Use: "profile", Short: "Profiles (shared inbound settings created from templates)"}
 
 	templates := &cobra.Command{
-		Use: "templates", Short: "List built-in templates and their variables",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ts, err := xrayconf.Templates()
+		Use: "templates", Short: "List templates (built-in and written in the web panel) and their variables",
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
+			ts, err := s.ProfileTemplates(ctx)
 			if err != nil {
 				return err
 			}
 			for _, t := range ts {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s — %s\n  %s\n", t.ID, t.Title, t.Summary)
+				kind := "built-in"
+				if t.Custom {
+					kind = "custom"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s — %s (%s)\n  %s\n", t.ID, t.Title, kind, t.Summary)
+				if t.Broken != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "  BROKEN: %s\n", t.Broken)
+				}
 				for _, v := range t.Variables {
 					fmt.Fprintf(cmd.OutOrStdout(), "    %-22s %-7s %-8s %s\n", v.Name, v.Scope, v.Source, v.Description)
 				}
 			}
 			return nil
-		},
+		}),
 	}
 
 	var name, tpl, override string

@@ -65,6 +65,7 @@ func (s *Server) routes() {
 	s.handle("PATCH /api/inbounds/{id}", s.updateInbound)
 	s.handle("DELETE /api/inbounds/{id}", s.detachInbound)
 	s.handle("GET /api/inbounds/{id}/config", s.inboundConfig)
+	s.editorRoutes()
 
 	s.subscriptionRoutes()
 
@@ -918,7 +919,10 @@ func (s *Server) profiles(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	tpls, _ := xrayconf.Templates()
+	tpls, err := s.svc.ProfileTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	titles := map[string]string{}
 	for _, t := range tpls {
 		titles[t.ID] = t.Title
@@ -942,15 +946,6 @@ func (s *Server) profiles(r *http.Request) (any, error) {
 			"values": publicValues(p.Values), "override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "inbounds": tags})
 	}
 	return out, nil
-}
-
-func (s *Server) profileTemplates(*http.Request) (any, error) {
-	ts, err := xrayconf.Templates()
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(ts, func(i, j int) bool { return ts[i].ID > ts[j].ID })
-	return ts, nil
 }
 
 type profileIn struct {
@@ -1005,24 +1000,6 @@ func cleanValues(v map[string]any) map[string]any {
 	return out
 }
 
-func (s *Server) updateProfile(r *http.Request) (any, error) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		return nil, err
-	}
-	var in profileIn
-	if err := decode(r, &in); err != nil {
-		return nil, err
-	}
-	for k, v := range in.Values {
-		if v == "•••" {
-			delete(in.Values, k)
-		}
-	}
-	_, err = s.svc.UpdateProfile(r.Context(), actor(r), id, service.ProfileInput{Values: cleanValues(in.Values), Override: in.Override})
-	return nil, err
-}
-
 func (s *Server) deleteProfile(r *http.Request) (any, error) {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -1048,85 +1025,12 @@ func (s *Server) attachInbound(r *http.Request) (any, error) {
 	return map[string]any{"id": ni.ID, "tag": ni.Tag}, nil
 }
 
-func (s *Server) updateInbound(r *http.Request) (any, error) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		return nil, err
-	}
-	var in struct {
-		Enabled        *bool          `json:"enabled"`
-		Port           *int           `json:"port"`
-		Values         map[string]any `json:"values"`
-		RegenerateKeys bool           `json:"regenerateKeys"`
-		Host           map[string]any `json:"host"`
-	}
-	if err := decode(r, &in); err != nil {
-		return nil, err
-	}
-	ctx, a := r.Context(), actor(r)
-	for k, v := range in.Values {
-		if v == "•••" {
-			delete(in.Values, k)
-		}
-	}
-	if in.Enabled != nil || in.Port != nil || len(in.Values) > 0 || in.RegenerateKeys {
-		if _, err := s.svc.UpdateNodeInbound(ctx, a, id, service.NodeInboundInput{Enabled: in.Enabled, PortOverride: in.Port,
-			Values: cleanValues(in.Values), RegenerateKeys: in.RegenerateKeys}); err != nil {
-			return nil, err
-		}
-	}
-	if in.Host != nil {
-		if err := s.svc.SetHostOverride(ctx, a, id, in.Host); err != nil {
-			return nil, err
-		}
-	}
-	return nil, nil
-}
-
 func (s *Server) detachInbound(r *http.Request) (any, error) {
 	id, err := pathID(r, "id")
 	if err != nil {
 		return nil, err
 	}
 	return nil, s.svc.DetachInbound(r.Context(), actor(r), id)
-}
-
-func (s *Server) inboundConfig(r *http.Request) (any, error) {
-	id, err := pathID(r, "id")
-	if err != nil {
-		return nil, err
-	}
-	rendered, err := s.svc.RenderNodeInbound(r.Context(), id)
-	if err != nil {
-		return nil, err
-	}
-	in := rendered.Inbound
-	// Hide the Reality private key.
-	if ss, ok := in["streamSettings"].(map[string]any); ok {
-		if rs, ok := ss["realitySettings"].(map[string]any); ok {
-			if _, ok := rs["privateKey"]; ok {
-				rs = copyMap(rs)
-				rs["privateKey"] = "•••"
-				ss = copyMap(ss)
-				ss["realitySettings"] = rs
-				in = copyMap(in)
-				in["streamSettings"] = ss
-			}
-		}
-	}
-	b, err := xrayconf.MarshalIndent(in)
-	if err != nil {
-		return nil, err
-	}
-	return rawResponse{"application/json", b}, nil
-}
-
-func copyMap(m map[string]any) map[string]any {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
 }
 
 // ---- settings ----

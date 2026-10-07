@@ -183,6 +183,7 @@ export interface Variable {
   default_from?: string
   from?: string
   secret?: boolean
+  validate?: string
   optional?: boolean
   description?: string
 }
@@ -191,7 +192,43 @@ export interface ProfileTemplate {
   id: string
   title: string
   summary: string
+  version: number
+  tag_pattern: string
+  remark_pattern: string
   variables: Variable[]
+  custom: boolean
+  source: string
+  profiles: string[]
+  broken?: string
+}
+
+export interface ProfileDetails {
+  id: number
+  name: string
+  templateId: string
+  templateVersion: number
+  values: Record<string, any>
+  override: Record<string, any>
+  tagPattern: string
+  remarkPattern: string
+  template?: { id: string; title: string; summary: string; version: number; variables: Variable[]; custom: boolean; tagPattern: string; remarkPattern: string }
+}
+
+export interface InboundDetails {
+  id: number
+  tag: string
+  nodeId: number
+  enabled: boolean
+  port: number
+  listenAddressId: number | null
+  egressAddressId: number | null
+  values: Record<string, any>
+  override: Record<string, any>
+  profile: { id: number; name: string }
+  addresses: { id: number; ip: string; interface: string; onInterface: boolean; primary: boolean }[]
+  variables?: Variable[]
+  rendered?: Record<string, any>
+  error?: string
 }
 
 export interface Profile {

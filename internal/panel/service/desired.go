@@ -43,6 +43,9 @@ func UserEmail(userID int64) string { return strconv.FormatInt(userID, 10) }
 
 // DesiredStates computes the desired state of every node in one pass.
 func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, error) {
+	if err := s.syncTemplates(ctx); err != nil {
+		return nil, err
+	}
 	q := s.st.DB
 	nodes, err := store.ListNodes(ctx, q)
 	if err != nil {

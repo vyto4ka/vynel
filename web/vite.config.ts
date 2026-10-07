@@ -11,7 +11,11 @@ const panel = process.env.VYNEL_PANEL
 export default defineConfig({
   base: './',
   plugins: [react()],
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: { output: { manualChunks: { editor: ['codemirror', '@codemirror/state', '@codemirror/view', '@codemirror/lang-yaml', '@codemirror/lang-json', '@codemirror/language'] } } },
+  },
   server: panel
     ? {
         proxy: {
