@@ -52,6 +52,7 @@ export interface User {
   lifetimeUsed: number
   resetStrategy: string
   hwidLimit: number | null
+  hwidOff: boolean
   clientType: string
   note: string
   onlineAt: number | null

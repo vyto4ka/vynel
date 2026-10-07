@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { del, get, Group, patch, post, Template, User, UserDetails } from '../api'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
-import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Loading, Modal, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
 
 const filters: [string, string][] = [['', 'Все'], ['active', 'Активные'], ['expired', 'Истёкшие'], ['limited', 'Без трафика'], ['disabled', 'Отключённые']]
 
@@ -203,7 +203,9 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
             {u.trafficLimit != null && <div style={{ marginTop: 6 }}><Bar value={u.trafficUsed} max={u.trafficLimit} /></div>}
           </div>
           <div className="k">Всего за всё время</div><div>{bytes(u.lifetimeUsed)}</div>
-          <div className="k">Устройства</div><div>{data.devices.length} из {(u.hwidLimit ?? data.hwidDefault) || '∞'} {u.hwidLimit == null && <span className="muted">(по умолчанию)</span>}</div>
+          <div className="k">Устройства</div><div>{u.hwidOff
+            ? <span className="amber-text">HWID не проверяется — пускает любое приложение</span>
+            : <>{data.devices.length} из {(u.hwidLimit ?? data.hwidDefault) || '∞'} {u.hwidLimit == null && <span className="muted">(по умолчанию)</span>}</>}</div>
           <div className="k">Группы</div><div>{u.groupIds.map((g) => groups.find((x) => x.id === g)?.name).filter(Boolean).join(', ') || <span className="pink-text">нет — серверов в подписке не будет</span>}</div>
           <div className="k">Онлайн</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">сейчас</span> : ago(u.onlineAt)}</div>
           <div className="k">Подписка обновлялась</div><div>{ago(u.subLastAt)} {u.subLastUA && <span className="muted small">· {u.subLastUA}</span>}</div>
@@ -244,7 +246,16 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
       </div>
 
       <div className="card">
-        <div className="card-head"><h3>Устройства (HWID)</h3><span className="card-sub">{data.devices.length} из {(u.hwidLimit ?? data.hwidDefault) || '∞'}</span></div>
+        <div className="card-head">
+          <div>
+            <h3>Устройства (HWID)</h3>
+            <div className="card-sub">{u.hwidOff ? 'проверка выключена для этого пользователя' : `${data.devices.length} из ${(u.hwidLimit ?? data.hwidDefault) || '∞'}`}</div>
+          </div>
+          <label className="row small text-2" style={{ gap: 8, flexWrap: 'nowrap' }} title="Выключите для приложений без HWID — подписка будет выдаваться без проверки устройств">
+            Проверять HWID
+            <Switch checked={!u.hwidOff} onChange={(v) => run(() => patch(`users/${id}`, { hwidOff: !v }), v ? 'Проверка HWID включена' : 'HWID для пользователя выключен')} />
+          </label>
+        </div>
         {data.devices.length === 0 ? <Empty>Устройства появятся после первого обновления подписки в приложении</Empty> : (
           <div className="table-wrap">
             <table className="table">

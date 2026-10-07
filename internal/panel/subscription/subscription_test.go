@@ -163,6 +163,47 @@ func TestHWIDLimitAndMissing(t *testing.T) {
 	}
 }
 
+// Remnawave-style response headers tell clients HWID is required; a per-user switch turns it off.
+func TestHWIDHeadersAndPerUserOff(t *testing.T) {
+	e := newEnv(t)
+	rec := e.get(e.path(), "Happ/3", "")
+	if rec.Header().Get("x-hwid-active") != "true" || rec.Header().Get("x-hwid-not-supported") != "true" {
+		t.Fatalf("headers without hwid: %v", rec.Header())
+	}
+	rec = e.get(e.path(), "Happ/3", "hw-1")
+	if rec.Header().Get("x-hwid-active") != "true" || rec.Header().Get("x-hwid-not-supported") != "" {
+		t.Fatalf("headers with hwid: %v", rec.Header())
+	}
+	e.get(e.path(), "Happ/3", "hw-2")
+	if rec := e.get(e.path(), "Happ/3", "hw-3"); rec.Header().Get("x-hwid-max-devices-reached") != "true" {
+		t.Fatalf("limit header: %v", rec.Header())
+	}
+
+	off := true
+	if _, err := e.svc.SetUserDetails(e.ctx, actor, e.user.ID, service.UserDetailsInput{HWIDOff: &off}); err != nil {
+		t.Fatal(err)
+	}
+	rec = e.get(e.path(), "v2rayNG/1.9", "")
+	if ls := links(t, rec); len(ls) != 2 || strings.Contains(ls[0], StubUUID) {
+		t.Fatalf("HWID off for the user must admit any client: %v", ls)
+	}
+	if rec.Header().Get("x-hwid-active") != "" {
+		t.Fatal("x-hwid-active sent while HWID is off for the user")
+	}
+	if devs, _ := e.svc.Devices(e.ctx, e.user.ID); len(devs) != 2 {
+		t.Fatalf("devices are not counted while off: %d", len(devs))
+	}
+}
+
+// Karing (sing-box core) gets links, without XHTTP points it cannot use.
+func TestKaring(t *testing.T) {
+	e := newEnv(t)
+	ls := links(t, e.get(e.path(), "karing/1.2.24.2704 android", "kr-1"))
+	if len(ls) != 1 || !strings.HasPrefix(ls[0], "vless://"+e.user.UUID) || strings.Contains(ls[0], "type=xhttp") {
+		t.Fatalf("karing links: %v", ls)
+	}
+}
+
 func TestStubsForInactiveUsers(t *testing.T) {
 	e := newEnv(t)
 	past := time.Now().Add(-time.Hour)

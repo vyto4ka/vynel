@@ -409,7 +409,11 @@ func (b *Bot) userText(ctx context.Context, u *store.User) string {
 	} else if def, _ := b.svc.Setting(ctx, service.SettingHWIDLimit, "3"); def != "" {
 		lim = def
 	}
-	fmt.Fprintf(&sb, "📱 устройства: %d из %s\n", len(devs), lim)
+	if u.HWIDOff {
+		sb.WriteString("📱 HWID не проверяется\n")
+	} else {
+		fmt.Fprintf(&sb, "📱 устройства: %d из %s\n", len(devs), lim)
+	}
 	if gs, _ := b.svc.UserGroupIDs(ctx, u.ID); len(gs) > 0 {
 		names := []string{}
 		all, _ := b.svc.Groups(ctx)

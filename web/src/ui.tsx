@@ -1,5 +1,6 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { Day } from './api'
+import { fmtBytes, TimeChart } from './charts'
 import { bytes } from './format'
 
 // ---------- иконки ----------
@@ -29,6 +30,7 @@ const paths: Record<string, ReactNode> = {
   link: <><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></>,
   telegram: <path d="M21 4 3 11l6 2.5M21 4l-4 16-8-6.5M21 4 9 13.5V19l3-3.5" />,
   code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
+  chart: <><path d="M4 4v16h16" /><path d="m7 14 4-4 3 3 5-6" /></>,
   sub: <><rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M10 6h4M9.5 11h5M9.5 14.5h5M11 18h2" /></>,
 }
 
@@ -245,45 +247,20 @@ export function Empty({ icon, children }: { icon?: string; children: ReactNode }
 }
 
 export function TrafficChart({ days }: { days: Day[] }) {
-  const W = 720
-  const H = 170
-  const pad = { l: 46, r: 6, t: 10, b: 20 }
-  const max = Math.max(1, ...days.map((d) => d.up + d.down))
-  const bw = (W - pad.l - pad.r) / Math.max(1, days.length)
-  const y = (v: number) => pad.t + (H - pad.t - pad.b) * (1 - v / max)
-  const ticks = [0, 0.5, 1]
   return (
-    <svg className="chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      {ticks.map((t) => (
-        <g key={t}>
-          <line className="grid" x1={pad.l} x2={W - pad.r} y1={y(max * t)} y2={y(max * t)} />
-          <text className="lbl" x={pad.l - 6} y={y(max * t) + 3} textAnchor="end">{bytes(max * t)}</text>
-        </g>
-      ))}
-      {days.map((d, i) => {
-        const x = pad.l + i * bw + bw * 0.18
-        const w = bw * 0.64
-        const yd = y(d.down)
-        const yt = y(d.up + d.down)
-        const label = new Date(d.day * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-        return (
-          <g key={d.day}>
-            <title>{`${label}: ↓ ${bytes(d.down)}, ↑ ${bytes(d.up)}`}</title>
-            <rect x={x} y={yd} width={w} height={Math.max(0, H - pad.b - yd)} rx={2} fill="var(--miku)" opacity={0.85} />
-            <rect x={x} y={yt} width={w} height={Math.max(0, yd - yt)} rx={2} fill="var(--pink)" opacity={0.85} />
-            {(i % 5 === 0 || i === days.length - 1) && <text className="lbl" x={x + w / 2} y={H - 5} textAnchor="middle">{label}</text>}
-          </g>
-        )
-      })}
-    </svg>
+    <TimeChart times={days.map((d) => d.day)} bucket={86400} kind="bars" stacked unit="bytes" format={fmtBytes} height={190}
+      series={[
+        { key: 'down', label: 'скачано', color: 'var(--s1)', values: days.map((d) => d.down) },
+        { key: 'up', label: 'отдано', color: 'var(--s2)', values: days.map((d) => d.up) },
+      ]} />
   )
 }
 
 export function ChartLegend() {
   return (
     <div className="legend">
-      <span><i style={{ background: 'var(--miku)' }} />скачано</span>
-      <span><i style={{ background: 'var(--pink)' }} />отдано</span>
+      <span><i style={{ background: 'var(--s1)' }} />скачано</span>
+      <span><i style={{ background: 'var(--s2)' }} />отдано</span>
     </div>
   )
 }

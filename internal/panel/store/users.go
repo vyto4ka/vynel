@@ -250,6 +250,7 @@ type User struct {
 	ResetStrategy     string
 	LastResetAt       *int64
 	HWIDLimit         *int64
+	HWIDOff           bool // no HWID check for this user
 	ClientType        string
 	TemplateID        *int64
 	TelegramID        *int64
@@ -265,7 +266,7 @@ type User struct {
 
 const userCols = `id, username, uuid, sub_token, disabled, status, expire_at, traffic_limit_bytes, traffic_used_bytes, lifetime_used_bytes,
 	reset_strategy, last_reset_at, hwid_limit, client_type, template_id, telegram_id, external_id, note, online_at, created_by, created_at, updated_at,
-	sub_last_at, sub_last_ua`
+	sub_last_at, sub_last_ua, hwid_off`
 
 func scanUser(sc interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
@@ -273,7 +274,7 @@ func scanUser(sc interface{ Scan(...any) error }) (*User, error) {
 	var ext sql.NullString
 	if err := sc.Scan(&u.ID, &u.Username, &u.UUID, &u.SubToken, &u.Disabled, &u.Status, &expire, &limit, &u.TrafficUsedBytes, &u.LifetimeUsedBytes,
 		&u.ResetStrategy, &reset, &hwid, &u.ClientType, &tpl, &tg, &ext, &u.Note, &online, &u.CreatedBy, &u.CreatedAt, &u.UpdatedAt,
-		&subAt, &u.SubLastUA); err != nil {
+		&subAt, &u.SubLastUA, &u.HWIDOff); err != nil {
 		return nil, mapErr(err)
 	}
 	u.SubLastAt = ptrInt(subAt)
@@ -287,10 +288,10 @@ func CreateUser(ctx context.Context, q DBTX, u *User) error {
 	now := unix()
 	u.CreatedAt, u.UpdatedAt = now, now
 	res, err := q.ExecContext(ctx, `INSERT INTO users (username, uuid, sub_token, disabled, status, expire_at, traffic_limit_bytes, reset_strategy, hwid_limit,
-		client_type, template_id, telegram_id, external_id, note, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		hwid_off, client_type, template_id, telegram_id, external_id, note, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.Username, u.UUID, u.SubToken, u.Disabled, u.Status, nullInt(u.ExpireAt), nullInt(u.TrafficLimitBytes), u.ResetStrategy, nullInt(u.HWIDLimit),
-		u.ClientType, nullInt(u.TemplateID), nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.CreatedBy, now, now)
+		u.HWIDOff, u.ClientType, nullInt(u.TemplateID), nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.CreatedBy, now, now)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -302,9 +303,9 @@ func CreateUser(ctx context.Context, q DBTX, u *User) error {
 func UpdateUser(ctx context.Context, q DBTX, u *User) error {
 	u.UpdatedAt = unix()
 	return execOne(ctx, q, `UPDATE users SET username=?, uuid=?, sub_token=?, disabled=?, status=?, expire_at=?, traffic_limit_bytes=?, traffic_used_bytes=?,
-		reset_strategy=?, last_reset_at=?, hwid_limit=?, client_type=?, telegram_id=?, external_id=?, note=?, updated_at=? WHERE id=?`,
+		reset_strategy=?, last_reset_at=?, hwid_limit=?, hwid_off=?, client_type=?, telegram_id=?, external_id=?, note=?, updated_at=? WHERE id=?`,
 		u.Username, u.UUID, u.SubToken, u.Disabled, u.Status, nullInt(u.ExpireAt), nullInt(u.TrafficLimitBytes), u.TrafficUsedBytes,
-		u.ResetStrategy, nullInt(u.LastResetAt), nullInt(u.HWIDLimit), u.ClientType, nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.UpdatedAt, u.ID)
+		u.ResetStrategy, nullInt(u.LastResetAt), nullInt(u.HWIDLimit), u.HWIDOff, u.ClientType, nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.UpdatedAt, u.ID)
 }
 
 // SetUserStatus changes only the status.

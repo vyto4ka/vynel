@@ -26,6 +26,7 @@ func (s *Server) routes() {
 	s.handle("GET /api/session", s.session)
 	s.handle("POST /api/account", s.account)
 	s.handle("GET /api/overview", s.overview)
+	s.handle("GET /api/stats", s.stats)
 	s.handle("GET /api/qr", s.qr)
 	s.handle("GET /api/audit", s.audit)
 
@@ -88,6 +89,7 @@ type User struct {
 	LifetimeUsed  int64   `json:"lifetimeUsed"`
 	ResetStrategy string  `json:"resetStrategy"`
 	HWIDLimit     *int64  `json:"hwidLimit"`
+	HWIDOff       bool    `json:"hwidOff"`
 	ClientType    string  `json:"clientType"`
 	Note          string  `json:"note"`
 	OnlineAt      *int64  `json:"onlineAt"`
@@ -104,7 +106,7 @@ func userDTO(u *store.User, groups []int64) User {
 	}
 	return User{ID: u.ID, Username: u.Username, Status: u.Status, Enabled: !u.Disabled, ExpireAt: u.ExpireAt,
 		TrafficLimit: u.TrafficLimitBytes, TrafficUsed: u.TrafficUsedBytes, LifetimeUsed: u.LifetimeUsedBytes,
-		ResetStrategy: u.ResetStrategy, HWIDLimit: u.HWIDLimit, ClientType: u.ClientType, Note: u.Note, OnlineAt: u.OnlineAt,
+		ResetStrategy: u.ResetStrategy, HWIDLimit: u.HWIDLimit, HWIDOff: u.HWIDOff, ClientType: u.ClientType, Note: u.Note, OnlineAt: u.OnlineAt,
 		CreatedAt: u.CreatedAt, SubLastAt: u.SubLastAt, SubLastUA: u.SubLastUA, GroupIDs: groups, TemplateID: u.TemplateID}
 }
 
@@ -413,6 +415,7 @@ func (s *Server) updateUser(r *http.Request) (any, error) {
 	var in struct {
 		Note          *string `json:"note"`
 		HWIDLimit     *int64  `json:"hwidLimit"`
+		HWIDOff       *bool   `json:"hwidOff"`
 		ClientType    *string `json:"clientType"`
 		ResetStrategy *string `json:"resetStrategy"`
 		Enabled       *bool   `json:"enabled"`
@@ -429,8 +432,9 @@ func (s *Server) updateUser(r *http.Request) (any, error) {
 	}
 	ctx, a := r.Context(), actor(r)
 	var u *store.User
-	if in.Note != nil || in.HWIDLimit != nil || in.ClientType != nil || in.ResetStrategy != nil {
-		if u, err = s.svc.SetUserDetails(ctx, a, id, service.UserDetailsInput{Note: in.Note, HWIDLimit: in.HWIDLimit, ClientType: in.ClientType, ResetStrategy: in.ResetStrategy}); err != nil {
+	if in.Note != nil || in.HWIDLimit != nil || in.HWIDOff != nil || in.ClientType != nil || in.ResetStrategy != nil {
+		if u, err = s.svc.SetUserDetails(ctx, a, id, service.UserDetailsInput{Note: in.Note, HWIDLimit: in.HWIDLimit, HWIDOff: in.HWIDOff,
+			ClientType: in.ClientType, ResetStrategy: in.ResetStrategy}); err != nil {
 			return nil, err
 		}
 	}

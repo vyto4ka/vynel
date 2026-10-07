@@ -250,6 +250,9 @@ type DeviceInfo struct {
 // DeviceVerdict is the HWID decision for a subscription request.
 type DeviceVerdict struct {
 	OK     bool
+	Off    bool   // HWID is not checked (globally or for this user)
+	NoHWID bool   // the client sent no x-hwid
+	Full   bool   // refused: the device limit is reached
 	Reason string // shown to the user inside the stub subscription
 	Count  int
 	Limit  int
@@ -258,8 +261,8 @@ type DeviceVerdict struct {
 // CheckDevice applies the HWID policy (docs/ARCHITECTURE.md §8.2) and registers new devices.
 func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) (DeviceVerdict, error) {
 	enabled, _ := s.Setting(ctx, SettingHWIDEnabled, "true")
-	if enabled != "true" {
-		return DeviceVerdict{OK: true}, nil
+	if enabled != "true" || u.HWIDOff {
+		return DeviceVerdict{OK: true, Off: true}, nil
 	}
 	limit := 3
 	if v, _ := s.Setting(ctx, SettingHWIDLimit, "3"); v != "" {
@@ -271,9 +274,10 @@ func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) 
 	if d.HWID == "" {
 		allow, _ := s.Setting(ctx, SettingHWIDAllowNone, "false")
 		if allow == "true" {
-			return DeviceVerdict{OK: true, Limit: limit}, nil
+			return DeviceVerdict{OK: true, NoHWID: true, Limit: limit}, nil
 		}
-		return DeviceVerdict{Reason: "Приложение не передаёт HWID — используйте Happ, v2RayTun или другое с поддержкой HWID", Limit: limit}, nil
+		return DeviceVerdict{NoHWID: true, Limit: limit,
+			Reason: "Приложение не передаёт HWID: включите его в настройках профиля (Karing: X-HWID) или используйте Happ, v2RayTun, KeqDroid"}, nil
 	}
 	v := DeviceVerdict{Limit: limit}
 	err := s.st.Tx(ctx, func(q store.DBTX) error {
@@ -292,7 +296,7 @@ func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) 
 			return nil
 		}
 		if limit > 0 && v.Count >= limit {
-			v.Reason = fmt.Sprintf("Лимит устройств: %d/%d", v.Count, limit)
+			v.Reason, v.Full = fmt.Sprintf("Лимит устройств: %d/%d", v.Count, limit), true
 			return store.AddEvent(ctx, q, "device.limit_reached", u.ID, map[string]string{"hwid": d.HWID, "model": d.Model})
 		}
 		if err := store.AddDevice(ctx, q, dev); err != nil {

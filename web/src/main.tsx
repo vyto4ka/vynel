@@ -5,6 +5,7 @@ import { get, post, setUnauthorizedHandler } from './api'
 import { ConfirmProvider, Icon, ToastProvider } from './ui'
 import { Login } from './pages/Login'
 import { Overview } from './pages/Overview'
+import { Stats } from './pages/Stats'
 import { Users } from './pages/Users'
 import { Groups } from './pages/Groups'
 import { Templates } from './pages/Templates'
@@ -19,7 +20,10 @@ import { Account } from './pages/Account'
 type Page = { id: string; title: string; icon: string; el: () => ReactElement }
 
 const sections: { title: string; pages: Page[] }[] = [
-  { title: 'Обзор', pages: [{ id: 'overview', title: 'Дашборд', icon: 'dashboard', el: () => <Overview /> }] },
+  { title: 'Обзор', pages: [
+    { id: 'overview', title: 'Дашборд', icon: 'dashboard', el: () => <Overview /> },
+    { id: 'stats', title: 'Статистика', icon: 'chart', el: () => <Stats /> },
+  ] },
   {
     title: 'Пользователи',
     pages: [

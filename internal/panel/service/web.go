@@ -236,6 +236,7 @@ func (s *Service) JoinToken(ctx context.Context, caFingerprint, secret string) (
 type UserDetailsInput struct {
 	Note          *string
 	HWIDLimit     *int64 // <0 = back to the default limit
+	HWIDOff       *bool  // true = no HWID check for this user
 	ClientType    *string
 	ResetStrategy *string
 }
@@ -258,6 +259,9 @@ func (s *Service) SetUserDetails(ctx context.Context, actor Actor, id int64, in 
 				v := *in.HWIDLimit
 				u.HWIDLimit = &v
 			}
+		}
+		if in.HWIDOff != nil {
+			u.HWIDOff = *in.HWIDOff
 		}
 		if in.ClientType != nil {
 			u.ClientType = firstNonEmpty(*in.ClientType, "auto")

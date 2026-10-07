@@ -22,10 +22,15 @@ var rules = []struct {
 	format Format
 }{
 	{regexp.MustCompile(`(?i)keqdroid|keqdis`), FormatBase64}, // reads vless:// links best (it also takes Clash)
+	// Karing converts links into its own sing-box config best; XHTTP is dropped for it (singBoxCore).
+	{regexp.MustCompile(`(?i)karing`), FormatBase64},
 	{regexp.MustCompile(`(?i)clash|mihomo|stash|flclash|koala`), FormatMihomo},
-	{regexp.MustCompile(`(?i)sing-?box|\bSF[AIMT]\b|karing`), FormatSingBox},
+	{regexp.MustCompile(`(?i)sing-?box|\bSF[AIMT]\b`), FormatSingBox},
 	{regexp.MustCompile(`(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`), FormatBase64},
 }
+
+// singBoxCore matches apps built on sing-box: they have no VLESS XHTTP, whatever format they get.
+var singBoxCore = regexp.MustCompile(`(?i)karing|sing-?box|\bSF[AIMT]\b`)
 
 // UARule is a User-Agent rule as the UI shows it.
 type UARule struct {
@@ -142,7 +147,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hosts, reason := h.hostsFor(ctx, r, u, ip, format)
+	hosts, reason := h.hostsFor(ctx, w, r, u, ip, format)
 	uuid := u.UUID
 	if reason != "" {
 		// A refused client gets no credentials at all, only a server named after the reason.
@@ -172,7 +177,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // hostsFor returns the user's hosts for a format, or a reason why the user gets a stub.
-func (h *Handler) hostsFor(ctx context.Context, r *http.Request, u *store.User, ip string, format Format) ([]service.Host, string) {
+func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User, ip string, format Format) ([]service.Host, string) {
 	switch u.Status {
 	case store.StatusExpired:
 		exp := ""
@@ -193,6 +198,17 @@ func (h *Handler) hostsFor(ctx context.Context, r *http.Request, u *store.User, 
 		h.log.Error("hwid check", "err", err)
 		return nil, "Временная ошибка, обновите подписку позже"
 	}
+	// The same response headers as Remnawave: clients such as Happ and Karing use them to
+	// turn on sending x-hwid by themselves.
+	if !v.Off {
+		w.Header().Set("x-hwid-active", "true")
+		if v.NoHWID {
+			w.Header().Set("x-hwid-not-supported", "true")
+		}
+		if v.Full {
+			w.Header().Set("x-hwid-max-devices-reached", "true")
+		}
+	}
 	if !v.OK {
 		return nil, v.Reason
 	}
@@ -201,9 +217,10 @@ func (h *Handler) hostsFor(ctx context.Context, r *http.Request, u *store.User, 
 		h.log.Error("user hosts", "err", err)
 		return nil, "Временная ошибка, обновите подписку позже"
 	}
+	noXHTTP := singBoxCore.MatchString(r.UserAgent())
 	var out []service.Host
 	for _, host := range all {
-		if !host.Hidden && format.Supports(host) {
+		if !host.Hidden && format.Supports(host) && (!noXHTTP || host.Network != "xhttp") {
 			out = append(out, host)
 		}
 	}
