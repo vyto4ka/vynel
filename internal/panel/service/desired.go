@@ -101,6 +101,11 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 		if err != nil {
 			return nil, fmt.Errorf("node %s: %w", n.Code, err)
 		}
+		logLevel, err := s.nodeSetting(ctx, SettingXrayLog, n.Code, DefaultXrayLog)
+		if err != nil {
+			return nil, err
+		}
+		baseMap["log"] = XrayLog(logLevel)
 		var rendered []*xrayconf.RenderedInbound
 		if n.Enabled {
 			for _, ni := range inbounds {
@@ -148,6 +153,24 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 		out[n.ID] = ds
 	}
 	return out, nil
+}
+
+// Xray log on nodes: the agent passes Xray's output to the journal (journalctl -u vynel-node).
+const (
+	SettingXrayLog = "node.xray_log" // none | warning | info | debug; per node: node.xray_log.CODE
+	DefaultXrayLog = "warning"
+)
+
+// XrayLog is the "log" section for a level. Only debug adds the access log (one line per
+// connection with the user's email): it is for troubleshooting, not for everyday use.
+func XrayLog(level string) map[string]any {
+	switch level {
+	case "none", "warning", "info":
+		return map[string]any{"loglevel": level, "access": "none", "dnsLog": false}
+	case "debug":
+		return map[string]any{"loglevel": "debug", "access": "", "dnsLog": false}
+	}
+	return map[string]any{"loglevel": DefaultXrayLog, "access": "none", "dnsLog": false}
 }
 
 // DesiredState computes one node's desired state.

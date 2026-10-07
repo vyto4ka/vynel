@@ -37,6 +37,9 @@ var settingDefs = []settingDef{
 
 	{Key: service.SettingGatewayAddr, Section: "Ноды", Title: "Адрес панели для нод", Type: "string",
 		Help: "IP:порт, к которому подключаются дополнительные ноды. Попадает в токены подключения."},
+	{Key: service.SettingXrayLog, Section: "Ноды", Title: "Логи Xray на нодах", Type: "select", Default: service.DefaultXrayLog,
+		Options: []string{"none", "warning", "info", "debug"},
+		Help:    "Смотреть на ноде: journalctl -u vynel-node -f. debug — для поиска проблем: пишет каждое подключение, после включите обратно warning."},
 }
 
 // hiddenSettings are internal and not listed (the login is changed on the account page).

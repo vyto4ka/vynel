@@ -204,6 +204,20 @@ func TestHysteria2NextToReality(t *testing.T) {
 	}
 	xraytest.Eventually(t, wait, "VPN through Hysteria2 (Xray client)", fetch(socks))
 
+	// The diagnostics report sees all of it and leaks no user ids.
+	var rep bytes.Buffer
+	agent.Diagnose(ctx, &rep, nodeDir, "test", bin, caddyBin)
+	report := rep.String()
+	for _, want := range []string{"hysteria on 127.0.0.1:", "vless on 127.0.0.1:", "xray -test: OK", "SNI " + domain + ": OK", "issuer=\"Caddy Local Authority"} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("diag lacks %q:\n%s", want, report)
+		}
+	}
+	if strings.Contains(report, alice.UUID) {
+		t.Fatal("diag leaks a user id")
+	}
+	t.Logf("diag:\n%s", report)
+
 	if mh := os.Getenv("MIHOMO_BIN"); mh != "" {
 		var doc map[string]any
 		if err := yaml.Unmarshal(sub("clash-verge/v2.2.3", ""), &doc); err != nil {

@@ -145,6 +145,7 @@ func (m *Manager) startLocked(path, admin string) error {
 		return err
 	}
 	m.tail.Reset()
+	m.tail.setEmit(func(line string) { m.Log.Info(line, "src", "caddy") })
 	cmd := exec.Command(m.Bin, "run", "--config", path)
 	cmd.Env = m.env()
 	cmd.Stdout, cmd.Stderr = &m.tail, &m.tail
@@ -239,15 +240,28 @@ func (m *Manager) load(ctx context.Context, cfg []byte) error {
 	return nil
 }
 
-// tailBuffer keeps the last 64 KiB of Caddy's output; safe for concurrent use.
+// tailBuffer keeps the last 64 KiB of Caddy's output and passes each line to emit (the journal);
+// safe for concurrent use.
 type tailBuffer struct {
-	mu  sync.Mutex
-	buf []byte
+	mu   sync.Mutex
+	buf  []byte
+	part []byte
+	emit func(line string)
 }
 
 func (t *tailBuffer) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.emit != nil {
+		for _, c := range p {
+			if c == '\n' {
+				t.emit(string(t.part))
+				t.part = t.part[:0]
+				continue
+			}
+			t.part = append(t.part, c)
+		}
+	}
 	t.buf = append(t.buf, p...)
 	if len(t.buf) > 64<<10 {
 		t.buf = append([]byte(nil), t.buf[len(t.buf)-32<<10:]...)
@@ -259,6 +273,12 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
+}
+
+func (t *tailBuffer) setEmit(f func(string)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.emit = f
 }
 
 func (t *tailBuffer) Reset() {

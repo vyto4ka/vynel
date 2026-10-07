@@ -71,6 +71,17 @@ func nodeCmd() *cobra.Command {
 		Use: "set-panel HOST:PORT", Short: "Point the node to a moved panel (same CA)", Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error { return agent.SetPanelAddr(dataDir, args[0]) },
 	}
-	c.AddCommand(join, run, setPanel)
+	var diagBin xray.Binary
+	var diagCaddy string
+	diag := &cobra.Command{
+		Use: "diag", Short: "Print a troubleshooting report (no keys or user ids): `vynel node diag > diag.txt`",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			agent.Diagnose(cmd.Context(), cmd.OutOrStdout(), dataDir, buildinfo.Version, diagBin, diagCaddy)
+			return nil
+		},
+	}
+	addXrayFlags(diag, &diagBin)
+	diag.Flags().StringVar(&diagCaddy, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary")
+	c.AddCommand(join, run, setPanel, diag)
 	return c
 }

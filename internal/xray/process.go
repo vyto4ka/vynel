@@ -33,7 +33,10 @@ func NewProcess(bin Binary, configPath string, log *slog.Logger) *Process {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Process{Bin: bin, ConfigPath: configPath, Log: log, tail: newRing(200)}
+	p := &Process{Bin: bin, ConfigPath: configPath, Log: log, tail: newRing(200)}
+	// Xray's own log goes to the journal too: its level comes from the panel (node.xray_log).
+	p.tail.emit = func(line string) { p.Log.Info(line, "src", "xray") }
+	return p
 }
 
 // Apply validates cfg, writes it atomically and (re)starts Xray. On validation failure the
@@ -153,6 +156,7 @@ type ring struct {
 	buf  []string
 	max  int
 	part []byte
+	emit func(line string) // called for every complete line, under mu
 }
 
 func newRing(n int) *ring { return &ring{max: n} }
@@ -162,6 +166,9 @@ func (r *ring) Write(b []byte) (int, error) {
 	defer r.mu.Unlock()
 	for _, c := range b {
 		if c == '\n' {
+			if r.emit != nil {
+				r.emit(string(r.part))
+			}
 			r.buf = append(r.buf, string(r.part))
 			r.part = r.part[:0]
 			if len(r.buf) > r.max {
