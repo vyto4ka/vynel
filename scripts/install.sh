@@ -455,7 +455,7 @@ drop_temp_swap() {
 
 # open_ports PORT...: only when ufw is active.
 open_ports() {
-  if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+  if command -v ufw >/dev/null && [[ "$(ufw status 2>/dev/null || true)" == *"Status: active"* ]]; then
     info "opening ports in ufw: $*"
     local p
     for p in "$@"; do ufw allow "$p/tcp" >/dev/null; done
@@ -552,7 +552,9 @@ restore_backup() {
   [[ -f "$RESTORE" ]] || die "backup file $RESTORE not found"
   info "restoring from $RESTORE"
   systemctl stop vynel 2>/dev/null || true
-  RESTORED="$(vynel restore --data-dir "$DATA" --yes "$RESTORE" | head -1)"
+  local out
+  out="$(vynel restore --data-dir "$DATA" --yes "$RESTORE")" # whole output: `| head` would SIGPIPE under pipefail
+  RESTORED="${out%%$'\n'*}"
   green "  $RESTORED"
 }
 
@@ -562,15 +564,18 @@ setup_bot() {
   if [[ -n "$BOT_TOKEN" ]]; then
     admin bot token "$BOT_TOKEN" >/dev/null || { red "  the bot token was not accepted; set it later in the panel (Telegram)"; return 0; }
   fi
-  admin bot 2>/dev/null | grep -q "^token    set" || return 0
-  admin bot 2>/dev/null | grep -q "^admin " && return 0 # already bound (update or restore)
+  local st
+  st="$(admin bot 2>/dev/null || true)" # captured: `| grep -q` can SIGPIPE the writer under pipefail
+  [[ "$st" == *"token    set"* ]] || return 0
+  if [[ "$st" == *$'\nadmin '* ]]; then return 0; fi # already bound (update or restore)
   BOT_CODE="$(admin bot code | awk '$1=="code" {print $2}')"
   local tok user
   tok="${BOT_TOKEN}"
   if [[ -n "$tok" ]]; then
     user="$(curl -fsS --max-time 10 "https://api.telegram.org/bot${tok}/getMe" 2>/dev/null | grep -o '"username":"[^"]*"' | cut -d'"' -f4 || true)"
-    [[ -n "$user" ]] && BOT_LINK="https://t.me/${user}?start=${BOT_CODE}"
+    if [[ -n "$user" ]]; then BOT_LINK="https://t.me/${user}?start=${BOT_CODE}"; fi
   fi
+  return 0
 }
 
 print_bot_block() {
@@ -578,11 +583,13 @@ print_bot_block() {
     pink "  Telegram-бот"
     if [[ -n "$BOT_LINK" ]]; then
       line "  привязать себя" "$BOT_LINK"
+      line "  или отправьте боту" "/start $BOT_CODE"
+    else
+      line "  отправьте боту" "/start $BOT_CODE"
     fi
-    line "  или отправьте боту" "/start $BOT_CODE"
     echo "  Код действует 15 минут; новый: vynel admin bot code (или в панели: Telegram)."
     echo
-  elif ! admin bot 2>/dev/null | grep -q "^token    set"; then
+  elif [[ "$(admin bot 2>/dev/null || true)" != *"token    set"* ]]; then
     echo "  Telegram-бот не настроен: панель → «Telegram» (токен от @BotFather)."
     echo
   fi
@@ -687,7 +694,7 @@ do_aio() {
   info "waiting for the node to start"
   local ok=0
   for _ in $(seq 1 60); do
-    if admin node list 2>/dev/null | grep -q "in sync"; then ok=1; break; fi
+    if [[ "$(admin node list 2>/dev/null || true)" == *"in sync"* ]]; then ok=1; break; fi
     sleep 2
   done
   admin node list || true
@@ -765,7 +772,7 @@ do_panel() {
   [[ -n "$EMAIL" ]] && admin setting caddy.email "$EMAIL" >/dev/null
   admin setting install.command "$(script_command)" >/dev/null
   # A profile for the nodes to come: Reality self-steal, available to the default group.
-  if ! admin profile list 2>/dev/null | awk 'NR>1 {print $2}' | grep -qx Reality; then
+  if ! awk 'NR>1 {print $2}' <<<"$(admin profile list 2>/dev/null || true)" | grep -qx Reality; then
     admin profile add --name Reality >/dev/null
   fi
   web_admin
