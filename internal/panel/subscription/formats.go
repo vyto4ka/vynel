@@ -174,12 +174,12 @@ func Mihomo(hosts []service.Host, uuid string) ([]byte, error) {
 				ro["support-x25519mlkem768"] = true
 			}
 			p["reality-opts"] = ro
-			p["client-fingerprint"] = h.Fingerprint
+			p["client-fingerprint"] = mihomoFingerprint(h.Fingerprint)
 		case "tls":
 			p["tls"] = true
 			p["servername"] = h.SNI
 			if h.Fingerprint != "" {
-				p["client-fingerprint"] = h.Fingerprint
+				p["client-fingerprint"] = mihomoFingerprint(h.Fingerprint)
 			}
 			if len(h.ALPN) > 0 {
 				p["alpn"] = h.ALPN
@@ -201,6 +201,14 @@ func Mihomo(hosts []service.Host, uuid string) ([]byte, error) {
 		"rules":        []string{"GEOIP,private,DIRECT,no-resolve", "MATCH,VPN"},
 	}
 	return yaml.Marshal(doc)
+}
+
+// mihomoFingerprint maps uTLS names Mihomo does not know ("randomized") to its closest one.
+func mihomoFingerprint(fp string) string {
+	if fp == "randomized" || fp == "randomizednoalpn" {
+		return "random"
+	}
+	return fp
 }
 
 // mihomoXHTTPKeys maps Xray xhttp extra keys to Mihomo xhttp-opts (adapter/outbound/vless.go).

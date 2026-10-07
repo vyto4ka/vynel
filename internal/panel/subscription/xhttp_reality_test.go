@@ -69,14 +69,14 @@ func newXHTTPRealityEnv(t *testing.T, values map[string]any, port int) *xhttpRea
 }
 
 func TestXHTTPRealityLinkAndMihomo(t *testing.T) {
-	e := newXHTTPRealityEnv(t, map[string]any{"XHTTP_PATH": "/assets/sync"}, 0)
+	e := newXHTTPRealityEnv(t, map[string]any{"XHTTP_PATH": "/assets/sync", "XHTTP_OBFS": "cookie", "FINGERPRINT": "safari"}, 0)
 	ls := links(t, e.get(e.path(), "Happ/3.1.0", "hw-1"))
 	if len(ls) != 1 {
 		t.Fatalf("links %v", ls)
 	}
 	l := ls[0]
 	for _, want := range []string{"@example.test:443", "type=xhttp", "security=reality", "sni=example.test", "host=example.test",
-		"fp=chrome", "pbk=", "sid=", "path=%2Fassets%2Fsync%2F", "mode=stream-up", "extra="} {
+		"fp=safari", "pbk=", "sid=", "path=%2Fassets%2Fsync%2F", "mode=stream-up", "extra="} {
 		if !strings.Contains(l, want) {
 			t.Fatalf("link lacks %q: %s", want, l)
 		}
@@ -136,14 +136,29 @@ func TestXHTTPRealityLinkAndMihomo(t *testing.T) {
 // config from the user's JSON subscription, pass traffic in both modes.
 func TestXHTTPRealityTrafficOnXray(t *testing.T) {
 	bin := xraytest.Binary(t)
-	for _, mode := range []string{"stream-up", "packet-up"} {
-		t.Run(mode, func(t *testing.T) {
+	// "old core": a client that does not know the 2026 placement keys and silently drops them.
+	newKeys := []string{"sessionIDPlacement", "sessionIDKey", "sessionPlacement", "sessionKey", "seqPlacement", "seqKey",
+		"xPaddingObfsMode", "xPaddingPlacement", "xPaddingKey", "xPaddingMethod", "uplinkDataPlacement", "uplinkHTTPMethod"}
+	for _, c := range []struct {
+		mode, obfs string
+		oldCore    bool
+	}{
+		{"stream-up", "compat", false}, {"packet-up", "compat", false},
+		{"stream-up", "cookie", false}, {"packet-up", "cookie", false},
+		{"stream-up", "compat", true}, {"packet-up", "compat", true},
+	} {
+		mode := c.mode
+		name := c.mode + "/" + c.obfs
+		if c.oldCore {
+			name += "/old-core"
+		}
+		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			target := xraytest.TLSTarget(t, "example.test")
 			origin := xraytest.Origin(t)
 			serverPort, apiPort := xraytest.FreePort(t), xraytest.FreePort(t)
-			e := newXHTTPRealityEnv(t, map[string]any{"XHTTP_MODE": mode, "SELFSTEAL_PORT": target}, serverPort)
+			e := newXHTTPRealityEnv(t, map[string]any{"XHTTP_MODE": mode, "XHTTP_OBFS": c.obfs, "SELFSTEAL_PORT": target}, serverPort)
 			if err := e.svc.SetSetting(ctx, actor, service.SettingXrayAPIPort, strconv.Itoa(apiPort)); err != nil {
 				t.Fatal(err)
 			}
@@ -212,6 +227,12 @@ func TestXHTTPRealityTrafficOnXray(t *testing.T) {
 			if xs["mode"] != mode {
 				t.Fatalf("client mode %v", xs["mode"])
 			}
+			if c.oldCore {
+				extra := xs["extra"].(map[string]any)
+				for _, k := range newKeys {
+					delete(extra, k)
+				}
+			}
 			raw, _ := json.Marshal(cfg)
 			xraytest.StartClient(t, bin, raw, socks)
 
@@ -228,7 +249,7 @@ func TestXHTTPRealityTrafficOnXray(t *testing.T) {
 				t.Fatalf("traffic did not go through the inbound: %+v %v", deltas, err)
 			}
 
-			if os.Getenv("MIHOMO_BIN") != "" {
+			if os.Getenv("MIHOMO_BIN") != "" && !c.oldCore {
 				socks := startMihomo(t, e.get(e.path(), "clash-verge/v2.2.3", "hw-1").Body.Bytes())
 				xraytest.Eventually(t, 15*time.Second, "fetch through Mihomo", func() error {
 					body, err := xraytest.Fetch(ctx, socks, origin)

@@ -1,7 +1,7 @@
 # Template B — VLESS + XHTTP (packet-up) behind VK Cloud CDN (docs/PROFILES.md §4).
 # Data goes in cookies, padding in the query string, so the CDN does not strip it.
 id: vless-xhttp-vkcdn
-version: 1
+version: 2
 title: VLESS XHTTP через VK CDN
 summary: Вход через CDN VK Cloud, когда прямые IP нод недоступны.
 tag_pattern: CDN_${NODE_CODE}
@@ -45,6 +45,12 @@ variables:
     options: [/upload, /hls, /segment, /media]
     validate: path
     description: Путь xhttp без завершающего слеша.
+  - name: FINGERPRINT
+    scope: profile
+    source: const
+    default: chrome
+    options: [chrome, firefox, safari, ios, android, edge, "360", qq, random, randomized]
+    description: TLS-отпечаток клиента (uTLS), под какой браузер маскируется подключение. Уходит в подписку.
   - name: MAX_HEADER_BYTES
     scope: profile
     source: const
@@ -98,7 +104,7 @@ host:
   host: ${CDN_DOMAIN}
   path: ${UPLINK_PATH}/
   alpn: [h2, http/1.1]
-  fingerprint: chrome
+  fingerprint: ${FINGERPRINT}
   xhttp_client_only:
     xmux:
       maxConcurrency: 12-24

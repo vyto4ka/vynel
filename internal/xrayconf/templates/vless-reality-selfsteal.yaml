@@ -1,7 +1,7 @@
 # Template A — VLESS + Reality, self-steal (docs/PROFILES.md §3).
 # Matches the Remnawave config profile from the RemnaSetup "full node" setup.
 id: vless-reality-selfsteal
-version: 1
+version: 2
 title: VLESS Reality (self-steal)
 summary: Основной профиль. Нода маскируется под собственный сайт на своём домене.
 tag_pattern: VLESS_${NODE_CODE}
@@ -46,6 +46,12 @@ variables:
     default: 443
     validate: port
     description: Порт снаружи.
+  - name: FINGERPRINT
+    scope: profile
+    source: const
+    default: firefox
+    options: [chrome, firefox, safari, ios, android, edge, "360", qq, random, randomized]
+    description: TLS-отпечаток клиента (uTLS), под какой браузер маскируется подключение. Уходит в подписку.
   - name: DECOY_SITE
     scope: node
     source: generate
@@ -88,7 +94,7 @@ host:
   port: ${INBOUND_PORT}
   security: reality
   sni: ${NODE_DOMAIN}
-  fingerprint: firefox
+  fingerprint: ${FINGERPRINT}
   public_key: ${REALITY_PUBLIC_KEY}
   short_id: ${REALITY_SHORT_ID}
   flow: xtls-rprx-vision

@@ -30,6 +30,26 @@ var generators = map[string]func(Variable) (any, error){
 // derivations compute derived variables.
 var derivations = map[string]func(string) (any, error){
 	"x25519_public": func(priv string) (any, error) { return X25519Public(priv) },
+	// XHTTP obfuscation (template C, docs/PROFILES.md §8.3): "cookie" puts the session in a
+	// cookie and the sequence and padding in the query (needs a 2026 client core); "compat" keeps
+	// Xray's defaults, which every Xray-based client understands.
+	"xhttp_session_placement": xhttpPick("cookie", "path"),
+	"xhttp_seq_placement":     xhttpPick("query", "path"),
+	"xhttp_padding_placement": xhttpPick("query", "queryInHeader"),
+	"xhttp_padding_key":       xhttpPick("cb", "x_padding"),
+	"xhttp_padding_obfs":      xhttpPick(true, false),
+}
+
+func xhttpPick(cookie, compat any) func(string) (any, error) {
+	return func(mode string) (any, error) {
+		switch mode {
+		case "cookie":
+			return cookie, nil
+		case "compat", "":
+			return compat, nil
+		}
+		return nil, fmt.Errorf("unknown XHTTP obfuscation %q (cookie, compat)", mode)
+	}
 }
 
 // NewX25519 returns a Reality key pair in Xray's encoding (base64 raw URL).

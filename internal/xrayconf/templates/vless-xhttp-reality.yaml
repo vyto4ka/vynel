@@ -3,7 +3,7 @@
 # Caddy site on 127.0.0.1:8443, like template A. The traffic is HTTP requests (XHTTP) instead of
 # one long raw TLS stream: session id in a cookie, sequence and padding in the query string.
 id: vless-xhttp-reality
-version: 1
+version: 2
 title: VLESS XHTTP + REALITY (self-steal)
 summary: XHTTP поверх REALITY на 443, маскировка под собственный сайт. Без Vision.
 tag_pattern: XHTTP_${NODE_CODE}
@@ -63,6 +63,38 @@ variables:
     default: stream-up
     options: [stream-up, packet-up]
     description: stream-up — основной (длинный POST вверх); packet-up — резервный, отдельные POST-пакеты. Один режим на IP:443.
+  - name: XHTTP_OBFS
+    scope: profile
+    source: const
+    default: compat
+    options: [compat, cookie]
+    description: "compat — стандартная разметка Xray, работает во всех клиентах на ядре Xray (KeqDroid, Happ, v2rayN, v2RayTun). cookie — как в ТЗ: сессия в куке, номер и набивка в query; нужен клиент с ядром Xray 26+ или Mihomo 1.19+, со старым ядром подключение «пингуется», но трафика нет."
+  - name: XHTTP_SESSION_PLACEMENT
+    scope: profile
+    source: derived
+    from: xhttp_session_placement(XHTTP_OBFS)
+  - name: XHTTP_SEQ_PLACEMENT
+    scope: profile
+    source: derived
+    from: xhttp_seq_placement(XHTTP_OBFS)
+  - name: XHTTP_PADDING_PLACEMENT
+    scope: profile
+    source: derived
+    from: xhttp_padding_placement(XHTTP_OBFS)
+  - name: XHTTP_PADDING_KEY
+    scope: profile
+    source: derived
+    from: xhttp_padding_key(XHTTP_OBFS)
+  - name: XHTTP_PADDING_OBFS
+    scope: profile
+    source: derived
+    from: xhttp_padding_obfs(XHTTP_OBFS)
+  - name: FINGERPRINT
+    scope: profile
+    source: const
+    default: chrome
+    options: [chrome, firefox, safari, ios, android, edge, "360", qq, random, randomized]
+    description: TLS-отпечаток клиента (uTLS), под какой браузер маскируется подключение. Уходит в подписку.
   - name: DECOY_SITE
     scope: node
     source: generate
@@ -74,15 +106,15 @@ variables:
 # Server side of the XHTTP settings (the "extra" of the inbound).
 xhttp_extra: |
   {
-    "sessionIDPlacement": "cookie",
+    "sessionIDPlacement": "${XHTTP_SESSION_PLACEMENT}",
     "sessionIDKey": "media_sid",
-    "sessionPlacement": "cookie",
+    "sessionPlacement": "${XHTTP_SESSION_PLACEMENT}",
     "sessionKey": "media_sid",
-    "seqPlacement": "query",
+    "seqPlacement": "${XHTTP_SEQ_PLACEMENT}",
     "seqKey": "offset",
-    "xPaddingObfsMode": true,
-    "xPaddingPlacement": "query",
-    "xPaddingKey": "cb",
+    "xPaddingObfsMode": "${XHTTP_PADDING_OBFS}",
+    "xPaddingPlacement": "${XHTTP_PADDING_PLACEMENT}",
+    "xPaddingKey": "${XHTTP_PADDING_KEY}",
     "xPaddingMethod": "repeat-x",
     "xPaddingBytes": "100-1000",
     "noSSEHeader": true,
@@ -126,7 +158,7 @@ host:
   sni: ${NODE_DOMAIN}
   host: ${NODE_DOMAIN}
   path: ${XHTTP_PATH}/   # Xray serves "<path>/"; Mihomo sends the path as is
-  fingerprint: chrome
+  fingerprint: ${FINGERPRINT}
   public_key: ${REALITY_PUBLIC_KEY}
   short_id: ${REALITY_SHORT_ID}
   # Mihomo 1.19.x understands xhttp-opts; older Clash cores do not, so it is opt-in per template.
@@ -136,15 +168,15 @@ host:
   # receive server-only keys (noSSEHeader, serverMaxHeaderBytes, uplinkDataPlacement: auto).
   # One object works for both modes: scMinPostsIntervalMs is packet-up only, noGRPCHeader stream-up only.
   xhttp_client_extra:
-    sessionIDPlacement: cookie
+    sessionIDPlacement: ${XHTTP_SESSION_PLACEMENT}
     sessionIDKey: media_sid
-    sessionPlacement: cookie
+    sessionPlacement: ${XHTTP_SESSION_PLACEMENT}
     sessionKey: media_sid
-    seqPlacement: query
+    seqPlacement: ${XHTTP_SEQ_PLACEMENT}
     seqKey: offset
-    xPaddingObfsMode: true
-    xPaddingPlacement: query
-    xPaddingKey: cb
+    xPaddingObfsMode: ${XHTTP_PADDING_OBFS}
+    xPaddingPlacement: ${XHTTP_PADDING_PLACEMENT}
+    xPaddingKey: ${XHTTP_PADDING_KEY}
     xPaddingMethod: repeat-x
     xPaddingBytes: 100-1000
     mode: ${XHTTP_MODE}

@@ -513,7 +513,8 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 | Flow | пусто: Vision поверх XHTTP не работает |
 | Маскировка запросов | сессия в куке `media_sid`, номер пакета `offset` и набивка `cb` в query (`repeat-x`, 100–1000 байт) |
 | Сертификат | не нужен Xray: REALITY; сайт в Caddy получает сертификат сам (ACME на `:80`) |
-| Fingerprint | `chrome` |
+| Fingerprint | `chrome`, выбирается переменной `FINGERPRINT` |
+| Маскировка запросов | `XHTTP_OBFS`: `compat` (по умолчанию) или `cookie` — см. §8.3 |
 | Mihomo | отдаётся (`xhttp-opts`, `reuse-settings`, `support-x25519mlkem768: true`); нужен Mihomo 1.19+ |
 | sing-box | не отдаётся: в sing-box нет XHTTP |
 
@@ -525,9 +526,26 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 | `REALITY_PRIVATE_KEY`, `REALITY_SHORT_ID` | нода | генерируются, свои на каждой ноде |
 | `XHTTP_PATH` | профиль | случайный из `/assets/sync`, `/api/stream`, `/static/chunks`, `/media/feed` |
 | `XHTTP_MODE` | профиль | `stream-up` (по умолчанию) или `packet-up` — выпадающий список |
+| `XHTTP_OBFS` | профиль | `compat` (по умолчанию) или `cookie` — §8.3 |
+| `FINGERPRINT` | профиль | `chrome`; варианты: firefox, safari, ios, android, edge, 360, qq, random, randomized |
 | `SELFSTEAL_PORT`, `PORT` | профиль | `8443`, `443` |
 
 ### 8.3 Серверный и клиентский extra
+
+**Режим маскировки `XHTTP_OBFS`.** Разметка из ТЗ — сессия в куке `media_sid`, номер пакета `offset` и набивка `cb` в query, `xPaddingObfsMode`. Она опирается на ключи, которые появились в ядре Xray только в 2026 году.
+
+Клиент со старым ядром, например KeqDroid, эти ключи молча игнорирует и кладёт сессию в путь. Сервер не находит куку и принимает запрос за stream-one. В итоге подключение «пингуется», сервер в логе пишет `accepted … DIRECT`, но ответы до клиента не доходят, и трафика ноль.
+
+Поэтому режимов два:
+
+| `XHTTP_OBFS` | Разметка | Клиенты |
+|---|---|---|
+| `compat` (по умолчанию) | стандартная Xray: сессия и номер в пути, набивка в `Referer` | все на ядре Xray, Mihomo 1.19+ |
+| `cookie` | как в ТЗ | Xray 26+ (Happ, v2rayN свежие), Mihomo 1.19+ |
+
+Значения размещений вычисляются из `XHTTP_OBFS` (`xhttp_session_placement(...)` и т.п.) и одинаково попадают в серверный и клиентский extra. Тест `TestXHTTPRealityTrafficOnXray/*/compat/old-core` гоняет трафик клиентом, у которого все новые ключи удалены.
+
+Ниже — значения в режиме `cookie`.
 
 Серверный `extra` (в инбаунде) — дословно из ТЗ: `uplinkDataPlacement: auto` (принимает и body, и куки), `noSSEHeader`, `scMaxEachPostBytes: "262144"`, `serverMaxHeaderBytes: 32768`. Рендер шаблона совпадает с инбаундом ТЗ (golden-тест `TestGoldenXHTTPRealityMatchesGuide`; сверх него только `sniffing` и `sockopt`).
 

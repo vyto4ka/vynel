@@ -144,7 +144,7 @@ func TestGoldenXHTTPMatchesGuide(t *testing.T) {
 func xhttpRealitySpec() InboundSpec {
 	return InboundSpec{
 		TemplateID:    "vless-xhttp-reality",
-		ProfileValues: map[string]any{"XHTTP_PATH": "/assets/sync"},
+		ProfileValues: map[string]any{"XHTTP_PATH": "/assets/sync", "XHTTP_OBFS": "cookie"},
 		NodeValues: map[string]any{
 			"REALITY_PRIVATE_KEY": fixturePriv,
 			"REALITY_SHORT_ID":    "0123456789abcdef",
@@ -380,5 +380,27 @@ func TestHysteriaNextToReality(t *testing.T) {
 	}
 	if _, err := BuildConfig(NodeConfig{Base: mustBase(t), Inbounds: []*RenderedInbound{h, h}, APIAddr: "127.0.0.1:10085"}); err == nil {
 		t.Fatal("duplicate accepted")
+	}
+}
+
+// compat (the default) keeps Xray's own placements, which old client cores use implicitly.
+func TestXHTTPRealityCompat(t *testing.T) {
+	spec := xhttpRealitySpec()
+	delete(spec.ProfileValues, "XHTTP_OBFS")
+	r, err := RenderInbound(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := xhttpExtra(r.Inbound)
+	want := map[string]any{"sessionPlacement": "path", "seqPlacement": "path", "xPaddingObfsMode": false,
+		"xPaddingPlacement": "queryInHeader", "xPaddingKey": "x_padding"}
+	for k, v := range want {
+		if extra[k] != v {
+			t.Fatalf("%s = %v, want %v", k, extra[k], v)
+		}
+	}
+	spec.ProfileValues["XHTTP_OBFS"] = "header"
+	if _, err := RenderInbound(spec); err == nil {
+		t.Fatal("unknown obfuscation accepted")
 	}
 }

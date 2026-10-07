@@ -15,7 +15,7 @@ func customSource(t *testing.T, id, fingerprint string) string {
 	t.Helper()
 	b := must(xrayconf.GetTemplate("vless-reality-selfsteal"))
 	src := strings.Replace(b.Source, "id: vless-reality-selfsteal", "id: "+id, 1)
-	src = strings.Replace(src, "fingerprint: firefox", "fingerprint: "+fingerprint, 1)
+	src = strings.Replace(src, "fingerprint: ${FINGERPRINT}", "fingerprint: "+fingerprint, 1)
 	return strings.Replace(src, "title: VLESS Reality (self-steal)", "title: Моя Reality", 1)
 }
 
