@@ -82,8 +82,8 @@ func TestTemplatesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 3 {
-		t.Fatalf("want 3 templates, got %d", len(ts))
+	if len(ts) != 4 {
+		t.Fatalf("want 4 templates, got %d", len(ts))
 	}
 }
 
@@ -349,5 +349,36 @@ func TestParseBaseRejectsSystemSections(t *testing.T) {
 func TestCountryFlag(t *testing.T) {
 	if CountryFlag("nl") != "🇳🇱" || CountryFlag("x") != "" {
 		t.Fatal("flag")
+	}
+}
+
+// Hysteria2 listens on UDP: it shares the port number with Reality on TCP, and its users
+// authenticate with the UUID as password.
+func TestHysteriaNextToReality(t *testing.T) {
+	a, err := RenderInbound(realitySpec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := RenderInbound(InboundSpec{TemplateID: "hysteria2", Context: NodeContext{Code: "NL", Domain: "nl2.vyto4ka.ru"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := BuildConfig(NodeConfig{Base: mustBase(t), Inbounds: []*RenderedInbound{a, h}, APIAddr: "127.0.0.1:10085",
+		Clients: map[string][]Client{h.Tag: {{Email: "7", ID: "11111111-2222-4333-8444-555555555555"}}}})
+	if err != nil {
+		t.Fatalf("UDP and TCP on 443 must not conflict: %v", err)
+	}
+	in := cfg["inbounds"].([]any)[1].(map[string]any)
+	clients := in["settings"].(map[string]any)["clients"].([]any)
+	if c := clients[0].(map[string]any); c["auth"] != "11111111-2222-4333-8444-555555555555" || c["id"] != nil {
+		t.Fatalf("hysteria client %v", c)
+	}
+	tls := in["streamSettings"].(map[string]any)["tlsSettings"].(map[string]any)
+	cert := tls["certificates"].([]any)[0].(map[string]any)
+	if cert["certificateFile"] != "vynel:cert:nl2.vyto4ka.ru" || cert["keyFile"] != "vynel:key:nl2.vyto4ka.ru" {
+		t.Fatalf("certificate placeholders %v", cert)
+	}
+	if _, err := BuildConfig(NodeConfig{Base: mustBase(t), Inbounds: []*RenderedInbound{h, h}, APIAddr: "127.0.0.1:10085"}); err == nil {
+		t.Fatal("duplicate accepted")
 	}
 }

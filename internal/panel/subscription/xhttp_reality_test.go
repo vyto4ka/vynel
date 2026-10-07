@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -256,15 +257,14 @@ func startMihomo(t *testing.T, profile []byte) int {
 	doc["mixed-port"] = port
 	doc["rules"] = []string{"MATCH,VPN"}
 	doc["geodata-mode"] = false
-	doc["log-level"] = "debug"
 	dir := t.TempDir()
 	raw, _ := yaml.Marshal(doc)
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(os.Getenv("MIHOMO_BIN"), "-d", dir)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
+	out := &lockedBuffer{}
+	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -288,3 +288,77 @@ func startMihomo(t *testing.T, profile []byte) int {
 type errShort int
 
 func (n errShort) Error() string { return "short body " + strconv.Itoa(int(n)) }
+
+func TestHysteria2Formats(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	svc := service.New(st)
+	if err := svc.EnsureDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	node, _, _ := svc.CreateNode(ctx, actor, service.NodeInput{Name: "Нидерланды", Country: "nl", Domain: "nl.example.com"})
+	prof, err := svc.CreateProfile(ctx, actor, service.ProfileInput{Name: "HY2", TemplateID: "hysteria2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, _ := svc.GroupByName(ctx, "Основная")
+	_ = svc.GrantAccess(ctx, actor, main.ID, store.AccessProfile, prof.ID)
+	if _, err := svc.AttachProfile(ctx, actor, service.AttachInput{NodeID: node.ID, ProfileID: prof.ID}); err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.SetSetting(ctx, actor, service.SettingSubDomain, "sub.example.com")
+	u, _ := svc.CreateUser(ctx, actor, service.CreateUserInput{Username: "alice"})
+	e := &env{ctx: ctx, svc: svc, h: NewHandler(svc, nil), user: u}
+
+	ls := links(t, e.get(e.path(), "Happ/3.1.0", "hw-1"))
+	if len(ls) != 1 || !strings.HasPrefix(ls[0], "hysteria2://"+u.UUID+"@nl.example.com:443/?") ||
+		!strings.Contains(ls[0], "sni=nl.example.com") || !strings.Contains(ls[0], "alpn=h3") || !strings.Contains(ls[0], "#%F0%9F%87%B3%F0%9F%87%B1") {
+		t.Fatalf("links %v", ls)
+	}
+	var doc struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal(e.get(e.path(), "clash-verge/v2.2.3", "hw-1").Body.Bytes(), &doc); err != nil || len(doc.Proxies) != 1 {
+		t.Fatalf("mihomo: %v", err)
+	}
+	if p := doc.Proxies[0]; p["type"] != "hysteria2" || p["password"] != u.UUID || p["sni"] != "nl.example.com" {
+		t.Fatalf("mihomo proxy %v", p)
+	}
+	var sb struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(e.get(e.path(), "sing-box 1.11.4", "hw-1").Body.Bytes(), &sb); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, o := range sb.Outbounds {
+		if o["type"] == "hysteria2" && o["password"] == u.UUID && o["server_port"] == float64(443) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("sing-box outbounds %v", sb.Outbounds)
+	}
+}
+
+// lockedBuffer collects a child process's output while the test reads it.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}

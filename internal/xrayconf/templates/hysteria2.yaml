@@ -1,0 +1,88 @@
+# Template D — Hysteria2 on the certificate Caddy already gets for the node (docs/PROFILES.md §9).
+# QUIC on UDP 443 next to Reality / XHTTP on TCP 443. The certificate and the decoy site are the
+# node's own: the agent replaces vynel:cert:/vynel:key:/vynel:decoy: with paths on the node
+# (Caddy's Let's Encrypt certificate, a temporary self-signed one until it is issued).
+id: hysteria2
+version: 1
+title: Hysteria2 (сертификат Caddy)
+summary: QUIC на UDP 443 рядом с Reality, на том же домене и сертификате. Быстро на плохих каналах.
+tag_pattern: HY2_${NODE_CODE}
+remark_pattern: ${NODE_FLAG} ${NODE_NAME} · Hysteria2
+protocol: hysteria
+client:
+  flow: ""
+lint: []
+
+variables:
+  - name: NODE_DOMAIN
+    scope: node
+    source: input
+    default_from: node.domain
+    validate: domain
+    description: Домен ноды (A-запись на IP инбаунда). На него Caddy получает сертификат, его же видит клиент в SNI.
+  - name: PORT
+    scope: profile
+    source: const
+    default: 443
+    validate: port
+    description: UDP-порт снаружи. 443 не мешает Reality и Caddy — они на TCP.
+  - name: SELFSTEAL_PORT
+    scope: profile
+    source: const
+    default: 8443
+    validate: port
+    description: Локальный порт сайта Caddy для этого домена (тот же, что у шаблона Reality — сайты совместятся).
+  - name: DECOY_SITE
+    scope: node
+    source: generate
+    generator: path
+    options: [cloud, studio, docs]
+    default: cloud
+    description: Сайт-заглушка — его отдают и Caddy, и Hysteria тем, кто пришёл без пароля (masquerade).
+  - name: UDP_IDLE_TIMEOUT
+    scope: profile
+    source: const
+    default: 60
+    description: Сколько секунд держать UDP-сессию пользователя без пакетов (2–600).
+
+xray_inbound: |
+  {
+    "tag": "${TAG}",
+    "port": "${PORT}",
+    "listen": "${LISTEN_IP}",
+    "protocol": "hysteria",
+    "settings": { "version": 2, "clients": [] },
+    "sniffing": { "enabled": true, "routeOnly": true, "destOverride": ["http", "tls", "quic"] },
+    "streamSettings": {
+      "network": "hysteria",
+      "security": "tls",
+      "tlsSettings": {
+        "alpn": ["h3"],
+        "certificates": [
+          { "certificateFile": "vynel:cert:${NODE_DOMAIN}", "keyFile": "vynel:key:${NODE_DOMAIN}" }
+        ]
+      },
+      "hysteriaSettings": {
+        "version": 2,
+        "udpIdleTimeout": "${UDP_IDLE_TIMEOUT}",
+        "masquerade": { "type": "file", "dir": "vynel:decoy:${DECOY_SITE}" }
+      }
+    }
+  }
+
+host:
+  address: ${NODE_DOMAIN}
+  port: ${INBOUND_PORT}
+  security: tls
+  sni: ${NODE_DOMAIN}
+  alpn: [h3]
+
+caddy:
+  role: certificate
+  domain: ${NODE_DOMAIN}
+  local_port: ${SELFSTEAL_PORT}
+  decoy: ${DECOY_SITE}
+
+node_requirements:
+  ports: [443/udp, 80/tcp]
+  dns: [{ type: A, name: "${NODE_DOMAIN}" }]

@@ -453,12 +453,14 @@ drop_temp_swap() {
   fi
 }
 
-# open_ports PORT...: only when ufw is active.
+# open_ports PORT[/PROTO]...: only when ufw is active; a bare port means TCP.
 open_ports() {
   if command -v ufw >/dev/null && [[ "$(ufw status 2>/dev/null || true)" == *"Status: active"* ]]; then
     info "opening ports in ufw: $*"
     local p
-    for p in "$@"; do ufw allow "$p/tcp" >/dev/null; done
+    for p in "$@"; do
+      if [[ "$p" == */* ]]; then ufw allow "$p" >/dev/null; else ufw allow "$p/tcp" >/dev/null; fi
+    done
   fi
 }
 
@@ -676,7 +678,8 @@ do_aio() {
   install_xray
   install_caddy
   drop_temp_swap
-  if [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]]; then open_ports 80 443; else open_ports 80 443 "${GATEWAY_LISTEN##*:}"; fi
+  # 443/udp: Hysteria2 inbounds (docs/PROFILES.md §9).
+  if [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]]; then open_ports 80 443 443/udp; else open_ports 80 443 443/udp "${GATEWAY_LISTEN##*:}"; fi
 
   restore_backup
   info "configuring the panel"
@@ -830,7 +833,7 @@ do_node() {
   install_xray
   install_caddy
   drop_temp_swap
-  open_ports 80 443
+  open_ports 80 443 443/udp
 
   if [[ -n "$TOKEN" ]]; then
     info "joining the panel"

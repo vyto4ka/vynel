@@ -63,6 +63,9 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 			listen = "0.0.0.0"
 		}
 		port, _ := r.Inbound["port"].(int)
+		if xrayconf.Transport(r.Inbound) == "udp" {
+			continue // Hysteria on UDP 443 does not compete with Caddy or Reality on TCP 443
+		}
 		xrayListens[listener{listen, strconv.Itoa(port)}] = r.Tag
 		ss, _ := r.Inbound["streamSettings"].(map[string]any)
 		if ss["security"] == "reality" {
@@ -100,6 +103,16 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 				continue // e.g. a profile override points Reality at a foreign site
 			}
 			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: front.localPort,
+				Routes: []caddyconf.Route{{Kind: caddyconf.KindDecoy, Decoy: decoyName(str(cm["decoy"]))}}})
+		case "certificate":
+			// The inbound needs Caddy's certificate for the domain (Hysteria2 uses it directly).
+			// The site lives on 127.0.0.1 only: the certificate comes over HTTP-01 on :80, and when a
+			// Reality inbound on the same node targets this port, browsers see the same decoy there.
+			port, _ := strconv.Atoi(str(cm["local_port"]))
+			if port == 0 {
+				port = 8443
+			}
+			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: port,
 				Routes: []caddyconf.Route{{Kind: caddyconf.KindDecoy, Decoy: decoyName(str(cm["decoy"]))}}})
 		case "reverse_proxy_xhttp":
 			bind := str(vals["LISTEN_IP"])

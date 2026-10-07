@@ -21,7 +21,7 @@ type Format string
 
 // Supported formats.
 const (
-	FormatBase64  Format = "base64"  // vless:// links, one per line, base64 (v2rayN/NG, Happ, v2RayTun, Streisand, Hiddify)
+	FormatBase64  Format = "base64"  // vless:// and hysteria2:// links, one per line, base64 (v2rayN/NG, Happ, v2RayTun, Streisand, Hiddify)
 	FormatMihomo  Format = "mihomo"  // Clash Meta / Mihomo / FlClash / Stash YAML
 	FormatSingBox Format = "singbox" // sing-box JSON (SFA/SFI/Karing)
 	FormatXray    Format = "xray"    // JSON array of full Xray client configs
@@ -52,9 +52,9 @@ func ParseFormat(s string) (Format, bool) {
 func (f Format) Supports(h service.Host) bool {
 	switch f {
 	case FormatMihomo:
-		return h.Network == "tcp" || (h.Network == "xhttp" && h.Mihomo)
+		return h.Network == "tcp" || h.Network == "hysteria" || (h.Network == "xhttp" && h.Mihomo)
 	case FormatSingBox:
-		return h.Network == "tcp"
+		return h.Network == "tcp" || h.Network == "hysteria"
 	}
 	return true
 }
@@ -67,8 +67,19 @@ func Stub(message string) service.Host {
 	return service.Host{Tag: "stub", Remark: message, Protocol: "vless", Network: "tcp", Security: "none", Address: "0.0.0.0", Port: 1}
 }
 
-// Link renders a vless:// link.
+// Link renders a vless:// link, or hysteria2:// for Hysteria2 hosts (the UUID is the password).
 func Link(h service.Host, uuid string) string {
+	if h.Protocol == "hysteria" {
+		q := url.Values{}
+		if h.SNI != "" {
+			q.Set("sni", h.SNI)
+		}
+		if len(h.ALPN) > 0 {
+			q.Set("alpn", strings.Join(h.ALPN, ","))
+		}
+		q.Set("insecure", "0")
+		return fmt.Sprintf("hysteria2://%s@%s/?%s#%s", uuid, net.JoinHostPort(h.Address, strconv.Itoa(h.Port)), q.Encode(), url.PathEscape(h.Remark))
+	}
 	q := url.Values{}
 	q.Set("encryption", "none")
 	q.Set("type", h.Network)
@@ -139,6 +150,17 @@ func Mihomo(hosts []service.Host, uuid string) ([]byte, error) {
 	names := uniqueNames(hosts)
 	proxies := make([]map[string]any, 0, len(hosts))
 	for i, h := range hosts {
+		if h.Protocol == "hysteria" {
+			p := map[string]any{"name": names[i], "type": "hysteria2", "server": h.Address, "port": h.Port, "password": uuid, "udp": true}
+			if h.SNI != "" {
+				p["sni"] = h.SNI
+			}
+			if len(h.ALPN) > 0 {
+				p["alpn"] = h.ALPN
+			}
+			proxies = append(proxies, p)
+			continue
+		}
 		p := map[string]any{
 			"name": names[i], "type": "vless", "server": h.Address, "port": h.Port, "uuid": uuid,
 			"network": "tcp", "udp": true,
@@ -255,6 +277,15 @@ func SingBox(hosts []service.Host, uuid string) ([]byte, error) {
 	names := uniqueNames(hosts)
 	outbounds := []map[string]any{{"type": "selector", "tag": "proxy", "outbounds": names}}
 	for i, h := range hosts {
+		if h.Protocol == "hysteria" {
+			tls := map[string]any{"enabled": true, "server_name": h.SNI}
+			if len(h.ALPN) > 0 {
+				tls["alpn"] = h.ALPN
+			}
+			outbounds = append(outbounds, map[string]any{"type": "hysteria2", "tag": names[i], "server": h.Address,
+				"server_port": h.Port, "password": uuid, "tls": tls})
+			continue
+		}
 		o := map[string]any{"type": "vless", "tag": names[i], "server": h.Address, "server_port": h.Port, "uuid": uuid}
 		if h.Flow != "" {
 			o["flow"] = h.Flow
@@ -283,6 +314,18 @@ func SingBox(hosts []service.Host, uuid string) ([]byte, error) {
 
 // XrayOutbound renders the proxy outbound of a host.
 func XrayOutbound(h service.Host, uuid string) map[string]any {
+	if h.Protocol == "hysteria" {
+		tls := map[string]any{"serverName": h.SNI}
+		if len(h.ALPN) > 0 {
+			tls["alpn"] = h.ALPN
+		}
+		return map[string]any{
+			"tag": "proxy", "protocol": "hysteria",
+			"settings": map[string]any{"version": 2, "address": h.Address, "port": h.Port},
+			"streamSettings": map[string]any{"network": "hysteria", "security": "tls", "tlsSettings": tls,
+				"hysteriaSettings": map[string]any{"version": 2, "auth": uuid}},
+		}
+	}
 	user := map[string]any{"id": uuid, "encryption": "none"}
 	if h.Flow != "" {
 		user["flow"] = h.Flow

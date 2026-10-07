@@ -3,6 +3,7 @@ module github.com/vyto4ka/vynel
 go 1.26.0
 
 require (
+	github.com/apernet/quic-go v0.59.1-0.20260217092621-db4786c77a22
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/cobra v1.10.2
@@ -18,7 +19,6 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.2.3 // indirect
-	github.com/apernet/quic-go v0.59.1-0.20260217092621-db4786c77a22 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -31,6 +31,7 @@ require (
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/pires/go-proxyproto v0.11.0 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/refraction-networking/utls v1.8.3-0.20260301010127-aa6edf4b11af // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sagernet/sing v0.5.1 // indirect

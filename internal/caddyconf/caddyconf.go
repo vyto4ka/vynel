@@ -120,6 +120,8 @@ func Build(spec Spec) ([]byte, error) {
 			"tls_connection_policies": []any{map[string]any{}},
 			"automatic_https":         map[string]any{"disable_redirects": true},
 			"max_header_bytes":        256 << 10, // XHTTP uplink data travels in cookies
+			// No HTTP/3: UDP 443 belongs to Hysteria2 inbounds, and the sites need nothing beyond h2.
+			"protocols": []string{"h1", "h2"},
 		}
 		if len(errRoutes) > 0 {
 			s["errors"] = map[string]any{"routes": errRoutes}

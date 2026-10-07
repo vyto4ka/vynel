@@ -107,6 +107,6 @@ func Reference() TemplateReference {
 	}
 	return TemplateReference{
 		Builtins: keys(builtinVars), Generators: keys(generators), Derivations: keys(derivations), Lint: keys(lintRules),
-		Validations: []string{"domain", "port", "path", "ip"}, CaddyRoles: []string{"selfsteal", "reverse_proxy_xhttp"},
+		Validations: []string{"domain", "port", "path", "ip"}, CaddyRoles: []string{"selfsteal", "reverse_proxy_xhttp", "certificate"},
 	}
 }

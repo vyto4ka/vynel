@@ -348,6 +348,21 @@ vynel admin inbound attach --node NL --profile XHTTP --listen 203.0.113.11
 - Mihomo (FlClashX, Clash Verge, 1.19+) получает `xhttp-opts`. Проверено на настоящем Mihomo.
 - sing-box этот вариант не получает.
 
+### Hysteria2 рядом с Reality
+
+Четвёртый встроенный шаблон, `hysteria2`. Это QUIC на **UDP** 443 на том же IP, домене и сертификате, что и Reality на TCP 443. Хорошо работает на мобильных сетях и каналах с потерями. Подробно схема описана в [PROFILES.md §9](PROFILES.md).
+
+```bash
+vynel admin profile add --name Hysteria2 --template hysteria2
+vynel admin inbound attach --node NL --profile Hysteria2
+```
+
+- Сертификат берётся тот, что Caddy уже получил для сайта ноды. Агент сам копирует его для Xray и подхватывает продления.
+- Тем, кто пришёл без пароля, Hysteria показывает тот же сайт-заглушку по HTTP/3.
+- Пароль Hysteria — UUID пользователя. Включение, отключение и лимиты работают так же, как у VLESS.
+- В подписке появится «🇳🇱 Нидерланды · Hysteria2». Её получают все форматы: ссылки, Xray JSON, Mihomo и sing-box.
+- Нужен открытый **UDP 443**. Установщик открывает его в ufw, а firewall в панели хостера проверьте сами.
+
 ## 11. Настройки
 
 `vynel admin setting КЛЮЧ` показывает значение, `vynel admin setting КЛЮЧ ЗНАЧЕНИЕ` меняет.

@@ -48,6 +48,7 @@ type Config struct {
 	StatsInterval time.Duration            // how often counters are collected, default 10s
 	CaddyBin      string                   // path to caddy ("" = not installed)
 	TuneSysctl    bool                     // apply BBR/fq/TFO on start (needs root)
+	CertInterval  time.Duration            // how often Caddy certificates are copied for Xray, default 1m
 }
 
 // Agent applies the panel's desired state to Xray.
@@ -67,6 +68,8 @@ type Agent struct {
 	warnings []string
 	metrics  metrics.Collector
 	statsCh  chan struct{} // a batch was queued
+	certs    *certBridge
+	certDoms []string // domains whose certificates the running Xray config uses
 }
 
 // New opens the agent's state. Call Run to start.
@@ -83,6 +86,9 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.StatsInterval == 0 {
 		cfg.StatsInterval = 10 * time.Second
 	}
+	if cfg.CertInterval == 0 {
+		cfg.CertInterval = time.Minute
+	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, err
 	}
@@ -92,7 +98,7 @@ func New(cfg Config) (*Agent, error) {
 	}
 	a := &Agent{cfg: cfg, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
 		caddy:   &caddy.Manager{Bin: cfg.CaddyBin, DataDir: filepath.Join(cfg.DataDir, "web"), Log: cfg.Log.With("component", "caddy")},
-		statsCh: make(chan struct{}, 1)}
+		statsCh: make(chan struct{}, 1), certs: newCertBridge(cfg.DataDir)}
 	if a.cur, err = st.Load(); err != nil {
 		st.Close()
 		return nil, err
@@ -144,6 +150,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	a.mu.Unlock()
 	go a.collectLoop(ctx)
+	go a.certLoop(ctx)
 
 	backoff := min(time.Second, a.cfg.MaxBackoff)
 	for ctx.Err() == nil {
@@ -420,6 +427,8 @@ func (a *Agent) addUser(ctx context.Context, in *state.Inbound, u state.User) er
 	switch in.Protocol {
 	case "vless":
 		return a.api.AddVLESSUser(ctx, in.Tag, u.Email, u.ID, in.Flow)
+	case "hysteria":
+		return a.api.AddHysteriaUser(ctx, in.Tag, u.Email, u.ID)
 	}
 	return fmt.Errorf("protocol %s is not supported for hot user changes", in.Protocol)
 }
@@ -430,6 +439,11 @@ func (a *Agent) restartLocked(ctx context.Context, st *state.State) error {
 	if err != nil {
 		return err
 	}
+	full, doms, err := a.certs.resolve(full)
+	if err != nil {
+		return err
+	}
+	a.certDoms = doms
 	if a.api != nil && a.proc.Running() {
 		// Xray counters live in memory: collect them before the restart drops them.
 		a.collectLocked(ctx)
@@ -487,7 +501,7 @@ func FullConfig(st *state.State) ([]byte, string, error) {
 		}
 		clients := make([]any, 0, len(si.Users))
 		for _, u := range si.Users {
-			clients = append(clients, xrayconf.ClientJSON(xrayconf.Client{Email: u.Email, ID: u.ID}, si.Flow))
+			clients = append(clients, xrayconf.ClientJSON(xrayconf.Client{Email: u.Email, ID: u.ID}, si.Protocol, si.Flow))
 		}
 		settings["clients"] = clients
 	}
@@ -509,6 +523,45 @@ func short(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// certLoop copies renewed Caddy certificates for Xray, which re-reads its certificate files
+// every hour by itself. When a domain gets its first real certificate (it ran on a self-signed
+// placeholder until Caddy got one), Xray is restarted at once instead of an hour later.
+func (a *Agent) certLoop(ctx context.Context) {
+	t := time.NewTicker(a.cfg.CertInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.mu.Lock()
+			a.syncCertsLocked(ctx)
+			a.mu.Unlock()
+		}
+	}
+}
+
+func (a *Agent) syncCertsLocked(ctx context.Context) {
+	restart := false
+	for _, d := range a.certDoms {
+		was := a.certs.pending(d)
+		changed, err := a.certs.sync(d)
+		if err != nil {
+			a.log.Warn("cannot sync certificate", "domain", d, "err", err)
+			continue
+		}
+		if changed && was && !a.certs.pending(d) {
+			a.log.Info("certificate issued, restarting xray", "domain", d)
+			restart = true
+		}
+	}
+	if restart && a.cur != nil {
+		if err := a.restartLocked(ctx, a.cur); err != nil {
+			a.log.Error("cannot restart xray with the new certificate", "err", err)
+		}
+	}
 }
 
 func (a *Agent) collectLoop(ctx context.Context) {

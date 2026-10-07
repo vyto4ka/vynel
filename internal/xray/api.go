@@ -10,6 +10,7 @@ import (
 	stats "github.com/xtls/xray-core/app/stats/command"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
+	hyaccount "github.com/xtls/xray-core/proxy/hysteria/account"
 	"github.com/xtls/xray-core/proxy/vless"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -58,6 +59,20 @@ func (a *API) AddVLESSUser(ctx context.Context, tag, email, uuid, flow string) e
 		Level:   0,
 		Email:   email,
 		Account: serial.ToTypedMessage(&vless.Account{Id: uuid, Flow: flow, Encryption: "none"}),
+	}}
+	_, err := a.handler.AlterInbound(ctx, &handler.AlterInboundRequest{Tag: tag, Operation: serial.ToTypedMessage(op)})
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		return nil
+	}
+	return err
+}
+
+// AddHysteriaUser adds a Hysteria2 user (auth = password) without restarting Xray.
+func (a *API) AddHysteriaUser(ctx context.Context, tag, email, auth string) error {
+	op := &handler.AddUserOperation{User: &protocol.User{
+		Level:   0,
+		Email:   email,
+		Account: serial.ToTypedMessage(&hyaccount.Account{Auth: auth}),
 	}}
 	_, err := a.handler.AlterInbound(ctx, &handler.AlterInboundRequest{Tag: tag, Operation: serial.ToTypedMessage(op)})
 	if err != nil && strings.Contains(err.Error(), "already exists") {

@@ -89,7 +89,7 @@ func BuildConfig(nc NodeConfig) (map[string]any, error) {
 		seenListen[key] = r.Tag
 		in := deepCopy(r.Inbound)
 		if settings, ok := in["settings"].(map[string]any); ok {
-			settings["clients"] = clientsJSON(nc.Clients[r.Tag], r.Flow)
+			settings["clients"] = clientsJSON(nc.Clients[r.Tag], r.Protocol, r.Flow)
 		}
 		inbounds = append(inbounds, in)
 	}
@@ -123,8 +123,12 @@ func BuildConfig(nc NodeConfig) (map[string]any, error) {
 	return cfg, nil
 }
 
-// ClientJSON renders one VLESS client entry.
-func ClientJSON(c Client, flow string) map[string]any {
+// ClientJSON renders one client entry for the inbound's protocol. Hysteria2 users authenticate
+// with a password: the user's UUID is used as one, so a user has a single secret everywhere.
+func ClientJSON(c Client, protocol, flow string) map[string]any {
+	if protocol == "hysteria" {
+		return map[string]any{"auth": c.ID, "email": c.Email, "level": 0}
+	}
 	m := map[string]any{"id": c.ID, "email": c.Email, "level": 0}
 	if c.Flow != "" {
 		flow = c.Flow
@@ -135,23 +139,35 @@ func ClientJSON(c Client, flow string) map[string]any {
 	return m
 }
 
-func clientsJSON(cs []Client, flow string) []any {
+func clientsJSON(cs []Client, protocol, flow string) []any {
 	sorted := append([]Client(nil), cs...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Email < sorted[j].Email })
 	out := make([]any, 0, len(sorted))
 	for _, c := range sorted {
-		out = append(out, ClientJSON(c, flow))
+		out = append(out, ClientJSON(c, protocol, flow))
 	}
 	return out
 }
 
+// listenKey identifies the socket an inbound binds: Hysteria listens on UDP, so it can share a
+// port number with a TCP inbound (Reality on TCP 443 and Hysteria2 on UDP 443).
 func listenKey(in map[string]any) string {
 	listen, _ := in["listen"].(string)
 	if listen == "" {
 		listen = "0.0.0.0"
 	}
 	port, _ := toInt(in["port"])
-	return net.JoinHostPort(listen, strconv.Itoa(port))
+	return Transport(in) + " " + net.JoinHostPort(listen, strconv.Itoa(port))
+}
+
+// Transport is "udp" for inbounds that listen on UDP (Hysteria, KCP) and "tcp" otherwise.
+func Transport(in map[string]any) string {
+	ss, _ := in["streamSettings"].(map[string]any)
+	switch ss["network"] {
+	case "hysteria", "kcp", "mkcp":
+		return "udp"
+	}
+	return "tcp"
 }
 
 // addEgress makes traffic from inbounds with an egress IP leave through that IP
