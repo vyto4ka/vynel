@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,12 +13,16 @@ import (
 
 // ProfileInput creates or edits a profile.
 type ProfileInput struct {
-	Name          string
-	TemplateID    string         // create only
-	Values        map[string]any // scope=profile values; missing generated ones are filled in
-	Override      map[string]any // merge patch over the template
-	TagPattern    string         // optional, defaults to the template's
-	RemarkPattern string         // optional
+	Name       string
+	TemplateID string         // create only
+	Values     map[string]any // scope=profile values; missing generated ones are filled in
+	Override   map[string]any // merge patch over the template (legacy; the editor sends Inbound)
+	// Inbound and Host are the profile's own source JSON (${VARIABLES} kept). nil leaves them as
+	// they are; a source equal to the template's goes back to following the template.
+	Inbound       map[string]any
+	Host          map[string]any
+	TagPattern    string // optional, defaults to the template's
+	RemarkPattern string // optional
 	// RegenerateKeys re-creates the profile's generated values (e.g. a random path).
 	RegenerateKeys bool
 }
@@ -73,6 +78,9 @@ func (s *Service) UpdateProfile(ctx context.Context, actor Actor, id int64, in P
 			for _, r := range s.renderProfileInbounds(ctx, q, p.ID) {
 				if r.Err != nil {
 					return fmt.Errorf("inbound %s: %w", r.Inbound.Tag, r.Err)
+				}
+				if err := checkHost(r.Rendered); err != nil {
+					return invalid("inbound %s: connection point: %v", r.Inbound.Tag, err)
 				}
 			}
 			return nil
@@ -162,6 +170,16 @@ func (s *Service) applyProfile(ctx context.Context, q store.DBTX, id int64, in P
 	if in.Override != nil {
 		p.Override = in.Override
 	}
+	if in.Inbound != nil {
+		p.Inbound = sameAsTemplate(in.Inbound, tpl.SourceInbound())
+		p.Override = map[string]any{} // a full source replaces patches on top of the template
+	}
+	if in.Host != nil {
+		p.Host = sameAsTemplate(in.Host, tpl.SourceHost())
+	}
+	if _, err := tpl.WithSources(p.Inbound, p.Host); err != nil {
+		return nil, invalid("%v", err)
+	}
 	if in.TagPattern != "" {
 		if !strings.Contains(in.TagPattern, "${NODE_CODE}") && !strings.Contains(in.TagPattern, "${NODE_COUNTRY}") {
 			return nil, invalid("the tag pattern must contain ${NODE_CODE} or ${NODE_COUNTRY}: every node needs its own tag")
@@ -176,6 +194,43 @@ func (s *Service) applyProfile(ctx context.Context, q store.DBTX, id int64, in P
 		return nil, err
 	}
 	return p, nil
+}
+
+// checkHost expands the connection point the way subscriptions do, so a typo in a ${VARIABLE}
+// is refused on save instead of breaking subscriptions later.
+func checkHost(r *xrayconf.RenderedInbound) error {
+	if r == nil || r.Template == nil || r.Template.Host == nil {
+		return nil
+	}
+	vals := copyMap(r.Values)
+	vals["INBOUND_PORT"] = r.Inbound["port"]
+	_, err := xrayconf.ExpandTree(r.Template.Host, vals)
+	return err
+}
+
+// sameAsTemplate returns nil when src is the template's source (the profile follows the
+// template again, including its future versions), else src.
+func sameAsTemplate(src, tpl map[string]any) map[string]any {
+	a, _ := json.Marshal(src)
+	b, _ := json.Marshal(tpl)
+	if string(a) == string(b) {
+		return nil
+	}
+	return src
+}
+
+// ProfileSources returns what the editor shows: the profile's own source or the template's,
+// with a legacy override folded into the inbound.
+func ProfileSources(tpl *xrayconf.Template, p *store.Profile) (inbound, host map[string]any) {
+	inbound = p.Inbound
+	if inbound == nil {
+		inbound = xrayconf.MergePatch(tpl.SourceInbound(), copyMap(p.Override))
+	}
+	host = p.Host
+	if host == nil {
+		host = tpl.SourceHost()
+	}
+	return inbound, host
 }
 
 // DeleteProfile removes an unused profile.
@@ -445,6 +500,9 @@ func (s *Service) renderNodeInboundWith(ctx context.Context, q store.DBTX, ni *s
 		if tpl, err = s.template(ctx, p.TemplateID); err != nil {
 			return nil, err
 		}
+	}
+	if tpl, err = tpl.WithSources(p.Inbound, p.Host); err != nil {
+		return nil, invalid("profile %s: %v", p.Name, err)
 	}
 	r, err := xrayconf.RenderInbound(xrayconf.InboundSpec{
 		TemplateID: p.TemplateID, Template: tpl, ProfileValues: p.Values, NodeValues: ni.Values,

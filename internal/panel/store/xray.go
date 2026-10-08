@@ -50,21 +50,35 @@ type Profile struct {
 	TemplateVersion int
 	Values          map[string]any
 	Override        map[string]any
+	Inbound         map[string]any // own inbound source; nil = the template's
+	Host            map[string]any // own connection point source; nil = the template's
 	TagPattern      string
 	RemarkPattern   string
 	CreatedAt       int64
 	UpdatedAt       int64
 }
 
-const profileCols = `id, name, template_id, template_version, values_json, override_json, tag_pattern, remark_pattern, created_at, updated_at`
+const profileCols = `id, name, template_id, template_version, values_json, override_json, tag_pattern, remark_pattern, created_at, updated_at,
+	inbound_json, host_json`
 
 func scanProfile(sc interface{ Scan(...any) error }) (*Profile, error) {
 	p := &Profile{}
-	var vals, over string
-	if err := sc.Scan(&p.ID, &p.Name, &p.TemplateID, &p.TemplateVersion, &vals, &over, &p.TagPattern, &p.RemarkPattern, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	var vals, over, inbound, host string
+	if err := sc.Scan(&p.ID, &p.Name, &p.TemplateID, &p.TemplateVersion, &vals, &over, &p.TagPattern, &p.RemarkPattern, &p.CreatedAt, &p.UpdatedAt,
+		&inbound, &host); err != nil {
 		return nil, mapErr(err)
 	}
 	var err error
+	if inbound != "" {
+		if p.Inbound, err = fromJSONMap(inbound); err != nil {
+			return nil, err
+		}
+	}
+	if host != "" {
+		if p.Host, err = fromJSONMap(host); err != nil {
+			return nil, err
+		}
+	}
 	if p.Values, err = fromJSONMap(vals); err != nil {
 		return nil, err
 	}
@@ -78,8 +92,9 @@ func scanProfile(sc interface{ Scan(...any) error }) (*Profile, error) {
 func CreateProfile(ctx context.Context, q DBTX, p *Profile) error {
 	now := unix()
 	p.CreatedAt, p.UpdatedAt = now, now
-	res, err := q.ExecContext(ctx, `INSERT INTO profiles (name, template_id, template_version, values_json, override_json, tag_pattern, remark_pattern, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.TemplateID, p.TemplateVersion, toJSON(p.Values), toJSON(p.Override), p.TagPattern, p.RemarkPattern, now, now)
+	res, err := q.ExecContext(ctx, `INSERT INTO profiles (name, template_id, template_version, values_json, override_json, tag_pattern, remark_pattern, created_at, updated_at,
+		inbound_json, host_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.TemplateID, p.TemplateVersion, toJSON(p.Values), toJSON(p.Override),
+		p.TagPattern, p.RemarkPattern, now, now, sourceJSON(p.Inbound), sourceJSON(p.Host))
 	if err != nil {
 		return mapErr(err)
 	}
@@ -90,8 +105,17 @@ func CreateProfile(ctx context.Context, q DBTX, p *Profile) error {
 // UpdateProfile saves a profile.
 func UpdateProfile(ctx context.Context, q DBTX, p *Profile) error {
 	p.UpdatedAt = unix()
-	return execOne(ctx, q, `UPDATE profiles SET name=?, values_json=?, override_json=?, tag_pattern=?, remark_pattern=?, updated_at=? WHERE id=?`,
-		p.Name, toJSON(p.Values), toJSON(p.Override), p.TagPattern, p.RemarkPattern, p.UpdatedAt, p.ID)
+	return execOne(ctx, q, `UPDATE profiles SET name=?, values_json=?, override_json=?, tag_pattern=?, remark_pattern=?, updated_at=?,
+		inbound_json=?, host_json=? WHERE id=?`,
+		p.Name, toJSON(p.Values), toJSON(p.Override), p.TagPattern, p.RemarkPattern, p.UpdatedAt, sourceJSON(p.Inbound), sourceJSON(p.Host), p.ID)
+}
+
+// sourceJSON stores a profile source; nil (use the template's) is an empty string.
+func sourceJSON(m map[string]any) string {
+	if m == nil {
+		return ""
+	}
+	return toJSON(m)
 }
 
 // GetProfile loads a profile.

@@ -383,3 +383,4 @@ pre.code { background: var(--bg-2); border: 1px solid var(--border); border-radi
   .heatmap-grid { grid-template-columns: 20px repeat(24, 1fr); gap: 2px; }
   .hm-c { min-height: 9px; }
 }
+.dot-own { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--pink); margin-left: 7px; vertical-align: 1px; }

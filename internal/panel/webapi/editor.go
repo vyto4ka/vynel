@@ -153,6 +153,8 @@ type profileEdit struct {
 	Name           string         `json:"name"`
 	Values         map[string]any `json:"values"`
 	Override       map[string]any `json:"override"`
+	Inbound        map[string]any `json:"inboundSource"` // the full inbound JSON as edited
+	Host           map[string]any `json:"hostSource"`    // the connection point JSON as edited
 	TagPattern     string         `json:"tagPattern"`
 	RemarkPattern  string         `json:"remarkPattern"`
 	RegenerateKeys bool           `json:"regenerateKeys"`
@@ -160,6 +162,7 @@ type profileEdit struct {
 
 func (e profileEdit) input() service.ProfileInput {
 	return service.ProfileInput{Name: e.Name, Values: cleanValues(dropMasked(e.Values)), Override: e.Override,
+		Inbound: e.Inbound, Host: e.Host,
 		TagPattern: e.TagPattern, RemarkPattern: e.RemarkPattern, RegenerateKeys: e.RegenerateKeys}
 }
 
@@ -183,7 +186,11 @@ func (s *Server) profileDTO(ctx context.Context, p *store.Profile) map[string]an
 		"override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "templateVersion": p.TemplateVersion}
 	if t != nil {
 		out["template"] = map[string]any{"id": t.ID, "title": t.Title, "summary": t.Summary, "version": t.Version, "variables": t.Variables,
-			"custom": t.Custom, "tagPattern": t.TagPattern, "remarkPattern": t.RemarkPattern}
+			"custom": t.Custom, "tagPattern": t.TagPattern, "remarkPattern": t.RemarkPattern,
+			"inboundSource": t.SourceInbound(), "hostSource": t.SourceHost()}
+		in, host := service.ProfileSources(t, p)
+		out["inboundSource"], out["hostSource"] = in, host
+		out["ownInbound"], out["ownHost"] = p.Inbound != nil || len(p.Override) > 0, p.Host != nil
 	}
 	return out
 }
@@ -244,6 +251,18 @@ func (s *Server) previewProfile(r *http.Request) (any, error) {
 			item["error"] = pv.Err.Error()
 		} else {
 			item["inbound"] = maskSecrets(pv.Rendered)
+			if t := pv.Rendered.Template; t != nil && t.Host != nil {
+				vals := map[string]any{}
+				for k, v := range pv.Rendered.Values {
+					vals[k] = v
+				}
+				vals["INBOUND_PORT"] = pv.Rendered.Inbound["port"]
+				if host, err := xrayconf.ExpandTree(t.Host, vals); err == nil {
+					item["host"] = host
+				} else {
+					item["hostError"] = err.Error()
+				}
+			}
 		}
 		out = append(out, item)
 	}

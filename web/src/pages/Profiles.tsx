@@ -148,7 +148,12 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
   )
 }
 
-type PreviewItem = { id: number; tag: string; node?: string; inbound?: Record<string, unknown>; error?: string }
+type PreviewItem = { id: number; tag: string; node?: string; inbound?: Record<string, unknown>; host?: Record<string, unknown>; hostError?: string; error?: string }
+
+// canon renders JSON with sorted keys, so «as in the template» does not depend on key order.
+function canon(v: unknown): string {
+  return JSON.stringify(v, (_, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x))
+}
 
 function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => void; onSaved: () => void }) {
   const loaded = useLoad(() => get<ProfileDetails>(`profiles/${id}`), [id])
@@ -156,7 +161,9 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
   const [tagPattern, setTagPattern] = useState('')
   const [remarkPattern, setRemarkPattern] = useState('')
   const [values, setValues] = useState<Record<string, string>>({})
-  const [overrideText, setOverrideText] = useState('')
+  const [inboundText, setInboundText] = useState('')
+  const [hostText, setHostText] = useState('')
+  const [tab, setTab] = useState<'params' | 'inbound' | 'host'>('params')
   const [regenerate, setRegenerate] = useState(false)
   const [preview, setPreview] = useState<{ items: PreviewItem[]; error?: string } | null>(null)
   const [selected, setSelected] = useState(0)
@@ -170,20 +177,27 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
     setTagPattern(p.tagPattern)
     setRemarkPattern(p.remarkPattern)
     setValues(Object.fromEntries(Object.entries(p.values).map(([k, v]) => [k, v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)])))
-    setOverrideText(Object.keys(p.override).length ? pretty(p.override) : '')
+    setInboundText(pretty(p.inboundSource ?? {}))
+    setHostText(pretty(p.hostSource ?? {}))
   }, [loaded.data])
 
-  const override = parseObject(overrideText)
+  const inboundSrc = parseObject(inboundText)
+  const hostSrc = parseObject(hostText)
+  const jsonError = inboundSrc.error || hostSrc.error
+  const tplInbound = loaded.data?.template?.inboundSource
+  const tplHost = loaded.data?.template?.hostSource
+  const ownInbound = !!inboundSrc.value && !!tplInbound && canon(inboundSrc.value) !== canon(tplInbound)
+  const ownHost = !!hostSrc.value && !!tplHost && canon(hostSrc.value) !== canon(tplHost)
   const vars = loaded.data?.template?.variables || []
   const body = useMemo(() => {
     const vals: Record<string, string> = {}
     for (const v of vars) if (v.scope === 'profile' && v.source !== 'derived' && values[v.name] !== undefined) vals[v.name] = values[v.name]
-    return { name, tagPattern, remarkPattern, values: vals, override: override.value ?? {}, regenerateKeys: regenerate }
-  }, [name, tagPattern, remarkPattern, values, overrideText, regenerate, vars])
+    return { name, tagPattern, remarkPattern, values: vals, inboundSource: inboundSrc.value, hostSource: hostSrc.value, regenerateKeys: regenerate }
+  }, [name, tagPattern, remarkPattern, values, inboundText, hostText, regenerate, vars])
 
   // Предпросмотр: что получит каждая нода, пересчитывается после паузы в правках.
   useEffect(() => {
-    if (!loaded.data || override.error) return
+    if (!loaded.data || jsonError) return
     const t = setTimeout(() => {
       post<{ inbounds: PreviewItem[]; error?: string }>(`profiles/${id}/preview`, body)
         .then((r) => setPreview({ items: r.inbounds, error: r.error }))
@@ -211,10 +225,15 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
       footer={<>
         {failed ? <span className="pink-text small grow">Есть ошибки — сохранить не получится</span> : <span className="muted small grow">Изменения применятся на всех нодах профиля</span>}
         <button className="btn ghost" onClick={onClose}>Отмена</button>
-        <button className="btn primary" disabled={!!override.error || !!failed} onClick={save}>Сохранить</button>
+        <button className="btn primary" disabled={!!jsonError || !!failed} onClick={save}>Сохранить</button>
       </>}>
+      <div className="seg" style={{ marginBottom: 14 }}>
+        <button className={tab === 'params' ? 'on' : ''} onClick={() => setTab('params')}>Параметры</button>
+        <button className={tab === 'inbound' ? 'on' : ''} onClick={() => setTab('inbound')}>Сервер · JSON{ownInbound && <span className="dot-own" title="свой, не как в шаблоне" />}</button>
+        <button className={tab === 'host' ? 'on' : ''} onClick={() => setTab('host')}>Подписка · JSON{ownHost && <span className="dot-own" title="свой, не как в шаблоне" />}</button>
+      </div>
       <div className="editor-split">
-        <div>
+        {tab === 'params' ? <div>
           <div className="grid2">
             <Field label="Название"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
             <Field label="Тег инбаунда" help="${NODE_CODE} — код ноды: VLESS_NL, VLESS_DE…">
@@ -238,12 +257,17 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
               На каждой ноде свои: {vars.filter((v) => v.scope === 'node').map((v) => <span key={v.name} className="mono">{v.name} </span>)} — они в «Ноды» → инбаунд → «Настроить».
             </div>
           )}
-
-          <Field label="Ручная правка JSON поверх шаблона" help='JSON merge patch: поля заменяют поля шаблона, null удаляет поле. Например {"sniffing":{"enabled":false}}. Пусто — без правок.'>
-            <CodeEditor lang="json" value={overrideText} onChange={setOverrideText} height={170} />
-            {override.error && <div className="small pink-text" style={{ marginTop: 6 }}>{override.error}</div>}
-          </Field>
-        </div>
+        </div> : (
+          <SourceEditor
+            kind={tab}
+            text={tab === 'inbound' ? inboundText : hostText}
+            onChange={tab === 'inbound' ? setInboundText : setHostText}
+            error={tab === 'inbound' ? inboundSrc.error : hostSrc.error}
+            own={tab === 'inbound' ? ownInbound : ownHost}
+            onReset={() => (tab === 'inbound' ? setInboundText(pretty(tplInbound ?? {})) : setHostText(pretty(tplHost ?? {})))}
+            vars={vars}
+          />
+        )}
 
         <div className="preview-pane">
           <div className="row between" style={{ marginBottom: 8 }}>
@@ -258,13 +282,47 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
             <div className="muted small">Профиль ещё не стоит ни на одной ноде — добавьте его в разделе «Ноды». Шаблон при этом проверяется при сохранении.</div>
           ) : item && (
             <>
-              <div className="small text-2" style={{ marginBottom: 6 }}>{item.node} · <span className="mono">{item.tag}</span></div>
-              {item.error ? <div className="alert pink">{item.error}</div> : <CodeEditor lang="json" value={pretty(item.inbound)} readOnly height="calc(100vh - 330px)" />}
+              <div className="small text-2" style={{ marginBottom: 6 }}>
+                {item.node} · <span className="mono">{item.tag}</span> · {tab === 'host' ? 'точка подключения для подписки' : 'inbound на ноде'}
+              </div>
+              {item.error ? <div className="alert pink">{item.error}</div>
+                : tab === 'host'
+                  ? (item.hostError ? <div className="alert pink">{item.hostError}</div> : <CodeEditor lang="json" value={pretty(item.host ?? {})} readOnly height="calc(100vh - 360px)" />)
+                  : <CodeEditor lang="json" value={pretty(item.inbound)} readOnly height="calc(100vh - 360px)" />}
             </>
           )}
         </div>
       </div>
     </Modal>
+  )
+}
+
+const builtinVars = ['TAG', 'LISTEN_IP', 'NODE_CODE', 'NODE_NAME', 'NODE_FLAG', 'NODE_COUNTRY', 'INBOUND_PORT']
+
+// SourceEditor edits the profile's own copy of the template JSON. ${VARIABLES} stay in place and
+// are filled per node; a copy equal to the template follows the template again.
+function SourceEditor({ kind, text, onChange, error, own, onReset, vars }: {
+  kind: 'inbound' | 'host'; text: string; onChange: (s: string) => void; error?: string; own: boolean; onReset: () => void; vars: Variable[]
+}) {
+  return (
+    <div>
+      <div className="row between" style={{ marginBottom: 8, flexWrap: 'nowrap' }}>
+        <div className="small text-2">
+          {kind === 'inbound'
+            ? <>Полный inbound Xray, который получит каждая нода. Клиенты (<span className="mono">settings.clients</span>) добавляются сами.</>
+            : <>Как сервер выглядит в подписке: адрес, SNI, отпечаток, путь и клиентский <span className="mono">xhttp_client_extra</span> (там же <span className="mono">xmux</span>).</>}
+        </div>
+        {own ? <Badge color="pink">свой</Badge> : <Badge>как в шаблоне</Badge>}
+      </div>
+      <CodeEditor lang="json" value={text} onChange={onChange} height="calc(100vh - 420px)" />
+      {error && <div className="small pink-text" style={{ marginTop: 6 }}>{error}</div>}
+      <div className="row between" style={{ marginTop: 10, alignItems: 'flex-start', flexWrap: 'nowrap', gap: 14 }}>
+        <div className="small muted">
+          Переменные: {[...vars.map((v) => v.name), ...builtinVars].map((n) => <code key={n} style={{ marginRight: 6 }}>{'${' + n + '}'}</code>)}
+        </div>
+        <button className="btn sm" disabled={!own} onClick={onReset} title="Взять JSON из шаблона: профиль снова будет следовать шаблону и его обновлениям">Как в шаблоне</button>
+      </div>
+    </div>
   )
 }
 

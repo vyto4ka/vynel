@@ -212,7 +212,14 @@ export interface ProfileDetails {
   override: Record<string, any>
   tagPattern: string
   remarkPattern: string
-  template?: { id: string; title: string; summary: string; version: number; variables: Variable[]; custom: boolean; tagPattern: string; remarkPattern: string }
+  inboundSource?: Record<string, any>
+  hostSource?: Record<string, any>
+  ownInbound?: boolean
+  ownHost?: boolean
+  template?: {
+    id: string; title: string; summary: string; version: number; variables: Variable[]; custom: boolean; tagPattern: string; remarkPattern: string
+    inboundSource: Record<string, any>; hostSource: Record<string, any>
+  }
 }
 
 export interface InboundDetails {

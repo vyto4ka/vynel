@@ -134,10 +134,7 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 	if err != nil {
 		return Host{}, err
 	}
-	tpl, err := s.template(ctx, p.TemplateID)
-	if err != nil {
-		return Host{}, err
-	}
+	tpl := r.Template // the profile's own connection point when it has one
 	vals := copyMap(r.Values)
 	port, _ := r.Inbound["port"].(int)
 	vals["INBOUND_PORT"] = port
