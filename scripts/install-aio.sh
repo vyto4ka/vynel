@@ -6,5 +6,5 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 if [[ -n "$here" && -f "$here/install.sh" ]]; then
   exec bash "$here/install.sh" "$@"
 fi
-REF="${VYNEL_REF:-claude/magical-hamilton-9vnx7n}"
+REF="${VYNEL_REF:-main}"
 exec bash <(curl -fsSL "https://raw.githubusercontent.com/vyto4ka/vynel/$REF/scripts/install.sh") "$@"

@@ -188,7 +188,7 @@ users               id, username, uuid, ss_password, trojan_password,
                     expire_at, traffic_limit_bytes, traffic_used_bytes, lifetime_used_bytes,
                     reset_strategy, last_reset_at,
                     hwid_limit (null = из настроек),
-                    client_type (auto | happ | v2raytun | clash | singbox | xray-json | ...),
+                    client_type (auto | base64 | mihomo | singbox | xray-json),
                     template_id, telegram_id, external_id,   -- external_id: для будущего биллинга
                     note, tags[], online_at, sub_last_at, sub_last_ua,
                     created_by(admin|bot|api), created_at, updated_at
@@ -199,7 +199,7 @@ user_devices        id, user_id, hwid, platform, os_version, model, user_agent,
 ── подписки ─────────────────────────────────────────────────────────
 response_rules      id, sort, name, enabled,
                     match_json   -- {ua_regex, headers{...}, client_type}
-                    format(base64|mihomo|stash|singbox|xray-json|html|blocked),
+                    format(base64|mihomo|singbox|xray-json|html|blocked),
                     template_id, extra_headers_json
 sub_templates       id, name, format, body, is_builtin
 
@@ -301,7 +301,7 @@ https://panel.example.com/install/9fK2...xQ
 
 Админ видит **итоговый результат**, а не набор полей:
 - `vless://` ссылку и QR;
-- как точка будет выглядеть в списке Happ/v2RayTun (название, флаг, порядок);
+- как точка будет выглядеть в списке приложения (название, флаг, порядок);
 - кусок конфига Mihomo и sing-box.
 
 Правка любого поля сохраняется в `override_json` и подсвечивается как «изменено вручную» с кнопкой «вернуть авто». Это главное отличие от Remnawave: там хост заполняется руками с нуля, и легко ошибиться в SNI или ключе.
@@ -365,7 +365,7 @@ https://panel.example.com/install/9fK2...xQ
                                только ноды не в статусе disabled
 6. отрендерить шаблон формата
 7. заголовки: subscription-userinfo, profile-title, profile-update-interval,
-              support-url, profile-web-page-url + extra_headers из правила (например announce для Happ)
+              support-url, profile-web-page-url + extra_headers из правила (например announce)
 8. обновить sub_last_at, sub_last_ua; событие subscription.fetched
 ```
 
@@ -373,7 +373,7 @@ https://panel.example.com/install/9fK2...xQ
 
 ### 8.2 HWID (как в Remnawave)
 
-Клиенты (Happ, v2RayTun, INCY, Streisand и др.) присылают заголовки:
+Клиенты (KeqDroid и др.) присылают заголовки:
 `x-hwid`, `x-device-os`, `x-ver-os`, `x-device-model`, `User-Agent`.
 
 Логика:
@@ -399,10 +399,9 @@ limit = user.hwid_limit ?? settings.hwid_default_limit   (0 = без лимит�
 
   | Клиент | Формат |
   |--------|--------|
-  | Happ, v2RayTun, v2rayN/NG, Streisand, Hiddify, INCY | base64 (+ спец-заголовки для Happ) |
-  | Clash Verge, Mihomo, FlClash, Clash Meta for Android | Mihomo YAML |
-  | Stash | Stash YAML |
-  | sing-box, SFA, SFI, Karing | sing-box JSON |
+  | KeqDroid и приложения на ядре Xray | base64 (+ заголовки приложений) |
+  | приложения на ядре Mihomo | Mihomo YAML |
+  | приложения на ядре sing-box | sing-box JSON |
   | Xray-клиенты, которые понимают полный JSON | Xray JSON |
   | Браузер (`Accept: text/html`) | HTML-страница |
   | Неизвестный | base64 |
@@ -412,7 +411,7 @@ limit = user.hwid_limit ?? settings.hwid_default_limit   (0 = без лимит�
 
 ### 8.4 HTML-страница подписки
 
-QR-код, кнопки «Добавить в Happ / v2RayTun / Hiddify» (deep links), остаток трафика и срок, инструкции по платформам, список устройств (без возможности удалить, только просмотр).
+QR-код, кнопки «Добавить в приложение» (deep links), остаток трафика и срок, инструкции по платформам, список устройств (без возможности удалить, только просмотр).
 
 ---
 
@@ -628,7 +627,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/install.s
    - бот: `/new`, `/find`, карточка, ночной бэкап, восстановление из бэкапа.
 2. **v1**
    - шаблоны Reality «чужой сайт», Trojan, SS-2022, WARP outbound;
-   - Stash и Xray JSON; редактор шаблонов подписок;
+   - Xray JSON; редактор шаблонов подписок;
    - самотест нод, алерты в бот, подтверждение опасных действий в Telegram, лимиты трафика хостера на нодах;
    - DNS-01 Cloudflare (wildcard), режим «панель только через VPN».
 3. **Потом**

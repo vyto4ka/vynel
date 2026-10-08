@@ -3,7 +3,7 @@
 Одна команда под root на сервере открывает меню установщика:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/claude/magical-hamilton-9vnx7n/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)
 ```
 
 ```
@@ -132,12 +132,12 @@ vynel admin user show vasya     # печатает sub url https://nl.example.co
 
 Ссылку подписки:
 
-- **открываешь на телефоне в браузере** — там QR-код и кнопки приложений: KeqDroid, Happ, v2RayTun, Hiddify, Clash… (для системы телефона — первыми);
+- **открываешь на телефоне в браузере** — там QR-код и кнопки приложений, первая — KeqDroid (для системы телефона — первыми);
 - или **вставляешь в приложение**: «Добавить подписку» / «Импорт из буфера».
 
 Приложение получит сервер «🇳🇱 Нидерланды» и само будет обновлять подписку. Как выглядит страница, какие кнопки на ней и какие заголовки получают приложения — настраивается в панели: «Подписка» ([USER_GUIDE §5](USER_GUIDE.md#5-подписки-и-приложения)).
 
-> По умолчанию у пользователя **до 3 устройств**, и приложение должно передавать HWID. KeqDroid, Happ и v2RayTun это делают. Если используешь клиент без HWID (например, v2rayN на компьютере), включи `vynel admin setting hwid.allow_missing true`.
+> По умолчанию у пользователя **до 3 устройств**, и приложение должно передавать HWID. KeqDroid это делает. Если используешь клиент без HWID, включи `vynel admin setting hwid.allow_missing true`.
 
 Продлить, отключить, лимит трафика, устройства — в карточке пользователя в панели или командами из [USER_GUIDE.md](USER_GUIDE.md).
 
@@ -215,7 +215,7 @@ vynel admin user show vasya     # печатает sub url https://nl.example.co
 | `node list`: `offline` / `syncing` | `journalctl -u vynel -e`. Перезапуск: `systemctl restart vynel`. |
 | PROBLEMS: `net.core.default_qdisc=…` | Ядро не дало включить fq/BBR (бывает на OpenVZ/LXC). VPN работает и без этого. |
 | В приложении сервер «⛔ Лимит устройств 3/3» | Освободить место: `vynel admin user devices vasya`, затем `… --rm ID`. Или поднять лимит: `vynel admin setting hwid.default_limit 5`. |
-| «⛔ Приложение не передаёт HWID» | Клиент без HWID. Используй Happ/v2RayTun или `vynel admin setting hwid.allow_missing true`. |
+| «⛔ Приложение не передаёт HWID» | Клиент без HWID. Используй KeqDroid, выключи HWID пользователю в его карточке или `vynel admin setting hwid.allow_missing true`. |
 | «⛔ Подписка истекла» / «Трафик исчерпан» | `vynel admin user extend vasya --months 1` / `vynel admin user reset vasya`. |
 | Подписка открывается, VPN не подключается | Проверь, что IP сервера не заблокирован (SSH без VPN), что часы сервера синхронизированы (`timedatectl`) и что в Cloudflare серое облако. |
 | Забыли адрес или пароль панели | `vynel admin web` — адрес и логин, `vynel admin web password` — новый пароль |

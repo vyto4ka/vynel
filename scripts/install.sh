@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # vynel installer: one script for every role (docs/INSTALL_GUIDE.md).
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/claude/magical-hamilton-9vnx7n/scripts/install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)
 #
 # Without arguments it shows a menu: everything on one server, panel only, node only, update,
 # uninstall. Every choice can also run unattended:
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REPO="${VYNEL_REPO:-https://github.com/vyto4ka/vynel.git}"
-REF="${VYNEL_REF:-claude/magical-hamilton-9vnx7n}"
+REF="${VYNEL_REF:-main}"
 SRC=/opt/vynel-src
 DATA=/var/lib/vynel
 NODE_DATA=/var/lib/vynel-node

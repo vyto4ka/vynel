@@ -203,7 +203,7 @@ func (s *Service) HasAdmin(ctx context.Context) bool {
 const SettingInstallCommand = "install.command"
 
 // DefaultInstallCommand is used until the installer has stored its own.
-const DefaultInstallCommand = "bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/claude/magical-hamilton-9vnx7n/scripts/install.sh)"
+const DefaultInstallCommand = "bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)"
 
 // NodeInstallCommand is the one-liner that installs a node with a join token.
 func (s *Service) NodeInstallCommand(ctx context.Context, token string) string {

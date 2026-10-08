@@ -187,7 +187,7 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
             </div>
             {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
             <div className="muted small" style={{ marginTop: 10 }}>
-              На телефоне ссылка открывает страницу с кнопками Happ, v2RayTun, Hiddify, Clash. Её же можно вставить в приложение как подписку.
+              На телефоне ссылка открывает страницу с QR-кодом и кнопками приложений. Её же можно вставить в приложение как подписку.
             </div>
           </>
         ) : <div className="alert amber">Ссылки нет: {data.subError}. Проверьте «Домен подписок» в настройках.</div>}

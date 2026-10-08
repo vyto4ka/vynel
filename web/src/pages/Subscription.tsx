@@ -124,7 +124,7 @@ function BasicsTab({ b, set }: { b: SubBasics; set: (b: SubBasics) => void }) {
           <input className="input" value={b.supportUrl} onChange={f('supportUrl')} placeholder="https://t.me/your_support" />
         </Field>
       </div>
-      <Field label="Объявление" help="announce: строка вверху Happ, v2RayTun, KeqDroid, INCY и плашка на странице. Пусто — не показывать">
+      <Field label="Объявление" help="announce: строка вверху приложения (KeqDroid и другие) и плашка на странице. Пусто — не показывать">
         <textarea className="input" rows={2} value={b.announce} onChange={f('announce')} placeholder="Например: профилактика в субботу 03:00–04:00" />
       </Field>
       <Field label="Ссылка объявления" help="announce-url: куда ведёт нажатие на объявление">
@@ -275,7 +275,7 @@ function HeadersTab({ hs, set, cfg, onReset }: { hs: SubHeader[]; set: (h: SubHe
         <div className="card-head">
           <div>
             <h3>Заголовки ответа подписки</h3>
-            <div className="card-sub">Их читают приложения: название, трафик, объявления, настройки Happ. Пустое значение — заголовок не отправляется.</div>
+            <div className="card-sub">Их читают приложения: название, трафик, объявления и настройки отдельных приложений. Пустое значение — заголовок не отправляется.</div>
           </div>
           <div className="row" style={{ gap: 6 }}>
             <button className="btn sm" onClick={() => setCatalogOpen(true)}><Icon name="plus" /> Из каталога</button>
@@ -331,7 +331,7 @@ function HeadersTab({ hs, set, cfg, onReset }: { hs: SubHeader[]; set: (h: SubHe
       )}
       {catalogOpen && (
         <Modal title="Каталог заголовков" wide onClose={() => setCatalogOpen(false)}>
-          <p className="muted small" style={{ marginTop: 0 }}>Известные заголовки популярных приложений. Часть заголовков Happ работает только с ProviderID из кабинета Happ.</p>
+          <p className="muted small" style={{ marginTop: 0 }}>Известные заголовки популярных приложений. Часть из них работает только с ProviderID из кабинета разработчика приложения.</p>
           <div className="table-wrap">
             <table className="table">
               <tbody>
@@ -376,7 +376,7 @@ function HeaderForm({ h, onClose, onSave }: { h: SubHeader; onClose: () => void;
       </Field>
       <label className="check" style={{ marginBottom: 14 }}>
         <input type="checkbox" checked={v.base64} onChange={(e) => setV({ ...v, base64: e.target.checked })} />
-        Отправлять как base64:… (для русского текста и эмодзи; так требуют Happ, v2RayTun, KeqDroid)
+        Отправлять как base64:… (для русского текста и эмодзи; так требует KeqDroid и большинство приложений)
       </label>
       <Field label="Каким приложениям" help="Регулярное выражение по User-Agent. Пусто — всем">
         <select className="input" value={presets.some(([p]) => p === v.clients) ? v.clients : '__custom'} onChange={(e) => e.target.value !== '__custom' && setV({ ...v, clients: e.target.value })}>

@@ -65,7 +65,7 @@ function ProfileList() {
                 </div>
                 <div className="card-pad">
                   <div className="kv small" style={{ gridTemplateColumns: '150px 1fr' }}>
-                    {(t?.variables || []).filter((v) => v.scope === 'profile').map((v) => (
+                    {(t?.variables || []).filter((v) => v.scope === 'profile' && v.source !== 'derived').map((v) => (
                       <ValueRow key={v.name} k={v.name} v={p.values[v.name]} def={v.default} />
                     ))}
                     <div className="k">Тег</div><div className="mono">{p.tagPattern}</div>

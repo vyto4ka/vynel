@@ -379,7 +379,7 @@ https://${ORIGIN_DOMAIN} {
 
 Форматы подписки:
 - **Xray JSON, Mihomo, sing-box**: `extra` и `xmux` передаются полностью;
-- **base64 `vless://`**: `extra` кладётся в параметр `extra=` (URL-encoded JSON), который понимают Happ, v2RayTun и v2rayN.
+- **base64 `vless://`**: `extra` кладётся в параметр `extra=` (URL-encoded JSON), который понимают KeqDroid и другие приложения на ядре Xray.
 
 Если клиент не поддерживает XHTTP с `extra` (определяется по правилам ответа), точка для него **скрывается**, а не отдаётся в нерабочем виде.
 
@@ -541,7 +541,7 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 | `XHTTP_OBFS` | Разметка | Клиенты |
 |---|---|---|
 | `compat` (по умолчанию) | стандартная Xray: сессия и номер в пути, набивка в `Referer` | все на ядре Xray, Mihomo 1.19+ |
-| `cookie` | как в ТЗ | Xray 26+ (Happ, v2rayN свежие), Mihomo 1.19+ |
+| `cookie` | как в ТЗ | ядро Xray 26+, Mihomo 1.19+ |
 
 Значения размещений вычисляются из `XHTTP_OBFS` (`xhttp_session_placement(...)` и т.п.) и одинаково попадают в серверный и клиентский extra. Тест `TestXHTTPRealityTrafficOnXray/*/compat/old-core` гоняет трафик клиентом, у которого все новые ключи удалены.
 
@@ -639,7 +639,7 @@ TCP :80  → Caddy: ACME HTTP-01 → сертификат NODE_DOMAIN → его
 
 | Формат | Что получает клиент |
 |--------|--------------------|
-| base64 (Happ, v2rayN, Hiddify, KeqDroid, Streisand) | `hysteria2://UUID@домен:443/?sni=домен&alpn=h3&insecure=0#🇳🇱 Нидерланды · Hysteria2` |
+| base64 (KeqDroid и другие приложения со ссылками) | `hysteria2://UUID@домен:443/?sni=домен&alpn=h3&insecure=0#🇳🇱 Нидерланды · Hysteria2` |
 | Xray JSON | outbound `hysteria` (`version: 2`, `auth` = UUID) |
 | Mihomo | `type: hysteria2`, `password` = UUID, `sni`, `alpn: [h3]` |
 | sing-box | `type: hysteria2`, `password`, `tls.server_name`, `alpn` |
