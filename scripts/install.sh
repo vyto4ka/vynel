@@ -10,6 +10,7 @@
 #   install.sh --mode panel --domain panel.example.com [--email ...] --yes
 #   install.sh --mode node  --token vyn1.…            (the command is shown in the panel: Ноды → + Нода)
 #   install.sh --mode update
+#   install.sh --mode harden  [--ssh-keys-only] [--ssh-port random|N] [--firewall on|off]
 #   install.sh --mode uninstall [--purge] [--yes]
 #
 # Binaries come from the branch's "edge" release built by CI; without one vynel is built from
@@ -27,6 +28,7 @@ NODE_UNIT=/etc/systemd/system/vynel-node.service
 MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
 ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
+VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY=""
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -44,6 +46,7 @@ Modes:
   panel      panel only; VPN nodes are other servers
   node       VPN node for an existing panel (needs --token from the panel)
   update     update everything installed here, keep the data
+  harden     protect this server: firewall, SSH by key only, another SSH port
   uninstall  remove the services (--purge also deletes all data and binaries)
 
 Options:
@@ -53,6 +56,11 @@ Options:
   --name NAME            aio: server name shown in VPN clients
   --country CC           aio: 2-letter country code for the flag (default: detected)
   --ip IP                public IP (default: detected)
+  --vpn-ip IP            aio: address the VPN listens on (servers with several IPs)
+  --sub-ip IP            aio: address of the subscriptions and the panel (default: the VPN one)
+  --firewall on|off      firewall: only SSH and what vynel serves is open (default on for new installs)
+  --ssh-keys-only        SSH: turn password login off (only when keys are installed)
+  --ssh-port random|N    SSH: move to another port (the old one stays until you confirm)
   --gateway-listen ADDR  port for additional nodes (default :9443; 127.0.0.1:9443 = none)
   --admin-login LOGIN    web panel login (default admin; the password is generated)
   --token TOKEN          node: join token from the panel
@@ -76,6 +84,11 @@ while [[ $# -gt 0 ]]; do
     --name) NAME="${2:-}"; shift 2 ;;
     --country) COUNTRY="${2:-}"; shift 2 ;;
     --ip) PUBLIC_IP="${2:-}"; shift 2 ;;
+    --vpn-ip) VPN_IP="${2:-}"; shift 2 ;;
+    --sub-ip) SUB_IP="${2:-}"; shift 2 ;;
+    --firewall) FIREWALL="${2:-}"; shift 2 ;;
+    --ssh-keys-only) SSH_KEYS_ONLY=yes; shift ;;
+    --ssh-port) SSH_PORT="${2:-}"; shift 2 ;;
     --gateway-listen) GATEWAY_LISTEN="${2:-}"; shift 2 ;;
     --admin-login) ADMIN_LOGIN="${2:-}"; shift 2 ;;
     --bot-token) BOT_TOKEN="${2:-}"; shift 2 ;;
@@ -129,9 +142,10 @@ confirm() {
 
 resolve() { getent ahostsv4 "$1" | awk 'NR==1 {print $1}' || true; }
 
-# ask_domain VAR "question" "default" -> asks until the A record points here or the user accepts
+# ask_domain VAR "question" "default" [IP] -> asks until the A record points at IP (default: the
+# public IP) or the user accepts
 ask_domain() {
-  local d r
+  local d r want="${4:-$PUBLIC_IP}"
   while true; do
     ask d "$2" "$3"
     d="$(printf '%s' "$d" | tr '[:upper:]' '[:lower:]' | sed 's#^https\?://##; s#/.*##')"
@@ -140,11 +154,11 @@ ask_domain() {
       continue
     fi
     r="$(resolve "$d")"
-    if [[ "$r" == "$PUBLIC_IP" ]]; then
-      green "  ✓ $d → $PUBLIC_IP"
+    if [[ "$r" == "$want" ]]; then
+      green "  ✓ $d → $want"
       break
     fi
-    red "  ✗ $d → ${r:-ничего}, а нужно $PUBLIC_IP. Создайте A-запись $d → $PUBLIC_IP."
+    red "  ✗ $d → ${r:-ничего}, а нужно $want. Создайте A-запись $d → $want (в Cloudflare — серое облако)."
     ask_yes "Продолжить всё равно (сертификат не выпустится, пока DNS не поправлен)?" n && break
   done
   printf -v "$1" '%s' "$d"
@@ -204,18 +218,21 @@ if [[ -z "$MODE" ]]; then
   echo "  2) Только панель (VPN-ноды будут на других серверах)"
   echo "  3) Только VPN-нода для существующей панели  (нужен токен из панели)"
   echo "  4) Обновить установленное"
-  echo "  5) Удалить"
+  echo "  5) Защитить сервер: файрвол, SSH только по ключу, другой порт SSH"
+  echo "  6) Удалить"
   echo
   def=1 choice=""
   [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] && def=4
   ask choice "Выберите" "$def"
   case "$choice" in
-    1) MODE=aio ;; 2) MODE=panel ;; 3) MODE=node ;; 4) MODE=update ;; 5) MODE=uninstall ;;
+    1) MODE=aio ;; 2) MODE=panel ;; 3) MODE=node ;; 4) MODE=update ;; 5) MODE=harden ;; 6) MODE=uninstall ;;
     *) die "нет такого пункта: $choice" ;;
   esac
   WIZARD=1
 fi
-case "$MODE" in aio|panel|node|update|uninstall) ;; *) usage; die "unknown mode $MODE" ;; esac
+case "$MODE" in aio|panel|node|update|harden|uninstall) ;; *) usage; die "unknown mode $MODE" ;; esac
+case "$FIREWALL" in ""|on|off) ;; *) die "--firewall: on or off" ;; esac
+[[ -z "$SSH_PORT" || "$SSH_PORT" == random || ( "$SSH_PORT" =~ ^[0-9]+$ && "$SSH_PORT" -ge 1024 && "$SSH_PORT" -le 65535 ) ]] || die "--ssh-port: random or 1024–65535"
 
 # ---- uninstall ----
 
@@ -230,13 +247,16 @@ if [[ "$MODE" == uninstall ]]; then
   elif [[ $WIZARD -eq 1 ]]; then
     confirm "remove the services (data stays in $DATA)?" || die "aborted"
   fi
+  vynel firewall off >/dev/null 2>&1 || true # the rules follow the services; do not leave a closed server
   for unit in vynel vynel-node; do
     systemctl disable --now "$unit" 2>/dev/null || true
   done
   rm -f "$PANEL_UNIT" "$NODE_UNIT"
   systemctl daemon-reload
   if [[ $PURGE -eq 1 ]]; then
-    rm -rf "$DATA" "$NODE_DATA" /etc/sysctl.d/90-vynel.conf "$SRC" \
+    systemctl disable vynel-ips 2>/dev/null || true
+    rm -f /etc/systemd/system/vynel-ips.service
+    rm -rf "$DATA" "$NODE_DATA" /etc/sysctl.d/90-vynel.conf "$SRC" /etc/vynel \
       /usr/local/bin/vynel /usr/local/bin/vynel.prev /usr/local/bin/xray /usr/local/bin/caddy /usr/local/share/xray
   fi
   green "removed$([[ $PURGE -eq 1 ]] && echo " with all data")"
@@ -252,8 +272,8 @@ case "$(uname -m)" in
   *) die "unsupported architecture $(uname -m)" ;;
 esac
 
-if [[ "$MODE" == update ]]; then
-  [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] || die "nothing to update: vynel is not installed here (run without --mode for the menu)"
+if [[ "$MODE" == update || "$MODE" == harden ]]; then
+  [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] || die "nothing to $MODE: vynel is not installed here (run without --mode for the menu)"
 fi
 if [[ "$MODE" == node && $PANEL_INSTALLED -eq 1 ]]; then
   die "this server runs the panel (ports 80/443 are taken); a node needs another server — or choose all-in-one to run a node here"
@@ -268,13 +288,13 @@ export DEBIAN_FRONTEND=noninteractive
 APT_OPTS=(-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
 need_pkgs=0
 for c in git curl unzip ip; do command -v "$c" >/dev/null || need_pkgs=1; done
-if [[ $need_pkgs -eq 1 || "$MODE" != update ]]; then
+if [[ $need_pkgs -eq 1 || ( "$MODE" != update && "$MODE" != harden ) ]]; then
   info "installing packages (apt)"
   if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
     echo "  apt is busy (automatic updates?) — waiting for it, up to 5 minutes"
   fi
   timeout 600 apt-get "${APT_OPTS[@]}" update -qq || red "  apt-get update failed or timed out — trying to install anyway"
-  timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq git curl unzip ca-certificates iproute2 psmisc >/dev/null || die "apt-get install failed"
+  timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq git curl unzip ca-certificates iproute2 psmisc nftables openssl >/dev/null || die "apt-get install failed"
 fi
 
 detect_ip() {
@@ -292,16 +312,220 @@ detect_country() {
   COUNTRY="$(printf '%s' "$COUNTRY" | tr '[:lower:]' '[:upper:]')"
 }
 
+# check_dns DOMAIN[@IP]...: every domain must point at its IP (default: the public IP).
 check_dns() {
-  local d resolved
-  for d in "$@"; do
+  local arg d want resolved
+  for arg in "$@"; do
+    d="${arg%@*}" want="$PUBLIC_IP"
+    [[ "$arg" == *@* ]] && want="$(public_of "${arg#*@}")"
     resolved="$(resolve "$d")"
-    if [[ "$resolved" != "$PUBLIC_IP" && $WIZARD -eq 0 ]]; then
-      red "DNS: $d -> ${resolved:-nothing}, expected $PUBLIC_IP"
-      red "     create an A record $d -> $PUBLIC_IP, otherwise the certificate cannot be issued"
+    if [[ "$resolved" != "$want" && $WIZARD -eq 0 ]]; then
+      red "DNS: $d -> ${resolved:-nothing}, expected $want"
+      red "     create an A record $d -> $want, otherwise the certificate cannot be issued"
       confirm "continue anyway?" || die "aborted"
     fi
   done
+}
+
+# ---- addresses (docs/INBOUNDS.md §2.7) ----
+
+# list_ips: "IP INTERFACE" for global IPv4 addresses of real interfaces.
+list_ips() {
+  ip -o -4 addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1], $2}' |
+    grep -Ev ' (docker|br-|veth|virbr|cni|flannel|cali|lxc|tun|tap|wg)' || true
+}
+primary_ip() { ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}'; }
+is_private() { [[ "$1" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.) ]]; }
+# public_of IP: what the world sees for an interface address (a private one sits behind NAT).
+public_of() { if is_private "$1"; then printf '%s' "$PUBLIC_IP"; else printf '%s' "$1"; fi; }
+
+# choose_ip VAR "question" DEFAULT: a number from the list or an address.
+choose_ip() {
+  local answer i
+  ask answer "$2 (номер или IP)" "$3"
+  if [[ "$answer" =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#IPS[@]} )); then
+    answer="${IPS[$((answer - 1))]%% *}"
+  fi
+  for i in "${IPS[@]}"; do
+    if [[ "${i%% *}" == "$answer" ]]; then printf -v "$1" '%s' "$answer"; return 0; fi
+  done
+  die "$answer — нет такого адреса на сервере (vynel net add-ip, если его нужно добавить)"
+}
+
+# ask_ips: on a server with several addresses, which one serves the VPN and which the panel.
+IPS=()
+ask_ips() {
+  mapfile -t IPS < <(list_ips)
+  (( ${#IPS[@]} > 1 )) || return 0
+  local prim n=1 i ip note
+  prim="$(primary_ip)"
+  echo
+  echo "  На сервере несколько IP:"
+  for i in "${IPS[@]}"; do
+    ip="${i%% *}" note=""
+    [[ "$ip" == "$prim" ]] && note+=" · основной"
+    is_private "$ip" && note+=" · за NAT, снаружи $PUBLIC_IP"
+    printf '    %d) %-16s %s%s\n' "$n" "$ip" "${i#* }" "$note"
+    n=$((n + 1))
+  done
+  echo "  VPN и панель можно развести по разным IP: заблокируют один — второй продолжит работать."
+  choose_ip VPN_IP "IP для VPN" "${VPN_IP:-$prim}"
+  choose_ip SUB_IP "IP для подписок и веб-панели" "${SUB_IP:-$VPN_IP}"
+}
+
+# ---- security (docs/INSTALL_GUIDE.md §7) ----
+
+SSHD_DROPIN=/etc/ssh/sshd_config.d/90-vynel.conf
+ssh_value() { sshd -T 2>/dev/null | awk -v k="$1" '$1==k {print $2}' | head -1 || true; }
+ssh_ports() { sshd -T 2>/dev/null | awk '$1=="port" {print $2}' | sort -un | tr '\n' ' ' | sed 's/ $//' || true; }
+has_ssh_keys() {
+  local f
+  for f in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
+    [[ -s "$f" ]] && grep -qE '^(ssh-|ecdsa-|sk-)' "$f" && return 0
+  done
+  return 1
+}
+
+# ask_security: the wizard's questions; flags answer them without a terminal.
+ask_security() {
+  echo
+  pink "  Защита сервера"
+  echo "  Файрвол: открыты только SSH и то, что обслуживает vynel (порты он знает сам)."
+  echo "  Всё остальное молчит, адрес, который перебирает закрытые порты, блокируется на сутки."
+  if ask_yes "Включить файрвол?" y; then FIREWALL=on; else FIREWALL=off; fi
+  if [[ "$(ssh_value passwordauthentication)" == yes ]]; then
+    if has_ssh_keys; then
+      ask_yes "Вход по SSH только по ключу (пароль выключить)? Ключи на сервере найдены" y && SSH_KEYS_ONLY=yes
+    else
+      echo "  SSH принимает пароль, а ключей на сервере нет — оставляю как есть. Добавьте ключ (ssh-copy-id) и запустите «Защитить сервер»."
+    fi
+  fi
+  local cur
+  cur="$(ssh_ports)"
+  if [[ "$cur" == 22 ]] && ask_yes "Перенести SSH с 22 на случайный порт? (боты перебирают пароли на 22; старый закроется после проверки)" n; then
+    SSH_PORT=random
+  fi
+}
+
+# apply_firewall: turns the managed firewall on or off and waits for the rules.
+FW_OK=0
+apply_firewall() {
+  [[ -n "$FIREWALL" ]] || return 0
+  if [[ "$FIREWALL" == off ]]; then
+    vynel firewall off >/dev/null 2>&1 || true
+    return 0
+  fi
+  command -v nft >/dev/null || timeout 600 apt-get "${APT_OPTS[@]}" install -y -qq nftables >/dev/null || { red "  nftables is not installed: firewall skipped"; return 0; }
+  info "firewall: only SSH and what vynel serves stays open"
+  vynel firewall on >/dev/null
+  local i
+  for i in $(seq 1 30); do
+    if [[ "$(vynel firewall status 2>/dev/null | head -1)" == "firewall   on" ]]; then FW_OK=1; break; fi
+    sleep 1
+  done
+  [[ $FW_OK -eq 1 ]] || red "  the firewall rules did not load: journalctl -u vynel -u vynel-node | grep firewall"
+}
+
+reload_ssh() {
+  if systemctl is-active --quiet ssh.socket 2>/dev/null; then
+    systemctl daemon-reload && systemctl restart ssh.socket
+  else
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || systemctl restart ssh 2>/dev/null || systemctl restart sshd
+  fi
+}
+
+# write_sshd PORTS...: the drop-in with our settings; an invalid config is never left behind.
+write_sshd() {
+  mkdir -p /etc/ssh/sshd_config.d
+  if ! grep -qiE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' /etc/ssh/sshd_config; then
+    sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config
+  fi
+  local keys_only=0
+  if [[ "$SSH_KEYS_ONLY" == yes ]] || grep -qs '^PasswordAuthentication no' "$SSHD_DROPIN"; then keys_only=1; fi
+  {
+    echo "# managed by vynel install.sh --mode harden"
+    if [[ $keys_only -eq 1 ]]; then
+      echo "PasswordAuthentication no"
+      echo "KbdInteractiveAuthentication no"
+      echo "PermitRootLogin prohibit-password"
+    fi
+    echo "MaxAuthTries 3"
+    echo "LoginGraceTime 30"
+    local p
+    for p in "$@"; do echo "Port $p"; done
+  } >"$SSHD_DROPIN.new"
+  local old=""
+  [[ -f "$SSHD_DROPIN" ]] && old="$(cat "$SSHD_DROPIN")"
+  mv -f "$SSHD_DROPIN.new" "$SSHD_DROPIN"
+  if ! sshd -t 2>/tmp/vynel-sshd.err; then
+    red "  sshd rejected the settings, nothing changed: $(cat /tmp/vynel-sshd.err)"
+    if [[ -n "$old" ]]; then printf '%s\n' "$old" >"$SSHD_DROPIN"; else rm -f "$SSHD_DROPIN"; fi
+    return 1
+  fi
+  reload_ssh
+}
+
+# apply_ssh: keys only and/or a new port. A new port is opened next to the old one; the old one
+# closes only after you log in on the new one from another window.
+SSH_NOTE=""
+apply_ssh() {
+  [[ "$SSH_KEYS_ONLY" == yes || -n "$SSH_PORT" ]] || return 0
+  if [[ "$SSH_KEYS_ONLY" == yes ]] && ! has_ssh_keys; then
+    red "  no SSH keys in authorized_keys: password login stays on (it would lock you out)"
+    SSH_KEYS_ONLY=""
+  fi
+  local cur new keep=()
+  cur="$(ssh_ports)"
+  read -r -a keep <<<"$cur"
+  (( ${#keep[@]} > 0 )) || keep=(22)
+  if [[ -n "$SSH_PORT" ]]; then
+    new="$SSH_PORT"
+    [[ "$new" == random ]] && new=$(( 20000 + RANDOM % 40000 ))
+    info "SSH: opening port $new next to ${cur:-22}"
+    write_sshd "${keep[@]}" "$new" || return 0
+    # The firewall follows sshd within 15 s.
+    local i
+    for i in $(seq 1 30); do
+      [[ "$(vynel firewall status 2>/dev/null)" != *"firewall   on"* ]] && break
+      [[ "$(vynel firewall status 2>/dev/null | awk '$1=="ssh"')" == *"$new"* ]] && break
+      sleep 1
+    done
+    if [[ $ASSUME_YES -eq 0 ]] && have_tty; then
+      echo
+      pink "  Проверьте вход по новому порту в ДРУГОМ окне, это окно не закрывайте:"
+      echo "    ssh -p $new root@$PUBLIC_IP"
+      if ask_yes "Вход по порту $new работает?" n; then
+        write_sshd "$new" && SSH_NOTE="порт $new (22 закрыт)"
+      else
+        write_sshd "${keep[@]}" && SSH_NOTE="порт не менялся (${cur:-22}): новый не подтвердили"
+        red "  Порт не сменён. Возможно, его закрывает файрвол хостера — откройте $new там и повторите."
+      fi
+    else
+      SSH_NOTE="порты ${cur:-22} и $new; после проверки входа по $new закройте старый: install.sh --mode harden --ssh-port $new"
+    fi
+  else
+    write_sshd "${keep[@]}" || return 0
+  fi
+  [[ "$SSH_KEYS_ONLY" == yes ]] && SSH_NOTE="только ключ${SSH_NOTE:+, $SSH_NOTE}"
+  return 0
+}
+
+print_security_block() {
+  pink "  Защита"
+  local st
+  st="$(vynel firewall status 2>/dev/null || true)"
+  if [[ "$st" == "firewall   on"* ]]; then
+    line "  файрвол" "включён"
+    awk '$1=="ssh" || $1=="open" {sub(/^[ \t]*/, ""); print "    " $0}' <<<"$st"
+    line "  сканеры портов" "блокируются на сутки (vynel firewall status)"
+  else
+    line "  файрвол" "выключен (включить: install.sh --mode harden)"
+  fi
+  local pw ports
+  pw="$(ssh_value passwordauthentication)" ports="$(ssh_ports)"
+  line "  SSH" "порт ${ports:-22}, $([[ "$pw" == no ]] && echo "только по ключу" || echo "пароль разрешён")"
+  [[ -n "$SSH_NOTE" ]] && line "" "$SSH_NOTE"
+  return 0
 }
 
 # Ports 80/443 must be free (our own services are stopped first when updating).
@@ -326,6 +550,10 @@ check_ports() {
 RELEASE="${VYNEL_RELEASE:-edge-${REF//\//-}}"
 RELEASE_URL="${VYNEL_RELEASE_URL:-https://github.com/vyto4ka/vynel/releases/download/$RELEASE}"
 TEMP_SWAP=0
+# Releases are signed (Ed25519, SHA256SUMS.signed): with a key here a binary whose checksums are
+# not signed by it is never installed, even when it comes through --gh-proxy. Set up with
+# scripts/release-key.sh (docs/DEVELOPMENT.md). Empty = checksums only.
+RELEASE_PUBKEY="${VYNEL_RELEASE_PUBKEY:-}"
 
 ensure_go() {
   export PATH="/usr/local/go/bin:$PATH"
@@ -415,7 +643,14 @@ gh_latest() {
 install_release_binary() {
   local tmp want have rc=0
   tmp="$(mktemp -d)"
-  fetch "$(gh "$RELEASE_URL/SHA256SUMS")" "$tmp/SHA256SUMS" || rc=$?
+  if [[ -n "$RELEASE_PUBKEY" ]]; then
+    fetch "$(gh "$RELEASE_URL/SHA256SUMS.signed")" "$tmp/SHA256SUMS.signed" || rc=$?
+    if [[ $rc -eq 0 ]]; then
+      verify_signed "$tmp/SHA256SUMS.signed" "$tmp/SHA256SUMS" || { rm -rf "$tmp"; die "the release signature does not match: the download was changed on the way (proxy?). Nothing installed"; }
+    fi
+  else
+    fetch "$(gh "$RELEASE_URL/SHA256SUMS")" "$tmp/SHA256SUMS" || rc=$?
+  fi
   if [[ $rc -ne 0 ]]; then
     rm -rf "$tmp"
     [[ $rc -eq 22 ]] && return 1
@@ -445,6 +680,19 @@ install_release_binary() {
   mv -f /usr/local/bin/vynel.new /usr/local/bin/vynel
   rm -rf "$tmp"
   return 0
+}
+
+# verify_signed SIGNED OUT: checks "# ed25519 SIG" (the last line) over the lines above it and
+# writes them to OUT.
+verify_signed() {
+  local dir sig
+  dir="$(dirname "$2")"
+  sig="$(tail -n 1 "$1")"
+  [[ "$sig" == "# ed25519 "* ]] || return 1
+  head -n -1 "$1" >"$2"
+  printf '%s' "${sig#\# ed25519 }" | base64 -d >"$dir/sums.sig" 2>/dev/null || return 1
+  printf -- '-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n' "$RELEASE_PUBKEY" >"$dir/release.pub"
+  openssl pkeyutl -verify -pubin -inkey "$dir/release.pub" -rawin -in "$2" -sigfile "$dir/sums.sig" >/dev/null 2>&1
 }
 
 build_from_source() {
@@ -649,7 +897,7 @@ wait_cert() {
   info "waiting for the certificate of $1"
   local code
   for _ in $(seq 1 45); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$1:443:$PUBLIC_IP" "https://$1/" || true)"
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$1:443:${2:-$PUBLIC_IP}" "https://$1/" || true)"
     if [[ "$code" == "200" ]]; then CERT_OK=1; return 0; fi
     sleep 2
   done
@@ -764,11 +1012,18 @@ do_aio() {
     echo "  Enter — оставить значение в скобках."
     echo
     ask PUBLIC_IP "Публичный IP сервера" "$PUBLIC_IP"
-    ask_domain DOMAIN "Домен сервера (A-запись на этот IP; на нём VPN, сайт-заглушка, подписки и панель)" "$DOMAIN"
-    if ask_yes "Отдельный домен для подписок? (не обязательно, одного домена достаточно)" n; then
-      ask_domain SUB_DOMAIN "Домен подписок" "$SUB_DOMAIN"
+    ask_ips
+    if [[ -n "$VPN_IP" && "$VPN_IP" != "$SUB_IP" ]]; then
+      echo "  VPN и панель на разных IP — нужны два домена."
+      ask_domain DOMAIN "Домен VPN (A-запись на $(public_of "$VPN_IP"); там же сайт-заглушка)" "$DOMAIN" "$(public_of "$VPN_IP")"
+      ask_domain SUB_DOMAIN "Домен подписок и панели (A-запись на $(public_of "$SUB_IP"))" "$SUB_DOMAIN" "$(public_of "$SUB_IP")"
     else
-      SUB_DOMAIN="$DOMAIN"
+      ask_domain DOMAIN "Домен сервера (A-запись на этот IP; на нём VPN, сайт-заглушка, подписки и панель)" "$DOMAIN" "$(public_of "${VPN_IP:-$PUBLIC_IP}")"
+      if ask_yes "Отдельный домен для подписок? (не обязательно, одного домена достаточно)" n; then
+        ask_domain SUB_DOMAIN "Домен подписок" "$SUB_DOMAIN" "$(public_of "${SUB_IP:-$PUBLIC_IP}")"
+      else
+        SUB_DOMAIN="$DOMAIN"
+      fi
     fi
     ask EMAIL "Email для Let's Encrypt (можно пусто)" "$EMAIL"
     ask COUNTRY "Код страны сервера, для флага в клиентах" "$COUNTRY"
@@ -782,24 +1037,35 @@ do_aio() {
     fi
     ask ADMIN_LOGIN "Логин для веб-панели (пароль сгенерируется сам)" "$ADMIN_LOGIN"
     ask_bot_and_restore
+    ask_security
     SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
     echo
     echo "  Сервер:    $PUBLIC_IP"
+    [[ -n "$VPN_IP" && "$VPN_IP" != "$SUB_IP" ]] && echo "  IP:        VPN $VPN_IP, панель и подписки $SUB_IP"
     echo "  Домен:     $DOMAIN"
     echo "  Подписки:  https://$SUB_DOMAIN/s/…"
     echo "  Клиенты:   ${NAME} (${COUNTRY:-без флага})"
     echo "  Email:     ${EMAIL:-—}"
     echo "  Ноды:      $([[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]] && echo "только этот сервер" || echo "порт 9443 открыт")"
     echo "  Панель:    логин $ADMIN_LOGIN, пароль будет показан в конце"
+    echo "  Защита:    файрвол $([[ "$FIREWALL" == on ]] && echo "включён" || echo "выключен")$([[ "$SSH_KEYS_ONLY" == yes ]] && echo ", SSH только по ключу")$([[ -n "$SSH_PORT" ]] && echo ", SSH на другой порт")"
     echo
     ask_yes "Устанавливаем?" y || die "отменено"
   fi
   [[ -n "$DOMAIN" ]] || { usage; die "--domain is required"; }
   [[ "$ADMIN_LOGIN" =~ ^[A-Za-z0-9_.@-]{1,64}$ ]] || die "the login may contain latin letters, digits and _ . - @"
   SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
+  FIREWALL="${FIREWALL:-on}"
+  [[ -n "$SUB_IP" && -z "$VPN_IP" ]] && VPN_IP="$(primary_ip)"
+  [[ -n "$VPN_IP" && -z "$SUB_IP" ]] && SUB_IP="$VPN_IP"
+  if [[ "$VPN_IP" == "$SUB_IP" ]]; then VPN_IP="" SUB_IP=""; fi # one address: listen on all of them
+  local ip
+  for ip in $VPN_IP $SUB_IP; do
+    list_ips | awk '{print $1}' | grep -qx "$ip" || die "$ip is not an address of this server (vynel net add-ip to add one)"
+  done
   NAME="${NAME:-$(country_name "$COUNTRY")}"
   info "server $PUBLIC_IP, country ${COUNTRY:-?}, domain $DOMAIN, subscriptions on $SUB_DOMAIN"
-  if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then check_dns "$DOMAIN" "$SUB_DOMAIN"; else check_dns "$DOMAIN"; fi
+  if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then check_dns "$DOMAIN@${VPN_IP:-$PUBLIC_IP}" "$SUB_DOMAIN@${SUB_IP:-$PUBLIC_IP}"; else check_dns "$DOMAIN"; fi
   check_ports
 
   install_vynel
@@ -814,6 +1080,7 @@ do_aio() {
   local setup_args=(--domain "$DOMAIN" --sub-domain "$SUB_DOMAIN" --name "$NAME")
   [[ -n "$COUNTRY" ]] && setup_args+=(--country "$COUNTRY")
   [[ -n "$EMAIL" ]] && setup_args+=(--email "$EMAIL")
+  setup_args+=(--vpn-ip "$VPN_IP" --sub-ip "$SUB_IP")
   admin setup "${setup_args[@]}"
   admin setting install.command "$(script_command)" >/dev/null
   web_admin
@@ -830,7 +1097,9 @@ do_aio() {
   done
   admin node list || true
   [[ $ok -eq 1 ]] || red "the node is not in sync yet: journalctl -u vynel -e"
-  wait_cert "$SUB_DOMAIN"
+  wait_cert "$SUB_DOMAIN" "${SUB_IP:-$PUBLIC_IP}"
+  apply_firewall
+  apply_ssh
 
   local sub_prefix
   sub_prefix="$(admin setting sub.prefix 2>/dev/null || true)"
@@ -847,6 +1116,8 @@ do_aio() {
   line "Данные" "$DATA  (бэкап: скопировать папку)"
   echo
   print_web_block
+  echo
+  print_security_block
   echo
   print_bot_block
   echo "  Пользователи — в панели: «Пользователи» → «+ Пользователь», ввести имя, скопировать ссылку."
@@ -878,6 +1149,7 @@ do_panel() {
     ask EMAIL "Email для Let's Encrypt (можно пусто)" "$EMAIL"
     ask ADMIN_LOGIN "Логин для веб-панели (пароль сгенерируется сам)" "$ADMIN_LOGIN"
     ask_bot_and_restore
+    ask_security
     echo
     echo "  Сервер:    $PUBLIC_IP, ноды подключаются на порт ${GATEWAY_LISTEN##*:}"
     echo "  Домен:     $DOMAIN (панель по секретному пути, подписки, сайт-заглушка)"
@@ -889,6 +1161,7 @@ do_panel() {
   [[ -n "$DOMAIN" ]] || { usage; die "--domain is required"; }
   [[ "$ADMIN_LOGIN" =~ ^[A-Za-z0-9_.@-]{1,64}$ ]] || die "the login may contain latin letters, digits and _ . - @"
   [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]] && die "a panel without its own node needs the node port open (--gateway-listen :9443)"
+  FIREWALL="${FIREWALL:-on}"
   check_dns "$DOMAIN"
   check_ports
 
@@ -913,6 +1186,8 @@ do_panel() {
   start_unit vynel
   sleep 2
   wait_cert "$DOMAIN"
+  apply_firewall
+  apply_ssh
 
   echo
   pink "══════════════════════════  vynel установлен: панель  ══════════════════════════"
@@ -927,12 +1202,14 @@ do_panel() {
   echo
   print_web_block
   echo
+  print_security_block
+  echo
   print_bot_block
   pink "  Дальше: добавьте VPN-ноду"
-  echo "  1. В панели: «Ноды» → «+ Нода» → название, страна, домен ноды (A-запись на IP нового сервера)."
+  echo "  1. В панели: «Ноды» → «Добавить сервер» → название, страна, домен ноды (A-запись на IP нового сервера)."
   echo "  2. Панель покажет команду вида:"
   echo "       $(script_command) --mode node --token vyn1.…"
-  echo "  3. Выполните её на новом сервере под root. Через минуту нода станет «работает»."
+  echo "  3. Выполните её на новом сервере под root. Чеклист в панели отметит каждый шаг сам."
   echo "  4. «Пользователи» → «+ Пользователь» → скопировать ссылку подписки."
   echo
   print_common_commands
@@ -947,10 +1224,12 @@ do_node() {
   if [[ $WIZARD -eq 1 && -z "$TOKEN" && $joined -eq 0 ]]; then
     echo
     green "VPN-нода для существующей панели"
-    echo "  Токен выдаёт панель: «Ноды» → «+ Нода» (или «Новый токен» у ноды)."
+    echo "  Токен выдаёт панель: «Ноды» → «Добавить сервер» (или «Новый токен» у ноды)."
     echo
     ask TOKEN "Токен (vyn1.…)" ""
+    ask_security
   fi
+  FIREWALL="${FIREWALL:-on}"
   TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
   if [[ $joined -eq 0 ]]; then
     [[ "$TOKEN" == vyn1.* ]] || die "a join token from the panel is required (--token vyn1.…)"
@@ -978,6 +1257,8 @@ do_node() {
     if systemctl is-active --quiet vynel-node; then ok=1; break; fi
     sleep 2
   done
+  apply_firewall
+  apply_ssh
 
   echo
   pink "══════════════════════════  vynel установлен: нода  ══════════════════════════"
@@ -987,12 +1268,15 @@ do_node() {
   line "Служба" "$([[ $ok -eq 1 ]] && echo "запущена" || echo "не запустилась — journalctl -u vynel-node -e")"
   line "Данные" "$NODE_DATA"
   echo
+  print_security_block
+  echo
   echo "  Нода получает настройки от панели сама: домен, ключи Reality, пользователей."
   echo "  Проверьте в панели: «Ноды» — через минуту состояние «работает»."
   echo
   line "  логи" "journalctl -u vynel-node -f"
   line "  перезапуск" "systemctl restart vynel-node"
   line "  панель переехала" "vynel node set-panel НОВЫЙ_IP:9443"
+  line "  ещё один IP" "vynel net add-ip 203.0.113.12"
   line "  обновить / удалить" "запустить установщик ещё раз и выбрать пункт"
   echo
 }
@@ -1056,6 +1340,45 @@ do_update() {
     line "Адрес панели" "$WEB_URL"
   fi
   [[ $NODE_INSTALLED -eq 1 ]] && line "Нода" "$(systemctl is-active vynel-node 2>/dev/null || true)"
+  apply_firewall
+  apply_ssh
+  echo
+  print_security_block
+  echo
+}
+
+# ================================================================== harden
+do_harden() {
+  detect_ip
+  echo "  installed: $(installed_text) · $(vynel version 2>/dev/null || echo '?')"
+  if [[ $WIZARD -eq 1 ]]; then
+    ask_security
+    if [[ "$(ssh_ports)" != 22 && -z "$SSH_PORT" ]]; then
+      local cur
+      cur="$(ssh_ports)"
+      if [[ "$cur" == *" "* ]] && ask_yes "SSH слушает несколько портов ($cur). Оставить один?" y; then
+        ask SSH_PORT "Какой оставить" "${cur##* }"
+      fi
+    fi
+  fi
+  [[ -n "$FIREWALL$SSH_KEYS_ONLY$SSH_PORT" ]] || FIREWALL=on
+  # --ssh-port with the current second port: just close the others.
+  if [[ -n "$SSH_PORT" && "$SSH_PORT" != random && " $(ssh_ports) " == *" $SSH_PORT "* ]]; then
+    info "SSH: keeping only port $SSH_PORT"
+    write_sshd "$SSH_PORT" && SSH_NOTE="порт $SSH_PORT"
+    SSH_PORT=""
+  fi
+  apply_firewall
+  apply_ssh
+  echo
+  pink "══════════════════════════  сервер защищён  ══════════════════════════"
+  echo
+  print_security_block
+  echo
+  line "  что открыто" "vynel firewall status"
+  line "  открыть порт" "vynel firewall allow 8080"
+  line "  снять блокировку" "vynel firewall unblock IP"
+  line "  выключить" "vynel firewall off"
   echo
 }
 
@@ -1064,4 +1387,5 @@ case "$MODE" in
   panel) do_panel ;;
   node) do_node ;;
   update) do_update ;;
+  harden) do_harden ;;
 esac

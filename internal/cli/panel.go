@@ -32,6 +32,7 @@ func panelCmd() *cobra.Command {
 	addXrayFlags(c, &cfg.Xray)
 	f.StringVar(&cfg.CaddyBin, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary")
 	f.BoolVar(&cfg.TuneSysctl, "tune-sysctl", true, "apply BBR/fq/TCP Fast Open on the local node (needs root)")
+	f.BoolVar(&cfg.Firewall, "firewall", true, "keep the nftables firewall in step with what the server serves once `vynel firewall on`")
 	return c
 }
 

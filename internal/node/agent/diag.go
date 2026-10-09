@@ -120,7 +120,9 @@ func Diagnose(ctx context.Context, w io.Writer, dataDir, version string, bin xra
 	run("ss", "-ltnup")
 
 	section("firewall")
+	run("vynel", "firewall", "status")
 	run("ufw", "status")
+	run("nft", "list", "chain", "inet", "vynel", "input")
 
 	section("agent journal (last 300 lines)")
 	run("journalctl", "-u", "vynel-node", "-n", "300", "--no-pager", "-o", "short-iso")

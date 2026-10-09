@@ -188,3 +188,24 @@ func TestCaddyPanelOnOwnPort(t *testing.T) {
 		t.Fatalf("web URL %s", u)
 	}
 }
+
+func TestSetupTwoIPs(t *testing.T) {
+	f := newFixture(t)
+	res := must(f.s.SetupAllInOne(f.ctx, ActorCLI, SetupInput{Domain: "nl.example.com", SubDomain: "sub.example.com", VPNIP: "203.0.113.12", SubIP: "203.0.113.10"}))
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	ds := must(f.s.DesiredState(f.ctx, res.Node.ID))
+	got := layout(t, ds.Caddy)
+	if got["sub.example.com"] != "203.0.113.10:443" || got["nl.example.com"] != "127.0.0.1:8443" || len(ds.Problems) > 0 {
+		t.Fatalf("layout %v problems %v", got, ds.Problems)
+	}
+	if !strings.Contains(string(ds.Config), `"listen":"203.0.113.12"`) {
+		t.Fatal("the VPN must listen on its own IP")
+	}
+	// Again without IPs: back to every address.
+	res = must(f.s.SetupAllInOne(f.ctx, ActorCLI, SetupInput{Domain: "nl.example.com"}))
+	if res.Inbound.ListenAddressID != nil {
+		t.Fatal("listen address kept")
+	}
+}

@@ -16,6 +16,22 @@ var Settings = []struct{ Key, Value string }{
 	{"net.ipv4.tcp_fastopen", "3"},
 }
 
+// Harden are network safety settings: SYN cookies, no ICMP redirects or source routing, no
+// answers to broadcast pings. Applied with the tuning but never reported as warnings: some
+// containers do not allow them, and nothing breaks without them.
+var Harden = []struct{ Key, Value string }{
+	{"net.ipv4.tcp_syncookies", "1"},
+	{"net.ipv4.conf.all.accept_redirects", "0"},
+	{"net.ipv4.conf.default.accept_redirects", "0"},
+	{"net.ipv6.conf.all.accept_redirects", "0"},
+	{"net.ipv6.conf.default.accept_redirects", "0"},
+	{"net.ipv4.conf.all.send_redirects", "0"},
+	{"net.ipv4.conf.all.accept_source_route", "0"},
+	{"net.ipv6.conf.all.accept_source_route", "0"},
+	{"net.ipv4.icmp_echo_ignore_broadcasts", "1"},
+	{"net.ipv4.icmp_ignore_bogus_error_responses", "1"},
+}
+
 // ConfPath persists the settings across reboots.
 const ConfPath = "/etc/sysctl.d/90-vynel.conf"
 
@@ -40,7 +56,10 @@ func Tune(apply bool) []string {
 		}
 		var conf strings.Builder
 		conf.WriteString("# managed by vynel\n")
-		for _, s := range Settings {
+		for _, s := range append(Settings[:len(Settings):len(Settings)], Harden...) {
+			if Read(s.Key) == "" {
+				continue // not in this kernel or container
+			}
 			conf.WriteString(s.Key + " = " + s.Value + "\n")
 			_ = os.WriteFile(procPath(s.Key), []byte(s.Value), 0o644)
 		}

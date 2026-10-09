@@ -938,6 +938,8 @@ func adminSetupCmd() *cobra.Command {
 	c.Flags().StringVar(&in.Email, "email", "", "email for Let's Encrypt (optional)")
 	c.Flags().StringVar(&in.NodeName, "name", "", "node name shown in clients")
 	c.Flags().StringVar(&in.Country, "country", "", "2-letter country code (flag in clients)")
+	c.Flags().StringVar(&in.VPNIP, "vpn-ip", "", "address the VPN listens on (default: every address)")
+	c.Flags().StringVar(&in.SubIP, "sub-ip", "", "address the subscriptions and the panel answer on (default: every address)")
 	_ = c.MarkFlagRequired("domain")
 	return c
 }

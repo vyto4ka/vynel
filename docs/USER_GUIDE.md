@@ -453,6 +453,8 @@ vynel admin
 vynel panel  …              сервер панели (запускает systemd-сервис vynel)
 vynel node run --token …    агент ноды на отдельном сервере
 vynel node set-panel HOST:PORT    если панель переехала
+vynel firewall status | on | off | allow PORT | deny PORT | unblock IP   файрвол (INSTALL_GUIDE §10)
+vynel net list | add-ip IP | rm-ip IP       адреса сервера; add-ip с откатом
 vynel restore файл.tar.gz [--yes]  восстановить панель из бэкапа (при остановленной панели)
 vynel version
 ```

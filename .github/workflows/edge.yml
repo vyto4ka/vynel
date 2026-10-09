@@ -36,6 +36,24 @@ jobs:
         run: make build-all VERSION="${GITHUB_SHA::7}"
       - name: Checksums
         run: cd bin && sha256sum vynel-linux-* > SHA256SUMS && cat SHA256SUMS
+      - name: Sign
+        # SHA256SUMS.signed = the checksums plus "# ed25519 <signature>" in one file, uploaded in
+        # one go, so a downloader never sees checksums and a signature from different builds.
+        env:
+          KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "no RELEASE_SIGNING_KEY secret: releases are not signed (scripts/release-key.sh)"; exit 0; fi
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/release.pem"
+          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release.pem" -in bin/SHA256SUMS -out "$RUNNER_TEMP/sums.sig"
+          rm -f "$RUNNER_TEMP/release.pem"
+          { cat bin/SHA256SUMS; printf '# ed25519 %s\n' "$(base64 -w0 "$RUNNER_TEMP/sums.sig")"; } > bin/SHA256SUMS.signed
+          # The key in scripts/install.sh must match, or every install would fail.
+          pub="$(grep -o 'VYNEL_RELEASE_PUBKEY:-[^}]*' scripts/install.sh | cut -d- -f2-)"
+          if [ -n "$pub" ]; then
+            printf -- '-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n' "$pub" > "$RUNNER_TEMP/release.pub"
+            openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/release.pub" -rawin -in bin/SHA256SUMS -sigfile "$RUNNER_TEMP/sums.sig"
+          fi
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,7 +69,8 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" bin/vynel-linux-* --clobber
             gh release upload "$tag" bin/SHA256SUMS --clobber
+            if [ -f bin/SHA256SUMS.signed ]; then gh release upload "$tag" bin/SHA256SUMS.signed --clobber; fi
             gh release edit "$tag" --title "$title" --notes "$notes" --prerelease
           else
-            gh release create "$tag" bin/vynel-linux-* bin/SHA256SUMS --prerelease --verify-tag --title "$title" --notes "$notes"
+            gh release create "$tag" bin/vynel-linux-* bin/SHA256SUMS $(ls bin/SHA256SUMS.signed 2>/dev/null) --prerelease --verify-tag --title "$title" --notes "$notes"
           fi

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -16,6 +17,8 @@ type SetupInput struct {
 	Domain    string // node domain: Reality SNI + self-steal site
 	SubDomain string // subscription domain; empty = Domain (the one-domain minimum)
 	Email     string // ACME email, optional
+	VPNIP     string // address the VPN inbound listens on; empty = every address
+	SubIP     string // address the subscriptions and the panel answer on; empty = every address
 }
 
 // SetupResult tells what Setup did.
@@ -52,11 +55,14 @@ func (s *Service) SetupAllInOne(ctx context.Context, actor Actor, in SetupInput)
 	}
 	res.Node = node
 
-	settings := map[string]string{SettingSubDomain: in.SubDomain}
+	settings := map[string]string{SettingSubDomain: in.SubDomain, SettingSubAddress: strings.TrimSpace(in.SubIP)}
 	if in.Email != "" {
 		settings[SettingCaddyEmail] = in.Email
 	}
 	for k, v := range settings {
+		if k == SettingSubAddress && v != "" && net.ParseIP(v) == nil {
+			return nil, invalid("%q is not an IP address", v)
+		}
 		if cur, _ := s.Setting(ctx, k, ""); cur != v {
 			if err := s.SetSetting(ctx, actor, k, v); err != nil {
 				return nil, err
@@ -95,11 +101,40 @@ func (s *Service) SetupAllInOne(ctx context.Context, actor Actor, in SetupInput)
 			res.Inbound = ni
 		}
 	}
+	// The VPN address: the node reports its interfaces once it runs; until then it is added here.
+	var listen *int64
+	if ip := strings.TrimSpace(in.VPNIP); ip != "" {
+		addrs, err := s.Addresses(ctx, node.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range addrs {
+			if a.IP == ip {
+				listen = &a.ID
+			}
+		}
+		if listen == nil {
+			a, err := s.AddAddress(ctx, actor, node.ID, ip, "")
+			if err != nil {
+				return nil, err
+			}
+			listen = &a.ID
+		}
+	}
 	if res.Inbound == nil {
-		if res.Inbound, err = s.AttachProfile(ctx, actor, AttachInput{NodeID: node.ID, ProfileID: prof.ID}); err != nil {
+		if res.Inbound, err = s.AttachProfile(ctx, actor, AttachInput{NodeID: node.ID, ProfileID: prof.ID, ListenAddressID: listen}); err != nil {
 			return nil, fmt.Errorf("attach %s: %w", RealityProfileName, err)
 		}
 		res.Created = append(res.Created, "inbound "+res.Inbound.Tag)
+	} else if !sameID(res.Inbound.ListenAddressID, listen) {
+		upd := NodeInboundInput{ListenAddressID: listen, ClearAddresses: listen == nil}
+		if res.Inbound, err = s.UpdateNodeInbound(ctx, actor, res.Inbound.ID, upd); err != nil {
+			return nil, fmt.Errorf("listen address of %s: %w", res.Inbound.Tag, err)
+		}
 	}
 	return res, nil
+}
+
+func sameID(a, b *int64) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }

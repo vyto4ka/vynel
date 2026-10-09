@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/vyto4ka/vynel/internal/node/caddy"
+	"github.com/vyto4ka/vynel/internal/node/firewall"
 	"github.com/vyto4ka/vynel/internal/node/metrics"
 	"github.com/vyto4ka/vynel/internal/node/state"
 	"github.com/vyto4ka/vynel/internal/node/sysctl"
@@ -49,6 +50,10 @@ type Config struct {
 	CaddyBin      string                   // path to caddy ("" = not installed)
 	TuneSysctl    bool                     // apply BBR/fq/TFO on start (needs root)
 	CertInterval  time.Duration            // how often Caddy certificates are copied for Xray, default 1m
+	// Firewall keeps nftables in step with what this node serves (when `vynel firewall on`);
+	// nil = never touch the firewall (tests).
+	Firewall   *firewall.Manager
+	ExtraPorts []firewall.Port // also let in (the panel's node gateway on an all-in-one server)
 }
 
 // Agent applies the panel's desired state to Xray.
@@ -70,6 +75,7 @@ type Agent struct {
 	statsCh  chan struct{} // a batch was queued
 	certs    *certBridge
 	certDoms []string // domains whose certificates the running Xray config uses
+	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
 }
 
 // New opens the agent's state. Call Run to start.
@@ -141,6 +147,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.cur != nil {
 		if err := a.caddy.Apply(ctx, a.cur.Caddy); err != nil {
 			a.log.Error("cannot start caddy from saved state", "err", err)
+		} else {
+			a.caddyCfg = a.cur.Caddy
 		}
 		if err := a.restartLocked(ctx, a.cur); err != nil {
 			a.log.Error("cannot start xray from saved state", "err", err)
@@ -151,6 +159,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.mu.Unlock()
 	go a.collectLoop(ctx)
 	go a.certLoop(ctx)
+	if a.cfg.Firewall != nil {
+		go a.cfg.Firewall.Loop(ctx, 15*time.Second, a.FirewallPorts)
+	}
 
 	backoff := min(time.Second, a.cfg.MaxBackoff)
 	for ctx.Err() == nil {
@@ -319,8 +330,12 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	caddyErr := a.caddy.Apply(ctx, next.Caddy)
 	if caddyErr != nil {
 		caddyErr = fmt.Errorf("caddy: %w", caddyErr)
+	} else {
+		a.caddyCfg = next.Caddy
+		a.syncFirewall(ctx) // e.g. port 80 for certificates, even if Xray then fails
 	}
 	commit := func() error {
+		defer a.syncFirewall(ctx)
 		if caddyErr != nil {
 			partial := next.Clone()
 			partial.Hash = ""
@@ -342,6 +357,24 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 		return errors.Join(err, caddyErr)
 	}
 	return commit()
+}
+
+// FirewallPorts is what this node serves: public Xray inbounds, Caddy sites and the extras.
+func (a *Agent) FirewallPorts() []firewall.Port {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ports := append([]firewall.Port(nil), a.cfg.ExtraPorts...)
+	if a.cur != nil {
+		ports = append(ports, firewall.XrayPorts(a.cur.Config)...)
+	}
+	return append(ports, firewall.CaddyPorts(a.caddyCfg)...)
+}
+
+// syncFirewall opens new ports right after a config change instead of at the next tick.
+func (a *Agent) syncFirewall(ctx context.Context) {
+	if a.cfg.Firewall != nil {
+		go func() { _ = a.cfg.Firewall.Sync(context.WithoutCancel(ctx), a.FirewallPorts()) }()
+	}
 }
 
 // ApplyDelta applies user operations on top of the current state.

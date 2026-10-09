@@ -16,6 +16,7 @@ import (
 
 	"github.com/vyto4ka/vynel/internal/node/agent"
 	"github.com/vyto4ka/vynel/internal/node/caddy"
+	"github.com/vyto4ka/vynel/internal/node/firewall"
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/ca"
 	"github.com/vyto4ka/vynel/internal/panel/gateway"
@@ -37,6 +38,7 @@ type Config struct {
 	Xray          xray.Binary
 	CaddyBin      string
 	TuneSysctl    bool
+	Firewall      bool // manage nftables (`vynel firewall on|off` decides whether rules are loaded)
 	Version       string
 	Log           *slog.Logger
 }
@@ -152,6 +154,10 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	run("web", func() error { return p.Web.Serve(ctx, webListen) })
 	run("bot", func() error { return p.Bot.Run(ctx) })
+	var fw *firewall.Manager
+	if cfg.Firewall {
+		fw = &firewall.Manager{Log: cfg.Log.With("component", "firewall")}
+	}
 	if cfg.WithNode {
 		node, err := p.Service.EnsureLocalNode(ctx, cfg.LocalNode)
 		if err != nil {
@@ -161,6 +167,7 @@ func Run(ctx context.Context, cfg Config) error {
 			DataDir: filepath.Join(cfg.DataDir, "node"), Xray: cfg.Xray, Version: cfg.Version,
 			Log: cfg.Log.With("component", "local-node"), Dial: LocalDialer(ctx, p.Reconciler, node.ID),
 			CaddyBin: cfg.CaddyBin, TuneSysctl: cfg.TuneSysctl,
+			Firewall: fw, ExtraPorts: firewall.ListenPort(cfg.GatewayListen, "node gateway"),
 		})
 		if err != nil {
 			return err
@@ -174,6 +181,16 @@ func Run(ctx context.Context, cfg Config) error {
 		m := &caddy.Manager{Bin: cfg.CaddyBin, DataDir: filepath.Join(cfg.DataDir, "web"), Log: cfg.Log.With("component", "caddy")}
 		defer m.Close()
 		run("caddy", func() error { return panelCaddyLoop(ctx, p.Service, m, cfg.Log) })
+		if fw != nil {
+			gw := firewall.ListenPort(cfg.GatewayListen, "node gateway")
+			run("firewall", func() error {
+				fw.Loop(ctx, 15*time.Second, func() []firewall.Port {
+					c, _ := p.Service.PanelCaddyConfig(ctx)
+					return append(firewall.CaddyPorts(c), gw...)
+				})
+				return nil
+			})
+		}
 	}
 	cfg.Log.Info("panel started", "data", cfg.DataDir, "gateway", cfg.GatewayListen)
 	select {
