@@ -678,12 +678,12 @@ func adminTemplateCmd() *cobra.Command {
 func adminUserCmd() *cobra.Command {
 	c := &cobra.Command{Use: "user", Short: "Users"}
 
-	var tplName string
+	var tplName, subLink string
 	var groups []string
 	add := &cobra.Command{
 		Use: "add USERNAME", Short: "Create a user (everything else comes from the default template)", Args: cobra.ExactArgs(1),
 		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
-			in := service.CreateUserInput{Username: args[0]}
+			in := service.CreateUserInput{Username: args[0], SubToken: subLink}
 			if tplName != "" {
 				t, err := s.UserTemplateByName(ctx, tplName)
 				if err != nil {
@@ -707,6 +707,7 @@ func adminUserCmd() *cobra.Command {
 		}),
 	}
 	add.Flags().StringVar(&tplName, "template", "", "user template (default: the default one)")
+	add.Flags().StringVar(&subLink, "link", "", "own end of the subscription link (8–64 latin letters, digits, _ -); default random")
 	add.Flags().StringArrayVar(&groups, "group", nil, "groups instead of the template's")
 
 	var status, search string
@@ -832,7 +833,23 @@ func adminUserCmd() *cobra.Command {
 	}
 	devices.Flags().Int64Var(&rmDevice, "rm", 0, "device id to remove")
 
-	c.AddCommand(add, list, extend, groupsCmd, reissue, links, devices,
+	link := &cobra.Command{
+		Use: "link USERNAME LINK", Short: "Set the end of a user's subscription link (the old link stops working)", Args: cobra.ExactArgs(2),
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+			u, err := s.UserByUsername(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			if u, err = s.SetSubToken(ctx, service.ActorCLI, u.ID, args[1]); err != nil {
+				return err
+			}
+			url, _ := s.SubscriptionURL(ctx, u)
+			fmt.Fprintln(cmd.OutOrStdout(), url)
+			return nil
+		}),
+	}
+
+	c.AddCommand(add, list, extend, groupsCmd, reissue, links, devices, link,
 		&cobra.Command{
 			Use: "show USERNAME", Short: "Show a user with traffic per node and the subscription URL", Args: cobra.ExactArgs(1),
 			RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {

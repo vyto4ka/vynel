@@ -41,3 +41,17 @@ func TestDetectRules(t *testing.T) {
 		t.Error("an unknown format passed")
 	}
 }
+
+func TestProbingBansOnlyRealAddresses(t *testing.T) {
+	h := NewHandler(nil, nil)
+	for i := 0; i < 50; i++ {
+		h.miss("127.0.0.1")
+		h.miss("198.51.100.7")
+	}
+	if h.banned("127.0.0.1") {
+		t.Fatal("loopback (unknown client) banned: everyone would get 404")
+	}
+	if !h.banned("198.51.100.7") {
+		t.Fatal("a real prober not banned")
+	}
+}

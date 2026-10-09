@@ -127,6 +127,11 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 				ds.Users[r.Tag] = clients
 			}
 		}
+		// Caddy first: it tells Reality inbounds that front it to pass the client address on.
+		spec, problems, err := s.caddySpec(ctx, n, rendered)
+		if err != nil {
+			return nil, err
+		}
 		cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: baseMap, Inbounds: rendered, APIAddr: apiAddr})
 		if err != nil {
 			// A structural conflict (e.g. two inbounds on one port) blocks the whole node config.
@@ -138,10 +143,6 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 			ds.Inbounds, ds.Users = nil, map[string][]xrayconf.Client{}
 		}
 		if ds.Config, err = json.Marshal(cfg); err != nil {
-			return nil, err
-		}
-		spec, problems, err := s.caddySpec(ctx, n, rendered)
-		if err != nil {
 			return nil, err
 		}
 		ds.Problems = append(ds.Problems, problems...)

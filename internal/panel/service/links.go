@@ -223,6 +223,20 @@ func (s *Service) SetHostOverride(ctx context.Context, actor Actor, niID int64, 
 }
 
 // SubscriptionURL is the user's subscription link.
+// SubPrefix is the path of subscription links, always "/…/" ("/sub" set by hand is "/sub/").
+func (s *Service) SubPrefix(ctx context.Context) string {
+	p, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)
+	if p = normalizePath(p); p == "" {
+		return DefaultSubPrefix
+	}
+	return p
+}
+
+// SubBase is the subscription link without the user's part.
+func (s *Service) SubBase(ctx context.Context) (string, error) {
+	return s.SubscriptionURL(ctx, &store.User{})
+}
+
 func (s *Service) SubscriptionURL(ctx context.Context, u *store.User) (string, error) {
 	domain, err := s.Setting(ctx, SettingSubDomain, "")
 	if err != nil {
@@ -232,7 +246,7 @@ func (s *Service) SubscriptionURL(ctx context.Context, u *store.User) (string, e
 		return "", fmt.Errorf("subscription domain is not set: `vynel admin setting %s sub.example.com`", SettingSubDomain)
 	}
 	port, _ := s.Setting(ctx, SettingSubPort, "443")
-	prefix, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)
+	prefix := s.SubPrefix(ctx)
 	host := domain
 	if port != "" && port != "443" {
 		host += ":" + port

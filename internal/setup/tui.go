@@ -41,6 +41,7 @@ type Options struct {
 type Answers struct {
 	Mode, Domain, SubDomain, Email, Name, Country, PublicIP, VPNIP, SubIP string
 	GatewayListen, AdminLogin, BotToken, Restore, Token                   string
+	SubPath, PanelPath                                                    string
 	Firewall, SSHKeysOnly, SSHPort                                        string
 	Purge                                                                 bool
 }
@@ -89,6 +90,17 @@ func theme() *huh.Theme {
 	t.Group.Title = t.Focused.Title.Foreground(pink)
 	t.Group.Description = t.Focused.Description
 	return t
+}
+
+var pathRe = regexp.MustCompile(`^/?[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/?$`)
+
+// cleanPath turns "sub", "/sub", "sub/" into "/sub/"; empty stays empty.
+func cleanPath(p string) string {
+	p = strings.Trim(strings.TrimSpace(p), "/")
+	if p == "" {
+		return ""
+	}
+	return "/" + p + "/"
 }
 
 var (
@@ -366,6 +378,35 @@ func Run(o Options) (*Answers, error) {
 					Affirmative("Да").Negative("Нет").Value(&nodes))
 		}
 		fields = append(fields,
+			huh.NewInput().Title("Путь ссылок подписки").Placeholder("/s/").Value(&a.SubPath).
+				DescriptionFunc(func() string {
+					d := cleanDomain(a.SubDomain)
+					if d == "" {
+						d = or(cleanDomain(a.Domain), "домен")
+					}
+					return "Ссылки будут вида https://" + d + or(cleanPath(a.SubPath), "/s/") + "<токен>. Пусто — /s/"
+				}, a).
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) != "" && !pathRe.MatchString(strings.TrimSpace(s)) {
+						return errors.New("латиница, цифры, _ - и /, например sub или api/v1/client")
+					}
+					return nil
+				}),
+			huh.NewInput().Title("Секретный путь веб-панели").Placeholder("случайный, например /k9Qm2xT7aB3c/").Value(&a.PanelPath).
+				Description("Без него панель не найти. Пусто — случайный (надёжнее)").
+				Validate(func(s string) error {
+					p := strings.Trim(strings.TrimSpace(s), "/")
+					if p == "" {
+						return nil
+					}
+					if !pathRe.MatchString(p) || len(p) < 6 {
+						return errors.New("от 6 символов: латиница, цифры, _ -")
+					}
+					if cleanPath(p) == or(cleanPath(a.SubPath), "/s/") {
+						return errors.New("совпадает с путём подписок")
+					}
+					return nil
+				}),
 			huh.NewInput().Title("Логин веб-панели").Description("Пароль сгенерируется сам и будет показан в конце").Value(&a.AdminLogin).
 				Validate(func(s string) error {
 					if !loginRe.MatchString(s) {
@@ -456,6 +497,7 @@ func Run(o Options) (*Answers, error) {
 		}
 	}
 	a.BotToken, a.Restore, a.Token = strings.TrimSpace(a.BotToken), strings.TrimSpace(a.Restore), strings.TrimSpace(a.Token)
+	a.SubPath, a.PanelPath = cleanPath(a.SubPath), cleanPath(a.PanelPath)
 	return a, nil
 }
 
@@ -470,13 +512,14 @@ func summary(a *Answers, nodes bool, sec []string, cache *dnsCache, publicOf fun
 		}
 		line("Домен", cleanDomain(a.Domain)+"  "+cache.check(a.Domain, publicOf(a.VPNIP)))
 		if a.SubDomain != "" {
-			line("Подписки", cleanDomain(a.SubDomain)+"  "+cache.check(a.SubDomain, publicOf(a.SubIP)))
+			line("Домен ссылок", cleanDomain(a.SubDomain)+"  "+cache.check(a.SubDomain, publicOf(a.SubIP)))
 		}
 		if a.Mode == "aio" {
 			line("В клиентах", or(a.Name, countryName(a.Country))+" "+a.Country)
 			line("Ноды", map[bool]string{true: "можно подключать (порт 9443)", false: "только этот сервер"}[nodes])
 		}
-		line("Панель", "логин "+a.AdminLogin+", пароль покажем в конце")
+		line("Подписки", "https://"+or(cleanDomain(a.SubDomain), cleanDomain(a.Domain))+or(cleanPath(a.SubPath), "/s/")+"<токен>")
+		line("Панель", "путь "+or(cleanPath(a.PanelPath), "случайный")+", логин "+a.AdminLogin+", пароль покажем в конце")
 		line("Бот", map[bool]string{true: "настроен", false: "потом, в панели"}[a.BotToken != ""])
 		if a.Restore != "" {
 			line("Бэкап", a.Restore)
@@ -514,6 +557,7 @@ func (a *Answers) Shell(w io.Writer) error {
 		"PUBLIC_IP": a.PublicIP, "VPN_IP": a.VPNIP, "SUB_IP": a.SubIP, "GATEWAY_LISTEN": a.GatewayListen,
 		"ADMIN_LOGIN": a.AdminLogin, "BOT_TOKEN": a.BotToken, "RESTORE": a.Restore, "TOKEN": a.Token,
 		"FIREWALL": a.Firewall, "SSH_KEYS_ONLY": a.SSHKeysOnly, "SSH_PORT": a.SSHPort, "PURGE": "0",
+		"SUB_PATH": a.SubPath, "PANEL_PATH": a.PanelPath,
 	}
 	if a.Purge {
 		vals["PURGE"] = "1"

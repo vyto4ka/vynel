@@ -73,6 +73,9 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 			f := realityFront{tag: r.Tag, listen: listen, port: port}
 			if host, p, err := net.SplitHostPort(str(rs["target"])); err == nil && (host == "127.0.0.1" || host == "localhost") {
 				f.localPort, _ = strconv.Atoi(p)
+				// Reality hands the client's address to our Caddy (PROXY v2), so subscriptions, the
+				// panel and the firewall see who connects instead of 127.0.0.1.
+				rs["xver"] = 2
 			}
 			fronts = append(fronts, f)
 		}
@@ -102,7 +105,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 			if front == nil || front.localPort == 0 {
 				continue // e.g. a profile override points Reality at a foreign site
 			}
-			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: front.localPort,
+			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: front.localPort, ProxyProtocol: true,
 				Routes: []caddyconf.Route{{Kind: caddyconf.KindDecoy, Decoy: decoyName(str(cm["decoy"]))}}})
 		case "certificate":
 			// The inbound needs Caddy's certificate for the domain (Hysteria2 uses it directly).
@@ -162,6 +165,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 				continue
 			}
 			site.LocalPort = front.localPort
+			site.ProxyProtocol = true
 			spec.Sites = append(spec.Sites, site)
 			continue
 		}
@@ -238,7 +242,7 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 	shared := webDomain == domain && webPort == port && webBind == bind
 	var sites []caddyconf.Site
 	if domain != "" {
-		prefix, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)
+		prefix := s.SubPrefix(ctx)
 		listen, _ := s.Setting(ctx, SettingSubListen, DefaultSubListen)
 		site := caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: []caddyconf.Route{{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix}}}
 		if webRoute != nil && shared {

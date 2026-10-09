@@ -136,6 +136,8 @@ bash <(curl -fsSL …/install.sh) --mode aio --domain nl.example.com --email you
 # ещё: --sub-domain sub.example.com --name "Нидерланды" --country NL --gateway-listen 127.0.0.1:9443 --admin-login boss
 #      --vpn-ip 203.0.113.12 --sub-ip 203.0.113.10   (сервер с несколькими IP)
 #      --firewall off  --ssh-keys-only  --ssh-port random
+#      --sub-path api/v1/client   (ссылки https://домен/api/v1/client/<токен>; по умолчанию /s/)
+#      --panel-path my-panel-77   (секретный путь панели; по умолчанию случайный)
 ```
 
 > Старая команда `…/install-aio.sh` тоже работает: теперь она запускает этот же установщик.

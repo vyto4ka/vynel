@@ -413,3 +413,8 @@ pre.code { background: var(--bg-2); border: 1px solid var(--border); border-radi
 .check-step.skip .check-icon { color: var(--muted); }
 .spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--miku-soft); border-top-color: var(--miku); animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Своя ссылка подписки: неизменяемое начало + редактируемый конец */
+.link-input { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.link-input > span { font-size: 12.5px; word-break: break-all; }
+.link-input > .input { flex: 1; min-width: 160px; }

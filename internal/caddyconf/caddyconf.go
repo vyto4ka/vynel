@@ -33,6 +33,9 @@ type Site struct {
 	Port      int    // public HTTPS port when not behind Reality (default 443)
 	LocalPort int    // >0: served on 127.0.0.1:LocalPort behind Reality instead
 	Routes    []Route
+	// ProxyProtocol: the listener reads a PROXY header from 127.0.0.1 (Reality's xver), so the
+	// panel sees the client's address instead of 127.0.0.1. The header is optional.
+	ProxyProtocol bool
 }
 
 // Spec is the whole node config.
@@ -59,6 +62,7 @@ func Build(spec Spec) ([]byte, error) {
 		domains []string
 		routes  map[string][]Route
 		tls     bool
+		proxy   bool
 	}
 	servers := map[string]*server{}
 	var domains []string
@@ -84,6 +88,7 @@ func Build(spec Spec) ([]byte, error) {
 			srv.domains = append(srv.domains, s.Domain)
 		}
 		srv.routes[s.Domain] = append(srv.routes[s.Domain], s.Routes...)
+		srv.proxy = srv.proxy || s.ProxyProtocol
 	}
 
 	httpServers := map[string]any{}
@@ -126,6 +131,14 @@ func Build(spec Spec) ([]byte, error) {
 		}
 		if len(errRoutes) > 0 {
 			s["errors"] = map[string]any{"routes": errRoutes}
+		}
+		if srv.proxy {
+			// PROXY first, TLS after it. Only loopback may send the header (Xray on this host);
+			// a connection without one is served as before.
+			s["listener_wrappers"] = []any{
+				map[string]any{"wrapper": "proxy_protocol", "timeout": "5s", "allow": []string{"127.0.0.1/32", "::1/128"}},
+				map[string]any{"wrapper": "tls"},
+			}
 		}
 		httpServers["https"+strconv.Itoa(i)] = s
 	}

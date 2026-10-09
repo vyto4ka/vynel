@@ -1,6 +1,7 @@
 package webapi
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -200,7 +201,8 @@ func (s *Server) session(r *http.Request) (any, error) {
 	ctx := r.Context()
 	login, _ := s.svc.Setting(ctx, service.SettingWebLogin, "")
 	url, _ := s.svc.WebURL(ctx)
-	return map[string]any{"login": login, "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx)}, nil
+	subBase, _ := s.svc.SubBase(ctx)
+	return map[string]any{"login": login, "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase}, nil
 }
 
 func (s *Server) account(r *http.Request) (any, error) {
@@ -338,22 +340,31 @@ func (s *Server) createUser(r *http.Request) (any, error) {
 		NeverExpires bool    `json:"neverExpires"`
 		TrafficLimit *int64  `json:"trafficLimit"`
 		HWIDLimit    *int64  `json:"hwidLimit"`
+		SubToken     string  `json:"subToken"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
 	ci := service.CreateUserInput{Username: in.Username, TemplateID: in.TemplateID, GroupIDs: in.GroupIDs, Note: in.Note,
-		NeverExpires: in.NeverExpires, TrafficLimitBytes: in.TrafficLimit, HWIDLimit: in.HWIDLimit}
+		NeverExpires: in.NeverExpires, TrafficLimitBytes: in.TrafficLimit, HWIDLimit: in.HWIDLimit, SubToken: in.SubToken}
 	if in.ExpireAt != nil {
 		t := time.Unix(*in.ExpireAt, 0)
 		ci.ExpireAt = &t
 	}
 	u, err := s.svc.CreateUser(r.Context(), actor(r), ci)
 	if err != nil {
-		return nil, err
+		return nil, subTokenTaken(err, in.SubToken)
 	}
 	g, _ := s.svc.UserGroupIDs(r.Context(), u.ID)
 	return userDTO(u, g), nil
+}
+
+// subTokenTaken explains a conflict on an own link end (the username is checked first).
+func subTokenTaken(err error, token string) error {
+	if token != "" && errors.Is(err, service.ErrConflict) {
+		return badRequest("такое имя или такая ссылка уже заняты")
+	}
+	return err
 }
 
 func (s *Server) user(r *http.Request) (any, error) {
@@ -504,6 +515,15 @@ func (s *Server) userAction(r *http.Request) (any, error) {
 			in.Token = true
 		}
 		u, err = s.svc.ReissueUser(ctx, a, id, in.Token, in.UUID)
+	case "link":
+		var in struct {
+			Token string `json:"token"`
+		}
+		if err := decode(r, &in); err != nil {
+			return nil, err
+		}
+		u, err = s.svc.SetSubToken(ctx, a, id, in.Token)
+		err = subTokenTaken(err, in.Token)
 	default:
 		return nil, &httpError{http.StatusNotFound, "unknown action"}
 	}
@@ -1128,6 +1148,13 @@ func (s *Server) setSetting(r *http.Request) (any, error) {
 		if in.Value != "" && net.ParseIP(in.Value) == nil {
 			return nil, badRequest("ожидается IP-адрес")
 		}
+	}
+	if in.Key == service.SettingSubPrefix && in.Value != "" {
+		p := strings.Trim(in.Value, "/ ")
+		if p == "" || strings.ContainsAny(p, "?#% ") {
+			return nil, badRequest("путь подписок: например s или api/v1/client, без ? # % и пробелов")
+		}
+		in.Value = "/" + p + "/"
 	}
 	if in.Key == service.SettingWebPath {
 		p := strings.Trim(in.Value, "/ ")

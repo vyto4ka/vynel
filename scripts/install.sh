@@ -28,7 +28,7 @@ NODE_UNIT=/etc/systemd/system/vynel-node.service
 MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
 ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
-VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY=""
+VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY="" SUB_PATH="" PANEL_PATH=""
 NO_TUI="${VYNEL_NO_TUI:-0}" TUI=0 SETUP_BIN=""
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -64,6 +64,8 @@ Options:
   --ssh-port random|N    SSH: move to another port (the old one stays until you confirm)
   --gateway-listen ADDR  port for additional nodes (default :9443; 127.0.0.1:9443 = none)
   --admin-login LOGIN    web panel login (default admin; the password is generated)
+  --sub-path PATH        aio/panel: path of subscription links (default /s/), e.g. sub or api/v1/client
+  --panel-path PATH      aio/panel: secret path of the web panel (default: random, 12 characters)
   --token TOKEN          node: join token from the panel
   --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
   --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz)
@@ -93,6 +95,8 @@ while [[ $# -gt 0 ]]; do
     --ssh-port) SSH_PORT="${2:-}"; shift 2 ;;
     --gateway-listen) GATEWAY_LISTEN="${2:-}"; shift 2 ;;
     --admin-login) ADMIN_LOGIN="${2:-}"; shift 2 ;;
+    --sub-path) SUB_PATH="${2:-}"; shift 2 ;;
+    --panel-path) PANEL_PATH="${2:-}"; shift 2 ;;
     --bot-token) BOT_TOKEN="${2:-}"; shift 2 ;;
     --restore) RESTORE="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
@@ -983,6 +987,22 @@ wait_cert() {
   red "https://$1/ does not answer yet (DNS or port 80 not reachable?). Caddy keeps retrying; see journalctl -u vynel"
 }
 
+# set_paths: the subscription link path and the panel's secret path, when given.
+set_paths() {
+  local p
+  if [[ -n "$SUB_PATH" ]]; then
+    p="${SUB_PATH#/}"; p="${p%/}"
+    [[ "$p" =~ ^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$ ]] || die "--sub-path: latin letters, digits, _ - and /"
+    admin setting sub.prefix "/$p/" >/dev/null
+  fi
+  if [[ -n "$PANEL_PATH" ]]; then
+    p="${PANEL_PATH#/}"; p="${p%/}"
+    [[ "$p" =~ ^[A-Za-z0-9_-]{6,}$ ]] || die "--panel-path: at least 6 latin letters, digits, _ -"
+    admin setting web.path "/$p/" >/dev/null
+  fi
+  return 0
+}
+
 # web_admin: creates the admin once and reads the panel address -> WEB_URL WEB_LOGIN WEB_PASSWORD
 web_admin() {
   local out
@@ -1163,6 +1183,7 @@ do_aio() {
   setup_args+=(--vpn-ip "$VPN_IP" --sub-ip "$SUB_IP")
   admin setup "${setup_args[@]}"
   admin setting install.command "$(script_command)" >/dev/null
+  set_paths
   web_admin
   setup_bot
 
@@ -1256,6 +1277,7 @@ do_panel() {
   admin setting sub.domain "$DOMAIN" >/dev/null
   [[ -n "$EMAIL" ]] && admin setting caddy.email "$EMAIL" >/dev/null
   admin setting install.command "$(script_command)" >/dev/null
+  set_paths
   # A profile for the nodes to come: Reality self-steal, available to the default group.
   if ! awk 'NR>1 {print $2}' <<<"$(admin profile list 2>/dev/null || true)" | grep -qx Reality; then
     admin profile add --name Reality >/dev/null
@@ -1277,7 +1299,9 @@ do_panel() {
   line "Сервер" "$PUBLIC_IP"
   line "Сертификат" "$([[ $CERT_OK -eq 1 ]] && echo "выпущен" || echo "ещё нет — проверьте DNS и порт 80")"
   line "Сайт-заглушка" "https://$DOMAIN/"
-  line "Подписки" "https://$DOMAIN/s/<токен>"
+  local sub_prefix
+  sub_prefix="$(admin setting sub.prefix 2>/dev/null || true)"
+  line "Подписки" "https://$DOMAIN${sub_prefix:-/s/}<токен>"
   line "Ноды подключаются" "$PUBLIC_IP:${GATEWAY_LISTEN##*:}"
   line "Данные" "$DATA  (бэкап: скопировать папку)"
   echo
@@ -1498,7 +1522,7 @@ run_tui() {
   if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
   if [[ $rc -ne 0 ]]; then rm -f "$out"; return 1; fi
   # Only known names, single-quoted values (internal/setup Answers.Shell).
-  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE)='" "$out"; then
+  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH)='" "$out"; then
     rm -f "$out"
     return 1
   fi

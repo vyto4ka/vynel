@@ -2,6 +2,8 @@
 package xraytest
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -9,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"log"
@@ -76,10 +79,35 @@ func TLSTarget(t testing.TB, name string) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = srv.ServeTLS(l, "", "") }()
+	go func() { _ = srv.ServeTLS(proxyListener{l}, "", "") }()
 	t.Cleanup(func() { _ = srv.Close() })
 	return l.Addr().(*net.TCPAddr).Port
 }
+
+// proxyListener drops an optional PROXY v2 header, as Caddy does behind Reality (xver 2).
+type proxyListener struct{ net.Listener }
+
+var proxyV2Sig = []byte("\r\n\r\n\x00\r\nQUIT\n")
+
+func (l proxyListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	br := bufio.NewReader(c)
+	if head, err := br.Peek(16); err == nil && bytes.Equal(head[:12], proxyV2Sig) {
+		n := int(binary.BigEndian.Uint16(head[14:16]))
+		_, _ = br.Discard(16 + n)
+	}
+	return &bufConn{Conn: c, r: br}, nil
+}
+
+type bufConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 
 // OriginSize is the body size served by Origin.
 const OriginSize = 256 * 1024

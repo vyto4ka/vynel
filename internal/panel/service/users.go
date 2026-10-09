@@ -188,6 +188,19 @@ type CreateUserInput struct {
 	Note              string
 	TelegramID        *int64
 	ExternalID        *string
+	SubToken          string // own end of the subscription link; empty = random
+}
+
+// subTokenRe: what may follow the subscription prefix. Short words are easy to guess, so an own
+// token is at least 8 characters.
+var subTokenRe = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+
+// CheckSubToken validates an own subscription token.
+func CheckSubToken(t string) error {
+	if !subTokenRe.MatchString(t) {
+		return invalid("the link end: 8–64 latin letters, digits, _ or -")
+	}
+	return nil
 }
 
 // CreateUser creates a user from a template.
@@ -201,7 +214,12 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 	if u.UUID, err = xrayconf.NewUUID(); err != nil {
 		return nil, err
 	}
-	if u.SubToken, err = newSubToken(); err != nil {
+	if in.SubToken = strings.TrimSpace(in.SubToken); in.SubToken != "" {
+		if err := CheckSubToken(in.SubToken); err != nil {
+			return nil, err
+		}
+		u.SubToken = in.SubToken
+	} else if u.SubToken, err = newSubToken(); err != nil {
 		return nil, err
 	}
 	err = s.mutate(ctx, change{actor: actor, action: "user.create", entity: "user", entityID: idOf(&u.ID), event: EvUserChanged, diff: map[string]any{"username": u.Username}},
@@ -350,6 +368,18 @@ func (s *Service) SetUserGroups(ctx context.Context, actor Actor, id int64, grou
 }
 
 // ReissueUser issues a new subscription token and/or VLESS UUID (leak response).
+// SetSubToken gives a user an own subscription link end (the old link stops working).
+func (s *Service) SetSubToken(ctx context.Context, actor Actor, id int64, token string) (*store.User, error) {
+	token = strings.TrimSpace(token)
+	if err := CheckSubToken(token); err != nil {
+		return nil, err
+	}
+	return s.updateUser(ctx, actor, id, "user.sub_token", map[string]string{"sub_token": "changed"}, func(_ store.DBTX, u *store.User) error {
+		u.SubToken = token
+		return nil
+	})
+}
+
 func (s *Service) ReissueUser(ctx context.Context, actor Actor, id int64, subToken, uuid bool) (*store.User, error) {
 	return s.updateUser(ctx, actor, id, "user.reissue", map[string]bool{"sub_token": subToken, "uuid": uuid}, func(_ store.DBTX, u *store.User) error {
 		var err error

@@ -111,7 +111,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.notFound(ctx, w)
 		return
 	}
-	prefix, _ := h.svc.Setting(ctx, service.SettingSubPrefix, service.DefaultSubPrefix)
+	prefix := h.svc.SubPrefix(ctx)
 	if r.Method != http.MethodGet && r.Method != http.MethodHead || !strings.HasPrefix(r.URL.Path, prefix) {
 		h.miss(ip)
 		h.notFound(ctx, w)
@@ -249,6 +249,11 @@ func (h *Handler) banned(ip string) bool {
 }
 
 func (h *Handler) miss(ip string) {
+	// Without the client's address (an old Reality front without PROXY, a local proxy) every
+	// visitor looks like 127.0.0.1: banning it would take subscriptions down for everyone.
+	if p := net.ParseIP(ip); p == nil || p.IsLoopback() {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := time.Now()

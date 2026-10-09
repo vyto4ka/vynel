@@ -96,12 +96,14 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
   const [templateId, setTemplateId] = useState(0)
   const [note, setNote] = useState('')
   const [ownGroups, setOwnGroups] = useState<number[] | null>(null)
+  const [subToken, setSubToken] = useState('')
+  const session = useLoad(() => get<{ subBase: string }>('session'))
   const act = useAction()
   const tpl = templates.data?.find((t) => (templateId ? t.id === templateId : t.isDefault))
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const u = await act(() => post<User>('users', { username, templateId, note, groupIds: ownGroups ?? undefined }), `Пользователь ${username} создан`)
+    const u = await act(() => post<User>('users', { username, templateId, note, groupIds: ownGroups ?? undefined, subToken: subToken.trim() }), `Пользователь ${username} создан`)
     if (u) onCreated(u)
   }
 
@@ -137,6 +139,12 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
         <Field label="Заметка">
           <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="например, телеграм @vasya" />
         </Field>
+        <Field label="Ссылка подписки" help={<>Пусто — случайная (её не подобрать). Своя: 8–64 символа, латиница, цифры, _ и -. Короткие слова легко угадать.</>}>
+          <div className="link-input">
+            <span className="mono muted">{session.data?.subBase || '…/s/'}</span>
+            <input className="input mono" value={subToken} onChange={(e) => setSubToken(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} placeholder="случайная" maxLength={64} />
+          </div>
+        </Field>
       </form>
     </Modal>
   )
@@ -159,6 +167,7 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
   const confirm = useConfirm()
   const [editing, setEditing] = useState(false)
   const [showQR, setShowQR] = useState(false)
+  const [linkEdit, setLinkEdit] = useState<string | null>(null)
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     const r = await act(fn, ok)
@@ -181,8 +190,22 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
         {data.subUrl ? (
           <>
             <CopyField value={data.subUrl} />
+            {linkEdit !== null && (
+              <div className="link-input" style={{ marginTop: 10 }}>
+                <span className="mono muted">{data.subUrl.slice(0, data.subUrl.length - (data.subUrl.split('/').pop() || '').length)}</span>
+                <input className="input mono" autoFocus value={linkEdit} maxLength={64}
+                  onChange={(e) => setLinkEdit(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} />
+                <button className="btn sm primary" disabled={linkEdit.length < 8} onClick={async () => {
+                  if (!(await confirm('Старая ссылка перестанет работать: пользователю нужно будет добавить новую.', 'Сменить'))) return
+                  await run(() => post(`users/${u.id}/link`, { token: linkEdit }), 'Ссылка изменена')
+                  setLinkEdit(null)
+                }}>Сохранить</button>
+                <button className="btn sm ghost" onClick={() => setLinkEdit(null)}>Отмена</button>
+              </div>
+            )}
             <div className="row" style={{ marginTop: 10 }}>
               <button className="btn sm" onClick={() => setShowQR(!showQR)}>{showQR ? 'Скрыть QR' : 'Показать QR'}</button>
+              {linkEdit === null && <button className="btn sm" onClick={() => setLinkEdit(data.subUrl!.split('/').pop() || '')}><Icon name="edit" /> Своя ссылка</button>}
               <a className="btn sm" href={data.subUrl} target="_blank" rel="noreferrer"><Icon name="link" /> Открыть страницу</a>
             </div>
             {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
