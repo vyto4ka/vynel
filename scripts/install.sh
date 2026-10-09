@@ -324,16 +324,30 @@ export DEBIAN_FRONTEND=noninteractive
 # apt waits for a lock held by unattended-upgrades instead of failing, and gives up on a mirror
 # that stops answering instead of hanging.
 APT_OPTS=(-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-need_pkgs=0
-for c in git curl unzip ip; do command -v "$c" >/dev/null || need_pkgs=1; done
-if [[ $need_pkgs -eq 1 || ( "$MODE" != update && "$MODE" != harden ) ]]; then
-  info "installing packages (apt)"
-  if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+export NEEDRESTART_MODE=a # Ubuntu's needrestart must not stop apt with a dialog
+
+# ensure_packages PKG...: installs what is missing, after the questions. Nothing runs when all
+# is there; the package lists are refreshed only when installing without it fails (fresh images
+# usually have usable lists, and `apt-get update` is the slow part).
+ensure_packages() {
+  local p missing=()
+  for p in "$@"; do
+    dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || missing+=("$p")
+  done
+  [[ ${#missing[@]} -gt 0 ]] || return 0
+  info "installing packages: ${missing[*]}"
+  if command -v fuser >/dev/null && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
     echo "  apt is busy (automatic updates?) — waiting for it, up to 5 minutes"
   fi
+  if timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq --no-install-recommends "${missing[@]}" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "  refreshing the package lists (apt-get update)"
   timeout 600 apt-get "${APT_OPTS[@]}" update -qq || red "  apt-get update failed or timed out — trying to install anyway"
-  timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq git curl unzip ca-certificates iproute2 psmisc nftables openssl >/dev/null || die "apt-get install failed"
-fi
+  timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq --no-install-recommends "${missing[@]}" >/dev/null || die "apt-get install ${missing[*]} failed"
+}
+# What the installation needs (the questions need nothing beyond curl, which got this script here).
+BASE_PKGS=(curl unzip ca-certificates iproute2 psmisc nftables openssl)
 
 detect_ip() {
   [[ -n "$PUBLIC_IP" ]] && return 0
@@ -453,7 +467,8 @@ apply_firewall() {
     vynel firewall off >/dev/null 2>&1 || true
     return 0
   fi
-  command -v nft >/dev/null || timeout 600 apt-get "${APT_OPTS[@]}" install -y -qq nftables >/dev/null || { red "  nftables is not installed: firewall skipped"; return 0; }
+  command -v nft >/dev/null || ensure_packages nftables || true
+  command -v nft >/dev/null || { red "  nftables is not installed: firewall skipped"; return 0; }
   info "firewall: only SSH and what vynel serves stays open"
   vynel firewall on >/dev/null
   local i
@@ -748,6 +763,7 @@ install_release_binary() {
 # writes them to OUT.
 verify_signed() {
   local dir sig
+  command -v openssl >/dev/null || ensure_packages openssl
   dir="$(dirname "$2")"
   sig="$(tail -n 1 "$1")"
   [[ "$sig" == "# ed25519 "* ]] || return 1
@@ -758,6 +774,7 @@ verify_signed() {
 }
 
 build_from_source() {
+  ensure_packages git
   ensure_go
   ensure_memory
   info "fetching source ($REF)"
@@ -1128,6 +1145,7 @@ do_aio() {
   NAME="${NAME:-$(country_name "$COUNTRY")}"
   info "server $PUBLIC_IP, country ${COUNTRY:-?}, domain $DOMAIN, subscriptions on $SUB_DOMAIN"
   if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then check_dns "$DOMAIN@${VPN_IP:-$PUBLIC_IP}" "$SUB_DOMAIN@${SUB_IP:-$PUBLIC_IP}"; else check_dns "$DOMAIN"; fi
+  ensure_packages "${BASE_PKGS[@]}"
   check_ports
 
   install_vynel
@@ -1225,6 +1243,7 @@ do_panel() {
   [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]] && die "a panel without its own node needs the node port open (--gateway-listen :9443)"
   FIREWALL="${FIREWALL:-on}"
   check_dns "$DOMAIN"
+  ensure_packages "${BASE_PKGS[@]}"
   check_ports
 
   install_vynel
@@ -1296,6 +1315,7 @@ do_node() {
   if [[ $joined -eq 0 ]]; then
     [[ "$TOKEN" == vyn1.* ]] || die "a join token from the panel is required (--token vyn1.…)"
   fi
+  ensure_packages "${BASE_PKGS[@]}"
   check_ports
 
   install_vynel
@@ -1362,6 +1382,7 @@ do_update() {
   if [[ $WIZARD -eq 1 ]]; then
     ask_yes "Обновить vynel, Xray и Caddy до свежих версий? Данные сохранятся" y || die "отменено"
   fi
+  ensure_packages "${BASE_PKGS[@]}"
   install_vynel || exit 1
   if [[ $PANEL_WITH_NODE -eq 1 || $NODE_INSTALLED -eq 1 ]]; then install_xray force; fi
   install_caddy force
