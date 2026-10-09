@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"slices"
@@ -92,28 +91,10 @@ func firewallCmd() *cobra.Command {
 	unblock := &cobra.Command{
 		Use: "unblock IP|all", Short: "Lift the scanner ban from an address (or everyone)", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			if args[0] == "all" {
-				for _, set := range []string{"scanners4", "scanners6"} {
-					if out, err := firewall.Runner(ctx, "", "flush", "set", "inet", firewall.Table, set); err != nil {
-						return fmt.Errorf("%w: %s", err, out)
-					}
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), "all bans lifted")
-				return nil
+			if err := firewall.Unblock(cmd.Context(), args[0]); err != nil {
+				return err
 			}
-			ip := net.ParseIP(args[0])
-			if ip == nil {
-				return fmt.Errorf("%q is not an IP address", args[0])
-			}
-			set := "scanners6"
-			if ip.To4() != nil {
-				set = "scanners4"
-			}
-			if out, err := firewall.Runner(ctx, "", "delete", "element", "inet", firewall.Table, set, "{ "+ip.String()+" }"); err != nil {
-				return fmt.Errorf("not banned or no firewall: %s", strings.TrimSpace(string(out)))
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s unblocked\n", ip)
+			fmt.Fprintf(cmd.OutOrStdout(), "%s unblocked\n", args[0])
 			return nil
 		},
 	}
@@ -170,26 +151,14 @@ func firewallStatus(ctx context.Context, cmd *cobra.Command) error {
 		fmt.Fprintln(w, "scanners   not banned (--no-trap)")
 		return nil
 	}
-	n := 0
-	for _, set := range []string{"scanners4", "scanners6"} {
-		out, err := firewall.Runner(ctx, "", "list", "set", "inet", firewall.Table, set)
-		if err != nil {
-			continue
+	banned := firewall.Banned(ctx)
+	for i, e := range banned {
+		if i == 20 {
+			break
 		}
-		s := string(out)
-		if i := strings.Index(s, "elements = {"); i >= 0 {
-			body := s[i+len("elements = {"):]
-			body = body[:strings.Index(body, "}")]
-			for _, e := range strings.Split(body, ",") {
-				if f := strings.Fields(e); len(f) > 0 {
-					n++
-					if n <= 20 {
-						fmt.Fprintf(w, "banned     %s (%s)\n", f[0], strings.Join(f[1:], " "))
-					}
-				}
-			}
-		}
+		fmt.Fprintf(w, "banned     %s\n", e)
 	}
+	n := len(banned)
 	fmt.Fprintf(w, "scanners   %d banned for a day; lift: vynel firewall unblock IP|all\n", n)
 	return nil
 }

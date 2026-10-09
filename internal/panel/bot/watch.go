@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/node/firewall"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
@@ -281,4 +282,74 @@ func exp(u *store.User) int64 {
 		return 1 << 62
 	}
 	return *u.ExpireAt
+}
+
+// ---- firewall of the panel's server ----
+
+// showFirewall: what the scanner trap banned and a way out when the admin locked himself out
+// (the bot keeps working: it talks to Telegram from the server).
+func (b *Bot) showFirewall(ctx context.Context, api *client, chat, msg int64, notice string) {
+	conf, _ := firewall.LoadConf()
+	loaded := firewall.Present(ctx)
+	var sb strings.Builder
+	if notice != "" {
+		sb.WriteString(notice + "\n\n")
+	}
+	sb.WriteString("🧱 <b>Файрвол сервера панели</b>\n")
+	switch {
+	case conf.Enabled && loaded:
+		sb.WriteString("включён: открыты только SSH и то, что обслуживает vynel\n")
+	case conf.Enabled:
+		sb.WriteString("включён, но правила ещё не загружены\n")
+	default:
+		sb.WriteString("выключен\n")
+	}
+	var kb Keyboard
+	if loaded {
+		banned := firewall.Banned(ctx)
+		fmt.Fprintf(&sb, "\nЗаблокировано сканеров: <b>%d</b> (на сутки)\n", len(banned))
+		for i, e := range banned {
+			if i == 10 {
+				fmt.Fprintf(&sb, "… и ещё %d\n", len(banned)-10)
+				break
+			}
+			sb.WriteString("<code>" + esc(strings.Fields(e)[0]) + "</code>\n")
+		}
+		sb.WriteString("\n<i>Свои не блокируются: вошедшие по SSH, в веб-панель и подключённые к VPN. Если заблокировало вас до входа — «Разблокировать всех».</i>")
+		if len(banned) > 0 {
+			kb = append(kb, row(btn("🔓 Разблокировать всех", "fwu")))
+		}
+	}
+	if conf.Enabled {
+		kb = append(kb, row(btn("⛔ Выключить файрвол", "fwoff")))
+	} else {
+		kb = append(kb, row(btn("🧱 Включить файрвол", "fwon")))
+	}
+	kb = append(kb, row(btn("🔄 Обновить", "fw"), btn("☰ Меню", "menu")))
+	b.show(ctx, api, chat, msg, sb.String(), kb)
+}
+
+func (b *Bot) firewallAction(ctx context.Context, api *client, chat, msg int64, action string) string {
+	switch action {
+	case "fwu":
+		if err := firewall.Unblock(ctx, "all"); err != nil {
+			return errText(err)
+		}
+		b.showFirewall(ctx, api, chat, msg, "🔓 Все блокировки сняты")
+		return "Разблокировано"
+	case "fwoff":
+		b.confirm(ctx, api, chat, msg, "⛔ Выключить файрвол на сервере панели? Откроются все порты, блокировки снимутся.", "fwoff!", "fw")
+	case "fwoff!", "fwon":
+		conf, _ := firewall.LoadConf()
+		conf.Enabled = action == "fwon"
+		if err := firewall.SaveConf(conf); err != nil {
+			return errText(err)
+		}
+		if !conf.Enabled {
+			_ = firewall.Remove(ctx)
+		}
+		b.log.Warn("firewall switched from telegram", "on", conf.Enabled)
+		b.showFirewall(ctx, api, chat, msg, map[bool]string{true: "🧱 Включён: правила загрузятся за 15 секунд", false: "⛔ Выключен"}[conf.Enabled])
+	}
+	return ""
 }

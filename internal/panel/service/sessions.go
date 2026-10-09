@@ -93,6 +93,21 @@ func (s *Service) WebSessions(ctx context.Context) ([]*store.WebSession, error) 
 	return store.ListWebSessions(ctx, s.st.DB, s.now().Unix())
 }
 
+// WebSessionIPs are the addresses of signed-in admins: the firewall never bans them.
+func (s *Service) WebSessionIPs(ctx context.Context) []string {
+	ws, err := s.WebSessions(ctx)
+	if err != nil {
+		return nil
+	}
+	var ips []string
+	for _, w := range ws {
+		if w.IP != "" {
+			ips = append(ips, w.IP)
+		}
+	}
+	return ips
+}
+
 // EndWebSessions ends one session, or all but keep when id is empty. It returns how many ended.
 func (s *Service) EndWebSessions(ctx context.Context, actor Actor, id, keep string) (int64, error) {
 	var n int64

@@ -64,6 +64,9 @@ func nodeCmd() *cobra.Command {
 				return err
 			}
 			defer a.Close()
+			if fwm != nil {
+				fwm.Trusted = a.TrustedIPs
+			}
 			return a.Run(cmd.Context())
 		},
 	}

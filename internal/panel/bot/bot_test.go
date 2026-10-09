@@ -327,6 +327,12 @@ func TestBot(t *testing.T) {
 	must(svc.SetSetting(ctx, service.ActorCLI, service.SettingWebPort, "47321"))
 	fake.waitCall(t, n, "panel moved", textHas("sendMessage", ":47321"))
 
+	// The firewall screen (off here: no table).
+	t.Setenv("VYNEL_FIREWALL_CONF", t.TempDir()+"/firewall.json")
+	n = fake.n()
+	fake.press(42, "fw")
+	fake.waitCall(t, n, "firewall screen", textHas("editMessageText", "Файрвол сервера панели"))
+
 	// The daily summary on demand.
 	n = fake.n()
 	fake.text(42, "/summary")

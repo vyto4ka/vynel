@@ -113,6 +113,8 @@ func (b *Bot) onMessage(ctx context.Context, api *client, m *Message) {
 			b.backupNow(ctx, api, chat)
 		case "/sessions":
 			b.showSessions(ctx, api, chat, 0, "")
+		case "/firewall":
+			b.showFirewall(ctx, api, chat, 0, "")
 		case "/summary":
 			text, err := b.summaryText(ctx)
 			if err != nil {
@@ -158,6 +160,7 @@ func (b *Bot) help(ctx context.Context, api *client, chat int64) {
 /login — ссылка входа в веб-панель (1 минута, один раз)
 /sessions — кто вошёл в веб-панель, завершить сессию
 /summary — сводка за сутки
+/firewall — файрвол: кто заблокирован, разблокировать, выключить
 /backup — бэкап сейчас
 Кнопка «Панель» у поля ввода открывает панель прямо в Telegram.
 
@@ -274,6 +277,10 @@ func (b *Bot) onCallback(ctx context.Context, api *client, q *CallbackQuery) {
 		b.sendLoginLink(ctx, api, q.From.ID, chat)
 	case "ss":
 		b.showSessions(ctx, api, chat, msg, "")
+	case "fw":
+		b.showFirewall(ctx, api, chat, msg, "")
+	case "fwu", "fwoff", "fwoff!", "fwon":
+		toast = b.firewallAction(ctx, api, chat, msg, parts[0])
 	case "sx": // end one session: sx:<id>
 		n, err := b.svc.EndWebSessions(ctx, actor, parts[1], "")
 		switch {
@@ -349,7 +356,8 @@ var menuKeyboard = Keyboard{
 	row(btn("👥 Пользователи", "ul:0"), btn("➕ Новый", "nu")),
 	row(btn("🔎 Найти", "find"), btn("🛰 Ноды", "nodes")),
 	row(btn("🔑 Войти в панель", "login"), btn("🔐 Сессии", "ss")),
-	row(btn("💾 Бэкап сейчас", "bk"), btn("🔄 Обновить", "menu")),
+	row(btn("💾 Бэкап сейчас", "bk"), btn("🧱 Файрвол", "fw")),
+	row(btn("🔄 Обновить", "menu")),
 }
 
 func (b *Bot) sendMenu(ctx context.Context, api *client, chat int64) {

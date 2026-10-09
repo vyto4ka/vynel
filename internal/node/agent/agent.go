@@ -76,6 +76,7 @@ type Agent struct {
 	certs    *certBridge
 	certDoms []string // domains whose certificates the running Xray config uses
 	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
+	vpnIPs   []string // addresses of connected VPN users, trusted by the firewall
 }
 
 // New opens the agent's state. Call Run to start.
@@ -370,6 +371,14 @@ func (a *Agent) FirewallPorts() []firewall.Port {
 	return append(ports, firewall.CaddyPorts(a.caddyCfg)...)
 }
 
+// TrustedIPs are the addresses of connected VPN users: they proved who they are with their key,
+// so the scanner trap never bans them (docs/INSTALL_GUIDE.md §10).
+func (a *Agent) TrustedIPs() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.vpnIPs...)
+}
+
 // syncFirewall opens new ports right after a config change instead of at the next tick.
 func (a *Agent) syncFirewall(ctx context.Context) {
 	if a.cfg.Firewall != nil {
@@ -632,8 +641,13 @@ func (a *Agent) collectLocked(ctx context.Context) {
 		if err != nil {
 			a.log.Debug("cannot read online users", "err", err)
 		}
+		var ips []string
 		for _, o := range online {
 			b.Online = append(b.Online, &nodev1.OnlineUser{Email: o.Email, Ips: int32(o.IPs)})
+			ips = append(ips, o.IPList...)
+		}
+		if err == nil {
+			a.vpnIPs = ips
 		}
 	}
 	if err := a.st.Enqueue(b); err != nil {

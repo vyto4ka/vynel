@@ -155,8 +155,15 @@ func Run(ctx context.Context, cfg Config) error {
 	run("web", func() error { return p.Web.Serve(ctx, webListen) })
 	run("bot", func() error { return p.Bot.Run(ctx) })
 	var fw *firewall.Manager
+	var trustedVPN func() []string // set once the local node exists
 	if cfg.Firewall {
-		fw = &firewall.Manager{Log: cfg.Log.With("component", "firewall")}
+		fw = &firewall.Manager{Log: cfg.Log.With("component", "firewall"), Trusted: func() []string {
+			ips := p.Service.WebSessionIPs(ctx)
+			if trustedVPN != nil {
+				ips = append(ips, trustedVPN()...)
+			}
+			return ips
+		}}
 	}
 	if cfg.WithNode {
 		node, err := p.Service.EnsureLocalNode(ctx, cfg.LocalNode)
@@ -174,6 +181,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		defer a.Close()
 		p.LocalNode = a
+		trustedVPN = a.TrustedIPs
 		cfg.Log.Info("local node enabled", "node", node.Code)
 		run("local node", func() error { return a.Run(ctx) })
 	} else {

@@ -151,7 +151,7 @@ func (b *Bot) runWith(ctx context.Context, token string) {
 	_ = api.setCommands(ctx, [][2]string{
 		{"menu", "Главное меню"}, {"users", "Пользователи"}, {"new", "Новый пользователь: /new имя"},
 		{"find", "Найти пользователя: /find имя"}, {"nodes", "Ноды"}, {"login", "Ссылка входа в веб-панель"},
-		{"sessions", "Кто вошёл в веб-панель"}, {"summary", "Сводка за сутки"},
+		{"sessions", "Кто вошёл в веб-панель"}, {"summary", "Сводка за сутки"}, {"firewall", "Файрвол: разблокировать, выключить"},
 		{"backup", "Бэкап сейчас"}, {"help", "Что умеет бот"},
 	})
 	b.loadAlerts(ctx)

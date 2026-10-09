@@ -2,7 +2,11 @@
 // SSH, the Xray inbounds, the Caddy sites and the node gateway. Everything else is dropped
 // silently, and an address that knocks on many closed ports is taken for a scanner and dropped
 // entirely for a day, so the server looks like a plain web server with nothing else on it
-// (docs/INSTALL_GUIDE.md §7).
+// (docs/INSTALL_GUIDE.md §10).
+//
+// Addresses that proved they are ours are never banned and skip the SSH limit: a successful SSH
+// login, an open web panel session, a connected VPN user. A browser retrying a port that has just
+// moved or a client pinging every server of a subscription must not lock the admin out.
 //
 // The table is built from the configs the node already runs, so a new inbound on another port
 // opens that port by itself. It is switched on and off with `vynel firewall on|off`; the state
@@ -304,11 +308,16 @@ func Render(s Spec) string {
 	w("table inet %s {", Table)
 	w("  set scanners4 { type ipv4_addr; flags timeout; timeout 1d; }")
 	w("  set scanners6 { type ipv6_addr; flags timeout; timeout 1d; }")
+	w("  set trusted4 { type ipv4_addr; flags timeout; timeout 1h; }")
+	w("  set trusted6 { type ipv6_addr; flags timeout; timeout 1h; }")
 	w("  chain input {")
 	w("    type filter hook input priority filter - 5; policy drop;")
 	w(`    iif "lo" accept`)
 	w("    ct state established,related accept")
 	w("    ct state invalid drop")
+	ssh := ints(s.SSH)
+	w("    ip saddr @trusted4 tcp dport %s accept", ssh)
+	w("    ip6 saddr @trusted6 tcp dport %s accept", ssh)
 	w("    ip saddr @scanners4 drop")
 	w("    ip6 saddr @scanners6 drop")
 	// ICMP: what a normal server answers. Ping is rate-limited; timestamps and the rest are not
@@ -321,7 +330,6 @@ func Render(s Spec) string {
 	w("    icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept")
 	w("    ip6 saddr fe80::/10 udp dport 546 accept")
 	// SSH stays open on every port it listens on; new connections are rate-limited per address.
-	ssh := ints(s.SSH)
 	w("    tcp dport %s ct state new meter ssh4 size 65535 { ip saddr limit rate over %d/minute burst %d packets } drop", ssh, rate, rate)
 	w("    tcp dport %s ct state new meter ssh6 size 65535 { ip6 saddr limit rate over %d/minute burst %d packets } drop", ssh, rate, rate)
 	w("    tcp dport %s accept", ssh)
@@ -331,6 +339,9 @@ func Render(s Spec) string {
 	if set := portSet(ports, "udp", nil); set != "" {
 		w("    udp dport %s accept", set)
 	}
+	// Ours knocking on a closed port: just no answer, never a ban.
+	w("    ip saddr @trusted4 drop")
+	w("    ip6 saddr @trusted6 drop")
 	// Port scanners: many new TCP connections to closed ports in a minute -> silence for a day.
 	if !s.Conf.NoTrap {
 		w("    tcp flags & (syn | ack) == syn meter trap4 size 65535 { ip saddr limit rate over 20/minute burst 20 packets } add @scanners4 { ip saddr } drop")
@@ -378,10 +389,15 @@ func AppliedPath() string { return strings.TrimSuffix(ConfPath(), ".json") + ".a
 // Manager keeps the table in step with the configs it is given and with firewall.json.
 type Manager struct {
 	Log *slog.Logger
+	// Trusted lists addresses that proved they are ours (web panel sessions, VPN users);
+	// SSH logins are found by the manager itself.
+	Trusted func() []string
 
 	mu      sync.Mutex
 	applied string // last script loaded
 	broken  string // last error, logged once
+	sshAt   time.Time
+	sshIPs  []string
 }
 
 // Sync applies the rules for these ports, or removes the table when the firewall is off. It is
@@ -417,6 +433,7 @@ func (m *Manager) Sync(ctx context.Context, ports []Port) error {
 	}
 	script := Render(Spec{SSH: SSHPorts(ctx), Ports: ports, Conf: conf})
 	if script == m.applied && Present(ctx) {
+		m.trust(ctx, false)
 		return nil
 	}
 	out, err := Runner(ctx, script, "-f", "-")
@@ -430,12 +447,128 @@ func (m *Manager) Sync(ctx context.Context, ports []Port) error {
 	}
 	m.broken = ""
 	m.applied = script
+	m.trust(ctx, true)
 	_ = os.WriteFile(AppliedPath(), []byte(script), 0o644)
 	var open []string
 	for _, p := range dedupe(ports) {
 		open = append(open, p.String())
 	}
 	log.Info("firewall rules applied", "ssh", SSHPortsString(script), "open", strings.Join(open, " "))
+	return nil
+}
+
+var acceptedRe = regexp.MustCompile(`Accepted \S+ for \S+ from (\S+) port`)
+
+// SSHLogins are the addresses that logged in over SSH in the last day (sshd's journal, or
+// auth.log on systems without one).
+func SSHLogins(ctx context.Context) []string {
+	out, err := exec.CommandContext(ctx, "journalctl", "-u", "ssh", "-u", "sshd", "--since", "-24h", "-o", "cat", "--no-pager").Output()
+	if err != nil || len(out) == 0 {
+		out, _ = os.ReadFile("/var/log/auth.log")
+	}
+	seen := map[string]bool{}
+	var ips []string
+	for _, m := range acceptedRe.FindAllStringSubmatch(string(out), -1) {
+		if ip := net.ParseIP(m[1]); ip != nil && !seen[ip.String()] {
+			seen[ip.String()] = true
+			ips = append(ips, ip.String())
+		}
+	}
+	return ips
+}
+
+// trust refreshes the trusted sets and lifts bans on those addresses (after the table was
+// replaced, and on every tick to keep their hour fresh).
+func (m *Manager) trust(ctx context.Context, fresh bool) {
+	if time.Since(m.sshAt) > time.Minute || fresh {
+		m.sshIPs, m.sshAt = SSHLogins(ctx), time.Now()
+	}
+	ips := append([]string(nil), m.sshIPs...)
+	if m.Trusted != nil {
+		ips = append(ips, m.Trusted()...)
+	}
+	script := TrustScript(ips)
+	if script == "" {
+		return
+	}
+	if out, err := Runner(ctx, script, "-f", "-"); err != nil && m.Log != nil {
+		m.Log.Warn("firewall: cannot update trusted addresses", "err", err, "out", strings.TrimSpace(string(out)))
+	}
+}
+
+// TrustScript adds addresses to the trusted sets with a fresh hour and takes them off the ban
+// lists. Each element is added, deleted and added again: that works whether it was there or not,
+// and resets its timeout.
+func TrustScript(ips []string) string {
+	var b strings.Builder
+	seen := map[string]bool{}
+	for _, raw := range ips {
+		ip := net.ParseIP(strings.TrimSpace(raw))
+		if ip == nil || ip.IsLoopback() || seen[ip.String()] {
+			continue
+		}
+		seen[ip.String()] = true
+		fam := "6"
+		if ip.To4() != nil {
+			fam = "4"
+		}
+		e := ip.String()
+		fmt.Fprintf(&b, "add element inet %s trusted%s { %s }\n", Table, fam, e)
+		fmt.Fprintf(&b, "delete element inet %s trusted%s { %s }\n", Table, fam, e)
+		fmt.Fprintf(&b, "add element inet %s trusted%s { %s timeout 1h }\n", Table, fam, e)
+		fmt.Fprintf(&b, "add element inet %s scanners%s { %s }\n", Table, fam, e)
+		fmt.Fprintf(&b, "delete element inet %s scanners%s { %s }\n", Table, fam, e)
+	}
+	return b.String()
+}
+
+// Banned lists the addresses the scanner trap dropped, with what nft says about their expiry.
+func Banned(ctx context.Context) []string {
+	var out []string
+	for _, set := range []string{"scanners4", "scanners6"} {
+		raw, err := Runner(ctx, "", "list", "set", "inet", Table, set)
+		if err != nil {
+			continue
+		}
+		s := string(raw)
+		i := strings.Index(s, "elements = {")
+		if i < 0 {
+			continue
+		}
+		body := s[i+len("elements = {"):]
+		if j := strings.Index(body, "}"); j >= 0 {
+			body = body[:j]
+		}
+		for _, e := range strings.Split(body, ",") {
+			if e = strings.Join(strings.Fields(e), " "); e != "" {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
+}
+
+// Unblock lifts the ban from one address, or from everyone with "all".
+func Unblock(ctx context.Context, who string) error {
+	if who == "all" {
+		for _, set := range []string{"scanners4", "scanners6"} {
+			if out, err := Runner(ctx, "", "flush", "set", "inet", Table, set); err != nil {
+				return fmt.Errorf("%w: %s", err, bytes.TrimSpace(out))
+			}
+		}
+		return nil
+	}
+	ip := net.ParseIP(who)
+	if ip == nil {
+		return fmt.Errorf("%q is not an IP address", who)
+	}
+	set := "scanners6"
+	if ip.To4() != nil {
+		set = "scanners4"
+	}
+	if out, err := Runner(ctx, "", "delete", "element", "inet", Table, set, "{ "+ip.String()+" }"); err != nil {
+		return fmt.Errorf("not banned or no firewall: %s", bytes.TrimSpace(out))
+	}
 	return nil
 }
 

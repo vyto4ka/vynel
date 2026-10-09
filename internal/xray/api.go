@@ -167,8 +167,9 @@ func (a *API) UserTrafficDeltas(ctx context.Context) ([]UserTraffic, error) {
 
 // OnlineUser is a user with live connections and the number of distinct IPs.
 type OnlineUser struct {
-	Email string
-	IPs   int
+	Email  string
+	IPs    int
+	IPList []string // the addresses themselves (they also let the firewall trust VPN users)
 }
 
 // OnlineUsers lists users with live connections (needs policy statsUserOnline).
@@ -186,6 +187,9 @@ func (a *API) OnlineUsers(ctx context.Context) ([]OnlineUser, error) {
 		ou := OnlineUser{Email: email}
 		if ips, err := a.stats.GetStatsOnlineIpList(ctx, &stats.GetStatsRequest{Name: "user>>>" + email + ">>>online"}); err == nil {
 			ou.IPs = len(ips.Ips)
+			for ip := range ips.Ips {
+				ou.IPList = append(ou.IPList, ip)
+			}
 		}
 		out = append(out, ou)
 	}
