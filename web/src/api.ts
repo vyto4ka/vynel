@@ -261,6 +261,18 @@ export interface Setting {
   default?: string
   value?: string
   set: boolean
+  movesPanel?: boolean
+}
+
+export interface NetRole { kind: 'panel' | 'sub' | 'gateway' | 'inbound' | 'egress'; tag?: string; all?: boolean }
+
+export interface Network {
+  nodes: {
+    id: number; code: string; name: string; country: string; domain: string; local: boolean
+    addresses: { id: number; ip: string; interface: string; onInterface: boolean; primary: boolean; roles: NetRole[] }[]
+    allRoles: NetRole[]
+  }[]
+  domains: { name: string; purpose: 'sub' | 'panel' | 'node'; node: string; resolved: string[]; expected: string[]; ok: boolean; error?: string }[]
 }
 
 export interface Overview {
@@ -352,5 +364,14 @@ export interface SubConfig {
   defaultHeaders: SubHeader[]
   defaultPage: SubPage
   variables: { name: string; description: string; example: string }[]
-  uaRules: { pattern: string; format: string }[]
+  rules: SubRule[]
+  defaultRules: SubRule[]
+  formats: string[]
+}
+
+export interface SubRule {
+  pattern: string
+  format: string
+  enabled: boolean
+  note?: string
 }

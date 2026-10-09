@@ -19,7 +19,8 @@ const (
 	SettingSubTitle       = "sub.title"        // profile-title shown by clients
 	SettingSubUpdateHours = "sub.update_hours" // profile-update-interval
 	SettingSubSupportURL  = "sub.support_url"
-	SettingSubDecoy       = "sub.decoy" // decoy site shown on the subscription domain
+	SettingSubDecoy       = "sub.decoy"        // decoy site shown on the subscription domain
+	SettingSubPageEnabled = "sub.page_enabled" // "false" = browsers get the decoy instead of the page
 	SettingHWIDEnabled    = "hwid.enabled"
 	SettingHWIDLimit      = "hwid.default_limit" // used when a user has no own limit; 0 = unlimited
 	SettingHWIDAllowNone  = "hwid.allow_missing" // let clients without x-hwid through

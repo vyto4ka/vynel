@@ -10,6 +10,7 @@ export function Nodes() {
   const profiles = useLoad(() => get<Profile[]>('profiles'))
   const [adding, setAdding] = useState(false)
   const [join, setJoin] = useState<JoinInfo | null>(null)
+  const [checkOf, setCheckOf] = useState<Node | null>(null)
   const [editNode, setEditNode] = useState<Node | null>(null)
   const [attachTo, setAttachTo] = useState<Node | null>(null)
   const [hostOf, setHostOf] = useState<Inbound | null>(null)
@@ -22,7 +23,7 @@ export function Nodes() {
     <>
       <div className="toolbar">
         <div className="text-2 grow small">Ноды — серверы с Xray. На каждой свой VLESS-инбаунд со своими ключами; общие настройки берутся из профиля.</div>
-        <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" /> Нода</button>
+        <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" /> Добавить сервер</button>
       </div>
 
       {!nodes.data ? <Loading error={nodes.error} /> : nodes.data.length === 0 ? <div className="card"><Empty icon="🛰">Нод нет</Empty></div> : (
@@ -43,6 +44,7 @@ export function Nodes() {
                   <div className="row" style={{ gap: 6 }}>
                     <Badge color={st.color} dot>{st.label}</Badge>
                     <Switch checked={n.enabled} onChange={(v) => act(() => patch(`nodes/${n.id}`, { enabled: v }), v ? 'Нода включена' : 'Нода выключена').then(reload)} />
+                    <button className="btn ghost icon sm" title="Проверка: связь, конфиг, DNS, сертификат" onClick={() => setCheckOf(n)}><Icon name="search" /></button>
                     <button className="btn ghost icon sm" title="Изменить" onClick={() => setEditNode(n)}><Icon name="edit" /></button>
                     {!n.local && <button className="btn ghost icon sm" title="Новый токен подключения" onClick={async () => {
                       if (await confirm('Выпустить новый токен? Текущий сертификат ноды будет отозван — ноду нужно будет подключить заново с новым токеном.', 'Выпустить')) {
@@ -62,7 +64,12 @@ export function Nodes() {
                       <ul className="list-plain" style={{ color: 'inherit' }}>{n.problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
                     </div>
                   )}
-                  {n.state === 'pending' && <div className="alert amber" style={{ marginBottom: 14 }}>Нода ещё не подключалась. Запустите её на сервере с токеном (кнопка с ключом выпустит новый).</div>}
+                  {n.state === 'pending' && (
+                    <div className="alert amber row between" style={{ marginBottom: 14 }}>
+                      <span>Нода ещё не подключалась. Запустите команду на сервере (кнопка с ключом выпустит новую).</span>
+                      <button className="btn sm" onClick={() => setCheckOf(n)}>Чеклист</button>
+                    </div>
+                  )}
                   <div className="cards" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
                     <div>
                       {m ? (
@@ -127,7 +134,8 @@ export function Nodes() {
       )}
 
       {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setAdding(false); setJoin(j); reload() }} />}
-      {join && <JoinModal j={join} onClose={() => setJoin(null)} />}
+      {join && <NodeSetup j={join} onClose={() => { setJoin(null); reload() }} />}
+      {checkOf && <NodeSetup node={checkOf} onClose={() => { setCheckOf(null); reload() }} />}
       {editNode && <EditNode n={editNode} onClose={() => setEditNode(null)} onSaved={() => { setEditNode(null); reload() }} />}
       {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}
       {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
@@ -148,8 +156,9 @@ function AddNode({ profiles, onClose, onAdded }: { profiles: Profile[]; onClose:
     if (j) onAdded(j)
   }
   return (
-    <Modal title="Новая нода" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="add-node" disabled={!name.trim()}>Создать и получить токен</button></>}>
+    <Modal title="Добавить сервер · шаг 1 из 2" onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="add-node" disabled={!name.trim()}>Дальше: команда установки</button></>}>
+      <WizardSteps at={0} />
       <form id="add-node" onSubmit={submit}>
         <div className="grid2">
           <Field label="Название (видно в приложениях)"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Германия" /></Field>
@@ -173,20 +182,52 @@ function AddNode({ profiles, onClose, onAdded }: { profiles: Profile[]; onClose:
   )
 }
 
-function JoinModal({ j, onClose }: { j: JoinInfo; onClose: () => void }) {
+interface Step { key: string; title: string; state: 'ok' | 'wait' | 'fail' | 'skip'; detail?: string }
+
+function WizardSteps({ at }: { at: number }) {
+  const names = ['Сервер', 'Установка и проверка']
   return (
-    <Modal title={`Подключение ноды ${j.code}`} onClose={onClose} wide footer={<button className="btn primary" onClick={onClose}>Готово</button>}>
-      {j.warnings && j.warnings.length > 0 && <div className="alert amber" style={{ marginBottom: 14 }}>{j.warnings.join('; ')}</div>}
-      {j.error ? <div className="alert pink">{j.error}</div> : (
+    <div className="wizard-steps">
+      {names.map((n, i) => <div key={n} className={i < at ? 'done' : i === at ? 'on' : ''}><span>{i < at ? '✓' : i + 1}</span>{n}</div>)}
+    </div>
+  )
+}
+
+const stepIcon = { ok: '✓', wait: '', fail: '!', skip: '–' }
+
+// Мастер, шаг 2: команда установки и живой чеклист, пока нода не заработает.
+function NodeSetup({ j, node, onClose }: { j?: JoinInfo; node?: Node; onClose: () => void }) {
+  const id = j?.id ?? node!.id
+  const title = j ? `Добавить сервер · шаг 2 из 2` : `Проверка ноды ${node!.name}`
+  const { data, error } = useLoad(() => get<Step[]>(`nodes/${id}/checklist`), [id], 4000)
+  const done = data?.every((s) => s.state === 'ok' || s.state === 'skip')
+  const firstOpen = data?.findIndex((s) => s.state !== 'ok' && s.state !== 'skip') ?? -1
+  return (
+    <Modal title={title} onClose={onClose} wide footer={<button className="btn primary" onClick={onClose}>{done ? 'Готово' : 'Закрыть'}</button>}>
+      {j && <WizardSteps at={1} />}
+      {j?.warnings && j.warnings.length > 0 && <div className="alert amber" style={{ marginBottom: 14 }}>{j.warnings.join('; ')}</div>}
+      {j && (j.error ? <div className="alert pink">{j.error}</div> : (
         <>
           <p className="text-2" style={{ marginTop: 0 }}>
             На новом сервере (Ubuntu или Debian, под root, свободные порты 80 и 443, A-запись домена ноды на его IP) выполните одну команду.
             Она поставит vynel, Xray и Caddy, подключит ноду к панели и запустит её как службу.
           </p>
           <CopyField value={j.command || ''} wrap />
-          <p className="muted small">Токен одноразовый и действует {j.ttl}. На панели должен быть открыт порт 9443. Через минуту нода появится здесь со статусом «работает».</p>
+          <p className="muted small">Команда одноразовая и действует {j.ttl}. На панели должен быть открыт порт 9443. Окно можно не закрывать: шаги ниже отметятся сами.</p>
         </>
-      )}
+      ))}
+      <div className="checklist">
+        {!data ? <Loading error={error} /> : data.map((s, i) => (
+          <div key={s.key} className={'check-step ' + s.state + (i === firstOpen && s.state === 'wait' ? ' current' : '')}>
+            <span className="check-icon">{i === firstOpen && s.state === 'wait' ? <span className="spinner" /> : stepIcon[s.state]}</span>
+            <div>
+              <div>{s.title}</div>
+              {s.detail && <div className={'small ' + (s.state === 'fail' ? 'pink-text' : 'muted')}>{s.detail}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {done && <div className="alert green" style={{ marginTop: 12 }}>Нода работает. Пользователи получат её с ближайшим обновлением подписки.</div>}
     </Modal>
   )
 }

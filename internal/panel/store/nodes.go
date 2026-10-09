@@ -210,3 +210,16 @@ func GetInstallToken(ctx context.Context, q DBTX, hash string) (*InstallToken, e
 func MarkInstallTokenUsed(ctx context.Context, q DBTX, id int64) error {
 	return execOne(ctx, q, `UPDATE node_install_tokens SET used_at=? WHERE id=? AND used_at IS NULL`, unix(), id)
 }
+
+// LatestInstallToken returns the newest install token of a node.
+func LatestInstallToken(ctx context.Context, q DBTX, nodeID int64) (*InstallToken, error) {
+	t := &InstallToken{}
+	var used sql.NullInt64
+	err := q.QueryRowContext(ctx, `SELECT id, node_id, token_hash, expires_at, used_at FROM node_install_tokens WHERE node_id=? ORDER BY id DESC LIMIT 1`, nodeID).
+		Scan(&t.ID, &t.NodeID, &t.TokenHash, &t.ExpiresAt, &used)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	t.UsedAt = ptrInt(used)
+	return t, nil
+}

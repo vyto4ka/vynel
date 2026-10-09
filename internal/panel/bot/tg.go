@@ -149,11 +149,17 @@ type Update struct {
 	CallbackQuery *CallbackQuery `json:"callback_query"`
 }
 
-// Button is an inline keyboard button: callback data or a URL.
+// Button is an inline keyboard button: callback data, a URL or a Mini App.
 type Button struct {
-	Text string `json:"text"`
-	Data string `json:"callback_data,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Text   string  `json:"text"`
+	Data   string  `json:"callback_data,omitempty"`
+	URL    string  `json:"url,omitempty"`
+	WebApp *WebApp `json:"web_app,omitempty"`
+}
+
+// WebApp opens a page as a Telegram Mini App.
+type WebApp struct {
+	URL string `json:"url"`
 }
 
 // Keyboard is an inline keyboard.
@@ -234,4 +240,10 @@ func (c *client) setCommands(ctx context.Context, cmds [][2]string) error {
 		list = append(list, map[string]string{"command": c[0], "description": c[1]})
 	}
 	return c.call(ctx, "setMyCommands", map[string]any{"commands": list}, nil)
+}
+
+// setMenuButton puts a Mini App button next to the chat's input field.
+func (c *client) setMenuButton(ctx context.Context, chat int64, text, url string) error {
+	return c.call(ctx, "setChatMenuButton", map[string]any{"chat_id": chat,
+		"menu_button": map[string]any{"type": "web_app", "text": text, "web_app": map[string]string{"url": url}}}, nil)
 }

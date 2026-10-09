@@ -384,3 +384,32 @@ pre.code { background: var(--bg-2); border: 1px solid var(--border); border-radi
   .hm-c { min-height: 9px; }
 }
 .dot-own { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--pink); margin-left: 7px; vertical-align: 1px; }
+
+/* Настройки: скрытие, адреса и роли */
+.stealth-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.stealth-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+.stealth-item .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--muted); opacity: .5; }
+.stealth-item.on .dot { background: var(--miku); opacity: 1; box-shadow: 0 0 0 3px var(--miku-soft); }
+.dns-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.dns-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.net-node { margin-bottom: 14px; }
+.net-node-head { margin-bottom: 6px; }
+.table.compact td { padding-top: 6px; padding-bottom: 6px; }
+
+/* Мастер ноды и чеклист */
+.wizard-steps { display: flex; gap: 18px; margin-bottom: 16px; font-size: 13px; color: var(--muted); }
+.wizard-steps > div { display: flex; align-items: center; gap: 8px; }
+.wizard-steps span { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; border: 1px solid var(--border-2); font-size: 12px; }
+.wizard-steps .on { color: var(--text); }
+.wizard-steps .on span { border-color: var(--miku); color: var(--miku); }
+.wizard-steps .done span { background: var(--miku-soft); border-color: var(--miku); color: var(--miku); }
+.checklist { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; }
+.check-step { display: flex; gap: 12px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; }
+.check-step.current { background: var(--surface-2); }
+.check-step.wait:not(.current) { opacity: .55; }
+.check-icon { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; border: 1px solid var(--border-2); }
+.check-step.ok .check-icon { background: var(--miku-soft); color: var(--miku); border-color: transparent; }
+.check-step.fail .check-icon { background: var(--red-soft); color: var(--red); border-color: transparent; }
+.check-step.skip .check-icon { color: var(--muted); }
+.spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--miku-soft); border-top-color: var(--miku); animation: spin .9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

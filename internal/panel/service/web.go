@@ -20,9 +20,12 @@ import (
 // Web panel settings (docs/STEALTH.md §2.2). The panel lives under a secret path on the
 // subscription domain (or web.domain), proxied by Caddy to web.listen.
 const (
-	SettingWebPath      = "web.path"   // secret path, e.g. /k9Qm2xT7aB3c/
-	SettingWebListen    = "web.listen" // internal listener behind Caddy
-	SettingWebDomain    = "web.domain" // optional; empty = sub.domain
+	SettingWebPath      = "web.path"    // secret path, e.g. /k9Qm2xT7aB3c/
+	SettingWebListen    = "web.listen"  // internal listener behind Caddy
+	SettingWebDomain    = "web.domain"  // optional; empty = sub.domain
+	SettingWebPort      = "web.port"    // public port of the panel; empty = sub.port
+	SettingWebAddress   = "web.address" // IP the panel binds to; empty = sub.address
+	SettingWebDecoy     = "web.decoy"   // decoy of the panel's own site; empty = sub.decoy
 	SettingWebLogin     = "web.login"
 	settingWebPassword  = "web.password_hash" // bcrypt
 	settingWebSessionKy = "web.session_key"   // HMAC key of session cookies
@@ -112,11 +115,19 @@ func (s *Service) WebURL(ctx context.Context) (string, error) {
 	if domain == "" {
 		return "", nil
 	}
-	port, _ := s.Setting(ctx, SettingSubPort, "443")
-	if port != "" && port != "443" {
+	if port := s.webPort(ctx); port != "" && port != "443" {
 		domain += ":" + port
 	}
 	return "https://" + domain + path, nil
+}
+
+// webPort is the panel's public port: web.port, else the subscription port.
+func (s *Service) webPort(ctx context.Context) string {
+	if p, _ := s.Setting(ctx, SettingWebPort, ""); strings.TrimSpace(p) != "" {
+		return strings.TrimSpace(p)
+	}
+	p, _ := s.Setting(ctx, SettingSubPort, "443")
+	return p
 }
 
 // SetAdminCredentials sets the admin login and a new generated password, which it returns.

@@ -8,6 +8,7 @@ interface BotInfo {
   status: { running: boolean; username?: string; error?: string }
   admins: { id: number; name: string; username?: string; boundAt: number }[]
   backupTime: string
+  summaryTime: string
   timezone: string
   alerts: boolean
   alertDelay: string
@@ -137,13 +138,27 @@ export function Telegram() {
       </div>
 
       <div className="card">
+        <div className="card-head"><h3>Сводка и вход</h3></div>
+        <div className="card-pad">
+          <Field label="Сводка за сутки каждый день в" help="Трафик, активные пользователи, у кого заканчивается подписка, состояние нод. Пусто — не присылать. Сразу: /summary">
+            <input className="input" style={{ maxWidth: 160 }} type="time" defaultValue={d.summaryTime === 'off' ? '' : d.summaryTime}
+              onBlur={(e) => { if ((e.target.value || 'off') !== d.summaryTime) save({ summaryTime: e.target.value }) }} />
+          </Field>
+          <div className="muted small">
+            О каждом входе в веб-панель бот пишет сразу — с кнопкой «Завершить эту сессию». Все сессии: /sessions в боте или «Аккаунт» в панели.
+            Кнопка «Панель» у поля ввода в чате с ботом открывает панель прямо в Telegram — без пароля, только для привязанных админов.
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
         <div className="card-head"><h3>Уведомления о нодах</h3></div>
         <div className="card-pad">
           <div className="field">
             <div className="row between" style={{ flexWrap: 'nowrap' }}>
               <div>
                 <div>Сообщать, если нода недоступна</div>
-                <div className="help muted small">Одно сообщение на сбой: оно обновляется (с какого времени, сколько уже, последняя проверка), а когда нода вернётся — превращается в «снова в строю».</div>
+                <div className="help muted small">Одно сообщение на сбой: оно обновляется (с какого времени, сколько уже, последняя проверка), а когда нода вернётся — превращается в «снова в строю». Об ошибке применения конфигурации бот пишет всегда.</div>
               </div>
               <Switch checked={d.alerts} onChange={(v) => save({ alerts: v })} />
             </div>

@@ -142,3 +142,49 @@ func TestCaddyCDNOriginBehindReality(t *testing.T) {
 	}
 	_ = caddyconf.KindStream
 }
+
+func TestCaddyPanelOnOwnPort(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "sub.example.com")
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]string{SettingWebPort: "47321", SettingWebDecoy: "cloud"} {
+		if err := f.s.SetSetting(f.ctx, ActorCLI, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	path := must(f.s.WebPath(f.ctx))
+	var cfg struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]json.RawMessage `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(ds.Caddy, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	var behind, own string
+	for _, s := range cfg.Apps.HTTP.Servers {
+		switch {
+		case strings.Contains(string(s), `"127.0.0.1:8443"`):
+			behind = string(s)
+		case strings.Contains(string(s), `":47321"`):
+			own = string(s)
+		}
+	}
+	if behind == "" || own == "" {
+		t.Fatalf("want the subscriptions behind Reality and the panel on :47321: %s", ds.Caddy)
+	}
+	if strings.Contains(behind, path) || !strings.Contains(own, path) || !strings.Contains(own, "/cloud") {
+		t.Fatalf("the panel path and its decoy belong to its own port only:\nbehind %s\nown %s", behind, own)
+	}
+	if u := must(f.s.WebURL(f.ctx)); u != "https://sub.example.com:47321"+path {
+		t.Fatalf("web URL %s", u)
+	}
+}

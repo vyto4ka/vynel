@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -16,7 +17,73 @@ const (
 	SettingSubAnnounce    = "sub.announce"     // text shown by apps (announce header) and on the page
 	SettingSubAnnounceURL = "sub.announce_url" // link of the announcement
 	SettingSubPageURL     = "sub.page_url"     // profile-web-page-url; empty = the subscription page itself
+	SettingSubRules       = "sub.ua_rules"     // JSON []SubRule; empty = DefaultSubRules
 )
+
+// SubRule maps a User-Agent to a subscription format; the first enabled match wins.
+type SubRule struct {
+	Pattern string `json:"pattern"` // regexp on the User-Agent
+	Format  string `json:"format"`  // base64 | mihomo | singbox | xray | html
+	Enabled bool   `json:"enabled"`
+	Note    string `json:"note,omitempty"`
+}
+
+// SubFormats are the formats a rule may pick.
+var SubFormats = []string{"base64", "mihomo", "singbox", "xray", "html"}
+
+// DefaultSubRules are the built-in rules (docs/ARCHITECTURE.md §8.3).
+func DefaultSubRules() []SubRule {
+	return []SubRule{
+		{`(?i)keqdroid|keqdis`, "base64", true, "KeqDroid лучше всего читает ссылки vless://"},
+		{`(?i)karing`, "base64", true, "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся"},
+		{`(?i)clash|mihomo|stash|flclash|koala`, "mihomo", true, "Clash-клиенты"},
+		{`(?i)sing-?box|\bSF[AIMT]\b`, "singbox", true, "sing-box и его приложения"},
+		{`(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, "base64", true, "Приложения на ядре Xray"},
+	}
+}
+
+// SubRules returns the configured User-Agent rules (the defaults until changed).
+func (s *Service) SubRules(ctx context.Context) ([]SubRule, error) {
+	raw, err := s.Setting(ctx, SettingSubRules, "")
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return DefaultSubRules(), err
+	}
+	var rs []SubRule
+	if err := json.Unmarshal([]byte(raw), &rs); err != nil {
+		return DefaultSubRules(), nil
+	}
+	return rs, nil
+}
+
+// CheckSubRules validates rules (also used for unsaved tests).
+func CheckSubRules(rs []SubRule) error {
+	for i := range rs {
+		r := &rs[i]
+		r.Pattern = strings.TrimSpace(r.Pattern)
+		if r.Pattern == "" {
+			return invalid("rule %d: the pattern is empty", i+1)
+		}
+		if _, err := regexp.Compile(r.Pattern); err != nil {
+			return invalid("rule %d: not a valid regexp: %v", i+1, err)
+		}
+		if !slices.Contains(SubFormats, r.Format) {
+			return invalid("rule %d: unknown format %q", i+1, r.Format)
+		}
+	}
+	return nil
+}
+
+// SetSubRules validates and stores the rules; nil restores the defaults.
+func (s *Service) SetSubRules(ctx context.Context, actor Actor, rs []SubRule) error {
+	if rs == nil {
+		return s.SetSetting(ctx, actor, SettingSubRules, "")
+	}
+	if err := CheckSubRules(rs); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(rs)
+	return s.SetSetting(ctx, actor, SettingSubRules, string(b))
+}
 
 // SubHeader is one response header of subscriptions. Value may contain {variables}
 // (see SubVariables); a header whose value renders empty is not sent.

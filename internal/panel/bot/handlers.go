@@ -111,6 +111,14 @@ func (b *Bot) onMessage(ctx context.Context, api *client, m *Message) {
 			b.sendLoginLink(ctx, api, m.From.ID, chat)
 		case "/backup":
 			b.backupNow(ctx, api, chat)
+		case "/sessions":
+			b.showSessions(ctx, api, chat, 0, "")
+		case "/summary":
+			text, err := b.summaryText(ctx)
+			if err != nil {
+				text = "Не получилось: " + esc(errText(err))
+			}
+			_, _ = api.send(ctx, chat, text, Keyboard{row(btn("☰ Меню", "menu"))})
 		default:
 			b.help(ctx, api, chat)
 		}
@@ -148,9 +156,12 @@ func (b *Bot) help(ctx context.Context, api *client, chat int64) {
 /new vasya — новый пользователь по шаблону
 /nodes — ноды и их состояние
 /login — ссылка входа в веб-панель (1 минута, один раз)
+/sessions — кто вошёл в веб-панель, завершить сессию
+/summary — сводка за сутки
 /backup — бэкап сейчас
+Кнопка «Панель» у поля ввода открывает панель прямо в Telegram.
 
-Сам бот присылает: бэкап каждый вечер, сообщение, если нода недоступна (оно обновляется, пока нода не вернётся).`, Keyboard{row(btn("☰ Меню", "menu"))})
+Сам бот присылает: бэкап каждый вечер, сводку каждое утро, сообщение о каждом входе в панель, о недоступной ноде (оно обновляется, пока нода не вернётся) и об ошибке применения конфигурации.`, Keyboard{row(btn("☰ Меню", "menu"))})
 }
 
 // ---- callbacks ----
@@ -261,6 +272,27 @@ func (b *Bot) onCallback(ctx context.Context, api *client, q *CallbackQuery) {
 		b.showNodes(ctx, api, chat, msg)
 	case "login":
 		b.sendLoginLink(ctx, api, q.From.ID, chat)
+	case "ss":
+		b.showSessions(ctx, api, chat, msg, "")
+	case "sx": // end one session: sx:<id>
+		n, err := b.svc.EndWebSessions(ctx, actor, parts[1], "")
+		switch {
+		case err != nil:
+			toast = errText(err)
+		case n == 0:
+			toast = "Сессия уже завершена"
+		default:
+			toast = "Сессия завершена"
+		}
+		b.showSessions(ctx, api, chat, msg, "")
+	case "sxa":
+		b.confirm(ctx, api, chat, msg, "⛔ Завершить все сессии веб-панели? Войти снова можно будет кнопкой «Войти в панель».", "sxa!", "ss")
+	case "sxa!":
+		n, err := b.svc.EndWebSessions(ctx, actor, "", "")
+		if err != nil {
+			toast = errText(err)
+		}
+		b.showSessions(ctx, api, chat, msg, fmt.Sprintf("Завершено сессий: %d", n))
 	case "bk":
 		toast = "Готовлю бэкап…"
 		go b.backupNow(context.WithoutCancel(ctx), api, chat)
@@ -316,7 +348,7 @@ func (b *Bot) menuText(ctx context.Context) string {
 var menuKeyboard = Keyboard{
 	row(btn("👥 Пользователи", "ul:0"), btn("➕ Новый", "nu")),
 	row(btn("🔎 Найти", "find"), btn("🛰 Ноды", "nodes")),
-	row(btn("🔑 Войти в панель", "login")),
+	row(btn("🔑 Войти в панель", "login"), btn("🔐 Сессии", "ss")),
 	row(btn("💾 Бэкап сейчас", "bk"), btn("🔄 Обновить", "menu")),
 }
 
@@ -610,7 +642,11 @@ func (b *Bot) sendLoginLink(ctx context.Context, api *client, from, chat int64) 
 		return
 	}
 	text := fmt.Sprintf("🔑 <b>Вход в панель</b>\nСсылка работает до %s и только один раз.", b.fmtTime(ctx, exp.Unix(), "15:04:05"))
-	m, err := api.send(ctx, chat, text, Keyboard{{{Text: "Открыть панель", URL: link}}})
+	kb := Keyboard{{{Text: "Открыть в браузере", URL: link}}}
+	if base, err := b.svc.WebURL(ctx); err == nil && base != "" {
+		kb = append(kb, row(Button{Text: "📱 Открыть в Telegram", WebApp: &WebApp{URL: base}}))
+	}
+	m, err := api.send(ctx, chat, text, kb)
 	if err != nil {
 		return
 	}
@@ -622,6 +658,6 @@ func (b *Bot) sendLoginLink(ctx context.Context, api *client, from, chat int64) 
 			return
 		case <-time.After(wait):
 		}
-		_ = api.edit(context.WithoutCancel(ctx), chat, m.MessageID, "🔑 Ссылка входа истекла. Новая: /login", nil)
+		_ = api.edit(context.WithoutCancel(ctx), chat, m.MessageID, "🔑 Ссылка входа истекла. Новая: /login, или кнопка «Панель» у поля ввода", nil)
 	}()
 }

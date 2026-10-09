@@ -148,6 +148,7 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request, rest string) {
 type session struct {
 	Login string `json:"l"`
 	Exp   int64  `json:"e"`
+	ID    string `json:"s"` // server-side session (store.WebSession); cookies without one are refused
 }
 
 func (s *Server) sign(ctx context.Context, sess session) (string, error) {
@@ -162,7 +163,8 @@ func (s *Server) sign(ctx context.Context, sess session) (string, error) {
 	return p + "." + base64.RawURLEncoding.EncodeToString(m.Sum(nil)), nil
 }
 
-func (s *Server) verify(ctx context.Context, v string) (*session, bool) {
+func (s *Server) verify(r *http.Request, v string) (*session, bool) {
+	ctx := r.Context()
 	p, sig, ok := strings.Cut(v, ".")
 	if !ok {
 		return nil, false
@@ -186,7 +188,7 @@ func (s *Server) verify(ctx context.Context, v string) (*session, bool) {
 		return nil, false
 	}
 	login, _ := s.svc.Setting(ctx, service.SettingWebLogin, "")
-	if sess.Login != login {
+	if sess.Login != login || sess.ID == "" || !s.svc.WebSessionActive(ctx, sess.ID, clientIP(r)) {
 		return nil, false
 	}
 	return &sess, true
@@ -196,15 +198,41 @@ func secure(r *http.Request) bool {
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
-func (s *Server) setCookie(w http.ResponseWriter, r *http.Request, login string) error {
-	exp := time.Now().Add(sessionTTL)
-	v, err := s.sign(r.Context(), session{Login: login, Exp: exp.Unix()})
+// startSession signs a browser in: it records the session (the bot hears about it) and sets the
+// cookie.
+func (s *Server) startSession(w http.ResponseWriter, r *http.Request, method, who string) (string, error) {
+	login, _ := s.svc.Setting(r.Context(), service.SettingWebLogin, "")
+	if login == "" {
+		login = "admin"
+	}
+	ws, err := s.svc.StartWebSession(r.Context(), method, who, clientIP(r), r.UserAgent(), sessionTTL)
+	if err != nil {
+		return "", err
+	}
+	return login, s.writeCookie(w, r, session{Login: login, Exp: ws.ExpiresAt, ID: ws.ID})
+}
+
+func (s *Server) writeCookie(w http.ResponseWriter, r *http.Request, sess session) error {
+	v, err := s.sign(r.Context(), sess)
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: v, Path: basePath(r), Expires: exp, HttpOnly: true,
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: v, Path: basePath(r), Expires: time.Unix(sess.Exp, 0), HttpOnly: true,
 		Secure: secure(r), SameSite: http.SameSiteStrictMode})
 	return nil
+}
+
+// current is the session of the request (already verified by handle).
+func current(r *http.Request) session {
+	var sess session
+	if c, err := r.Cookie(cookieName); err == nil {
+		if p, _, ok := strings.Cut(c.Value, "."); ok {
+			if raw, err := base64.RawURLEncoding.DecodeString(p); err == nil {
+				_ = json.Unmarshal(raw, &sess)
+			}
+		}
+	}
+	return sess
 }
 
 func basePath(r *http.Request) string {
@@ -236,7 +264,7 @@ func (s *Server) handle(pattern string, fn apiFunc) {
 			writeError(w, &httpError{http.StatusUnauthorized, "not logged in"})
 			return
 		}
-		if _, ok := s.verify(r.Context(), c.Value); !ok {
+		if _, ok := s.verify(r, c.Value); !ok {
 			writeError(w, &httpError{http.StatusUnauthorized, "session expired"})
 			return
 		}
@@ -308,17 +336,7 @@ func pathID(r *http.Request, name string) (int64, error) {
 }
 
 func actor(r *http.Request) service.Actor {
-	login := ""
-	if c, err := r.Cookie(cookieName); err == nil {
-		if p, _, ok := strings.Cut(c.Value, "."); ok {
-			if raw, err := base64.RawURLEncoding.DecodeString(p); err == nil {
-				var sess session
-				_ = json.Unmarshal(raw, &sess)
-				login = sess.Login
-			}
-		}
-	}
-	return service.Actor{Kind: "admin", ID: login}
+	return service.Actor{Kind: "admin", ID: current(r).Login}
 }
 
 func clientIP(r *http.Request) string {
@@ -347,6 +365,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
+	if !s.svc.PasswordLoginEnabled(r.Context()) {
+		writeError(w, &httpError{http.StatusForbidden, "вход по паролю выключен — войдите через Telegram-бота (/login)"})
+		return
+	}
 	s.loginMu.Lock()
 	err := s.svc.CheckAdmin(r.Context(), strings.TrimSpace(in.Login), in.Password)
 	if err != nil {
@@ -358,8 +380,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{http.StatusUnauthorized, "неверный логин или пароль"})
 		return
 	}
-	login, _ := s.svc.Setting(r.Context(), service.SettingWebLogin, "")
-	if err := s.setCookie(w, r, login); err != nil {
+	login, err := s.startSession(w, r, service.LoginPassword, strings.TrimSpace(in.Login))
+	if err != nil {
 		writeError(w, &httpError{http.StatusInternalServerError, err.Error()})
 		return
 	}
@@ -368,6 +390,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(cookieName); err == nil {
+		if sess, ok := s.verify(r, c.Value); ok {
+			_, _ = s.svc.EndWebSessions(r.Context(), actor(r), sess.ID, "")
+		}
+	}
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: basePath(r), MaxAge: -1, HttpOnly: true, Secure: secure(r), SameSite: http.SameSiteStrictMode})
 	s.respond(w, r, func(*http.Request) (any, error) { return nil, nil })
 }

@@ -1,11 +1,13 @@
-import { FormEvent, useState } from 'react'
-import { post } from '../api'
+import { FormEvent, useEffect, useState } from 'react'
+import { get, post } from '../api'
 
 export function Login({ onLogin, error: initialError }: { onLogin: () => void; error?: string }) {
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(initialError || '')
   const [busy, setBusy] = useState(false)
+  const [opts, setOpts] = useState<{ password: boolean; bot: string } | null>(null)
+  useEffect(() => { get<{ password: boolean; bot: string }>('login/options').then(setOpts, () => setOpts({ password: true, bot: '' })) }, [])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -29,6 +31,13 @@ export function Login({ onLogin, error: initialError }: { onLogin: () => void; e
           <div className="brand-name">vyn<span>el</span></div>
         </div>
         <h2>Вход в панель</h2>
+        {opts && !opts.password ? (
+          <>
+            {error && <div className="alert pink" style={{ marginBottom: 14 }}>{error}</div>}
+            <p className="text-2">Вход по паролю выключен. Откройте Telegram-бота панели{opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></>} и нажмите кнопку «Панель» у поля ввода или отправьте <code>/login</code>.</p>
+            <p className="muted small" style={{ marginBottom: 0 }}>Нет доступа к боту — на сервере: <code>vynel admin login-link</code></p>
+          </>
+        ) : <>
         <div className="field">
           <label htmlFor="login">Логин</label>
           <input id="login" className="input" autoComplete="username" autoFocus value={login} onChange={(e) => setLogin(e.target.value)} />
@@ -43,6 +52,7 @@ export function Login({ onLogin, error: initialError }: { onLogin: () => void; e
           Без пароля: команда <code>/login</code> в Telegram-боте панели.<br />
           Забыли пароль? На сервере: <code>vynel admin web password</code>
         </p>
+        </>}
       </form>
     </div>
   )

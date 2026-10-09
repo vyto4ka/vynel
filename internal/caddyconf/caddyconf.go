@@ -68,11 +68,13 @@ func Build(spec Spec) ([]byte, error) {
 		if s.Domain == "" {
 			return nil, fmt.Errorf("site without domain")
 		}
+		// A domain may be served on several listeners (the panel on its own port next to the
+		// subscriptions); it still gets one certificate.
 		listen := listenAddr(s)
-		if prev, ok := seenDomain[s.Domain]; ok && prev != listen {
-			return nil, fmt.Errorf("domain %s is served on both %s and %s", s.Domain, prev, listen)
+		if _, ok := seenDomain[s.Domain]; !ok {
+			seenDomain[s.Domain] = listen
+			domains = append(domains, s.Domain)
 		}
-		seenDomain[s.Domain] = listen
 		srv := servers[listen]
 		if srv == nil {
 			srv = &server{listen: listen, routes: map[string][]Route{}, tls: true}
@@ -80,7 +82,6 @@ func Build(spec Spec) ([]byte, error) {
 		}
 		if _, ok := srv.routes[s.Domain]; !ok {
 			srv.domains = append(srv.domains, s.Domain)
-			domains = append(domains, s.Domain)
 		}
 		srv.routes[s.Domain] = append(srv.routes[s.Domain], s.Routes...)
 	}

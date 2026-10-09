@@ -2,7 +2,9 @@ package webapi
 
 import (
 	"fmt"
+	"net"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,6 +57,7 @@ func (s *Server) routes() {
 	s.handle("PATCH /api/nodes/{id}", s.updateNode)
 	s.handle("DELETE /api/nodes/{id}", s.deleteNode)
 	s.handle("POST /api/nodes/{id}/token", s.nodeToken)
+	s.handle("GET /api/nodes/{id}/checklist", s.nodeChecklist)
 
 	s.handle("GET /api/profiles", s.profiles)
 	s.handle("GET /api/profile-templates", s.profileTemplates)
@@ -73,6 +76,8 @@ func (s *Server) routes() {
 
 	s.handle("GET /api/settings", s.settings)
 	s.handle("PUT /api/settings", s.setSetting)
+	s.handle("POST /api/settings/stealth", s.stealth)
+	s.handle("GET /api/network", s.network)
 }
 
 // ---- DTOs ----
@@ -195,7 +200,7 @@ func (s *Server) session(r *http.Request) (any, error) {
 	ctx := r.Context()
 	login, _ := s.svc.Setting(ctx, service.SettingWebLogin, "")
 	url, _ := s.svc.WebURL(ctx)
-	return map[string]any{"login": login, "version": s.cfg.Version, "webUrl": url}, nil
+	return map[string]any{"login": login, "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx)}, nil
 }
 
 func (s *Server) account(r *http.Request) (any, error) {
@@ -223,9 +228,11 @@ func (s *Server) account(r *http.Request) (any, error) {
 		return nil, err
 	}
 	login, _ := s.svc.Setting(ctx, service.SettingWebLogin, "")
-	// The session key depends on the password: hand out a fresh cookie so this browser stays in.
+	// The session key depends on the password: re-sign this browser's session so it stays in.
 	w := r.Context().Value(writerKey{}).(http.ResponseWriter)
-	if err := s.setCookie(w, r, login); err != nil {
+	sess := current(r)
+	sess.Login = login
+	if err := s.writeCookie(w, r, sess); err != nil {
 		return nil, err
 	}
 	return map[string]string{"login": login, "password": pw}, nil
@@ -893,6 +900,14 @@ func (s *Server) deleteNode(r *http.Request) (any, error) {
 	return nil, s.svc.DeleteNode(r.Context(), actor(r), id)
 }
 
+func (s *Server) nodeChecklist(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	return s.svc.NodeChecklist(r.Context(), id, s.cfg.Connected)
+}
+
 func (s *Server) nodeToken(r *http.Request) (any, error) {
 	id, err := pathID(r, "id")
 	if err != nil {
@@ -1046,13 +1061,21 @@ func (s *Server) settings(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	localIPs := s.localIPs(r)
 	known := map[string]bool{}
 	out := make([]map[string]any, 0, len(settingDefs)+len(stored))
 	for _, d := range settingDefs {
 		known[d.Key] = true
 		v, set := stored[d.Key]
+		opts := d.Options
+		if ipSettings[d.Key] {
+			opts = localIPs
+			if v != "" && !slices.Contains(opts, v) {
+				opts = append([]string{v}, opts...)
+			}
+		}
 		out = append(out, map[string]any{"key": d.Key, "section": d.Section, "title": d.Title, "help": d.Help, "type": d.Type,
-			"options": d.Options, "default": d.Default, "value": v, "set": set})
+			"options": opts, "default": d.Default, "value": v, "set": set, "movesPanel": movesPanel[d.Key]})
 	}
 	var extra []string
 	for k := range stored {
@@ -1093,6 +1116,19 @@ func (s *Server) setSetting(r *http.Request) (any, error) {
 			}
 		}
 	}
+	in.Value = strings.TrimSpace(in.Value)
+	switch in.Key {
+	case service.SettingWebPort, service.SettingSubPort:
+		if in.Value != "" {
+			if p, _ := strconv.Atoi(in.Value); p < 1 || p > 65535 || p == 80 {
+				return nil, badRequest("порт: от 1 до 65535, кроме 80 (он нужен для сертификатов)")
+			}
+		}
+	case service.SettingWebAddress, service.SettingSubAddress:
+		if in.Value != "" && net.ParseIP(in.Value) == nil {
+			return nil, badRequest("ожидается IP-адрес")
+		}
+	}
 	if in.Key == service.SettingWebPath {
 		p := strings.Trim(in.Value, "/ ")
 		if len(p) < 6 || strings.ContainsAny(p, "/?#% ") {
@@ -1105,4 +1141,30 @@ func (s *Server) setSetting(r *http.Request) (any, error) {
 	}
 	url, _ := s.svc.WebURL(r.Context())
 	return map[string]string{"webUrl": url}, nil
+}
+
+// localIPs lists the addresses of the panel's own server.
+func (s *Server) localIPs(r *http.Request) []string {
+	ips, _ := s.svc.LocalIPs(r.Context())
+	if ips == nil {
+		ips = []string{}
+	}
+	return ips
+}
+
+// stealth moves the panel to a random high port and a new secret path (docs/STEALTH.md §1).
+func (s *Server) stealth(r *http.Request) (any, error) {
+	var in struct{ Port, Path bool }
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	url, err := s.svc.Stealth(r.Context(), actor(r), in.Port, in.Path)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"webUrl": url}, nil
+}
+
+func (s *Server) network(r *http.Request) (any, error) {
+	return s.svc.Network(r.Context())
 }

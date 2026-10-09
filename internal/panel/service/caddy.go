@@ -193,7 +193,8 @@ func (s *Service) nodeSetting(ctx context.Context, key, code, def string) (strin
 }
 
 // panelSites are the sites of the panel's own server: the subscription domain with the web
-// panel under its secret path, or the web panel on its own domain (web.domain).
+// panel under its secret path, or the web panel on its own domain (web.domain), port
+// (web.port) or IP (web.address), each with its own decoy (docs/STEALTH.md §1).
 func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 	domain, err := s.Setting(ctx, SettingSubDomain, "")
 	if err != nil {
@@ -210,26 +211,44 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 	if err != nil {
 		return nil, invalid("sub.port %q is not a number", portStr)
 	}
+	webPort, err := strconv.Atoi(s.webPort(ctx))
+	if err != nil || webPort <= 0 || webPort > 65535 {
+		return nil, invalid("web.port %q is not a port", s.webPort(ctx))
+	}
+	webBind, _ := s.Setting(ctx, SettingWebAddress, "")
+	if webBind == "" {
+		webBind = bind
+	}
 	d, _ := s.Setting(ctx, SettingSubDecoy, "docs")
 	decoyRoute := caddyconf.Route{Kind: caddyconf.KindDecoy, Decoy: decoyName(d)}
+	wd, _ := s.Setting(ctx, SettingWebDecoy, "")
+	webDecoyRoute := decoyRoute
+	if wd != "" {
+		webDecoyRoute.Decoy = decoyName(wd)
+	}
 	var webRoute *caddyconf.Route
 	if path, _ := s.WebPath(ctx); path != "" {
 		listen, _ := s.Setting(ctx, SettingWebListen, DefaultWebListen)
 		webRoute = &caddyconf.Route{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: path}
 	}
+	if webDomain == "" {
+		webDomain = domain
+	}
+	// The panel shares the subscription site only when domain, IP and port are all the same.
+	shared := webDomain == domain && webPort == port && webBind == bind
 	var sites []caddyconf.Site
 	if domain != "" {
 		prefix, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)
 		listen, _ := s.Setting(ctx, SettingSubListen, DefaultSubListen)
 		site := caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: []caddyconf.Route{{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix}}}
-		if webRoute != nil && (webDomain == "" || webDomain == domain) {
+		if webRoute != nil && shared {
 			site.Routes = append(site.Routes, *webRoute)
 		}
 		site.Routes = append(site.Routes, decoyRoute)
 		sites = append(sites, site)
 	}
-	if webRoute != nil && webDomain != "" && webDomain != domain {
-		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: bind, Port: port, Routes: []caddyconf.Route{*webRoute, decoyRoute}})
+	if webRoute != nil && !shared {
+		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: webBind, Port: webPort, Routes: []caddyconf.Route{*webRoute, webDecoyRoute}})
 	}
 	return sites, nil
 }

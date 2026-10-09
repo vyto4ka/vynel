@@ -31,11 +31,15 @@ func (s *Server) subConfig(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	rules, err := s.svc.SubRules(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"basics": s.svc.SubBasicsGet(ctx), "headers": hs, "page": page,
 		"headerCatalog": service.SubHeaderCatalog, "appCatalog": service.SubAppCatalog,
 		"defaultHeaders": service.DefaultSubHeaders(), "defaultPage": service.DefaultSubPage(),
-		"variables": service.SubVariables, "uaRules": subscription.UARules(),
+		"variables": service.SubVariables, "rules": rules, "defaultRules": service.DefaultSubRules(), "formats": service.SubFormats,
 	}, nil
 }
 
@@ -43,6 +47,7 @@ type subDraft struct {
 	Basics  *service.SubBasics   `json:"basics"`
 	Headers *[]service.SubHeader `json:"headers"`
 	Page    *service.SubPage     `json:"page"`
+	Rules   *[]service.SubRule   `json:"rules"`
 }
 
 func (s *Server) subSave(r *http.Request) (any, error) {
@@ -70,6 +75,15 @@ func (s *Server) subSave(r *http.Request) (any, error) {
 			return nil, err
 		}
 	}
+	if in.Rules != nil {
+		rs := *in.Rules
+		if rs == nil {
+			rs = []service.SubRule{}
+		}
+		if err := s.svc.SetSubRules(ctx, a, rs); err != nil {
+			return nil, err
+		}
+	}
 	return s.subConfig(r)
 }
 
@@ -88,8 +102,12 @@ func (s *Server) subReset(r *http.Request) (any, error) {
 		if err := s.svc.SetSubPage(ctx, a, nil); err != nil {
 			return nil, err
 		}
+	case "rules":
+		if err := s.svc.SetSubRules(ctx, a, nil); err != nil {
+			return nil, err
+		}
 	default:
-		return nil, badRequest("part must be headers or page")
+		return nil, badRequest("part must be headers, page or rules")
 	}
 	return s.subConfig(r)
 }
@@ -125,6 +143,7 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 		UserAgent string               `json:"userAgent"`
 		Headers   *[]service.SubHeader `json:"headers"` // unsaved draft
 		Basics    *service.SubBasics   `json:"basics"`
+		Rules     *[]service.SubRule   `json:"rules"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -142,9 +161,19 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	if in.Basics != nil {
 		b = *in.Basics
 	}
+	rules, err := s.svc.SubRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Rules != nil {
+		rules = *in.Rules
+		if err := service.CheckSubRules(rules); err != nil {
+			return nil, err
+		}
+	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	req.Header.Set("User-Agent", in.UserAgent)
-	format := subscription.Detect(req, "", u.ClientType)
+	format := subscription.Detect(req, "", u.ClientType, rules)
 	headers := subscription.RenderHeaders(hs, subscription.UserVars(u, s.subURLFor(r, u), b, time.Now()), in.UserAgent)
 	if headers == nil {
 		headers = []subscription.HeaderValue{}
@@ -160,7 +189,7 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not logged in", http.StatusUnauthorized)
 		return
 	}
-	if _, ok := s.verify(r.Context(), c.Value); !ok {
+	if _, ok := s.verify(r, c.Value); !ok {
 		http.Error(w, "session expired", http.StatusUnauthorized)
 		return
 	}

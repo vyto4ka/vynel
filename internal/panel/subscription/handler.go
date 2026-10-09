@@ -16,40 +16,28 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
-// rules map User-Agents to formats (docs/ARCHITECTURE.md §8.3); the first match wins.
-var rules = []struct {
-	re     *regexp.Regexp
-	format Format
-}{
-	{regexp.MustCompile(`(?i)keqdroid|keqdis`), FormatBase64}, // reads vless:// links best (it also takes Clash)
-	// Karing converts links into its own sing-box config best; XHTTP is dropped for it (singBoxCore).
-	{regexp.MustCompile(`(?i)karing`), FormatBase64},
-	{regexp.MustCompile(`(?i)clash|mihomo|stash|flclash|koala`), FormatMihomo},
-	{regexp.MustCompile(`(?i)sing-?box|\bSF[AIMT]\b`), FormatSingBox},
-	{regexp.MustCompile(`(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`), FormatBase64},
-}
-
 // singBoxCore matches apps built on sing-box: they have no VLESS XHTTP, whatever format they get.
 var singBoxCore = regexp.MustCompile(`(?i)karing|sing-?box|\bSF[AIMT]\b`)
 
-// UARule is a User-Agent rule as the UI shows it.
-type UARule struct {
-	Pattern string `json:"pattern"`
-	Format  string `json:"format"`
-}
+// ruleRes caches compiled rule patterns; rules change rarely and are few.
+var ruleRes sync.Map // pattern → *regexp.Regexp (nil when invalid)
 
-// UARules lists the User-Agent rules in order.
-func UARules() []UARule {
-	out := make([]UARule, 0, len(rules))
-	for _, r := range rules {
-		out = append(out, UARule{Pattern: r.re.String(), Format: string(r.format)})
+func ruleRe(p string) *regexp.Regexp {
+	if v, ok := ruleRes.Load(p); ok {
+		re, _ := v.(*regexp.Regexp)
+		return re
 	}
-	return out
+	re, err := regexp.Compile(p)
+	if err != nil {
+		re = nil
+	}
+	ruleRes.Store(p, re)
+	return re
 }
 
-// Detect picks the format: explicit URL suffix, then the user's client type, then UA rules,
-// then HTML for browsers, else base64.
-func Detect(r *http.Request, explicit, clientType string) Format {
+// Detect picks the format: explicit URL suffix, then the user's client type, then the
+// User-Agent rules (first enabled match), then HTML for browsers, else base64.
+func Detect(r *http.Request, explicit, clientType string, rules []service.SubRule) Format {
 	if f, ok := ParseFormat(explicit); ok {
 		return f
 	}
@@ -58,8 +46,13 @@ func Detect(r *http.Request, explicit, clientType string) Format {
 	}
 	ua := r.UserAgent()
 	for _, rule := range rules {
-		if rule.re.MatchString(ua) {
-			return rule.format
+		if !rule.Enabled {
+			continue
+		}
+		if re := ruleRe(rule.Pattern); re != nil && re.MatchString(ua) {
+			if f, ok := ParseFormat(rule.Format); ok {
+				return f
+			}
 		}
 	}
 	if strings.Contains(r.Header.Get("Accept"), "text/html") && strings.Contains(ua, "Mozilla") {
@@ -134,7 +127,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.notFound(ctx, w)
 		return
 	}
-	format := Detect(r, explicit, u.ClientType)
+	rules, err := h.svc.SubRules(ctx)
+	if err != nil {
+		h.log.Warn("subscription rules", "err", err)
+	}
+	format := Detect(r, explicit, u.ClientType, rules)
+	if format == FormatHTML {
+		if on, _ := h.svc.Setting(ctx, service.SettingSubPageEnabled, "true"); on == "false" {
+			// Without the page a browser cannot tell the link from any other missing page.
+			h.notFound(ctx, w)
+			return
+		}
+	}
 	if err := h.svc.TouchSubscription(ctx, u.ID, r.UserAgent()); err != nil {
 		h.log.Warn("touch subscription", "err", err)
 	}

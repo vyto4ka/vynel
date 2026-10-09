@@ -34,13 +34,20 @@ func TestBuildMergesRoutesOfOneDomain(t *testing.T) {
 	}
 }
 
-func TestBuildRejectsDomainOnTwoListeners(t *testing.T) {
-	_, err := Build(Spec{Sites: []Site{
+func TestBuildDomainOnTwoListeners(t *testing.T) {
+	// The subscription domain behind Reality and the panel on its own public port.
+	cfg, err := Build(Spec{Sites: []Site{
 		{Domain: "a.example.com", LocalPort: 8443, Routes: []Route{{Kind: KindDecoy, Decoy: "cloud"}}},
-		{Domain: "a.example.com", Bind: "203.0.113.10", Routes: []Route{{Kind: KindDecoy, Decoy: "cloud"}}},
+		{Domain: "A.example.com", Bind: "203.0.113.10", Port: 47321, Routes: []Route{{Kind: KindDecoy, Decoy: "cloud"}}},
 	}})
-	if err == nil {
-		t.Fatal("want error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(cfg)
+	for _, want := range []string{`"127.0.0.1:8443"`, `"203.0.113.10:47321"`, `"automate":["a.example.com"]`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("no %s in %s", want, s)
+		}
 	}
 }
 

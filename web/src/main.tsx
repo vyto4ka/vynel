@@ -162,6 +162,18 @@ function App() {
       })
       return
     }
+    // Telegram Mini App: Telegram кладёт подписанные данные в фрагмент (#tgWebAppData=…). Если сессии
+    // ещё нет, обменять их на сессию; фрагмент сразу убрать.
+    const tg = location.hash.includes('tgWebAppData=') ? new URLSearchParams(location.hash.slice(1)).get('tgWebAppData') : null
+    if (tg) {
+      history.replaceState(null, '', location.pathname + '#/overview')
+      get('session').then(setSession, () =>
+        post('login/telegram', { initData: tg }).then(check, (e) => {
+          setMagicError(e.message)
+          check()
+        }))
+      return
+    }
     check()
   }, [check])
 

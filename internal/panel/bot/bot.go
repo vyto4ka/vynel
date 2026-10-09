@@ -43,10 +43,12 @@ type Bot struct {
 	status   Status
 	api      *client
 	pending  map[int64]pendingInput // chat -> what the next text message means
+	menuSet  map[int64]string       // chat -> Mini App URL its menu button opens
 	failures int                    // wrong bind codes since the last good one
 
-	alerts alertState
-	backup backupState
+	alerts  alertState
+	backup  backupState
+	watchSt watchState
 }
 
 type pendingInput struct {
@@ -149,6 +151,7 @@ func (b *Bot) runWith(ctx context.Context, token string) {
 	_ = api.setCommands(ctx, [][2]string{
 		{"menu", "Главное меню"}, {"users", "Пользователи"}, {"new", "Новый пользователь: /new имя"},
 		{"find", "Найти пользователя: /find имя"}, {"nodes", "Ноды"}, {"login", "Ссылка входа в веб-панель"},
+		{"sessions", "Кто вошёл в веб-панель"}, {"summary", "Сводка за сутки"},
 		{"backup", "Бэкап сейчас"}, {"help", "Что умеет бот"},
 	})
 	b.loadAlerts(ctx)
@@ -197,17 +200,65 @@ func sleep(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// watch runs the periodic jobs: node alerts and the nightly backup.
+// watch runs the periodic jobs (node alerts, apply errors, the panel address, the nightly
+// backup, the daily summary) and passes sign-ins on as they happen.
 func (b *Bot) watch(ctx context.Context) {
 	t := time.NewTicker(b.cfg.Tick)
 	defer t.Stop()
 	for {
 		b.checkNodes(ctx)
+		b.checkApply(ctx)
+		b.checkWebURL(ctx)
 		b.maybeBackup(ctx)
+		b.maybeSummary(ctx)
+		b.setMenuButtons(ctx)
+		if !b.nextTick(ctx, t.C) {
+			return
+		}
+	}
+}
+
+// nextTick waits for the next tick, passing sign-ins on to the admins meanwhile.
+func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
+	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-t.C:
+			return false
+		case n := <-b.svc.Notices():
+			if n.Kind == "login" && n.Session != nil {
+				b.onLogin(ctx, n.Session)
+			}
+		case <-tick:
+			return true
+		}
+	}
+}
+
+// setMenuButtons gives every admin's chat a «Панель» button that opens it as a Mini App, and
+// keeps it in step with the panel address.
+func (b *Bot) setMenuButtons(ctx context.Context) {
+	api := b.client()
+	url, err := b.svc.WebURL(ctx)
+	if api == nil || err != nil || url == "" {
+		return
+	}
+	admins, _ := b.svc.BotAdmins(ctx)
+	b.mu.Lock()
+	if b.menuSet == nil {
+		b.menuSet = map[int64]string{}
+	}
+	var todo []int64
+	for _, a := range admins {
+		if b.menuSet[a.ID] != url {
+			todo = append(todo, a.ID)
+		}
+	}
+	b.mu.Unlock()
+	for _, id := range todo {
+		if err := api.setMenuButton(ctx, id, "Панель", url); err == nil {
+			b.mu.Lock()
+			b.menuSet[id] = url
+			b.mu.Unlock()
 		}
 	}
 }

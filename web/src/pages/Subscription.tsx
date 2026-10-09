@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, User } from '../api'
+import { get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, User } from '../api'
 import { Badge, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 const tabs: [string, string][] = [
@@ -7,6 +7,7 @@ const tabs: [string, string][] = [
   ['page', 'Страница'],
   ['apps', 'Приложения'],
   ['headers', 'Заголовки'],
+  ['rules', 'Форматы'],
   ['test', 'Проверка'],
 ]
 
@@ -31,6 +32,7 @@ export function Subscription() {
   const [basics, setBasics] = useState<SubBasics | null>(null)
   const [page, setPage] = useState<SubPage | null>(null)
   const [headers, setHeaders] = useState<SubHeader[] | null>(null)
+  const [rules, setRules] = useState<SubRule[] | null>(null)
   const [userId, setUserId] = useState(0)
   const act = useAction()
   const confirm = useConfirm()
@@ -40,14 +42,15 @@ export function Subscription() {
       setBasics(cfg.data.basics)
       setPage(cfg.data.page)
       setHeaders(cfg.data.headers)
+      setRules(cfg.data.rules)
     }
   }, [cfg.data])
 
   const dirty = useMemo(() => {
-    if (!cfg.data || !basics || !page || !headers) return false
+    if (!cfg.data || !basics || !page || !headers || !rules) return false
     return JSON.stringify(basics) !== JSON.stringify(cfg.data.basics) || JSON.stringify(page) !== JSON.stringify(cfg.data.page) ||
-      JSON.stringify(headers) !== JSON.stringify(cfg.data.headers)
-  }, [cfg.data, basics, page, headers])
+      JSON.stringify(headers) !== JSON.stringify(cfg.data.headers) || JSON.stringify(rules) !== JSON.stringify(cfg.data.rules)
+  }, [cfg.data, basics, page, headers, rules])
 
   // Предпросмотр обновляется с небольшой задержкой после правок.
   const [previewSrc, setPreviewSrc] = useState('')
@@ -57,15 +60,16 @@ export function Subscription() {
     return () => clearTimeout(t)
   }, [basics, page, userId])
 
-  if (!cfg.data || !basics || !page || !headers) return <Loading error={cfg.error} />
+  if (!cfg.data || !basics || !page || !headers || !rules) return <Loading error={cfg.error} />
   const c = cfg.data
 
   const save = async () => {
-    const r = await act(() => put<SubConfig>('subscription', { basics, page, headers }), 'Сохранено — приложения получат изменения при следующем обновлении')
+    const r = await act(() => put<SubConfig>('subscription', { basics, page, headers, rules }), 'Сохранено — приложения получат изменения при следующем обновлении')
     if (r) cfg.setData(r)
   }
-  const reset = async (part: 'headers' | 'page') => {
-    if (!(await confirm(part === 'headers' ? 'Вернуть заголовки по умолчанию? Ваши правки заголовков пропадут.' : 'Вернуть страницу и приложения по умолчанию?', 'Вернуть'))) return
+  const reset = async (part: 'headers' | 'page' | 'rules') => {
+    const q = { headers: 'Вернуть заголовки по умолчанию? Ваши правки заголовков пропадут.', page: 'Вернуть страницу и приложения по умолчанию?', rules: 'Вернуть правила форматов по умолчанию?' }
+    if (!(await confirm(q[part], 'Вернуть'))) return
     const r = await act(() => post<SubConfig>('subscription/reset', { part }), 'Возвращено по умолчанию')
     if (r) cfg.setData(r)
   }
@@ -79,7 +83,7 @@ export function Subscription() {
         </div>
         <div className="grow" />
         {dirty && <span className="pink-text small">есть несохранённые изменения</span>}
-        <button className="btn ghost" disabled={!dirty} onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers) }}>Отменить</button>
+        <button className="btn ghost" disabled={!dirty} onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers); setRules(c.rules) }}>Отменить</button>
         <button className="btn primary" disabled={!dirty} onClick={save}>Сохранить</button>
       </div>
 
@@ -89,7 +93,8 @@ export function Subscription() {
           {tab === 'page' && <PageTab p={page} set={setPage} onReset={() => reset('page')} />}
           {tab === 'apps' && <AppsTab p={page} set={setPage} catalog={c.appCatalog} />}
           {tab === 'headers' && <HeadersTab hs={headers} set={setHeaders} cfg={c} onReset={() => reset('headers')} />}
-          {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={c.uaRules} dirty={dirty} />}
+          {tab === 'rules' && <RulesTab rules={rules} set={setRules} formats={c.formats} onReset={() => reset('rules')} />}
+          {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
         </div>
         {showPreview && (
           <div className="card sub-preview">
@@ -389,12 +394,12 @@ function HeaderForm({ h, onClose, onSave }: { h: SubHeader; onClose: () => void;
   )
 }
 
-function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[]; basics: SubBasics; users: User[]; rules: { pattern: string; format: string }[]; dirty: boolean }) {
+function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[]; basics: SubBasics; users: User[]; rules: SubRule[]; dirty: boolean }) {
   const uas = ['keqdroid/0.25.1', 'Happ/4.1.0', 'v2RayTun/5.25.82', 'Hiddify/4.1.1 (android)', 'INCY/3.6.5', 'clash-verge/v2.2.3', 'FlClashX/0.4.2', 'SFA/1.14.0', 'Streisand/1.6.76', 'v2rayNG/2.2.6']
   const [ua, setUa] = useState(uas[0])
   const [userId, setUserId] = useState(0)
-  const { data, error } = useLoad(() => post<{ user: string; format: string; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics }),
-    [ua, userId, JSON.stringify(headers), JSON.stringify(basics)])
+  const { data, error } = useLoad(() => post<{ user: string; format: string; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules }),
+    [ua, userId, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules)])
   return (
     <>
       <div className="card card-pad">
@@ -431,13 +436,78 @@ function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[
         <div className="card-pad small text-2">
           <ol className="list-plain">
             <li>Формат в конце ссылки (<span className="mono">/s/токен/mihomo</span>) или выбранный у пользователя.</li>
-            <li>Иначе по User-Agent, первое совпадение:</li>
+            <li>Иначе по User-Agent, первое совпадение (меняется на вкладке «Форматы»):</li>
           </ol>
           <div className="kv mono" style={{ gridTemplateColumns: '1fr 180px', marginTop: 8 }}>
-            {rules.map((r) => <Fragment key={r.pattern}><div>{r.pattern}</div><div className="miku-text">{formatNames[r.format] || r.format}</div></Fragment>)}
+            {rules.filter((r) => r.enabled).map((r, i) => <Fragment key={i}><div>{r.pattern}</div><div className="miku-text">{formatNames[r.format] || r.format}</div></Fragment>)}
           </div>
           <div style={{ marginTop: 8 }}>Браузер получает страницу, всё остальное — ссылки vless:// в base64.</div>
         </div>
+      </div>
+    </>
+  )
+}
+
+function RulesTab({ rules, set, formats, onReset }: { rules: SubRule[]; set: (r: SubRule[]) => void; formats: string[]; onReset: () => void }) {
+  const update = (i: number, r: SubRule) => set(rules.map((x, j) => (j === i ? r : x)))
+  const move = (i: number, d: number) => {
+    const j = i + d
+    if (j < 0 || j >= rules.length) return
+    const next = [...rules]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    set(next)
+  }
+  const bad = (p: string) => {
+    try {
+      new RegExp(p.replace(/^\(\?i\)/, ''))
+      return false
+    } catch {
+      return true
+    }
+  }
+  return (
+    <>
+      <div className="card">
+        <div className="card-head">
+          <div><h3>Формат по приложению</h3><div className="card-sub">правила проверяются сверху вниз, срабатывает первое совпадение User-Agent</div></div>
+          <button className="btn sm" onClick={() => set([...rules, { pattern: '(?i)', format: 'base64', enabled: true }])}><Icon name="plus" /> Правило</button>
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th /><th>User-Agent (регулярное выражение)</th><th>Формат</th><th>Заметка</th><th /></tr></thead>
+            <tbody>
+              {rules.length === 0 && <tr><td colSpan={5} className="muted">Правил нет — приложения получат ссылки, браузер — страницу</td></tr>}
+              {rules.map((r, i) => (
+                <tr key={i}>
+                  <td style={{ width: 50 }}><Switch checked={r.enabled} onChange={(v) => update(i, { ...r, enabled: v })} /></td>
+                  <td>
+                    <input className="input mono" value={r.pattern} onChange={(e) => update(i, { ...r, pattern: e.target.value })} />
+                    {bad(r.pattern) && <div className="small pink-text">выражение с ошибкой</div>}
+                  </td>
+                  <td style={{ width: 260 }}>
+                    <select className="input" value={r.format} onChange={(e) => update(i, { ...r, format: e.target.value })}>
+                      {formats.map((f) => <option key={f} value={f}>{formatNames[f] || f}</option>)}
+                    </select>
+                  </td>
+                  <td><input className="input" value={r.note || ''} onChange={(e) => update(i, { ...r, note: e.target.value })} placeholder="для кого" /></td>
+                  <td className="nowrap" style={{ width: 110 }}>
+                    <button className="btn ghost icon sm" title="Выше" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+                    <button className="btn ghost icon sm" title="Ниже" disabled={i === rules.length - 1} onClick={() => move(i, 1)}>↓</button>
+                    <button className="btn ghost icon sm" title="Убрать" onClick={() => set(rules.filter((_, j) => j !== i))}><Icon name="trash" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="card card-pad small text-2">
+        <p style={{ marginTop: 0 }}>
+          Правила нужны, только если приложение не указывает формат само. Формат в конце ссылки (<span className="mono">/s/токен/mihomo</span>) и формат, выбранный у пользователя, важнее правил.
+          Если ни одно правило не подошло, браузер получает страницу, остальные — ссылки vless:// в base64.
+        </p>
+        <p>Проверить, что получит конкретное приложение, можно на вкладке «Проверка» — она учитывает несохранённые правила.</p>
+        <button className="btn ghost sm" onClick={onReset}>Вернуть правила по умолчанию</button>
       </div>
     </>
   )

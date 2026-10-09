@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -165,6 +166,7 @@ func TestBot(t *testing.T) {
 	must(svc.SetSetting(ctx, service.ActorCLI, service.SettingSubDomain, "nl.example.com"))
 	must(svc.SetSetting(ctx, service.ActorCLI, service.SettingBotAlertDelay, "0"))
 	must(svc.SetSetting(ctx, service.ActorCLI, service.SettingBotBackupTime, "off"))
+	must(svc.SetSetting(ctx, service.ActorCLI, service.SettingBotSummaryTime, "off"))
 	must(svc.SetBotToken(ctx, service.ActorCLI, token))
 	node, err := svc.EnsureLocalNode(ctx, service.NodeInput{Name: "Нидерланды", Country: "nl", Domain: "nl.example.com"})
 	must(err)
@@ -291,6 +293,44 @@ func TestBot(t *testing.T) {
 	if docs != 1 {
 		t.Fatalf("%d nightly backups instead of one", docs)
 	}
+
+	// The Mini App button in the admin's chat.
+	fake.waitCall(t, 0, "menu button", func(c call) bool {
+		return c.Method == "setChatMenuButton" && strings.Contains(fmt.Sprint(c.Params), "web_app")
+	})
+
+	// A sign-in is reported at once, with a button that ends that session.
+	n = fake.n()
+	ws, err := svc.StartWebSession(ctx, service.LoginPassword, "boss", "203.0.113.5", "Mozilla/5.0 (Windows NT 10.0) Chrome/120", time.Hour)
+	must(err)
+	c = fake.waitCall(t, n, "login notice", textHas("sendMessage", "Вход в панель"))
+	if s, _ := c.Params["text"].(string); !strings.Contains(s, "Chrome · Windows") || !strings.Contains(s, "203.0.113.5") {
+		t.Fatalf("login notice %q", s)
+	}
+	n = fake.n()
+	fake.press(42, "sx:"+ws.ID)
+	fake.waitCall(t, n, "sessions list", textHas("editMessageText", "Сессии веб-панели"))
+	if svc.WebSessionActive(ctx, ws.ID, "") {
+		t.Fatal("the session was not ended")
+	}
+
+	// A config the node cannot apply is reported once, and so is the recovery.
+	n = fake.n()
+	must(store.SetNodeRuntime(ctx, st.DB, node.ID, store.NodeRuntime{LastError: "xray: bad config"}))
+	fake.waitCall(t, n, "apply error", textHas("sendMessage", "не применила конфигурацию"))
+	n = fake.n()
+	must(store.SetNodeRuntime(ctx, st.DB, node.ID, store.NodeRuntime{}))
+	fake.waitCall(t, n, "apply ok", textHas("sendMessage", "применила конфигурацию"))
+
+	// The panel moves: a fresh login button.
+	n = fake.n()
+	must(svc.SetSetting(ctx, service.ActorCLI, service.SettingWebPort, "47321"))
+	fake.waitCall(t, n, "panel moved", textHas("sendMessage", ":47321"))
+
+	// The daily summary on demand.
+	n = fake.n()
+	fake.text(42, "/summary")
+	fake.waitCall(t, n, "summary", textHas("sendMessage", "Сводка за сутки"))
 }
 
 func itoa(i int64) string { b, _ := json.Marshal(i); return string(b) }

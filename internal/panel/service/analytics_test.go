@@ -38,7 +38,8 @@ func TestStatistics(t *testing.T) {
 				return err
 			}
 		}
-		return store.AddMetrics(ctx, q, store.Metrics{NodeID: node.ID, TS: now - 600, CPU: 40, MemUsed: 1, MemTotal: 4, Online: 7})
+		return store.AddMetrics(ctx, q, store.Metrics{NodeID: node.ID, TS: now, // the current hour, whatever the minute
+			CPU: 40, MemUsed: 1, MemTotal: 4, Online: 7})
 	})
 	if err != nil {
 		t.Fatal(err)

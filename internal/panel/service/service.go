@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -56,6 +57,9 @@ type Service struct {
 	tpl templateCache
 	// OnChange is called after every committed change (the reconciler hooks in here for instant pushes).
 	OnChange func()
+
+	noticeOnce sync.Once
+	notices    chan Notice
 }
 
 // New creates a service over a store.
