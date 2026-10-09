@@ -34,7 +34,7 @@ func Execute() int {
 		},
 	}
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "info", "debug|info|warn|error")
-	root.AddCommand(versionCmd(), panelCmd(), nodeCmd(), adminCmd(), installCmd(), restoreCmd(), firewallCmd(), netCmd())
+	root.AddCommand(versionCmd(), panelCmd(), nodeCmd(), adminCmd(), installCmd(), restoreCmd(), firewallCmd(), netCmd(), setupTUICmd())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

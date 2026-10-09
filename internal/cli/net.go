@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vyto4ka/vynel/internal/node/agent"
+	"github.com/vyto4ka/vynel/internal/setup"
 )
 
 // Extra addresses live in one file and are put on the interfaces by a boot-time unit, the same
@@ -290,6 +291,17 @@ func netCmd() *cobra.Command {
 			return errors.Join(errs...)
 		},
 	}
-	c.AddCommand(list, add, rm, apply)
+	resolve := &cobra.Command{
+		Use: "resolve DOMAIN", Short: "A records as public DNS sees them (not /etc/hosts)", Args: cobra.ExactArgs(1), Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ips, err := setup.LookupA(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), strings.Join(ips, "\n"))
+			return nil
+		},
+	}
+	c.AddCommand(list, add, rm, apply, resolve)
 	return c
 }

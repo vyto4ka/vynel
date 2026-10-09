@@ -29,6 +29,7 @@ MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY
 ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
 VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY=""
+NO_TUI="${VYNEL_NO_TUI:-0}" TUI=0 SETUP_BIN=""
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -70,6 +71,7 @@ Options:
   --gh-proxy URL         prefix for github.com downloads when GitHub is slow or blocked,
                          e.g. https://ghfast.top/ (also VYNEL_GH_PROXY)
   --build-from-source    allow compiling vynel when no prebuilt release can be downloaded
+  --no-tui               plain questions instead of the terminal form (also VYNEL_NO_TUI=1)
   --purge                uninstall: also delete data and binaries
   --yes                  do not ask questions
 EOF
@@ -102,6 +104,7 @@ while [[ $# -gt 0 ]]; do
     --uninstall) MODE=uninstall; shift ;;
     --update) MODE=update; shift ;;
     --purge) PURGE=1; shift ;;
+    --no-tui) NO_TUI=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown option $1" ;;
   esac
@@ -140,7 +143,21 @@ confirm() {
   [[ "$answer" =~ ^[YyДд] ]]
 }
 
-resolve() { getent ahostsv4 "$1" | awk 'NR==1 {print $1}' || true; }
+# resolve DOMAIN: its A record as public DNS sees it. Not /etc/hosts: Debian maps the server's own
+# name to 127.0.1.1 there, and a domain named like the server would "resolve" to loopback.
+resolve() {
+  local bin ip=""
+  for bin in "$SETUP_BIN" /usr/local/bin/vynel; do
+    if [[ -n "$bin" && -x "$bin" ]] && ip="$("$bin" net resolve "$1" 2>/dev/null | head -1)" && [[ -n "$ip" ]]; then
+      printf '%s' "$ip"
+      return 0
+    fi
+  done
+  ip="$(curl -fsS --max-time 5 -H 'accept: application/dns-json' "https://1.1.1.1/dns-query?name=$1&type=A" 2>/dev/null |
+    grep -o '"data":"[0-9.]*"' | head -1 | cut -d'"' -f4 || true)"
+  [[ -n "$ip" ]] || ip="$(getent ahostsv4 "$1" | awk '$1 !~ /^127\./ {print $1; exit}' || true)"
+  printf '%s' "$ip"
+}
 
 # ask_domain VAR "question" "default" [IP] -> asks until the A record points at IP (default: the
 # public IP) or the user accepts
@@ -158,7 +175,11 @@ ask_domain() {
       green "  ✓ $d → $want"
       break
     fi
-    red "  ✗ $d → ${r:-ничего}, а нужно $want. Создайте A-запись $d → $want (в Cloudflare — серое облако)."
+    if [[ "$r" =~ ^(104\.(1[6-9]|2[0-7])|172\.(6[4-9]|7[01])|188\.114\.(9[6-9]|1[01][0-9])|162\.15[89]|141\.101|108\.162|190\.93|198\.41)\. ]]; then
+      red "  ✗ $d за прокси Cloudflare (оранжевое облако). Включите «DNS only» (серое облако): A-запись $d → $want."
+    else
+      red "  ✗ $d → ${r:-ничего}, а нужно $want. Создайте A-запись $d → $want."
+    fi
     ask_yes "Продолжить всё равно (сертификат не выпустится, пока DNS не поправлен)?" n && break
   done
   printf -v "$1" '%s' "$d"
@@ -208,8 +229,8 @@ if [[ -z "$MODE" ]]; then
   fi
 fi
 
-if [[ -z "$MODE" ]]; then
-  have_tty || { usage; die "--mode is required when there is no terminal to ask questions"; }
+# bash_menu: the plain menu (no terminal form: --no-tui, an old release, a dumb terminal).
+bash_menu() {
   echo
   pink "  vynel — установка"
   echo "  На этом сервере сейчас: $(installed_text)"
@@ -221,7 +242,7 @@ if [[ -z "$MODE" ]]; then
   echo "  5) Защитить сервер: файрвол, SSH только по ключу, другой порт SSH"
   echo "  6) Удалить"
   echo
-  def=1 choice=""
+  local def=1 choice=""
   [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] && def=4
   ask choice "Выберите" "$def"
   case "$choice" in
@@ -229,14 +250,23 @@ if [[ -z "$MODE" ]]; then
     *) die "нет такого пункта: $choice" ;;
   esac
   WIZARD=1
+}
+
+if [[ -z "$MODE" ]]; then
+  have_tty || { usage; die "--mode is required when there is no terminal to ask questions"; }
+  if [[ "$NO_TUI" == 1 || "${TERM:-dumb}" == dumb ]]; then
+    bash_menu
+  else
+    MODE=tui # the form opens once the vynel binary is here (below)
+  fi
 fi
-case "$MODE" in aio|panel|node|update|harden|uninstall) ;; *) usage; die "unknown mode $MODE" ;; esac
+case "$MODE" in aio|panel|node|update|harden|uninstall|tui) ;; *) usage; die "unknown mode $MODE" ;; esac
 case "$FIREWALL" in ""|on|off) ;; *) die "--firewall: on or off" ;; esac
 [[ -z "$SSH_PORT" || "$SSH_PORT" == random || ( "$SSH_PORT" =~ ^[0-9]+$ && "$SSH_PORT" -ge 1024 && "$SSH_PORT" -le 65535 ) ]] || die "--ssh-port: random or 1024–65535"
 
 # ---- uninstall ----
 
-if [[ "$MODE" == uninstall ]]; then
+do_uninstall() {
   [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] || { green "nothing is installed"; exit 0; }
   echo "  installed: $(installed_text)"
   if [[ $WIZARD -eq 1 && $PURGE -eq 0 ]] && ask_yes "Удалить и все данные (пользователи, ключи, сертификаты)?" n; then
@@ -260,6 +290,10 @@ if [[ "$MODE" == uninstall ]]; then
       /usr/local/bin/vynel /usr/local/bin/vynel.prev /usr/local/bin/xray /usr/local/bin/caddy /usr/local/share/xray
   fi
   green "removed$([[ $PURGE -eq 1 ]] && echo " with all data")"
+}
+
+if [[ "$MODE" == uninstall ]]; then
+  do_uninstall
   exit 0
 fi
 
@@ -272,15 +306,19 @@ case "$(uname -m)" in
   *) die "unsupported architecture $(uname -m)" ;;
 esac
 
-if [[ "$MODE" == update || "$MODE" == harden ]]; then
-  [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] || die "nothing to $MODE: vynel is not installed here (run without --mode for the menu)"
-fi
-if [[ "$MODE" == node && $PANEL_INSTALLED -eq 1 ]]; then
-  die "this server runs the panel (ports 80/443 are taken); a node needs another server — or choose all-in-one to run a node here"
-fi
-if [[ ( "$MODE" == aio || "$MODE" == panel ) && $NODE_INSTALLED -eq 1 ]]; then
-  die "this server runs a node of another panel; remove it first (install.sh --mode uninstall)"
-fi
+check_mode() {
+  if [[ "$MODE" == update || "$MODE" == harden ]]; then
+    [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] || die "nothing to $MODE: vynel is not installed here (run without --mode for the menu)"
+  fi
+  if [[ "$MODE" == node && $PANEL_INSTALLED -eq 1 ]]; then
+    die "this server runs the panel (ports 80/443 are taken); a node needs another server — or choose all-in-one to run a node here"
+  fi
+  if [[ ( "$MODE" == aio || "$MODE" == panel ) && $NODE_INSTALLED -eq 1 ]]; then
+    die "this server runs a node of another panel; remove it first (install.sh --mode uninstall)"
+  fi
+  return 0
+}
+check_mode
 
 export DEBIAN_FRONTEND=noninteractive
 # apt waits for a lock held by unattended-upgrades instead of failing, and gives up on a mirror
@@ -490,7 +528,7 @@ apply_ssh() {
       [[ "$(vynel firewall status 2>/dev/null | awk '$1=="ssh"')" == *"$new"* ]] && break
       sleep 1
     done
-    if [[ $ASSUME_YES -eq 0 ]] && have_tty; then
+    if [[ $ASSUME_YES -eq 0 || $TUI -eq 1 ]] && have_tty; then
       echo
       pink "  Проверьте вход по новому порту в ДРУГОМ окне, это окно не закрывайте:"
       echo "    ssh -p $new root@$PUBLIC_IP"
@@ -640,21 +678,52 @@ gh_latest() {
 
 # install_release_binary: 0 = installed, 2 = already this version, 1 = not available (yet),
 # 3 = network trouble (timeout, reset: GitHub is slow or blocked from here).
+# release_sums DIR: the release's SHA256SUMS into DIR (signature checked when there is a key).
+# 0 = ok, 1 = no release (yet), 3 = network trouble.
+release_sums() {
+  local rc=0
+  if [[ -n "$RELEASE_PUBKEY" ]]; then
+    fetch "$(gh "$RELEASE_URL/SHA256SUMS.signed")" "$1/SHA256SUMS.signed" || rc=$?
+    if [[ $rc -eq 0 ]]; then
+      verify_signed "$1/SHA256SUMS.signed" "$1/SHA256SUMS" || die "the release signature does not match: the download was changed on the way (proxy?). Nothing installed"
+    fi
+  else
+    fetch "$(gh "$RELEASE_URL/SHA256SUMS")" "$1/SHA256SUMS" || rc=$?
+  fi
+  [[ $rc -eq 0 ]] && return 0
+  [[ $rc -eq 22 ]] && return 1
+  return 3
+}
+
+# release_binary DIR: downloads vynel for this machine into DIR/vynel and checks it -> 0/1/3.
+release_binary() {
+  local want rc=0
+  want="$(awk -v f="vynel-linux-$GOARCH" '$2 == f {print $1}' "$1/SHA256SUMS")"
+  [[ -n "$want" ]] || return 1
+  if [[ -n "$SETUP_BIN" && "$(sha256sum "$SETUP_BIN" 2>/dev/null | awk '{print $1}')" == "$want" ]]; then
+    cp -f "$SETUP_BIN" "$1/vynel" # already downloaded for the setup form
+    return 0
+  fi
+  fetch "$(gh "$RELEASE_URL/vynel-linux-$GOARCH")" "$1/vynel" "vynel" || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    [[ $rc -eq 22 ]] && return 1
+    return 3
+  fi
+  if [[ "$(sha256sum "$1/vynel" | awk '{print $1}')" != "$want" ]]; then
+    # CI replaces the release file by file: a binary and checksums from different builds.
+    echo "  checksum does not match yet (the release is being updated)"
+    return 1
+  fi
+  chmod 755 "$1/vynel"
+}
+
 install_release_binary() {
   local tmp want have rc=0
   tmp="$(mktemp -d)"
-  if [[ -n "$RELEASE_PUBKEY" ]]; then
-    fetch "$(gh "$RELEASE_URL/SHA256SUMS.signed")" "$tmp/SHA256SUMS.signed" || rc=$?
-    if [[ $rc -eq 0 ]]; then
-      verify_signed "$tmp/SHA256SUMS.signed" "$tmp/SHA256SUMS" || { rm -rf "$tmp"; die "the release signature does not match: the download was changed on the way (proxy?). Nothing installed"; }
-    fi
-  else
-    fetch "$(gh "$RELEASE_URL/SHA256SUMS")" "$tmp/SHA256SUMS" || rc=$?
-  fi
+  release_sums "$tmp" || rc=$?
   if [[ $rc -ne 0 ]]; then
     rm -rf "$tmp"
-    [[ $rc -eq 22 ]] && return 1
-    return 3
+    return $rc
   fi
   want="$(awk -v f="vynel-linux-$GOARCH" '$2 == f {print $1}' "$tmp/SHA256SUMS")"
   [[ -n "$want" ]] || { rm -rf "$tmp"; return 1; }
@@ -663,17 +732,10 @@ install_release_binary() {
     rm -rf "$tmp"
     return 2
   fi
-  fetch "$(gh "$RELEASE_URL/vynel-linux-$GOARCH")" "$tmp/vynel" "vynel" || rc=$?
+  release_binary "$tmp" || rc=$?
   if [[ $rc -ne 0 ]]; then
     rm -rf "$tmp"
-    [[ $rc -eq 22 ]] && return 1
-    return 3
-  fi
-  if [[ "$(sha256sum "$tmp/vynel" | awk '{print $1}')" != "$want" ]]; then
-    # CI replaces the release file by file: a binary and checksums from different builds.
-    echo "  checksum does not match yet (the release is being updated)"
-    rm -rf "$tmp"
-    return 1
+    return $rc
   fi
   [[ -x /usr/local/bin/vynel ]] && cp -f /usr/local/bin/vynel /usr/local/bin/vynel.prev
   install -m 755 "$tmp/vynel" /usr/local/bin/vynel.new
@@ -1382,7 +1444,62 @@ do_harden() {
   echo
 }
 
+# ================================================================== the form
+# setup_binary: a vynel that has the form — the installed one if it is new enough, else this
+# release's, downloaded and checked like an install (and reused by it).
+setup_binary() {
+  if [[ -x /usr/local/bin/vynel ]] && /usr/local/bin/vynel setup-tui --help >/dev/null 2>&1; then
+    SETUP_BIN=/usr/local/bin/vynel
+    return 0
+  fi
+  local dir
+  dir="$(mktemp -d /tmp/vynel-setup.XXXXXX)"
+  info "downloading vynel for the setup form"
+  release_sums "$dir" || return 1
+  release_binary "$dir" || return 1
+  "$dir/vynel" setup-tui --help >/dev/null 2>&1 || return 1
+  SETUP_BIN="$dir/vynel"
+}
+
+# run_tui: the form; its answers become the flags of an unattended run.
+run_tui() {
+  setup_binary || return 1
+  detect_ip
+  detect_country
+  local installed="" version="" out rc=0
+  [[ $PANEL_WITH_NODE -eq 1 ]] && installed=aio
+  [[ $PANEL_WITH_NODE -eq 0 && $PANEL_INSTALLED -eq 1 ]] && installed=panel
+  [[ $NODE_INSTALLED -eq 1 ]] && installed=node
+  [[ -n "$installed" ]] && version="$(vynel version 2>/dev/null || true)"
+  out="$(mktemp)"
+  "$SETUP_BIN" setup-tui --out "$out" --installed "$installed" --version "$version" \
+    --public-ip "$PUBLIC_IP" --country "$COUNTRY" --domain "$DOMAIN" --email "$EMAIL" --token "$TOKEN" </dev/tty >/dev/tty || rc=$?
+  if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
+  if [[ $rc -ne 0 ]]; then rm -f "$out"; return 1; fi
+  # Only known names, single-quoted values (internal/setup Answers.Shell).
+  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE)='" "$out"; then
+    rm -f "$out"
+    return 1
+  fi
+  # shellcheck disable=SC1090
+  source "$out"
+  rm -f "$out"
+  TUI=1 ASSUME_YES=1 WIZARD=0
+  [[ -z "$SUB_DOMAIN" ]] && SUB_DOMAIN="$DOMAIN"
+  check_mode
+}
+
+if [[ "$MODE" == tui ]]; then
+  if ! run_tui; then
+    red "  the setup form is not available here, using plain questions"
+    MODE=""
+    bash_menu
+    check_mode
+  fi
+fi
+
 case "$MODE" in
+  uninstall) do_uninstall ;;
   aio) do_aio ;;
   panel) do_panel ;;
   node) do_node ;;
