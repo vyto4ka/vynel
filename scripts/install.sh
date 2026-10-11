@@ -233,8 +233,16 @@ if [[ -z "$MODE" ]]; then
   fi
 fi
 
+# clear_screen: the questions start at the top of a clean terminal (the download and the curl
+# command above them are of no use any more). Scrollback is kept.
+clear_screen() {
+  [[ -t 1 && "${TERM:-dumb}" != dumb ]] && printf '\033[H\033[2J'
+  return 0
+}
+
 # bash_menu: the plain menu (no terminal form: --no-tui, an old release, a dumb terminal).
 bash_menu() {
+  clear_screen
   echo
   pink "  vynel — установка"
   echo "  На этом сервере сейчас: $(installed_text)"
@@ -327,28 +335,141 @@ check_mode
 export DEBIAN_FRONTEND=noninteractive
 # apt waits for a lock held by unattended-upgrades instead of failing, and gives up on a mirror
 # that stops answering instead of hanging.
-APT_OPTS=(-o DPkg::Lock::Timeout=300 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+# apt never runs silently: every step shows one live line (what it is doing, for how long) and
+# writes everything to $APT_LOG. A mirror that stops answering is cut off and retried over IPv4,
+# instead of hanging the installer for half an hour.
+APT_LOG=/var/log/vynel-install.log
+APT_OPTS=(-o DPkg::Lock::Timeout=600 -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
+  -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Use-Pty=0 -o quiet=0)
+# A server without an IPv6 route: apt would try the mirrors' IPv6 addresses first and wait on each.
+if command -v ip >/dev/null && [[ -z "$(ip -6 route show default 2>/dev/null)" ]]; then
+  APT_OPTS+=(-o Acquire::ForceIPv4=true)
+fi
 export NEEDRESTART_MODE=a # Ubuntu's needrestart must not stop apt with a dialog
 
-# ensure_packages PKG...: installs what is missing, after the questions. Nothing runs when all
-# is there; the package lists are refreshed only when installing without it fails (fresh images
+fmt_secs() { printf '%d:%02d' $(($1 / 60)) $(($1 % 60)); }
+
+# run_step LABEL STALL MAX CMD...: runs CMD with its output in $APT_LOG and shows one live line:
+# a spinner, the time so far and the last thing CMD said. Returns CMD's code, or 124 when it said
+# nothing for STALL seconds (0 = no limit) or ran longer than MAX seconds.
+run_step() {
+  local label="$1" stall="$2" max="$3"; shift 3
+  local from size prev=-1 changed start rc=0 line i=0 cols tty=0
+  local spin=('|' '/' '-' "\\")
+  [[ -t 1 ]] && tty=1
+  cols="$(tput cols 2>/dev/null || echo 80)"
+  printf '\n--- %s %s: %s\n' "$(date '+%F %T')" "$label" "$*" >>"$APT_LOG"
+  from="$(wc -c <"$APT_LOG")"
+  "$@" >>"$APT_LOG" 2>&1 </dev/null &
+  local pid=$!
+  start=$SECONDS changed=$SECONDS
+  while kill -0 "$pid" 2>/dev/null; do
+    size="$(wc -c <"$APT_LOG")"
+    if [[ "$size" != "$prev" ]]; then prev="$size" changed=$SECONDS; fi
+    if (( (stall > 0 && SECONDS - changed >= stall) || (max > 0 && SECONDS - start >= max) )); then
+      kill "$pid" 2>/dev/null; sleep 2; kill -9 "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      rc=124
+      echo "--- stopped: no output for $((SECONDS - changed)) s" >>"$APT_LOG"
+      break
+    fi
+    line="$(tail -c +"$((from + 1))" "$APT_LOG" | tr '\r' '\n' | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c1-$((cols - ${#label} - 16)) || true)"
+    if [[ $tty -eq 1 ]]; then
+      printf '\r\033[K  %s %s %s  \033[2m%s\033[0m' "${spin[i++ % 4]}" "$label" "$(fmt_secs $((SECONDS - start)))" "$line"
+    elif (( (SECONDS - start) % 15 == 14 )); then
+      echo "  … $label $(fmt_secs $((SECONDS - start))): $line"
+    fi
+    sleep 1
+  done
+  if [[ $rc -eq 0 ]]; then wait "$pid" || rc=$?; fi
+  [[ $tty -eq 1 ]] && printf '\r\033[K'
+  if [[ $rc -eq 0 ]]; then
+    green "  ✓ $label ($(fmt_secs $((SECONDS - start))))"
+  else
+    red "  ✗ $label: $([[ $rc -eq 124 ]] && echo "no progress, stopped" || echo "exit code $rc")"
+  fi
+  return $rc
+}
+
+# wait_apt_idle: right after a server's first boot the system updates itself and holds apt for
+# minutes. Wait for it in plain sight rather than inside a silent apt.
+wait_apt_idle() {
+  local start=$SECONDS who
+  while true; do
+    who="$(pgrep -x apt-get || pgrep -x apt || pgrep -x dpkg || pgrep -x aptitude || pgrep -f '/usr/bin/unattended-upgrade( |$)' || true)"
+    who="${who%%$'\n'*}"
+    [[ -n "$who" ]] || break
+    if (( SECONDS - start >= 900 )); then
+      [[ -t 1 ]] && printf '\r\033[K'
+      red "  apt is still busy after 15 minutes ($(ps -o args= -p "$who" 2>/dev/null | cut -c1-60)); trying anyway"
+      return 0
+    fi
+    if [[ -t 1 ]]; then
+      printf '\r\033[K  … ждём, пока система закончит своё обновление пакетов %s  \033[2m%s\033[0m' \
+        "$(fmt_secs $((SECONDS - start)))" "$(ps -o args= -p "$who" 2>/dev/null | cut -c1-50)"
+    elif (( (SECONDS - start) % 30 == 0 )); then
+      echo "  … apt is busy (automatic updates), waiting $(fmt_secs $((SECONDS - start)))"
+    fi
+    sleep 2
+  done
+  if (( SECONDS - start > 0 )); then
+    [[ -t 1 ]] && printf '\r\033[K'
+    green "  ✓ the system finished its own update ($(fmt_secs $((SECONDS - start))))"
+  fi
+}
+
+apt_update() {
+  local rc=0
+  run_step "apt-get update" 60 600 apt-get "${APT_OPTS[@]}" update || rc=$?
+  if [[ $rc -eq 124 && " ${APT_OPTS[*]} " != *ForceIPv4* ]]; then
+    echo "  a mirror stopped answering — retrying over IPv4"
+    APT_OPTS+=(-o Acquire::ForceIPv4=true)
+    rc=0
+    run_step "apt-get update (IPv4)" 60 600 apt-get "${APT_OPTS[@]}" update || rc=$?
+  fi
+  return $rc
+}
+
+# apt_install PKG...: downloads first (safe to stop when a mirror hangs), then installs (never
+# stopped halfway: an interrupted dpkg breaks the system).
+apt_install() {
+  local rc=0
+  run_step "downloading $*" 60 900 apt-get "${APT_OPTS[@]}" install -y --download-only --no-install-recommends "$@" || rc=$?
+  if [[ $rc -eq 124 && " ${APT_OPTS[*]} " != *ForceIPv4* ]]; then
+    APT_OPTS+=(-o Acquire::ForceIPv4=true)
+    rc=0
+    run_step "downloading $* (IPv4)" 60 900 apt-get "${APT_OPTS[@]}" install -y --download-only --no-install-recommends "$@" || rc=$?
+  fi
+  [[ $rc -eq 0 ]] || return $rc
+  run_step "installing $*" 0 1800 apt-get "${APT_OPTS[@]}" install -y --no-install-recommends "$@"
+}
+
+# try_packages / ensure_packages PKG...: install what is missing, after the questions (ensure_
+# stops the installer when it cannot). Nothing runs when all is
+# there; the package lists are refreshed only when installing without it fails (fresh images
 # usually have usable lists, and `apt-get update` is the slow part).
-ensure_packages() {
+try_packages() {
   local p missing=()
   for p in "$@"; do
     dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || missing+=("$p")
   done
   [[ ${#missing[@]} -gt 0 ]] || return 0
-  info "installing packages: ${missing[*]}"
-  if command -v fuser >/dev/null && fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
-    echo "  apt is busy (automatic updates?) — waiting for it, up to 5 minutes"
+  info "packages: ${missing[*]}  (full log: $APT_LOG)"
+  wait_apt_idle
+  if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
+    run_step "finishing an interrupted dpkg" 0 900 dpkg --configure -a || true
   fi
-  if timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq --no-install-recommends "${missing[@]}" >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "  refreshing the package lists (apt-get update)"
-  timeout 600 apt-get "${APT_OPTS[@]}" update -qq || red "  apt-get update failed or timed out — trying to install anyway"
-  timeout 900 apt-get "${APT_OPTS[@]}" install -y -qq --no-install-recommends "${missing[@]}" >/dev/null || die "apt-get install ${missing[*]} failed"
+  apt_install "${missing[@]}" && return 0
+  echo "  refreshing the package lists"
+  apt_update || red "  apt-get update failed — trying to install anyway"
+  apt_install "${missing[@]}" && return 0
+  red "  last lines of $APT_LOG:"
+  tail -n 15 "$APT_LOG" | sed 's/^/    /'
+  return 1
+}
+
+ensure_packages() {
+  try_packages "$@" || die "cannot install $*: see $APT_LOG"
 }
 # What the installation needs (the questions need nothing beyond curl, which got this script here).
 BASE_PKGS=(curl unzip ca-certificates iproute2 psmisc nftables openssl)
@@ -471,7 +592,7 @@ apply_firewall() {
     vynel firewall off >/dev/null 2>&1 || true
     return 0
   fi
-  command -v nft >/dev/null || ensure_packages nftables || true
+  command -v nft >/dev/null || try_packages nftables || true
   command -v nft >/dev/null || { red "  nftables is not installed: firewall skipped"; return 0; }
   info "firewall: only SSH and what vynel serves stays open"
   vynel firewall on >/dev/null
@@ -1517,6 +1638,7 @@ run_tui() {
   [[ $NODE_INSTALLED -eq 1 ]] && installed=node
   [[ -n "$installed" ]] && version="$(vynel version 2>/dev/null || true)"
   out="$(mktemp)"
+  clear_screen
   "$SETUP_BIN" setup-tui --out "$out" --installed "$installed" --version "$version" \
     --public-ip "$PUBLIC_IP" --country "$COUNTRY" --domain "$DOMAIN" --email "$EMAIL" --token "$TOKEN" </dev/tty >/dev/tty || rc=$?
   if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
