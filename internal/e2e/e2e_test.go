@@ -220,10 +220,10 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	// NL joins over gRPC with the join token; DE runs in-process like `panel --with-node`.
 	token := jointoken.Token{Addr: gwAddr, SNI: panel.SNI, CAFingerprint: panel.CA.Fingerprint(), Secret: nlSecret}.Encode()
 	nlDir := filepath.Join(t.TempDir(), "nl")
-	if _, err := agent.Join(ctx, nlDir, token); err != nil {
+	if _, err := agent.Join(ctx, nlDir, token, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agent.Join(ctx, t.TempDir(), token); err == nil {
+	if _, err := agent.Join(ctx, t.TempDir(), token, ""); err == nil {
 		t.Fatal("a join token must be single-use")
 	}
 	nlDial, closeDial, err := agent.GRPCDialer(nlDir)

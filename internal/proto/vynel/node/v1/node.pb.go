@@ -74,9 +74,12 @@ func (UserOp_Kind) EnumDescriptor() ([]byte, []int) {
 }
 
 type JoinRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
-	CsrDer        []byte                 `protobuf:"bytes,2,opt,name=csr_der,json=csrDer,proto3" json:"csr_der,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Token  string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	CsrDer []byte                 `protobuf:"bytes,2,opt,name=csr_der,json=csrDer,proto3" json:"csr_der,omitempty"`
+	// ISO alpha-2 country of the node's public IP as the installer found it; empty if unknown.
+	// The panel fills the node's flag, name and code from it when the admin left them out.
+	Country       string `protobuf:"bytes,3,opt,name=country,proto3" json:"country,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -123,6 +126,13 @@ func (x *JoinRequest) GetCsrDer() []byte {
 		return x.CsrDer
 	}
 	return nil
+}
+
+func (x *JoinRequest) GetCountry() string {
+	if x != nil {
+		return x.Country
+	}
+	return ""
 }
 
 type JoinResponse struct {
@@ -1367,10 +1377,11 @@ var File_vynel_node_v1_node_proto protoreflect.FileDescriptor
 
 const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\n" +
-	"\x18vynel/node/v1/node.proto\x12\rvynel.node.v1\"<\n" +
+	"\x18vynel/node/v1/node.proto\x12\rvynel.node.v1\"V\n" +
 	"\vJoinRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x17\n" +
-	"\acsr_der\x18\x02 \x01(\fR\x06csrDer\"v\n" +
+	"\acsr_der\x18\x02 \x01(\fR\x06csrDer\x12\x18\n" +
+	"\acountry\x18\x03 \x01(\tR\acountry\"v\n" +
 	"\fJoinResponse\x12\x19\n" +
 	"\bcert_der\x18\x01 \x01(\fR\acertDer\x12\x15\n" +
 	"\x06ca_der\x18\x02 \x01(\fR\x05caDer\x12\x17\n" +

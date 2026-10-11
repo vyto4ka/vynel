@@ -12,11 +12,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -24,6 +27,7 @@ import (
 
 	"github.com/vyto4ka/vynel/internal/node/agent"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // Options is what the script knows before asking.
@@ -35,6 +39,7 @@ type Options struct {
 	Domain    string // prefilled from flags
 	Email     string
 	Token     string
+	State     string // file that keeps the answers between runs ("" — do not keep)
 }
 
 // Answers go back to the script as shell variables.
@@ -188,18 +193,7 @@ func sshFacts() (keys, password bool, ports []int) {
 	return keys, password, firewall.SSHPorts(context.Background())
 }
 
-var countries = map[string]string{"NL": "Нидерланды", "DE": "Германия", "FI": "Финляндия", "SE": "Швеция", "FR": "Франция",
-	"GB": "Великобритания", "US": "США", "CA": "Канада", "PL": "Польша", "LV": "Латвия", "LT": "Литва", "EE": "Эстония",
-	"AT": "Австрия", "CH": "Швейцария", "CZ": "Чехия", "ES": "Испания", "IT": "Италия", "RO": "Румыния", "BG": "Болгария",
-	"HU": "Венгрия", "RS": "Сербия", "MD": "Молдова", "TR": "Турция", "KZ": "Казахстан", "AM": "Армения", "GE": "Грузия",
-	"AE": "ОАЭ", "JP": "Япония", "SG": "Сингапур", "HK": "Гонконг", "RU": "Россия", "UA": "Украина"}
-
-func countryName(cc string) string {
-	if n, ok := countries[strings.ToUpper(cc)]; ok {
-		return n
-	}
-	return "VPN"
-}
+func countryName(cc string) string { return or(xrayconf.CountryName(cc), "VPN") }
 
 var installedNames = map[string]string{"aio": "панель + нода (всё на одном сервере)", "panel": "панель", "node": "нода", "": "ничего"}
 
@@ -210,6 +204,35 @@ func Run(o Options) (*Answers, error) {
 	lipgloss.SetHasDarkBackground(true)
 	a := &Answers{Domain: o.Domain, Email: o.Email, Token: o.Token, PublicIP: o.PublicIP, Country: strings.ToUpper(o.Country),
 		AdminLogin: "admin", GatewayListen: ":9443"}
+	nodes := true
+	var sec []string
+	saved := loadState(o.State)
+	if saved != nil {
+		a.restore(&saved.Answers, o)
+		sec = saved.Security
+		if saved.Nodes != nil {
+			nodes = *saved.Nodes
+		}
+	}
+	// Whatever happens next (done, cancelled, Ctrl+C, the SSH session dropped), the answers so far
+	// survive a restart.
+	save := func() {
+		if a.Mode != "update" && a.Mode != "uninstall" {
+			saveState(o.State, &state{Answers: *a, Security: sec, Nodes: &nodes})
+		}
+	}
+	defer save()
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP, syscall.SIGTERM)
+	defer signal.Stop(hup)
+	go func() {
+		<-hup
+		save()
+		os.Exit(2)
+	}()
+	// Look for a domain the server already has while the first question is on screen.
+	detected := make(chan string, 1)
+	go func() { detected <- DetectDomain(context.Background(), a.PublicIP) }()
 	th := theme()
 	run := func(groups ...*huh.Group) error {
 		err := huh.NewForm(groups...).WithTheme(th).WithShowHelp(true).Run()
@@ -239,6 +262,14 @@ func Run(o Options) (*Answers, error) {
 	header := "Сейчас на сервере: " + installedNames[o.Installed]
 	if o.Version != "" {
 		header += " · " + o.Version
+	}
+	if saved != nil && saved.Mode != "update" && saved.Mode != "uninstall" {
+		for _, m := range modes {
+			if m.Value == saved.Mode {
+				a.Mode = saved.Mode
+				header += "\nОтветы прошлого запуска подставлены: можно продолжить с того же места"
+			}
+		}
 	}
 	if err := run(huh.NewGroup(
 		huh.NewSelect[string]().Title("vynel — установка").Description(header).Options(modes...).Value(&a.Mode),
@@ -283,6 +314,13 @@ func Run(o Options) (*Answers, error) {
 		return ip
 	}
 
+	// A domain found on the server is offered greyed out: Enter keeps it, typing replaces it.
+	found := ""
+	if a.Mode == "aio" || a.Mode == "panel" {
+		found = <-detected
+	}
+	domainOf := func() string { return or(cleanDomain(a.Domain), found) }
+
 	// 2. Server and domains.
 	switch a.Mode {
 	case "aio", "panel":
@@ -316,9 +354,23 @@ func Run(o Options) (*Answers, error) {
 		if a.Mode == "panel" {
 			domainTitle, domainHelp = "Домен панели и подписок", "A-запись на этот сервер"
 		}
+		placeholder := "nl.example.com"
+		if found != "" {
+			placeholder = found
+			domainHelp = "Найден домен сервера — Enter оставит его, или введите свой"
+		}
 		fields = append(fields,
-			huh.NewInput().Title(domainTitle).Placeholder("nl.example.com").Value(&a.Domain).Validate(validDomain).
+			huh.NewInput().Title(domainTitle).Placeholder(placeholder).Value(&a.Domain).
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" && found != "" {
+						return nil
+					}
+					return validDomain(s)
+				}).
 				DescriptionFunc(func() string {
+					if a.Domain == "" && found != "" {
+						return domainHelp
+					}
 					if m := cache.check(a.Domain, publicOf(a.VPNIP)); m != "" {
 						return m
 					}
@@ -360,7 +412,6 @@ func Run(o Options) (*Answers, error) {
 	}
 
 	// 3. Panel, VPN name, bot.
-	nodes := true
 	if a.Mode == "aio" || a.Mode == "panel" {
 		var fields []huh.Field
 		if a.Mode == "aio" {
@@ -382,7 +433,7 @@ func Run(o Options) (*Answers, error) {
 				DescriptionFunc(func() string {
 					d := cleanDomain(a.SubDomain)
 					if d == "" {
-						d = or(cleanDomain(a.Domain), "домен")
+						d = or(domainOf(), "домен")
 					}
 					return "Ссылки будут вида https://" + d + or(cleanPath(a.SubPath), "/s/") + "<токен>. Пусто — /s/"
 				}, a).
@@ -436,19 +487,24 @@ func Run(o Options) (*Answers, error) {
 
 	// 4. Security: check boxes.
 	keys, password, sshPorts := sshFacts()
-	sec := []string{"firewall"}
-	if keys && password {
-		sec = append(sec, "keys")
+	if sec == nil {
+		sec = []string{"firewall"}
+		if keys && password {
+			sec = append(sec, "keys")
+		}
 	}
-	secOpts := []huh.Option[string]{huh.NewOption("Файрвол: открыты только SSH и то, что обслуживает vynel; сканеры портов блокируются", "firewall").Selected(true)}
+	secOpts := []huh.Option[string]{huh.NewOption("Файрвол: открыты только SSH и то, что обслуживает vynel; сканеры портов блокируются", "firewall")}
 	switch {
 	case keys && password:
-		secOpts = append(secOpts, huh.NewOption("SSH только по ключу (пароль выключить) — ключи на сервере есть", "keys").Selected(true))
+		secOpts = append(secOpts, huh.NewOption("SSH только по ключу (пароль выключить) — ключи на сервере есть", "keys"))
 	case !keys && password:
 		secOpts = append(secOpts, huh.NewOption("SSH только по ключу — недоступно: на сервере нет ключей (ssh-copy-id)", "nokeys"))
 	}
 	portNow := fmt.Sprint(sshPorts)
 	secOpts = append(secOpts, huh.NewOption("SSH на случайный порт вместо "+strings.Trim(portNow, "[]")+" — старый закроется после проверки входа", "port"))
+	sec = slices.DeleteFunc(sec, func(v string) bool {
+		return !slices.ContainsFunc(secOpts, func(o huh.Option[string]) bool { return o.Value == v })
+	})
 	groups = append(groups, huh.NewGroup(
 		huh.NewMultiSelect[string]().Title("Защита сервера").Description("Пробел или x — отметить, Enter — дальше").
 			Options(secOpts...).Value(&sec).Validate(func(v []string) error {
@@ -464,7 +520,7 @@ func Run(o Options) (*Answers, error) {
 	// 5. Summary.
 	ok := true
 	groups = append(groups, huh.NewGroup(
-		huh.NewNote().Title("Проверьте").DescriptionFunc(func() string { return summary(a, nodes, sec, cache, publicOf) }, a),
+		huh.NewNote().Title("Проверьте").DescriptionFunc(func() string { return summary(a, domainOf(), nodes, sec, cache, publicOf) }, a),
 		huh.NewConfirm().Title("Устанавливаем?").Affirmative("Установить").Negative("Отмена").Value(&ok),
 	))
 	if a.Mode == "harden" {
@@ -477,7 +533,7 @@ func Run(o Options) (*Answers, error) {
 		return nil, ErrAborted
 	}
 
-	a.Domain, a.SubDomain = cleanDomain(a.Domain), cleanDomain(a.SubDomain)
+	a.Domain, a.SubDomain = domainOf(), cleanDomain(a.SubDomain)
 	a.Country = strings.ToUpper(a.Country)
 	if a.Name == "" {
 		a.Name = countryName(a.Country)
@@ -501,7 +557,7 @@ func Run(o Options) (*Answers, error) {
 	return a, nil
 }
 
-func summary(a *Answers, nodes bool, sec []string, cache *dnsCache, publicOf func(string) string) string {
+func summary(a *Answers, domain string, nodes bool, sec []string, cache *dnsCache, publicOf func(string) string) string {
 	var b strings.Builder
 	line := func(k, v string) { fmt.Fprintf(&b, "%-12s %s\n", k, v) }
 	switch a.Mode {
@@ -510,7 +566,7 @@ func summary(a *Answers, nodes bool, sec []string, cache *dnsCache, publicOf fun
 		if a.VPNIP != "" || a.SubIP != "" {
 			line("IP", "VPN "+or(a.VPNIP, "все")+", панель "+or(a.SubIP, "все"))
 		}
-		line("Домен", cleanDomain(a.Domain)+"  "+cache.check(a.Domain, publicOf(a.VPNIP)))
+		line("Домен", domain+"  "+cache.check(domain, publicOf(a.VPNIP)))
 		if a.SubDomain != "" {
 			line("Домен ссылок", cleanDomain(a.SubDomain)+"  "+cache.check(a.SubDomain, publicOf(a.SubIP)))
 		}
@@ -518,7 +574,7 @@ func summary(a *Answers, nodes bool, sec []string, cache *dnsCache, publicOf fun
 			line("В клиентах", or(a.Name, countryName(a.Country))+" "+a.Country)
 			line("Ноды", map[bool]string{true: "можно подключать (порт 9443)", false: "только этот сервер"}[nodes])
 		}
-		line("Подписки", "https://"+or(cleanDomain(a.SubDomain), cleanDomain(a.Domain))+or(cleanPath(a.SubPath), "/s/")+"<токен>")
+		line("Подписки", "https://"+or(cleanDomain(a.SubDomain), domain)+or(cleanPath(a.SubPath), "/s/")+"<токен>")
 		line("Панель", "путь "+or(cleanPath(a.PanelPath), "случайный")+", логин "+a.AdminLogin+", пароль покажем в конце")
 		line("Бот", map[bool]string{true: "настроен", false: "потом, в панели"}[a.BotToken != ""])
 		if a.Restore != "" {

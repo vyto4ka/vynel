@@ -21,10 +21,11 @@ func nodeCmd() *cobra.Command {
 	c := &cobra.Command{Use: "node", Short: "Node agent"}
 	c.PersistentFlags().StringVar(&dataDir, "data-dir", DefaultNodeDataDir, "node data directory")
 
+	var country string
 	join := &cobra.Command{
 		Use: "join TOKEN", Short: "Register this node with the panel using a join token", Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			code, err := agent.Join(cmd.Context(), dataDir, args[0])
+			code, err := agent.Join(cmd.Context(), dataDir, args[0], country)
 			if err != nil {
 				return err
 			}
@@ -32,6 +33,8 @@ func nodeCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	join.Flags().StringVar(&country, "country", "", "2-letter country of this server; the panel names the node by it if the admin did not")
 
 	var token, caddyBin string
 	var tune, fw bool
@@ -43,7 +46,7 @@ func nodeCmd() *cobra.Command {
 				if token == "" {
 					return errors.New("node is not joined: pass --token or run `vynel node join TOKEN`")
 				}
-				code, err := agent.Join(cmd.Context(), dataDir, token)
+				code, err := agent.Join(cmd.Context(), dataDir, token, "")
 				if err != nil {
 					return err
 				}

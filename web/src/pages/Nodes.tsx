@@ -157,16 +157,16 @@ function AddNode({ profiles, onClose, onAdded }: { profiles: Profile[]; onClose:
   }
   return (
     <Modal title="Добавить сервер · шаг 1 из 2" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="add-node" disabled={!name.trim()}>Дальше: команда установки</button></>}>
+      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="add-node">Дальше: команда установки</button></>}>
       <WizardSteps at={0} />
       <form id="add-node" onSubmit={submit}>
-        <div className="grid2">
-          <Field label="Название (видно в приложениях)"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Германия" /></Field>
-          <Field label="Код страны" help="Для флага: DE, NL, FI…"><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder="DE" /></Field>
-        </div>
         <Field label="Домен ноды" help="A-запись на IP нового сервера (серое облако в Cloudflare). Нужен для Reality self-steal.">
-          <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="de.example.com" />
+          <input className="input" autoFocus value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="de.example.com" />
         </Field>
+        <div className="grid2">
+          <Field label="Название (видно в приложениях)" help="Пусто — по стране сервера"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="определится при установке" /></Field>
+          <Field label="Код страны" help="Пусто — определится по IP сервера"><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder="авто" /></Field>
+        </div>
         <Field label="Сразу добавить профили">
           <div className="row">
             {profiles.map((p) => (

@@ -46,9 +46,10 @@ func Joined(dir string) bool {
 	return err == nil
 }
 
-// Join registers the node with a join token and stores the credentials in dir.
+// Join registers the node with a join token and stores the credentials in dir. country is the
+// node's country as the installer detected it ("" if unknown); the panel names the node by it.
 // The panel's certificate is trusted only if its CA matches the fingerprint in the token.
-func Join(ctx context.Context, dir, tokenStr string) (code string, err error) {
+func Join(ctx context.Context, dir, tokenStr, country string) (code string, err error) {
 	tok, err := jointoken.Parse(tokenStr)
 	if err != nil {
 		return "", err
@@ -77,7 +78,7 @@ func Join(ctx context.Context, dir, tokenStr string) (code string, err error) {
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	resp, err := nodev1.NewNodeGatewayClient(conn).Join(ctx, &nodev1.JoinRequest{Token: tok.Secret, CsrDer: csr})
+	resp, err := nodev1.NewNodeGatewayClient(conn).Join(ctx, &nodev1.JoinRequest{Token: tok.Secret, CsrDer: csr, Country: country})
 	if err != nil {
 		return "", fmt.Errorf("join: %w", err)
 	}

@@ -110,7 +110,12 @@ func (g *Server) Join(ctx context.Context, req *nodev1.JoinRequest) (*nodev1.Joi
 		}
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	g.log.Info("node joined", "node", node.Code, "peer", peerAddr(ctx))
+	if err := g.svc.LearnNodeCountry(ctx, node.ID, req.Country); err != nil {
+		g.log.Warn("node country", "node", node.Code, "err", err)
+	} else if n, err := store.GetNode(ctx, g.svc.Store().DB, node.ID); err == nil {
+		node = n
+	}
+	g.log.Info("node joined", "node", node.Code, "country", node.Country, "peer", peerAddr(ctx))
 	return &nodev1.JoinResponse{CertDer: certDER, CaDer: g.ca.Cert.Raw, NodeId: node.ID, NodeCode: node.Code}, nil
 }
 

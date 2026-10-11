@@ -16,6 +16,9 @@ service NodeGateway {
 message JoinRequest {
   string token = 1;
   bytes csr_der = 2;
+  // ISO alpha-2 country of the node's public IP as the installer found it; empty if unknown.
+  // The panel fills the node's flag, name and code from it when the admin left them out.
+  string country = 3;
 }
 
 message JoinResponse {

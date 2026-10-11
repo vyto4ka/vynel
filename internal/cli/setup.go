@@ -41,6 +41,7 @@ func setupTUICmd() *cobra.Command {
 	c.Flags().StringVar(&o.Domain, "domain", "", "prefilled domain")
 	c.Flags().StringVar(&o.Email, "email", "", "prefilled email")
 	c.Flags().StringVar(&o.Token, "token", "", "prefilled node token")
+	c.Flags().StringVar(&o.State, "state", "", "file that keeps the answers between runs")
 	_ = c.MarkFlagRequired("out")
 	return c
 }

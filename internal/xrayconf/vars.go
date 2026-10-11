@@ -109,6 +109,18 @@ func (c NodeContext) builtins() map[string]any {
 	}
 }
 
+// countryNames are the Russian names of the usual VPN locations.
+var countryNames = map[string]string{"NL": "Нидерланды", "DE": "Германия", "FI": "Финляндия", "SE": "Швеция", "FR": "Франция",
+	"GB": "Великобритания", "US": "США", "CA": "Канада", "PL": "Польша", "LV": "Латвия", "LT": "Литва", "EE": "Эстония",
+	"AT": "Австрия", "CH": "Швейцария", "CZ": "Чехия", "ES": "Испания", "IT": "Италия", "RO": "Румыния", "BG": "Болгария",
+	"HU": "Венгрия", "RS": "Сербия", "MD": "Молдова", "TR": "Турция", "KZ": "Казахстан", "AM": "Армения", "GE": "Грузия",
+	"AE": "ОАЭ", "JP": "Япония", "SG": "Сингапур", "HK": "Гонконг", "RU": "Россия", "UA": "Украина", "NO": "Норвегия",
+	"DK": "Дания", "BE": "Бельгия", "IE": "Ирландия", "PT": "Португалия", "IL": "Израиль", "KR": "Корея", "IN": "Индия",
+	"AU": "Австралия", "BR": "Бразилия", "UZ": "Узбекистан", "KG": "Киргизия", "BY": "Беларусь", "AZ": "Азербайджан"}
+
+// CountryName is the Russian name of a country code, or "" when it is not in the list.
+func CountryName(cc string) string { return countryNames[strings.ToUpper(cc)] }
+
 // CountryFlag converts "NL" into the 🇳🇱 emoji. Unknown input yields "".
 func CountryFlag(cc string) string {
 	cc = strings.ToUpper(cc)

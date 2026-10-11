@@ -339,6 +339,8 @@ export DEBIAN_FRONTEND=noninteractive
 # writes everything to $APT_LOG. A mirror that stops answering is cut off and retried over IPv4,
 # instead of hanging the installer for half an hour.
 APT_LOG=/var/log/vynel-install.log
+# The form's answers survive a cancelled or failed run; removed once an install succeeds.
+STATE_FILE=/tmp/vynel-install.state
 APT_OPTS=(-o DPkg::Lock::Timeout=600 -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
   -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o Dpkg::Use-Pty=0 -o quiet=0)
 # A server without an IPv6 route: apt would try the mirrors' IPv6 addresses first and wait on each.
@@ -1474,7 +1476,8 @@ do_node() {
     if [[ $joined -eq 1 ]]; then
       rm -rf "$NODE_DATA"
     fi
-    vynel node join --data-dir "$NODE_DATA" "$TOKEN" || die "the panel did not accept the token: is it fresh (24 h, single use) and is port 9443 open on the panel?"
+    detect_country
+    vynel node join --data-dir "$NODE_DATA" ${COUNTRY:+--country "$COUNTRY"} "$TOKEN" || die "the panel did not accept the token: is it fresh (24 h, single use) and is port 9443 open on the panel?"
   fi
   write_node_unit
   start_unit vynel-node
@@ -1640,7 +1643,8 @@ run_tui() {
   out="$(mktemp)"
   clear_screen
   "$SETUP_BIN" setup-tui --out "$out" --installed "$installed" --version "$version" \
-    --public-ip "$PUBLIC_IP" --country "$COUNTRY" --domain "$DOMAIN" --email "$EMAIL" --token "$TOKEN" </dev/tty >/dev/tty || rc=$?
+    --public-ip "$PUBLIC_IP" --country "$COUNTRY" --domain "$DOMAIN" --email "$EMAIL" --token "$TOKEN" \
+    --state "$STATE_FILE" </dev/tty >/dev/tty || rc=$?
   if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
   if [[ $rc -ne 0 ]]; then rm -f "$out"; return 1; fi
   # Only known names, single-quoted values (internal/setup Answers.Shell).
@@ -1673,3 +1677,4 @@ case "$MODE" in
   update) do_update ;;
   harden) do_harden ;;
 esac
+rm -f "$STATE_FILE"

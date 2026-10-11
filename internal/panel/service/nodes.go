@@ -14,12 +14,20 @@ import (
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // InstallTokenTTL is how long a node install token stays valid (docs/ARCHITECTURE.md §6.1).
 const InstallTokenTTL = 24 * time.Hour
 
 var codeRe = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,9}$`)
+
+// PendingNodeName names a node created without a name and country; the node replaces it with
+// its country's name when it joins (LearnNodeCountry).
+const PendingNodeName = "Новый сервер"
+
+// pendingCodeRe matches the codes picked for a node without a country (N, N2, …).
+var pendingCodeRe = regexp.MustCompile(`^N[0-9]*$`)
 
 // NodeInput creates or edits a node.
 type NodeInput struct {
@@ -35,11 +43,14 @@ func (s *Service) CreateNode(ctx context.Context, actor Actor, in NodeInput) (*s
 	in.Name = strings.TrimSpace(in.Name)
 	in.Country = strings.ToUpper(strings.TrimSpace(in.Country))
 	in.Code = strings.ToUpper(strings.TrimSpace(in.Code))
-	if in.Name == "" {
-		return nil, "", invalid("node name is required")
-	}
 	if in.Country != "" && !regexp.MustCompile(`^[A-Z]{2}$`).MatchString(in.Country) {
 		return nil, "", invalid("country must be a 2-letter code")
+	}
+	if in.Name == "" {
+		in.Name = xrayconf.CountryName(in.Country)
+		if in.Name == "" {
+			in.Name = PendingNodeName
+		}
 	}
 	n := &store.Node{Name: in.Name, Country: in.Country, Domain: strings.ToLower(strings.TrimSpace(in.Domain)), Local: in.Local, Enabled: true}
 	var token string
@@ -206,6 +217,67 @@ func (s *Service) ConsumeInstallToken(ctx context.Context, token string, sign fu
 		return nil, err
 	}
 	return node, nil
+}
+
+// LearnNodeCountry fills in what the admin left for the node to tell when it joins: the country
+// (flag), the name and, when the code was only a placeholder (N, N2), a code from the country with
+// the inbound tags that were built from it. A node that already has a country is left as is.
+func (s *Service) LearnNodeCountry(ctx context.Context, nodeID int64, cc string) error {
+	cc = strings.ToUpper(strings.TrimSpace(cc))
+	if !regexp.MustCompile(`^[A-Z]{2}$`).MatchString(cc) {
+		return nil
+	}
+	return s.mutate(ctx, change{actor: ActorSystem, action: "node.country", entity: "node", entityID: func() int64 { return nodeID }, event: EvNodeChanged, diff: map[string]string{"country": cc}},
+		func(q store.DBTX) error {
+			n, err := store.GetNode(ctx, q, nodeID)
+			if err != nil {
+				return err
+			}
+			if n.Country != "" {
+				return nil
+			}
+			n.Country = cc
+			if n.Name == PendingNodeName {
+				if n.Name = xrayconf.CountryName(cc); n.Name == "" {
+					n.Name = cc
+				}
+			}
+			if pendingCodeRe.MatchString(n.Code) {
+				old := n.Code
+				if n.Code, err = s.pickNodeCode(ctx, q, "", cc); err != nil {
+					return err
+				}
+				if err := s.retagNode(ctx, q, n, old); err != nil {
+					return err
+				}
+			}
+			return store.UpdateNode(ctx, q, n)
+		})
+}
+
+// retagNode renames the node's inbounds whose tag came from its profile's pattern with the old code.
+func (s *Service) retagNode(ctx context.Context, q store.DBTX, n *store.Node, oldCode string) error {
+	inbounds, err := store.ListNodeInbounds(ctx, q, n.ID, 0)
+	if err != nil {
+		return err
+	}
+	for _, ni := range inbounds {
+		p, err := store.GetProfile(ctx, q, ni.ProfileID)
+		if err != nil {
+			return err
+		}
+		was := strings.NewReplacer("${NODE_CODE}", oldCode, "${NODE_COUNTRY}", "").Replace(p.TagPattern)
+		if ni.Tag != was && !strings.HasPrefix(ni.Tag, was+"_") {
+			continue
+		}
+		if ni.Tag, err = s.pickTag(ctx, q, "", p, n); err != nil {
+			return err
+		}
+		if err := store.UpdateNodeInbound(ctx, q, ni); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReportedAddress is an address the agent found on the node's interfaces.

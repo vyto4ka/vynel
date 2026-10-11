@@ -129,11 +129,10 @@ func adminNodeCmd() *cobra.Command {
 			return printJoinToken(ctx, cmd.OutOrStdout(), s, n, token)
 		}),
 	}
-	add.Flags().StringVar(&in.Name, "name", "", "display name, e.g. Нидерланды")
-	add.Flags().StringVar(&in.Country, "country", "", "ISO country code, e.g. NL")
+	add.Flags().StringVar(&in.Name, "name", "", "display name, e.g. Нидерланды (default: from the country, learned at join)")
+	add.Flags().StringVar(&in.Country, "country", "", "ISO country code, e.g. NL (default: the node reports it at join)")
 	add.Flags().StringVar(&in.Domain, "domain", "", "node domain (Reality self-steal, A record to the node)")
 	add.Flags().StringVar(&in.Code, "code", "", "node code (default: from country)")
-	_ = add.MarkFlagRequired("name")
 
 	list := &cobra.Command{
 		Use: "list", Short: "List nodes with live numbers",

@@ -45,3 +45,23 @@ func TestCloudflareAndDomains(t *testing.T) {
 		t.Fatal("private ranges")
 	}
 }
+
+func TestStateKeepsAnswersButFlagsWin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state")
+	saveState(path, &state{Answers: Answers{Mode: "aio", Domain: "old.example.com", BotToken: "1:AAx", SubPath: "/sub/"}, Security: []string{"port"}})
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("state file must be root-only: %v %v", fi, err)
+	}
+	s := loadState(path)
+	if s == nil || s.BotToken != "1:AAx" || len(s.Security) != 1 {
+		t.Fatalf("round trip: %+v", s)
+	}
+	a := &Answers{Domain: "flag.example.com", AdminLogin: "admin"}
+	a.restore(&s.Answers, Options{Domain: "flag.example.com"})
+	if a.Domain != "flag.example.com" || a.BotToken != "1:AAx" || a.SubPath != "/sub/" || a.AdminLogin != "admin" {
+		t.Fatalf("restore: %+v", a)
+	}
+	if loadState(filepath.Join(t.TempDir(), "none")) != nil {
+		t.Fatal("missing file")
+	}
+}

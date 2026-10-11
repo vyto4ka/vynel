@@ -334,3 +334,32 @@ func TestEgressAddress(t *testing.T) {
 		t.Fatalf("foreign address: %v", err)
 	}
 }
+
+func TestLearnNodeCountry(t *testing.T) {
+	f := newFixture(t)
+	n, _ := must2(f.s.CreateNode(f.ctx, ActorCLI, NodeInput{Domain: "x.example.com"}))
+	if n.Name != PendingNodeName || n.Code != "N" {
+		t.Fatalf("node without name and country: %q %q", n.Name, n.Code)
+	}
+	prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: prof.ID}))
+	if err := f.s.LearnNodeCountry(f.ctx, n.ID, "de"); err != nil {
+		t.Fatal(err)
+	}
+	got := must(f.s.Node(f.ctx, n.ID))
+	if got.Country != "DE" || got.Name != "Германия" || got.Code != "DE" {
+		t.Fatalf("learned: %q %q %q", got.Country, got.Name, got.Code)
+	}
+	if ib := must(f.s.NodeInbounds(f.ctx, n.ID)); len(ib) != 1 || ib[0].Tag != "VLESS_DE" {
+		t.Fatalf("inbound not retagged: %+v", ib[0].Tag)
+	}
+
+	// What the admin typed stays.
+	m, _ := must2(f.s.CreateNode(f.ctx, ActorCLI, NodeInput{Name: "Мой", Country: "FI"}))
+	if err := f.s.LearnNodeCountry(f.ctx, m.ID, "SE"); err != nil {
+		t.Fatal(err)
+	}
+	if got := must(f.s.Node(f.ctx, m.ID)); got.Country != "FI" || got.Name != "Мой" || got.Code != "FI" {
+		t.Fatalf("admin values overwritten: %q %q %q", got.Country, got.Name, got.Code)
+	}
+}
