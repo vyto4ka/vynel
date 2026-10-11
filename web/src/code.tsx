@@ -8,30 +8,32 @@ import { yaml } from '@codemirror/lang-yaml'
 import { json } from '@codemirror/lang-json'
 import { tags as t } from '@lezer/highlight'
 
-// Редактор кода в цветах панели: бирюзовые ключи, розовые строки, серый фон.
+// Code editor in the panel palette: teal keys, pink strings, an inset mantle background.
 const theme = EditorView.theme({
-  '&': { backgroundColor: 'var(--bg-2)', color: 'var(--text)', fontSize: '12.5px', border: '1px solid var(--border-2)', borderRadius: 'var(--radius-sm)' },
-  '&.cm-focused': { outline: 'none', borderColor: 'var(--miku)', boxShadow: '0 0 0 3px var(--miku-soft)' },
-  '.cm-scroller': { fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', lineHeight: '1.55' },
-  '.cm-content': { caretColor: 'var(--miku-2)', padding: '8px 0' },
-  '.cm-gutters': { backgroundColor: 'var(--surface)', color: 'var(--muted)', border: 'none', borderRight: '1px solid var(--border)' },
-  '.cm-activeLine': { backgroundColor: 'rgba(57, 197, 187, 0.06)' },
-  '.cm-activeLineGutter': { backgroundColor: 'rgba(57, 197, 187, 0.10)', color: 'var(--miku-2)' },
-  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(255, 95, 162, 0.28) !important' },
-  '.cm-cursor': { borderLeftColor: 'var(--miku-2)' },
-  '.cm-matchingBracket': { backgroundColor: 'rgba(57, 197, 187, 0.22)', outline: 'none' },
-  '.cm-selectionMatch': { backgroundColor: 'rgba(255, 95, 162, 0.14)' },
+  '&': { backgroundColor: 'var(--mantle)', color: 'var(--on-surface)', fontSize: '12.5px', borderRadius: 'var(--shape-md)', overflow: 'hidden', boxShadow: 'inset 0 0 0 1px var(--outline-variant)' },
+  '&.cm-focused': { outline: 'none', boxShadow: 'inset 0 0 0 2px var(--primary)' },
+  '.cm-scroller': { fontFamily: '"JetBrains Mono", "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', lineHeight: '1.55' },
+  '.cm-content': { caretColor: 'var(--primary)', padding: '10px 0' },
+  '.cm-gutters': { backgroundColor: 'var(--crust)', color: 'var(--muted)', border: 'none' },
+  '.cm-activeLine': { backgroundColor: 'rgba(117, 224, 215, 0.06)' },
+  '.cm-activeLineGutter': { backgroundColor: 'rgba(117, 224, 215, 0.10)', color: 'var(--primary)' },
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(255, 148, 186, 0.26) !important' },
+  '.cm-cursor': { borderLeftColor: 'var(--primary)' },
+  '.cm-matchingBracket': { backgroundColor: 'rgba(117, 224, 215, 0.22)', outline: 'none' },
+  '.cm-selectionMatch': { backgroundColor: 'rgba(255, 148, 186, 0.14)' },
   '.cm-foldGutter span': { color: 'var(--muted)' },
+  '.cm-panels': { backgroundColor: 'var(--container-high)', color: 'var(--on-surface)' },
+  '.cm-tooltip': { backgroundColor: 'var(--container-highest)', border: 'none', borderRadius: 'var(--shape-sm)', boxShadow: 'var(--elev-2)' },
 }, { dark: true })
 
 const highlight = HighlightStyle.define([
-  { tag: [t.propertyName, t.definition(t.propertyName)], color: '#5fd8cf' },
-  { tag: [t.string, t.special(t.string)], color: '#ff8dbd' },
-  { tag: [t.number, t.bool, t.null, t.atom], color: '#f2b84b' },
-  { tag: [t.keyword, t.operator], color: '#b49cff' },
-  { tag: [t.comment, t.lineComment, t.blockComment], color: '#6b7c82', fontStyle: 'italic' },
-  { tag: [t.punctuation, t.separator, t.bracket], color: '#8a9aa0' },
-  { tag: t.invalid, color: '#ff6b6b' },
+  { tag: [t.propertyName, t.definition(t.propertyName)], color: '#75e0d7' },
+  { tag: [t.string, t.special(t.string)], color: '#ff94ba' },
+  { tag: [t.number, t.bool, t.null, t.atom], color: '#f5c572' },
+  { tag: [t.keyword, t.operator], color: '#c2b1f8' },
+  { tag: [t.comment, t.lineComment, t.blockComment], color: '#778990', fontStyle: 'italic' },
+  { tag: [t.punctuation, t.separator, t.bracket], color: '#9eb2ba' },
+  { tag: t.invalid, color: '#fb8276' },
 ])
 
 export function CodeEditor({ value, onChange, lang, height = 360, readOnly }: {

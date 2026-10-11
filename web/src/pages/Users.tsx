@@ -36,8 +36,8 @@ export function Users() {
           {filters.map(([v, l]) => <button key={v} className={status === v ? 'on' : ''} onClick={() => setStatus(v)}>{l}</button>)}
         </div>
         <div className="grow" style={{ minWidth: 180, maxWidth: 320, position: 'relative' }}>
-          <input className="input" placeholder="Поиск по имени или заметке" value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 34 }} />
-          <span className="muted" style={{ position: 'absolute', left: 10, top: 9 }}><Icon name="search" size={17} /></span>
+          <input className="input" placeholder="Поиск по имени или заметке" value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 40 }} />
+          <span className="muted" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', display: 'flex' }}><Icon name="search" size={18} /></span>
         </div>
         <div className="grow" />
         <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" /> Пользователь</button>

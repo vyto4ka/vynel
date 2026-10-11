@@ -71,7 +71,7 @@ const purposeNames = { sub: 'подписки', panel: 'панель', node: 'н
 
 function RoleChips({ roles }: { roles: NetRole[] }) {
   if (roles.length === 0) return <span className="muted small">не используется</span>
-  return <>{roles.map((r, i) => <Badge key={i} color={roleColors[r.kind]}>{roleNames[r.kind]}{r.tag ? ` ${r.tag}` : ''}</Badge>)}</>
+  return <span className="badges">{roles.map((r, i) => <Badge key={i} color={roleColors[r.kind]}>{roleNames[r.kind]}{r.tag ? ` ${r.tag}` : ''}</Badge>)}</span>
 }
 
 function NetworkCard() {

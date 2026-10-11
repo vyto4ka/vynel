@@ -317,8 +317,8 @@ function SourceEditor({ kind, text, onChange, error, own, onReset, vars }: {
       <CodeEditor lang="json" value={text} onChange={onChange} height="calc(100vh - 420px)" />
       {error && <div className="small pink-text" style={{ marginTop: 6 }}>{error}</div>}
       <div className="row between" style={{ marginTop: 10, alignItems: 'flex-start', flexWrap: 'nowrap', gap: 14 }}>
-        <div className="small muted">
-          Переменные: {[...vars.map((v) => v.name), ...builtinVars].map((n) => <code key={n} style={{ marginRight: 6 }}>{'${' + n + '}'}</code>)}
+        <div className="small muted" style={{ minWidth: 0 }}>
+          Переменные: {[...vars.map((v) => v.name), ...builtinVars].map((n) => <code key={n} style={{ marginRight: 6, display: 'inline-block' }}>{'${' + n + '}'}</code>)}
         </div>
         <button className="btn sm" disabled={!own} onClick={onReset} title="Взять JSON из шаблона: профиль снова будет следовать шаблону и его обновлениям">Как в шаблоне</button>
       </div>

@@ -17,7 +17,8 @@ import { Audit } from './pages/Audit'
 import { Telegram } from './pages/Telegram'
 import { Account } from './pages/Account'
 
-type Page = { id: string; title: string; icon: string; el: () => ReactElement }
+// short is the label under the icon when the menu is collapsed into a rail.
+type Page = { id: string; title: string; short?: string; icon: string; el: () => ReactElement }
 
 const sections: { title: string; pages: Page[] }[] = [
   { title: 'Обзор', pages: [
@@ -29,7 +30,7 @@ const sections: { title: string; pages: Page[] }[] = [
     pages: [
       { id: 'users', title: 'Пользователи', icon: 'users', el: () => <Users /> },
       { id: 'groups', title: 'Группы', icon: 'groups', el: () => <Groups /> },
-      { id: 'templates', title: 'Шаблоны пользователей', icon: 'templates', el: () => <Templates /> },
+      { id: 'templates', title: 'Шаблоны пользователей', short: 'Шаблоны', icon: 'templates', el: () => <Templates /> },
       { id: 'subscription', title: 'Подписка', icon: 'sub', el: () => <Subscription /> },
     ],
   },
@@ -76,6 +77,15 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
   const [page, setPage] = useState(currentPage)
   const [collapsed, setCollapsed] = useState(() => load('vynel.sidebar', 'open') === 'collapsed')
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
+
+  // The top app bar lifts onto a container tone once the page scrolls under it.
+  useEffect(() => {
+    const h = () => setScrolled(window.scrollY > 4)
+    h()
+    window.addEventListener('scroll', h, { passive: true })
+    return () => window.removeEventListener('scroll', h)
+  }, [])
 
   useEffect(() => {
     const h = () => {
@@ -113,6 +123,7 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
                 <a key={x.id} href={'#/' + x.id} className={'nav-item' + (x.id === page ? ' active' : '')} title={x.title}>
                   <Icon name={x.icon} />
                   <span className="nav-label">{x.title}</span>
+                  <span className="nav-short">{x.short || x.title}</span>
                 </a>
               ))}
             </div>
@@ -123,16 +134,18 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
           <button className="nav-item" onClick={onLogout} title="Выйти">
             <Icon name="logout" />
             <span className="nav-label">Выйти</span>
+            <span className="nav-short">Выйти</span>
           </button>
           <button className="nav-item collapse-btn" onClick={toggle} title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}>
             <Icon name={collapsed ? 'expand' : 'collapse'} />
             <span className="nav-label">Свернуть</span>
+            <span className="nav-short">Меню</span>
           </button>
         </div>
       </aside>
       <div className="scrim" onClick={() => setMobileOpen(false)} />
       <div className="main">
-        <header className="topbar">
+        <header className={'topbar' + (scrolled ? ' scrolled' : '')}>
           <button className="btn ghost icon burger" onClick={() => setMobileOpen(true)} aria-label="Меню"><Icon name="menu" /></button>
           <h1>{p.title}</h1>
           <div className="spacer" />

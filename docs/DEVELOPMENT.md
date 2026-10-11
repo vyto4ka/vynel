@@ -109,7 +109,7 @@ docs/                       документация
 
 ## Веб-интерфейс
 
-- Стек: React 19 + TypeScript + Vite, без UI-библиотек; редактор кода — CodeMirror 6 (`web/src/code.tsx`, отдельный чанк). Тема — CSS-переменные в `web/src/styles.css` (бирюзовый `--miku`, розовый `--pink`, серые `--surface*`).
+- Стек: React 19 + TypeScript + Vite, без UI-библиотек; редактор кода — CodeMirror 6 (`web/src/code.tsx`, отдельный чанк). Тема — CSS-переменные в `web/src/styles.css`: компоненты по Material 3 (роли `--primary`, `--secondary-container`, `--container*`, шкала скруглений `--shape-*`, `--elev-*`), нейтральные слои по схеме Catppuccin Mocha в бирюзовом оттенке, акценты — мику-бирюзовый (`--primary`) и розовый (`--tertiary`). Старые имена (`--miku`, `--pink`, `--surface*`) оставлены как псевдонимы.
 - Маршруты — через `#/раздел`, поэтому интерфейс работает под любым секретным путём. Запросы — относительные `api/…` с заголовком `X-Vynel: 1` (защита от CSRF).
 - API: `internal/panel/webapi/api.go`, список маршрутов — в `routes()`. Новая страница — файл в `web/src/pages/` и строка в `sections` в `web/src/main.tsx`.
 - Разработка с горячей перезагрузкой: запустить панель (см. ниже), затем

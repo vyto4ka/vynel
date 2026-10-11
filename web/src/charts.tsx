@@ -253,8 +253,8 @@ export function BarList({ rows, format = String, color = 'var(--s1)', onClick }:
 
 /** Sequential teal ramp for magnitude: near-surface for zero, bright teal for the maximum. */
 function ramp(t: number): string {
-  const a = [0x1f, 0x26, 0x2c] // --surface-2
-  const b = [0x5f, 0xd8, 0xcf] // --miku-2
+  const a = [0x24, 0x31, 0x37] // --container-high
+  const b = [0x75, 0xe0, 0xd7] // --primary
   const k = Math.pow(Math.max(0, Math.min(1, t)), 0.75)
   return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`
 }
@@ -273,7 +273,7 @@ export function Heatmap({ data }: { data: number[][] }) {
         {data.map((row, d) => (
           <FragmentRow key={d} label={DAYS[d]}>
             {row.map((v, h) => (
-              <span key={h} className={'hm-c' + (hover && hover[0] === d && hover[1] === h ? ' on' : '')} style={{ background: v ? ramp(v / max) : 'var(--surface-2)' }}
+              <span key={h} className={'hm-c' + (hover && hover[0] === d && hover[1] === h ? ' on' : '')} style={{ background: v ? ramp(v / max) : 'var(--container-high)' }}
                 onMouseEnter={() => setHover([d, h])} onMouseLeave={() => setHover(null)} />
             ))}
           </FragmentRow>
