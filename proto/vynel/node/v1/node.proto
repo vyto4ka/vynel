@@ -34,6 +34,7 @@ message NodeMessage {
     Ack ack = 2;
     Addresses addresses = 3;
     StatsBatch stats = 4;
+    CommandResult result = 5;
   }
 }
 
@@ -71,7 +72,28 @@ message PanelMessage {
     Snapshot snapshot = 1;
     Delta delta = 2;
     StatsAck stats_ack = 3;
+    Command command = 4;
   }
+}
+
+// Command is an admin action on the node (panel: «Ноды» → «Действия»).
+message Command {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_RESTART_XRAY = 1;  // restart Xray with the applied config
+    ACTION_RESTART_CADDY = 2; // restart Caddy with the applied config
+    ACTION_RESTART_AGENT = 3; // restart the vynel service (systemd starts it again)
+    ACTION_REBOOT = 4;        // reboot the server
+  }
+  string id = 1;
+  Action action = 2;
+}
+
+// CommandResult answers a Command. For a service restart or reboot it is sent before acting.
+message CommandResult {
+  string id = 1;
+  string error = 2; // empty = done
+  string detail = 3;
 }
 
 // StatsBatch carries counters collected since the previous batch. Batches are queued on the

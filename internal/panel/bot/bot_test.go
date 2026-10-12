@@ -310,9 +310,21 @@ func TestBot(t *testing.T) {
 	n = fake.n()
 	fake.press(42, "sx:"+ws.ID)
 	fake.waitCall(t, n, "sessions list", textHas("editMessageText", "Сессии веб-панели"))
-	if svc.WebSessionActive(ctx, ws.ID, "") {
+	if svc.WebSessionCheck(ctx, ws.ID, "", false) == "" {
 		t.Fatal("the session was not ended")
 	}
+	// ...and the sign-in message goes away with it.
+	fake.waitCall(t, n, "sign-in message deleted", func(c call) bool { return c.Method == "deleteMessage" })
+
+	// A request from another IP ends the session at once, and its message is deleted too.
+	n = fake.n()
+	ws, err = svc.StartWebSession(ctx, service.LoginPassword, "boss", "203.0.113.5", "Mozilla/5.0 (Windows NT 10.0) Chrome/120", time.Hour)
+	must(err)
+	c = fake.waitCall(t, n, "second login notice", textHas("sendMessage", "Вход в панель"))
+	if why := svc.WebSessionCheck(ctx, ws.ID, "198.51.100.9", false); why != service.EndIP {
+		t.Fatalf("another IP: %q", why)
+	}
+	fake.waitCall(t, n, "second sign-in message deleted", func(c call) bool { return c.Method == "deleteMessage" })
 
 	// A config the node cannot apply is reported once, and so is the recovery.
 	n = fake.n()

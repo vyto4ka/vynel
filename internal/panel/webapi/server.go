@@ -33,6 +33,8 @@ type Config struct {
 	Log           *slog.Logger
 	UI            fs.FS    // built UI; nil = web.Dist
 	Bot           *bot.Bot // Telegram bot (status, backups); nil in tests
+	// NodeAction runs an admin action (service.NodeActions) on a connected node; nil = unavailable.
+	NodeAction func(ctx context.Context, nodeID int64, action string) (detail string, err error)
 }
 
 // Server is the web panel.
@@ -164,34 +166,45 @@ func (s *Server) sign(ctx context.Context, sess session) (string, error) {
 }
 
 func (s *Server) verify(r *http.Request, v string) (*session, bool) {
+	sess, why := s.check(r, v, false)
+	return sess, why == ""
+}
+
+// check verifies a session cookie. active: the request is something the admin did (it resets
+// the inactivity timer). It returns why the session cannot be used ("" = it can): "bad" for a
+// forged or stale cookie, else a service.End* reason.
+func (s *Server) check(r *http.Request, v string, active bool) (*session, string) {
 	ctx := r.Context()
 	p, sig, ok := strings.Cut(v, ".")
 	if !ok {
-		return nil, false
+		return nil, "bad"
 	}
 	key, err := s.svc.SessionKey(ctx)
 	if err != nil {
-		return nil, false
+		return nil, "bad"
 	}
 	m := hmac.New(sha256.New, key)
 	m.Write([]byte(p))
 	got, err := base64.RawURLEncoding.DecodeString(sig)
 	if err != nil || !hmac.Equal(got, m.Sum(nil)) {
-		return nil, false
+		return nil, "bad"
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(p)
 	if err != nil {
-		return nil, false
+		return nil, "bad"
 	}
 	var sess session
 	if json.Unmarshal(raw, &sess) != nil || time.Now().Unix() > sess.Exp {
-		return nil, false
+		return nil, "bad"
 	}
 	login, _ := s.svc.Setting(ctx, service.SettingWebLogin, "")
-	if sess.Login != login || sess.ID == "" || !s.svc.WebSessionActive(ctx, sess.ID, clientIP(r)) {
-		return nil, false
+	if sess.Login != login || sess.ID == "" {
+		return nil, "bad"
 	}
-	return &sess, true
+	if why := s.svc.WebSessionCheck(ctx, sess.ID, clientIP(r), active); why != "" {
+		return nil, why
+	}
+	return &sess, ""
 }
 
 func secure(r *http.Request) bool {
@@ -264,8 +277,14 @@ func (s *Server) handle(pattern string, fn apiFunc) {
 			writeError(w, &httpError{http.StatusUnauthorized, "not logged in"})
 			return
 		}
-		if _, ok := s.verify(r, c.Value); !ok {
-			writeError(w, &httpError{http.StatusUnauthorized, "session expired"})
+		// Background requests (GET, the page's ping) keep the session alive but are not actions.
+		active := r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.HasSuffix(r.URL.Path, "/api/session/ping")
+		if _, why := s.check(r, c.Value, active); why != "" {
+			msg := "session expired"
+			if why != "bad" {
+				msg = service.EndReasonText(why, s.svc.WebIdleMinutes(r.Context()))
+			}
+			writeError(w, &httpError{http.StatusUnauthorized, msg})
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get(csrfHeader) != "1" {
@@ -392,7 +411,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil {
 		if sess, ok := s.verify(r, c.Value); ok {
-			_, _ = s.svc.EndWebSessions(r.Context(), actor(r), sess.ID, "")
+			_ = s.svc.Logout(r.Context(), actor(r), sess.ID)
 		}
 	}
 	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: basePath(r), MaxAge: -1, HttpOnly: true, Secure: secure(r), SameSite: http.SameSiteStrictMode})

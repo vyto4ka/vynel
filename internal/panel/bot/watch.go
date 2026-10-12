@@ -56,7 +56,28 @@ func (b *Bot) onLogin(ctx context.Context, w *store.WebSession) {
 		b.fmtTime(ctx, w.CreatedAt, "02.01 15:04"), b.sessionLine(ctx, w))
 	kb := Keyboard{row(btn("⛔ Завершить эту сессию", "sx:"+w.ID), btn("Все сессии", "ss"))}
 	for _, a := range admins {
-		_, _ = api.send(ctx, a.ID, text, kb)
+		if m, err := api.send(ctx, a.ID, text, kb); err == nil {
+			// Deleted when the session ends (sign-out, inactivity, another IP, closed page).
+			_ = b.svc.RememberLoginNotice(ctx, w.ID, a.ID, m.MessageID)
+		}
+	}
+}
+
+// dropLoginNotices deletes the sign-in messages of sessions that have ended. It runs when a
+// session ends and on every tick (sessions that simply expired, a bot that was down).
+func (b *Bot) dropLoginNotices(ctx context.Context) {
+	api := b.client()
+	if api == nil {
+		return
+	}
+	ns, err := b.svc.EndedLoginNotices(ctx)
+	if err != nil {
+		b.log.Warn("ended sign-in messages", "err", err)
+	}
+	for _, n := range ns {
+		if err := api.deleteMessage(ctx, n[0], n[1]); err != nil {
+			b.log.Warn("delete sign-in message", "chat", n[0], "err", err)
+		}
 	}
 }
 

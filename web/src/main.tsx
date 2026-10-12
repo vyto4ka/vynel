@@ -79,6 +79,34 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
 
+  // The server ends a session after a few minutes without actions and when the page is closed.
+  // Every half a minute the page says it is alive and whether anything was clicked or typed.
+  useEffect(() => {
+    let acted = false
+    const mark = () => { acted = true }
+    const kinds = ['pointerdown', 'keydown', 'wheel', 'touchstart']
+    kinds.forEach((k) => window.addEventListener(k, mark, { capture: true, passive: true }))
+    const ping = () => {
+      const active = acted
+      acted = false
+      post('session/ping', { active }).catch(() => {})
+    }
+    const timer = setInterval(ping, 30000)
+    // A closed tab ends the session; a reload makes a request at once and keeps it.
+    const closing = () => {
+      fetch('api/session/closing', { method: 'POST', keepalive: true, credentials: 'same-origin', headers: { 'X-Vynel': '1' } }).catch(() => {})
+    }
+    const back = (e: PageTransitionEvent) => { if (e.persisted) ping() }
+    window.addEventListener('pagehide', closing)
+    window.addEventListener('pageshow', back)
+    return () => {
+      kinds.forEach((k) => window.removeEventListener(k, mark, { capture: true }))
+      clearInterval(timer)
+      window.removeEventListener('pagehide', closing)
+      window.removeEventListener('pageshow', back)
+    }
+  }, [])
+
   // The top app bar lifts onto a container tone once the page scrolls under it.
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 4)
@@ -163,7 +191,11 @@ function App() {
     get('session').then(setSession, () => setSession(null))
   }, [])
   useEffect(() => {
-    setUnauthorizedHandler(() => setSession(null))
+    setUnauthorizedHandler((message) => {
+      // Why the server ended the session (inactivity, another IP, a closed page) goes on the login screen.
+      if (message.startsWith('Сессия')) setMagicError(message)
+      setSession(null)
+    })
     // Одноразовая ссылка из Telegram-бота: токен во фрагменте адреса (#/magic/…). Сразу убрать его
     // из адресной строки и истории, затем обменять на сессию.
     const m = location.hash.match(/^#\/magic\/([A-Za-z0-9_-]+)/)
@@ -191,7 +223,7 @@ function App() {
   }, [check])
 
   if (session === undefined) return null
-  if (session === null) return <Login onLogin={check} error={magicError} />
+  if (session === null) return <Login onLogin={() => { setMagicError(''); check() }} error={magicError} />
   return (
     <Shell login={session.login} version={session.version}
       onLogout={() => post('logout').finally(() => setSession(null))} />

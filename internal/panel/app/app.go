@@ -25,6 +25,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
 	"github.com/vyto4ka/vynel/internal/panel/webapi"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 	"github.com/vyto4ka/vynel/internal/xray"
 )
 
@@ -113,8 +114,40 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	p.Bot = bot.New(bot.Config{Service: svc, DataDir: cfg.DataDir, Version: cfg.Version, Connected: rec.Connected,
 		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
-		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot})
+		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec)})
 	return p, func() { st.Close() }, nil
+}
+
+// nodeAction runs the panel's node actions through the node's live session.
+func nodeAction(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, action string) (string, error) {
+	commands := map[string]nodev1.Command_Action{
+		"xray": nodev1.Command_ACTION_RESTART_XRAY, "caddy": nodev1.Command_ACTION_RESTART_CADDY,
+		"service": nodev1.Command_ACTION_RESTART_AGENT, "reboot": nodev1.Command_ACTION_REBOOT,
+	}
+	return func(ctx context.Context, nodeID int64, action string) (string, error) {
+		if action == "resync" {
+			if err := rec.Resync(nodeID); err != nil {
+				return "", errors.New("нода не на связи")
+			}
+			return "конфиг отправляется заново", nil
+		}
+		cmd, ok := commands[action]
+		if !ok {
+			return "", fmt.Errorf("unknown action %q", action)
+		}
+		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		defer cancel()
+		res, err := rec.Command(ctx, nodeID, cmd)
+		switch {
+		case errors.Is(err, reconciler.ErrNotConnected):
+			return "", errors.New("нода не на связи")
+		case err != nil:
+			return "", err
+		case res.Error != "":
+			return "", errors.New(res.Error)
+		}
+		return res.Detail, nil
+	}
 }
 
 // Run runs the panel until ctx ends.
@@ -200,6 +233,7 @@ func Run(ctx context.Context, cfg Config) error {
 			})
 		}
 	}
+	run("web sessions", func() error { p.Service.WebSessionsLoop(ctx, 5*time.Second); return nil })
 	cfg.Log.Info("panel started", "data", cfg.DataDir, "gateway", cfg.GatewayListen)
 	select {
 	case <-ctx.Done():

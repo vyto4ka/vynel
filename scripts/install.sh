@@ -348,12 +348,19 @@ if command -v ip >/dev/null && [[ -z "$(ip -6 route show default 2>/dev/null)" ]
   APT_OPTS+=(-o Acquire::ForceIPv4=true)
 fi
 export NEEDRESTART_MODE=a # Ubuntu's needrestart must not stop apt with a dialog
+# Hooks that run after `apt-get update` (Ubuntu rebuilds its command-not-found index there and sits
+# at "100% [Working]" for up to a minute on a small server). The installer needs none of them.
+APT_CONF=/run/vynel-apt.conf
+if printf '#clear APT::Update::Post-Invoke-Success;\n' >"$APT_CONF" 2>/dev/null; then
+  APT_OPTS+=(-c "$APT_CONF")
+fi
 
 fmt_secs() { printf '%d:%02d' $(($1 / 60)) $(($1 % 60)); }
 
 # run_step LABEL STALL MAX CMD...: runs CMD with its output in $APT_LOG and shows one live line:
 # a spinner, the time so far and the last thing CMD said. Returns CMD's code, or 124 when it said
-# nothing for STALL seconds (0 = no limit) or ran longer than MAX seconds.
+# nothing for STALL seconds (0 = no limit) or ran longer than MAX seconds. With STEP_SOFT=1 a
+# failure is not an error yet (the caller has another way): it is shown dimmed, not in red.
 run_step() {
   local label="$1" stall="$2" max="$3"; shift 3
   local from size prev=-1 changed start rc=0 line i=0 cols tty=0
@@ -387,6 +394,8 @@ run_step() {
   [[ $tty -eq 1 ]] && printf '\r\033[K'
   if [[ $rc -eq 0 ]]; then
     green "  ✓ $label ($(fmt_secs $((SECONDS - start))))"
+  elif [[ "${STEP_SOFT:-0}" == 1 ]]; then
+    printf '  \033[2m· %s: %s\033[0m\n' "$label" "$([[ $rc -eq 124 ]] && echo "no progress" || echo "not this way")"
   else
     red "  ✗ $label: $([[ $rc -eq 124 ]] && echo "no progress, stopped" || echo "exit code $rc")"
   fi
@@ -446,10 +455,22 @@ apt_install() {
   run_step "installing $*" 0 1800 apt-get "${APT_OPTS[@]}" install -y --no-install-recommends "$@"
 }
 
+# lists_fresh PKG...: the package lists know every PKG and are less than a day old. Fresh cloud
+# images often ship without lists (nothing to install from) or with lists weeks old (the .deb
+# files they name are gone from the mirror): either way `apt-get update` has to come first.
+lists_fresh() {
+  local p
+  # Release files keep the mirror's own date; the directory and the stamp show the last update here.
+  [[ -n "$(find /var/lib/apt/lists /var/lib/apt/periodic/update-success-stamp -maxdepth 0 -mmin -1440 2>/dev/null)" ]] || return 1
+  for p in "$@"; do
+    # Not a pipe into grep -q: with pipefail its early exit fails the pipe.
+    [[ "$(apt-cache policy "$p" 2>/dev/null)" =~ Candidate:\ [^\(] ]] || return 1
+  done
+}
+
 # try_packages / ensure_packages PKG...: install what is missing, after the questions (ensure_
-# stops the installer when it cannot). Nothing runs when all is
-# there; the package lists are refreshed only when installing without it fails (fresh images
-# usually have usable lists, and `apt-get update` is the slow part).
+# stops the installer when it cannot). Nothing runs when all is there. The package lists are
+# refreshed first when they are missing or stale, otherwise only if installing without it fails.
 try_packages() {
   local p missing=()
   for p in "$@"; do
@@ -461,8 +482,10 @@ try_packages() {
   if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
     run_step "finishing an interrupted dpkg" 0 900 dpkg --configure -a || true
   fi
-  apt_install "${missing[@]}" && return 0
-  echo "  refreshing the package lists"
+  if lists_fresh "${missing[@]}"; then
+    STEP_SOFT=1 apt_install "${missing[@]}" && return 0
+    echo "  the package lists are out of date — refreshing them"
+  fi
   apt_update || red "  apt-get update failed — trying to install anyway"
   apt_install "${missing[@]}" && return 0
   red "  last lines of $APT_LOG:"

@@ -123,6 +123,21 @@ func (m *Manager) Close() {
 	m.stopLocked()
 }
 
+// Restart stops Caddy and starts it again with the config it runs (admin action).
+func (m *Manager) Restart() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return errors.New("caddy manager closed")
+	}
+	if m.current == nil {
+		return errors.New("this node's config does not use Caddy")
+	}
+	admin := m.admin
+	m.stopLocked()
+	return m.startLocked(filepath.Join(m.DataDir, "caddy.json"), admin)
+}
+
 func (m *Manager) installDecoys() error {
 	dir := filepath.Join(m.DataDir, "decoy")
 	for _, name := range decoy.Names() {

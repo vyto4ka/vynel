@@ -220,6 +220,16 @@ func (c *client) edit(ctx context.Context, chat, msg int64, html string, kb Keyb
 	return err
 }
 
+// deleteMessage removes a message; one that is already gone (or too old to delete) is not an error.
+func (c *client) deleteMessage(ctx context.Context, chat, msg int64) error {
+	err := c.call(ctx, "deleteMessage", map[string]any{"chat_id": chat, "message_id": msg}, nil)
+	var ae *apiError
+	if errors.As(err, &ae) && ae.Code == 400 {
+		return nil
+	}
+	return err
+}
+
 func (c *client) answer(ctx context.Context, id, text string, alert bool) {
 	_ = c.call(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": id, "text": text, "show_alert": alert}, nil)
 }

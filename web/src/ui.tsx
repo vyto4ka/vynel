@@ -31,6 +31,8 @@ const paths: Record<string, ReactNode> = {
   telegram: <path d="M21 4 3 11l6 2.5M21 4l-4 16-8-6.5M21 4 9 13.5V19l3-3.5" />,
   code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
   chart: <><path d="M4 4v16h16" /><path d="m7 14 4-4 3 3 5-6" /></>,
+  more: <><circle cx="12" cy="5" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="12" cy="19" r="1.3" /></>,
+  power: <><path d="M12 3v8" /><path d="M6.3 7.3a8 8 0 1 0 11.4 0" /></>,
   sub: <><rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M10 6h4M9.5 11h5M9.5 14.5h5M11 18h2" /></>,
 }
 
@@ -182,6 +184,39 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         </Modal>
       )}
     </ConfirmCtx.Provider>
+  )
+}
+
+// ---------- меню ----------
+
+export type MenuItem = { label: ReactNode; icon?: string; danger?: boolean; disabled?: boolean; onClick: () => void } | 'divider'
+
+// Меню по кнопке (M3 menu): закрывается кликом мимо, Esc и после выбора пункта.
+export function Menu({ title, items, icon = 'more' }: { title: string; items: MenuItem[]; icon?: string }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); window.removeEventListener('keydown', key) }
+  }, [open])
+  return (
+    <div className="menu-wrap" ref={box}>
+      <button className={'btn ghost icon sm' + (open ? ' on' : '')} title={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name={icon} /></button>
+      {open && (
+        <div className="menu" role="menu">
+          {items.map((it, i) => it === 'divider' ? <div key={i} className="menu-divider" /> : (
+            <button key={i} role="menuitem" className={'menu-item' + (it.danger ? ' danger' : '')} disabled={it.disabled}
+              onClick={() => { setOpen(false); it.onClick() }}>
+              {it.icon && <Icon name={it.icon} />}<span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

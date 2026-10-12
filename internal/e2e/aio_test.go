@@ -75,10 +75,12 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 		t.Fatalf("desired state: %v %v", err, ds.Problems)
 	}
 
+	restarted := make(chan string, 2)
 	a, err := agent.New(agent.Config{
 		DataDir: filepath.Join(t.TempDir(), "node"), Xray: bin, Version: "test", CaddyBin: caddyBin,
 		Dial: app.LocalDialer(ctx, panel.Reconciler, node.ID), Log: logger("aio-node"),
 		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond, StatsInterval: 200 * time.Millisecond,
+		Restart: func() { restarted <- "service" }, Reboot: func() error { restarted <- "reboot"; return nil },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -201,6 +203,43 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 		}
 		return nil
 	})
+
+	// Admin actions: Xray and Caddy restart in place and the VPN comes back; a service restart
+	// and a reboot are answered first and then handed to the hooks.
+	for _, act := range []nodev1.Command_Action{nodev1.Command_ACTION_RESTART_XRAY, nodev1.Command_ACTION_RESTART_CADDY} {
+		cctx, ccancel := context.WithTimeout(ctx, wait)
+		res, err := panel.Reconciler.Command(cctx, node.ID, act)
+		ccancel()
+		if err != nil || res.Error != "" {
+			t.Fatalf("%v: %v %+v", act, err, res)
+		}
+		xraytest.Eventually(t, wait, "VPN after "+act.String(), func() error {
+			b, err := xraytest.Fetch(ctx, socks, origin)
+			if err == nil && len(b) != xraytest.OriginSize {
+				err = fmt.Errorf("short body %d", len(b))
+			}
+			return err
+		})
+	}
+	for act, want := range map[nodev1.Command_Action]string{nodev1.Command_ACTION_RESTART_AGENT: "service", nodev1.Command_ACTION_REBOOT: "reboot"} {
+		cctx, ccancel := context.WithTimeout(ctx, wait)
+		res, err := panel.Reconciler.Command(cctx, node.ID, act)
+		ccancel()
+		if err != nil || res.Error != "" || res.Detail == "" {
+			t.Fatalf("%v: %v %+v", act, err, res)
+		}
+		select {
+		case got := <-restarted:
+			if got != want {
+				t.Fatalf("%v ran %q", act, got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%v: hook not called", act)
+		}
+	}
+	if _, err := panel.Reconciler.Command(ctx, 9999, nodev1.Command_ACTION_RESTART_XRAY); err == nil {
+		t.Fatal("a command to a node that is not connected must fail")
+	}
 }
 
 func decodeLinks(t *testing.T, body []byte) []string {

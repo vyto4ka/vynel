@@ -352,6 +352,21 @@ func (s *Service) Node(ctx context.Context, id int64) (*store.Node, error) {
 	return store.GetNode(ctx, s.st.DB, id)
 }
 
+// NodeActions are the admin actions on a node (the panel's «Действия» menu).
+var NodeActions = map[string]string{
+	"xray": "перезапустить Xray", "caddy": "перезапустить Caddy", "resync": "отправить конфиг заново",
+	"service": "перезапустить службу vynel", "reboot": "перезагрузить сервер",
+}
+
+// LogNodeAction records an admin action on a node in the audit log.
+func (s *Service) LogNodeAction(ctx context.Context, actor Actor, nodeID int64, action, result string) error {
+	if _, ok := NodeActions[action]; !ok {
+		return invalid("unknown node action %q", action)
+	}
+	return s.mutate(ctx, change{actor: actor, action: "node.action", entity: "node", entityID: func() int64 { return nodeID },
+		diff: map[string]string{"action": action, "result": result}}, func(store.DBTX) error { return nil })
+}
+
 // NodeByCode loads a node by code.
 func (s *Service) NodeByCode(ctx context.Context, code string) (*store.Node, error) {
 	return store.GetNodeByCode(ctx, s.st.DB, strings.ToUpper(code))

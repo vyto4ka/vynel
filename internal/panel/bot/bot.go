@@ -212,6 +212,7 @@ func (b *Bot) watch(ctx context.Context) {
 		b.maybeBackup(ctx)
 		b.maybeSummary(ctx)
 		b.setMenuButtons(ctx)
+		b.dropLoginNotices(ctx)
 		if !b.nextTick(ctx, t.C) {
 			return
 		}
@@ -225,8 +226,11 @@ func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
 		case <-ctx.Done():
 			return false
 		case n := <-b.svc.Notices():
-			if n.Kind == "login" && n.Session != nil {
+			switch {
+			case n.Kind == "login" && n.Session != nil:
 				b.onLogin(ctx, n.Session)
+			case n.Kind == "ended":
+				b.dropLoginNotices(ctx)
 			}
 		case <-tick:
 			return true

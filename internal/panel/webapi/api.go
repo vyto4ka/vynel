@@ -27,6 +27,8 @@ func (s *Server) routes() {
 	})
 
 	s.handle("GET /api/session", s.session)
+	s.handle("POST /api/session/ping", s.sessionPing)
+	s.handle("POST /api/session/closing", s.sessionClosing)
 	s.handle("POST /api/account", s.account)
 	s.handle("GET /api/overview", s.overview)
 	s.handle("GET /api/stats", s.stats)
@@ -59,6 +61,7 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/nodes/{id}", s.deleteNode)
 	s.handle("POST /api/nodes/{id}/token", s.nodeToken)
 	s.handle("GET /api/nodes/{id}/checklist", s.nodeChecklist)
+	s.handle("POST /api/nodes/{id}/action", s.nodeAction)
 
 	s.handle("GET /api/profiles", s.profiles)
 	s.handle("GET /api/profile-templates", s.profileTemplates)
@@ -203,6 +206,26 @@ func (s *Server) session(r *http.Request) (any, error) {
 	url, _ := s.svc.WebURL(ctx)
 	subBase, _ := s.svc.SubBase(ctx)
 	return map[string]any{"login": login, "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase}, nil
+}
+
+// sessionPing: the open page says it is alive every half a minute, and whether the admin did
+// anything since the last ping (that resets the inactivity timer).
+func (s *Server) sessionPing(r *http.Request) (any, error) {
+	var in struct {
+		Active bool `json:"active"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	if in.Active {
+		s.svc.WebSessionCheck(r.Context(), current(r).ID, clientIP(r), true)
+	}
+	return map[string]int{"idleMinutes": s.svc.WebIdleMinutes(r.Context())}, nil
+}
+
+// sessionClosing: the page is being closed (or reloaded: then its next request keeps the session).
+func (s *Server) sessionClosing(r *http.Request) (any, error) {
+	return nil, s.svc.WebSessionClosing(r.Context(), current(r).ID)
 }
 
 func (s *Server) account(r *http.Request) (any, error) {
@@ -926,6 +949,40 @@ func (s *Server) nodeChecklist(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return s.svc.NodeChecklist(r.Context(), id, s.cfg.Connected)
+}
+
+func (s *Server) nodeAction(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		Action string `json:"action"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	if _, ok := service.NodeActions[in.Action]; !ok {
+		return nil, badRequest("неизвестное действие")
+	}
+	if _, err := s.svc.Node(r.Context(), id); err != nil {
+		return nil, err
+	}
+	if s.cfg.NodeAction == nil {
+		return nil, badRequest("действия с нодами недоступны")
+	}
+	detail, actErr := s.cfg.NodeAction(r.Context(), id, in.Action)
+	result := "ok"
+	if actErr != nil {
+		result = actErr.Error()
+	}
+	if err := s.svc.LogNodeAction(r.Context(), actor(r), id, in.Action, result); err != nil {
+		return nil, err
+	}
+	if actErr != nil {
+		return nil, badRequest(actErr.Error())
+	}
+	return map[string]string{"detail": detail}, nil
 }
 
 func (s *Server) nodeToken(r *http.Request) (any, error) {

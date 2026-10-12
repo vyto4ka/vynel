@@ -3,7 +3,7 @@ import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
-import { Badge, Bar, CopyField, Empty, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, CopyField, Empty, Field, Icon, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000)
@@ -19,6 +19,13 @@ export function Nodes() {
   const confirm = useConfirm()
   const reload = nodes.reload
 
+  // Действия с нодой через её живое соединение с панелью.
+  const nodeAction = async (n: Node, action: string, done: string, warn?: React.ReactNode, ok?: string) => {
+    if (warn && !(await confirm(warn, ok || 'Да'))) return
+    await act(() => post(`nodes/${n.id}/action`, { action }), done)
+    reload()
+  }
+
   return (
     <>
       <div className="toolbar">
@@ -30,6 +37,7 @@ export function Nodes() {
         <div className="cards">
           {nodes.data.map((n) => {
             const st = nodeStateInfo[n.state] || { label: n.state, color: '' }
+            const online = n.state === 'in sync' || n.state === 'syncing'
             const m = n.metrics
             return (
               <div key={n.id} className="card">
@@ -46,16 +54,29 @@ export function Nodes() {
                     <Switch checked={n.enabled} onChange={(v) => act(() => patch(`nodes/${n.id}`, { enabled: v }), v ? 'Нода включена' : 'Нода выключена').then(reload)} />
                     <button className="btn ghost icon sm" title="Проверка: связь, конфиг, DNS, сертификат" onClick={() => setCheckOf(n)}><Icon name="search" /></button>
                     <button className="btn ghost icon sm" title="Изменить" onClick={() => setEditNode(n)}><Icon name="edit" /></button>
-                    {!n.local && <button className="btn ghost icon sm" title="Новый токен подключения" onClick={async () => {
-                      if (await confirm('Выпустить новый токен? Текущий сертификат ноды будет отозван — ноду нужно будет подключить заново с новым токеном.', 'Выпустить')) {
-                        const j = await act(() => post<JoinInfo>(`nodes/${n.id}/token`))
-                        if (j) { setJoin(j); reload() }
-                      }
-                    }}><Icon name="key" /></button>}
-                    {!n.local && <button className="btn ghost icon sm" title="Удалить" onClick={async () => {
-                      if (await confirm(<>Удалить ноду <b>{n.name}</b>? Её инбаунды пропадут из подписок.</>, 'Удалить'))
-                        act(() => del(`nodes/${n.id}`), 'Нода удалена').then(reload)
-                    }}><Icon name="trash" /></button>}
+                    <Menu title="Действия" items={[
+                      { label: 'Перезапустить Xray', icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'xray', 'Xray перезапущен') },
+                      { label: 'Перезапустить Caddy', icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', 'Caddy перезапущен') },
+                      { label: 'Отправить конфиг заново', icon: 'nodes', disabled: !online, onClick: () => nodeAction(n, 'resync', 'Конфиг отправлен') },
+                      'divider',
+                      { label: n.local ? 'Перезапустить службу (и панель)' : 'Перезапустить службу vynel', icon: 'power', disabled: !online,
+                        onClick: () => nodeAction(n, 'service', 'Служба перезапускается',
+                          n.local ? 'Перезапустить службу vynel? Панель и VPN на этом сервере пропадут на несколько секунд, страница переподключится сама.' : 'Перезапустить службу vynel на ноде? VPN на ней пропадёт на несколько секунд.', 'Перезапустить') },
+                      { label: 'Перезагрузить сервер', icon: 'power', danger: true, disabled: !online,
+                        onClick: () => nodeAction(n, 'reboot', 'Сервер перезагружается',
+                          <>Перезагрузить сервер <b>{n.name}</b>?{n.local ? ' Это сервер панели: панель будет недоступна, пока он не загрузится (обычно 1–2 минуты).' : ' VPN на нём пропадёт на 1–2 минуты.'}</>, 'Перезагрузить') },
+                      ...(!n.local ? ['divider' as const,
+                        { label: 'Новый токен подключения', icon: 'key', onClick: async () => {
+                          if (await confirm('Выпустить новый токен? Текущий сертификат ноды будет отозван — ноду нужно будет подключить заново с новым токеном.', 'Выпустить')) {
+                            const j = await act(() => post<JoinInfo>(`nodes/${n.id}/token`))
+                            if (j) { setJoin(j); reload() }
+                          }
+                        } },
+                        { label: 'Удалить ноду', icon: 'trash', danger: true, onClick: async () => {
+                          if (await confirm(<>Удалить ноду <b>{n.name}</b>? Её инбаунды пропадут из подписок.</>, 'Удалить'))
+                            act(() => del(`nodes/${n.id}`), 'Нода удалена').then(reload)
+                        } }] : []),
+                    ]} />
                   </div>
                 </div>
                 <div className="card-pad">
@@ -66,7 +87,7 @@ export function Nodes() {
                   )}
                   {n.state === 'pending' && (
                     <div className="alert amber row between" style={{ marginBottom: 14 }}>
-                      <span>Нода ещё не подключалась. Запустите команду на сервере (кнопка с ключом выпустит новую).</span>
+                      <span>Нода ещё не подключалась. Запустите команду на сервере (новую выпустит меню «⋮» → «Новый токен подключения»).</span>
                       <button className="btn sm" onClick={() => setCheckOf(n)}>Чеклист</button>
                     </div>
                   )}

@@ -23,6 +23,11 @@ var settingDefs = []settingDef{
 	{Key: service.SettingWebDecoy, Section: "Доступ к панели", Title: "Сайт-заглушка панели", Type: "select", Options: decoy.Names(),
 		Help: "Что видно вне секретного пути, когда у панели свой домен или порт. По умолчанию — как у подписок; разные заглушки не дают связать два адреса."},
 
+	{Key: service.SettingWebIdleMinutes, Section: "Доступ к панели", Title: "Выход после бездействия, мин", Type: "int", Default: "5",
+		Help: "Сессия завершается, если столько минут в панели ничего не нажимали (открытая страница со статистикой не считается действием). 0 — не завершать."},
+	{Key: service.SettingWebBindIP, Section: "Доступ к панели", Title: "Завершать сессию при смене IP", Type: "bool", Default: "true",
+		Help: "Запрос с другого адреса сразу завершает сессию: украденная cookie не сработает. Выключите, если IP часто меняется сам (мобильный интернет, IPv4/IPv6)."},
+
 	{Key: service.SettingSubDomain, Section: "Подписки", Title: "Домен подписок", Type: "string",
 		Help: "Ссылки подписок строятся на этом домене. A-запись должна вести на сервер панели."},
 	{Key: service.SettingSubPrefix, Section: "Подписки", Title: "Путь подписок", Type: "string", Default: service.DefaultSubPrefix,

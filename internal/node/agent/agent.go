@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -54,6 +56,11 @@ type Config struct {
 	// nil = never touch the firewall (tests).
 	Firewall   *firewall.Manager
 	ExtraPorts []firewall.Port // also let in (the panel's node gateway on an all-in-one server)
+	// Restart restarts the whole service (admin action). Default: SIGTERM to this process, and
+	// systemd (Restart=always) starts it again.
+	Restart func()
+	// Reboot reboots the server (admin action). Default: systemctl reboot.
+	Reboot func() error
 }
 
 // Agent applies the panel's desired state to Xray.
@@ -95,6 +102,12 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.CertInterval == 0 {
 		cfg.CertInterval = time.Minute
+	}
+	if cfg.Restart == nil {
+		cfg.Restart = func() { _ = syscall.Kill(os.Getpid(), syscall.SIGTERM) }
+	}
+	if cfg.Reboot == nil {
+		cfg.Reboot = func() error { return exec.Command("systemctl", "reboot").Run() }
 	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, err
@@ -266,6 +279,17 @@ func (a *Agent) session(ctx context.Context) error {
 				return err
 			}
 		case m := <-msgs:
+			if c, ok := m.Msg.(*nodev1.PanelMessage_Command); ok {
+				res, after := a.command(ctx, c.Command)
+				if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Result{Result: res}}); err != nil {
+					return err
+				}
+				if after != nil {
+					// The answer reaches the panel first; then the service goes down.
+					time.AfterFunc(time.Second, after)
+				}
+				continue
+			}
 			if sa, ok := m.Msg.(*nodev1.PanelMessage_StatsAck); ok {
 				if err := a.st.AckStats(sa.StatsAck.Epoch, sa.StatsAck.Seq); err != nil {
 					return err
@@ -310,6 +334,42 @@ func (a *Agent) handle(ctx context.Context, m *nodev1.PanelMessage) *nodev1.Ack 
 		return ack
 	}
 	return nil
+}
+
+// command runs an admin action. Restarting the service or rebooting answers first and acts in
+// after, once the answer is sent.
+func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.CommandResult, after func()) {
+	res = &nodev1.CommandResult{Id: c.Id}
+	var err error
+	switch c.Action {
+	case nodev1.Command_ACTION_RESTART_XRAY:
+		a.mu.Lock()
+		if a.cur == nil {
+			err = errors.New("no config applied yet")
+		} else {
+			err = a.restartLocked(ctx, a.cur)
+		}
+		a.mu.Unlock()
+	case nodev1.Command_ACTION_RESTART_CADDY:
+		err = a.caddy.Restart()
+	case nodev1.Command_ACTION_RESTART_AGENT:
+		res.Detail = "the service restarts now"
+		after = a.cfg.Restart
+	case nodev1.Command_ACTION_REBOOT:
+		res.Detail = "the server reboots now"
+		after = func() {
+			if err := a.cfg.Reboot(); err != nil {
+				a.log.Error("reboot failed", "err", err)
+			}
+		}
+	default:
+		err = fmt.Errorf("unknown action %v", c.Action)
+	}
+	a.log.Info("admin action", "action", c.Action.String(), "err", err)
+	if err != nil {
+		res.Error = err.Error()
+	}
+	return res, after
 }
 
 // ApplySnapshot makes the node run the snapshot. Same structure: users are changed through the

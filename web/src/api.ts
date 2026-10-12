@@ -7,8 +7,8 @@ export class ApiError extends Error {
   }
 }
 
-let onUnauthorized: () => void = () => {}
-export function setUnauthorizedHandler(fn: () => void) {
+let onUnauthorized: (message: string) => void = () => {}
+export function setUnauthorizedHandler(fn: (message: string) => void) {
   onUnauthorized = fn
 }
 
@@ -27,7 +27,7 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
     data = text
   }
   if (!res.ok) {
-    if (res.status === 401 && path !== 'login') onUnauthorized()
+    if (res.status === 401 && path !== 'login') onUnauthorized((data && data.error) || '')
     throw new ApiError(res.status, (data && data.error) || res.statusText)
   }
   return data as T

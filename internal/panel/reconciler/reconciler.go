@@ -8,6 +8,8 @@ package reconciler
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -201,6 +203,7 @@ type session struct {
 	pendingAt time.Time
 	holdUntil time.Time
 	hello     *nodev1.Hello
+	waiters   map[string]chan *nodev1.CommandResult // admin commands sent, by id
 }
 
 func (s *session) wake() {
@@ -293,6 +296,15 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		}
 	case *nodev1.NodeMessage_Addresses:
 		return svc.SyncAddresses(ctx, s.nodeID, toReported(m.Addresses.Addresses))
+	case *nodev1.NodeMessage_Result:
+		s.mu.Lock()
+		w := s.waiters[m.Result.Id]
+		delete(s.waiters, m.Result.Id)
+		s.mu.Unlock()
+		if w != nil {
+			w <- m.Result
+		}
+		return nil
 	case *nodev1.NodeMessage_Stats:
 		b := m.Stats
 		if err := svc.IngestStats(ctx, s.nodeID, b); err != nil {
@@ -334,6 +346,61 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 			return err
 		}
 	}
+	s.wake()
+	return nil
+}
+
+// ErrNotConnected: the node has no live session, so it cannot take a command.
+var ErrNotConnected = errors.New("the node is not connected")
+
+// Command sends an admin action to a connected node and waits for its answer.
+func (r *Reconciler) Command(ctx context.Context, nodeID int64, action nodev1.Command_Action) (*nodev1.CommandResult, error) {
+	r.mu.Lock()
+	s := r.sessions[nodeID]
+	r.mu.Unlock()
+	if s == nil {
+		return nil, ErrNotConnected
+	}
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	id := hex.EncodeToString(b)
+	ch := make(chan *nodev1.CommandResult, 1)
+	s.mu.Lock()
+	if s.waiters == nil {
+		s.waiters = map[string]chan *nodev1.CommandResult{}
+	}
+	s.waiters[id] = ch
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.waiters, id)
+		s.mu.Unlock()
+	}()
+	msg := &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Command{Command: &nodev1.Command{Id: id, Action: action}}}
+	select {
+	case s.out <- msg:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case res := <-ch:
+		return res, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("no answer from the node: %w", ctx.Err())
+	}
+}
+
+// Resync makes the next push to the node a full snapshot (admin action «send the config again»).
+func (r *Reconciler) Resync(nodeID int64) error {
+	r.mu.Lock()
+	s := r.sessions[nodeID]
+	r.mu.Unlock()
+	if s == nil {
+		return ErrNotConnected
+	}
+	s.mu.Lock()
+	s.applied, s.appliedH, s.pending, s.holdUntil = nil, "", nil, time.Time{}
+	s.mu.Unlock()
 	s.wake()
 	return nil
 }

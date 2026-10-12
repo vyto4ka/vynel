@@ -647,3 +647,23 @@ pre.code {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* M3 menu */
+.menu-wrap { position: relative; display: inline-flex; }
+.btn.on { --state: color-mix(in srgb, currentColor 12%, transparent); }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 35; min-width: 260px; padding: 8px 0; white-space: nowrap;
+  background: var(--container-highest); border-radius: var(--shape-md); box-shadow: var(--elev-2);
+  animation: pop .2s var(--ease-out); transform-origin: top right;
+}
+.menu-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; height: 44px; padding: 0 16px;
+  border: 0; background-color: transparent; color: var(--on-surface); font: inherit; text-align: left; cursor: pointer;
+  --state: transparent; background-image: linear-gradient(var(--state), var(--state));
+}
+.menu-item:hover:not(:disabled) { --state: color-mix(in srgb, currentColor 8%, transparent); }
+.menu-item:active:not(:disabled) { --state: color-mix(in srgb, currentColor 12%, transparent); }
+.menu-item:disabled { opacity: .38; cursor: default; }
+.menu-item svg { width: 20px; height: 20px; flex: none; color: var(--on-surface-variant); }
+.menu-item.danger, .menu-item.danger svg { color: var(--error); }
+.menu-divider { height: 1px; margin: 8px 0; background: var(--outline-variant); }
