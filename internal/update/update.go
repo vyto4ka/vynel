@@ -135,13 +135,45 @@ func get(ctx context.Context, url string, limit int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
-// Result is the outcome of the last update on this server.
+// Result is the state of the last update on this server: Running while it goes, then the outcome.
 type Result struct {
-	OK      bool   `json:"ok"`
-	At      int64  `json:"at"`
-	Version string `json:"version,omitempty"` // vynel version after the update
-	Error   string `json:"error,omitempty"`   // last lines of the log
+	Running   bool   `json:"running,omitempty"`
+	StartedAt int64  `json:"started_at,omitempty"`
+	OK        bool   `json:"ok"`
+	At        int64  `json:"at"`                // when it finished
+	Version   string `json:"version,omitempty"` // vynel version after the update
+	Error     string `json:"error,omitempty"`   // last lines of the log
 }
+
+// Status is what the panel shows about an update: the record plus the end of the log.
+type Status struct {
+	Running    bool
+	OK         bool
+	StartedAt  int64
+	FinishedAt int64
+	Version    string
+	Log        string
+}
+
+// staleAfter: an update that has said "running" this long died without writing its outcome.
+const staleAfter = 30 * time.Minute
+
+// LocalStatus is the state of this server's last update (nil when there was none).
+func LocalStatus() *Status {
+	r := LastResult()
+	if r == nil {
+		return nil
+	}
+	st := &Status{Running: r.Running, OK: r.OK, StartedAt: r.StartedAt, FinishedAt: r.At, Version: r.Version, Log: tail(LogFile, logLines)}
+	if r.Running && time.Since(time.Unix(r.StartedAt, 0)) > staleAfter {
+		st.Running, st.OK, st.FinishedAt = false, false, r.StartedAt+int64(staleAfter/time.Second)
+		st.Log = strings.TrimSpace(st.Log + "\nthe update stopped without a result (killed or the server rebooted)")
+	}
+	return st
+}
+
+// logLines is how much of the log the panel gets.
+const logLines = 60
 
 // LastResult reads ResultFile (nil when there was no update yet).
 func LastResult() *Result {
@@ -193,17 +225,23 @@ func Run(ctx context.Context, w io.Writer) error {
 	}
 	defer logf.Close()
 	out := io.MultiWriter(w, logf)
+	started := time.Now().Unix()
+	saveResult(Result{Running: true, StartedAt: started})
 	fmt.Fprintf(out, "vynel update %s: branch %s, release %s\n", time.Now().Format(time.RFC3339), s.Ref, s.Release)
 
 	// The current installer from the branch (fixes to the update itself arrive with it); the
 	// one built into this binary when GitHub does not answer.
 	script, err := get(ctx, s.scriptURL(), 4<<20)
 	if err != nil || !strings.HasPrefix(string(script), "#!") {
+		if err == nil {
+			err = errors.New("not a script")
+		}
 		fmt.Fprintf(out, "cannot download the installer (%v): using the one built into this version\n", err)
 		script = scripts.Install
 	}
 	tmp, err := os.CreateTemp("", "vynel-install-*.sh")
 	if err != nil {
+		saveResult(Result{StartedAt: started, At: time.Now().Unix(), Error: err.Error()})
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
@@ -218,12 +256,13 @@ func Run(ctx context.Context, w io.Writer) error {
 	cmd.Stdout, cmd.Stderr = out, out
 	runErr := cmd.Run()
 
-	res := Result{OK: runErr == nil, At: time.Now().Unix()}
+	res := Result{OK: runErr == nil, StartedAt: started, At: time.Now().Unix()}
 	if v, err := exec.Command("/usr/local/bin/vynel", "version").Output(); err == nil {
 		res.Version = strings.TrimSpace(string(v))
 	}
 	if runErr != nil {
 		res.Error = tail(LogFile, 6)
+		fmt.Fprintf(out, "update failed: %v\n", runErr)
 		saveResult(res)
 		// The services may still run the old version without having restarted: restart them
 		// so the agent reconnects and the panel learns the update failed.
@@ -234,6 +273,7 @@ func Run(ctx context.Context, w io.Writer) error {
 		}
 		return fmt.Errorf("update failed: %w", runErr)
 	}
+	fmt.Fprintf(out, "update finished: %s\n", res.Version)
 	saveResult(res)
 	return nil
 }
@@ -254,5 +294,9 @@ func tail(path string, n int) string {
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	if len(out) > 12<<10 {
+		out = out[len(out)-12<<10:]
+	}
+	return out
 }

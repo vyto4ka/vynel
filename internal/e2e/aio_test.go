@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xray/xraytest"
 )
 
@@ -76,11 +78,26 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	}
 
 	restarted := make(chan string, 2)
+	var updState atomic.Pointer[update.Status]
 	a, err := agent.New(agent.Config{
 		DataDir: filepath.Join(t.TempDir(), "node"), Xray: bin, Version: "test", CaddyBin: caddyBin,
 		Dial: app.LocalDialer(ctx, panel.Reconciler, node.ID), Log: logger("aio-node"),
 		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond, StatsInterval: 200 * time.Millisecond,
 		Restart: func() { restarted <- "service" }, Reboot: func() error { restarted <- "reboot"; return nil },
+		// A fake update: it says it runs, logs two steps and finishes, as update.Run would.
+		Update: func(context.Context) error {
+			go func() {
+				now := time.Now().Unix()
+				updState.Store(&update.Status{Running: true, StartedAt: now, Log: "vynel: downloading"})
+				time.Sleep(300 * time.Millisecond)
+				updState.Store(&update.Status{Running: true, StartedAt: now, Log: "vynel: downloading\nrestarting vynel"})
+				time.Sleep(300 * time.Millisecond)
+				updState.Store(&update.Status{OK: true, StartedAt: now, FinishedAt: time.Now().Unix(), Version: "vynel new", Log: "update finished"})
+			}()
+			return nil
+		},
+		UpdateStatus: func() *update.Status { return updState.Load() },
+		UpdateEvery:  100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -237,6 +254,31 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 			t.Fatalf("%v: hook not called", act)
 		}
 	}
+	// An update: the command is accepted, the node reports it running with its log, then done.
+	cctx, ccancel := context.WithTimeout(ctx, wait)
+	res, err := panel.Reconciler.Command(cctx, node.ID, nodev1.Command_ACTION_UPDATE)
+	ccancel()
+	if err != nil || res.Error != "" {
+		t.Fatalf("update: %v %+v", err, res)
+	}
+	var sawRunning bool
+	xraytest.Eventually(t, wait, "update reported as done", func() error {
+		st := panel.Reconciler.UpdateStatus(node.ID)
+		switch {
+		case st == nil:
+			return fmt.Errorf("no status yet")
+		case st.Running:
+			sawRunning = sawRunning || strings.Contains(st.Log, "downloading")
+			return fmt.Errorf("running: %q", st.Log)
+		case !st.OK || st.Version != "vynel new":
+			return fmt.Errorf("finished: %+v", st)
+		}
+		return nil
+	})
+	if !sawRunning {
+		t.Fatal("the running update and its log never reached the panel")
+	}
+
 	if _, err := panel.Reconciler.Command(ctx, 9999, nodev1.Command_ACTION_RESTART_XRAY); err == nil {
 		t.Fatal("a command to a node that is not connected must fail")
 	}

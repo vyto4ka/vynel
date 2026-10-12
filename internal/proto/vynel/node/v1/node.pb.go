@@ -79,7 +79,7 @@ func (x Command_Action) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Command_Action.Descriptor instead.
 func (Command_Action) EnumDescriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{8, 0}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{9, 0}
 }
 
 type UserOp_Kind int32
@@ -128,7 +128,7 @@ func (x UserOp_Kind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UserOp_Kind.Descriptor instead.
 func (UserOp_Kind) EnumDescriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{19, 0}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{20, 0}
 }
 
 type JoinRequest struct {
@@ -270,6 +270,7 @@ type NodeMessage struct {
 	//	*NodeMessage_Addresses
 	//	*NodeMessage_Stats
 	//	*NodeMessage_Result
+	//	*NodeMessage_Update
 	Msg           isNodeMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -357,6 +358,15 @@ func (x *NodeMessage) GetResult() *CommandResult {
 	return nil
 }
 
+func (x *NodeMessage) GetUpdate() *UpdateStatus {
+	if x != nil {
+		if x, ok := x.Msg.(*NodeMessage_Update); ok {
+			return x.Update
+		}
+	}
+	return nil
+}
+
 type isNodeMessage_Msg interface {
 	isNodeMessage_Msg()
 }
@@ -381,6 +391,10 @@ type NodeMessage_Result struct {
 	Result *CommandResult `protobuf:"bytes,5,opt,name=result,proto3,oneof"`
 }
 
+type NodeMessage_Update struct {
+	Update *UpdateStatus `protobuf:"bytes,6,opt,name=update,proto3,oneof"`
+}
+
 func (*NodeMessage_Hello) isNodeMessage_Msg() {}
 
 func (*NodeMessage_Ack) isNodeMessage_Msg() {}
@@ -390,6 +404,94 @@ func (*NodeMessage_Addresses) isNodeMessage_Msg() {}
 func (*NodeMessage_Stats) isNodeMessage_Msg() {}
 
 func (*NodeMessage_Result) isNodeMessage_Msg() {}
+
+func (*NodeMessage_Update) isNodeMessage_Msg() {}
+
+// UpdateStatus is how the node's update (`vynel update`) is going: sent every few seconds while it
+// runs, once more when it ends, and once on every connect so the panel knows the last outcome.
+type UpdateStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Running       bool                   `protobuf:"varint,1,opt,name=running,proto3" json:"running,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`                                   // finished without errors (meaningful when not running)
+	StartedAt     int64                  `protobuf:"varint,3,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`    // unix seconds
+	FinishedAt    int64                  `protobuf:"varint,4,opt,name=finished_at,json=finishedAt,proto3" json:"finished_at,omitempty"` // 0 while running
+	Version       string                 `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`                          // vynel version after the update
+	Log           string                 `protobuf:"bytes,6,opt,name=log,proto3" json:"log,omitempty"`                                  // the last lines of /var/log/vynel-update.log
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateStatus) Reset() {
+	*x = UpdateStatus{}
+	mi := &file_vynel_node_v1_node_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateStatus) ProtoMessage() {}
+
+func (x *UpdateStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_vynel_node_v1_node_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateStatus.ProtoReflect.Descriptor instead.
+func (*UpdateStatus) Descriptor() ([]byte, []int) {
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *UpdateStatus) GetRunning() bool {
+	if x != nil {
+		return x.Running
+	}
+	return false
+}
+
+func (x *UpdateStatus) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *UpdateStatus) GetStartedAt() int64 {
+	if x != nil {
+		return x.StartedAt
+	}
+	return 0
+}
+
+func (x *UpdateStatus) GetFinishedAt() int64 {
+	if x != nil {
+		return x.FinishedAt
+	}
+	return 0
+}
+
+func (x *UpdateStatus) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *UpdateStatus) GetLog() string {
+	if x != nil {
+		return x.Log
+	}
+	return ""
+}
 
 type Hello struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
@@ -408,7 +510,7 @@ type Hello struct {
 
 func (x *Hello) Reset() {
 	*x = Hello{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[3]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -420,7 +522,7 @@ func (x *Hello) String() string {
 func (*Hello) ProtoMessage() {}
 
 func (x *Hello) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[3]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -433,7 +535,7 @@ func (x *Hello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hello.ProtoReflect.Descriptor instead.
 func (*Hello) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{3}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Hello) GetAgentVersion() string {
@@ -503,7 +605,7 @@ type Address struct {
 
 func (x *Address) Reset() {
 	*x = Address{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[4]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -515,7 +617,7 @@ func (x *Address) String() string {
 func (*Address) ProtoMessage() {}
 
 func (x *Address) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[4]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -528,7 +630,7 @@ func (x *Address) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Address.ProtoReflect.Descriptor instead.
 func (*Address) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{4}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Address) GetIp() string {
@@ -561,7 +663,7 @@ type Addresses struct {
 
 func (x *Addresses) Reset() {
 	*x = Addresses{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[5]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -573,7 +675,7 @@ func (x *Addresses) String() string {
 func (*Addresses) ProtoMessage() {}
 
 func (x *Addresses) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[5]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +688,7 @@ func (x *Addresses) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Addresses.ProtoReflect.Descriptor instead.
 func (*Addresses) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{5}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Addresses) GetAddresses() []*Address {
@@ -608,7 +710,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[6]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -620,7 +722,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[6]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -633,7 +735,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{6}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Ack) GetRevision() int64 {
@@ -672,7 +774,7 @@ type PanelMessage struct {
 
 func (x *PanelMessage) Reset() {
 	*x = PanelMessage{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[7]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -684,7 +786,7 @@ func (x *PanelMessage) String() string {
 func (*PanelMessage) ProtoMessage() {}
 
 func (x *PanelMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[7]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -697,7 +799,7 @@ func (x *PanelMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PanelMessage.ProtoReflect.Descriptor instead.
 func (*PanelMessage) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{7}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *PanelMessage) GetMsg() isPanelMessage_Msg {
@@ -782,7 +884,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[8]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -794,7 +896,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[8]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -807,7 +909,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{8}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Command) GetId() string {
@@ -836,7 +938,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[9]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -848,7 +950,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[9]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -861,7 +963,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{9}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CommandResult) GetId() string {
@@ -903,7 +1005,7 @@ type StatsBatch struct {
 
 func (x *StatsBatch) Reset() {
 	*x = StatsBatch{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[10]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -915,7 +1017,7 @@ func (x *StatsBatch) String() string {
 func (*StatsBatch) ProtoMessage() {}
 
 func (x *StatsBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[10]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -928,7 +1030,7 @@ func (x *StatsBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsBatch.ProtoReflect.Descriptor instead.
 func (*StatsBatch) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{10}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *StatsBatch) GetEpoch() string {
@@ -998,7 +1100,7 @@ type UserTraffic struct {
 
 func (x *UserTraffic) Reset() {
 	*x = UserTraffic{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[11]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1010,7 +1112,7 @@ func (x *UserTraffic) String() string {
 func (*UserTraffic) ProtoMessage() {}
 
 func (x *UserTraffic) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[11]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1023,7 +1125,7 @@ func (x *UserTraffic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserTraffic.ProtoReflect.Descriptor instead.
 func (*UserTraffic) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{11}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UserTraffic) GetEmail() string {
@@ -1057,7 +1159,7 @@ type OnlineUser struct {
 
 func (x *OnlineUser) Reset() {
 	*x = OnlineUser{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[12]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1069,7 +1171,7 @@ func (x *OnlineUser) String() string {
 func (*OnlineUser) ProtoMessage() {}
 
 func (x *OnlineUser) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[12]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1082,7 +1184,7 @@ func (x *OnlineUser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OnlineUser.ProtoReflect.Descriptor instead.
 func (*OnlineUser) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{12}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *OnlineUser) GetEmail() string {
@@ -1114,7 +1216,7 @@ type Metrics struct {
 
 func (x *Metrics) Reset() {
 	*x = Metrics{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[13]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1126,7 +1228,7 @@ func (x *Metrics) String() string {
 func (*Metrics) ProtoMessage() {}
 
 func (x *Metrics) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[13]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1139,7 +1241,7 @@ func (x *Metrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metrics.ProtoReflect.Descriptor instead.
 func (*Metrics) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{13}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *Metrics) GetCpu() float64 {
@@ -1201,7 +1303,7 @@ type StatsAck struct {
 
 func (x *StatsAck) Reset() {
 	*x = StatsAck{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[14]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1213,7 +1315,7 @@ func (x *StatsAck) String() string {
 func (*StatsAck) ProtoMessage() {}
 
 func (x *StatsAck) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[14]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1226,7 +1328,7 @@ func (x *StatsAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsAck.ProtoReflect.Descriptor instead.
 func (*StatsAck) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{14}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *StatsAck) GetEpoch() string {
@@ -1257,7 +1359,7 @@ type Snapshot struct {
 
 func (x *Snapshot) Reset() {
 	*x = Snapshot{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[15]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1269,7 +1371,7 @@ func (x *Snapshot) String() string {
 func (*Snapshot) ProtoMessage() {}
 
 func (x *Snapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[15]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1282,7 +1384,7 @@ func (x *Snapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Snapshot.ProtoReflect.Descriptor instead.
 func (*Snapshot) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{15}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *Snapshot) GetRevision() int64 {
@@ -1332,7 +1434,7 @@ type InboundUsers struct {
 
 func (x *InboundUsers) Reset() {
 	*x = InboundUsers{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[16]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1344,7 +1446,7 @@ func (x *InboundUsers) String() string {
 func (*InboundUsers) ProtoMessage() {}
 
 func (x *InboundUsers) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[16]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1357,7 +1459,7 @@ func (x *InboundUsers) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InboundUsers.ProtoReflect.Descriptor instead.
 func (*InboundUsers) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{16}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *InboundUsers) GetTag() string {
@@ -1398,7 +1500,7 @@ type User struct {
 
 func (x *User) Reset() {
 	*x = User{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[17]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1512,7 @@ func (x *User) String() string {
 func (*User) ProtoMessage() {}
 
 func (x *User) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[17]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +1525,7 @@ func (x *User) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use User.ProtoReflect.Descriptor instead.
 func (*User) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{17}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *User) GetEmail() string {
@@ -1453,7 +1555,7 @@ type Delta struct {
 
 func (x *Delta) Reset() {
 	*x = Delta{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[18]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1465,7 +1567,7 @@ func (x *Delta) String() string {
 func (*Delta) ProtoMessage() {}
 
 func (x *Delta) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[18]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1478,7 +1580,7 @@ func (x *Delta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Delta.ProtoReflect.Descriptor instead.
 func (*Delta) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{18}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *Delta) GetRevision() int64 {
@@ -1521,7 +1623,7 @@ type UserOp struct {
 
 func (x *UserOp) Reset() {
 	*x = UserOp{}
-	mi := &file_vynel_node_v1_node_proto_msgTypes[19]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1533,7 +1635,7 @@ func (x *UserOp) String() string {
 func (*UserOp) ProtoMessage() {}
 
 func (x *UserOp) ProtoReflect() protoreflect.Message {
-	mi := &file_vynel_node_v1_node_proto_msgTypes[19]
+	mi := &file_vynel_node_v1_node_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1546,7 +1648,7 @@ func (x *UserOp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserOp.ProtoReflect.Descriptor instead.
 func (*UserOp) Descriptor() ([]byte, []int) {
-	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{19}
+	return file_vynel_node_v1_node_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *UserOp) GetKind() UserOp_Kind {
@@ -1590,14 +1692,24 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\bcert_der\x18\x01 \x01(\fR\acertDer\x12\x15\n" +
 	"\x06ca_der\x18\x02 \x01(\fR\x05caDer\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\x03R\x06nodeId\x12\x1b\n" +
-	"\tnode_code\x18\x04 \x01(\tR\bnodeCode\"\x8f\x02\n" +
+	"\tnode_code\x18\x04 \x01(\tR\bnodeCode\"\xc6\x02\n" +
 	"\vNodeMessage\x12,\n" +
 	"\x05hello\x18\x01 \x01(\v2\x14.vynel.node.v1.HelloH\x00R\x05hello\x12&\n" +
 	"\x03ack\x18\x02 \x01(\v2\x12.vynel.node.v1.AckH\x00R\x03ack\x128\n" +
 	"\taddresses\x18\x03 \x01(\v2\x18.vynel.node.v1.AddressesH\x00R\taddresses\x121\n" +
 	"\x05stats\x18\x04 \x01(\v2\x19.vynel.node.v1.StatsBatchH\x00R\x05stats\x126\n" +
-	"\x06result\x18\x05 \x01(\v2\x1c.vynel.node.v1.CommandResultH\x00R\x06resultB\x05\n" +
-	"\x03msg\"\x8d\x02\n" +
+	"\x06result\x18\x05 \x01(\v2\x1c.vynel.node.v1.CommandResultH\x00R\x06result\x125\n" +
+	"\x06update\x18\x06 \x01(\v2\x1b.vynel.node.v1.UpdateStatusH\x00R\x06updateB\x05\n" +
+	"\x03msg\"\xa4\x01\n" +
+	"\fUpdateStatus\x12\x18\n" +
+	"\arunning\x18\x01 \x01(\bR\arunning\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\x12\x1d\n" +
+	"\n" +
+	"started_at\x18\x03 \x01(\x03R\tstartedAt\x12\x1f\n" +
+	"\vfinished_at\x18\x04 \x01(\x03R\n" +
+	"finishedAt\x12\x18\n" +
+	"\aversion\x18\x05 \x01(\tR\aversion\x12\x10\n" +
+	"\x03log\x18\x06 \x01(\tR\x03log\"\x8d\x02\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12!\n" +
 	"\fxray_version\x18\x02 \x01(\tR\vxrayVersion\x12!\n" +
@@ -1712,61 +1824,63 @@ func file_vynel_node_v1_node_proto_rawDescGZIP() []byte {
 }
 
 var file_vynel_node_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vynel_node_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_vynel_node_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_vynel_node_v1_node_proto_goTypes = []any{
 	(Command_Action)(0),   // 0: vynel.node.v1.Command.Action
 	(UserOp_Kind)(0),      // 1: vynel.node.v1.UserOp.Kind
 	(*JoinRequest)(nil),   // 2: vynel.node.v1.JoinRequest
 	(*JoinResponse)(nil),  // 3: vynel.node.v1.JoinResponse
 	(*NodeMessage)(nil),   // 4: vynel.node.v1.NodeMessage
-	(*Hello)(nil),         // 5: vynel.node.v1.Hello
-	(*Address)(nil),       // 6: vynel.node.v1.Address
-	(*Addresses)(nil),     // 7: vynel.node.v1.Addresses
-	(*Ack)(nil),           // 8: vynel.node.v1.Ack
-	(*PanelMessage)(nil),  // 9: vynel.node.v1.PanelMessage
-	(*Command)(nil),       // 10: vynel.node.v1.Command
-	(*CommandResult)(nil), // 11: vynel.node.v1.CommandResult
-	(*StatsBatch)(nil),    // 12: vynel.node.v1.StatsBatch
-	(*UserTraffic)(nil),   // 13: vynel.node.v1.UserTraffic
-	(*OnlineUser)(nil),    // 14: vynel.node.v1.OnlineUser
-	(*Metrics)(nil),       // 15: vynel.node.v1.Metrics
-	(*StatsAck)(nil),      // 16: vynel.node.v1.StatsAck
-	(*Snapshot)(nil),      // 17: vynel.node.v1.Snapshot
-	(*InboundUsers)(nil),  // 18: vynel.node.v1.InboundUsers
-	(*User)(nil),          // 19: vynel.node.v1.User
-	(*Delta)(nil),         // 20: vynel.node.v1.Delta
-	(*UserOp)(nil),        // 21: vynel.node.v1.UserOp
+	(*UpdateStatus)(nil),  // 5: vynel.node.v1.UpdateStatus
+	(*Hello)(nil),         // 6: vynel.node.v1.Hello
+	(*Address)(nil),       // 7: vynel.node.v1.Address
+	(*Addresses)(nil),     // 8: vynel.node.v1.Addresses
+	(*Ack)(nil),           // 9: vynel.node.v1.Ack
+	(*PanelMessage)(nil),  // 10: vynel.node.v1.PanelMessage
+	(*Command)(nil),       // 11: vynel.node.v1.Command
+	(*CommandResult)(nil), // 12: vynel.node.v1.CommandResult
+	(*StatsBatch)(nil),    // 13: vynel.node.v1.StatsBatch
+	(*UserTraffic)(nil),   // 14: vynel.node.v1.UserTraffic
+	(*OnlineUser)(nil),    // 15: vynel.node.v1.OnlineUser
+	(*Metrics)(nil),       // 16: vynel.node.v1.Metrics
+	(*StatsAck)(nil),      // 17: vynel.node.v1.StatsAck
+	(*Snapshot)(nil),      // 18: vynel.node.v1.Snapshot
+	(*InboundUsers)(nil),  // 19: vynel.node.v1.InboundUsers
+	(*User)(nil),          // 20: vynel.node.v1.User
+	(*Delta)(nil),         // 21: vynel.node.v1.Delta
+	(*UserOp)(nil),        // 22: vynel.node.v1.UserOp
 }
 var file_vynel_node_v1_node_proto_depIdxs = []int32{
-	5,  // 0: vynel.node.v1.NodeMessage.hello:type_name -> vynel.node.v1.Hello
-	8,  // 1: vynel.node.v1.NodeMessage.ack:type_name -> vynel.node.v1.Ack
-	7,  // 2: vynel.node.v1.NodeMessage.addresses:type_name -> vynel.node.v1.Addresses
-	12, // 3: vynel.node.v1.NodeMessage.stats:type_name -> vynel.node.v1.StatsBatch
-	11, // 4: vynel.node.v1.NodeMessage.result:type_name -> vynel.node.v1.CommandResult
-	6,  // 5: vynel.node.v1.Hello.addresses:type_name -> vynel.node.v1.Address
-	6,  // 6: vynel.node.v1.Addresses.addresses:type_name -> vynel.node.v1.Address
-	17, // 7: vynel.node.v1.PanelMessage.snapshot:type_name -> vynel.node.v1.Snapshot
-	20, // 8: vynel.node.v1.PanelMessage.delta:type_name -> vynel.node.v1.Delta
-	16, // 9: vynel.node.v1.PanelMessage.stats_ack:type_name -> vynel.node.v1.StatsAck
-	10, // 10: vynel.node.v1.PanelMessage.command:type_name -> vynel.node.v1.Command
-	0,  // 11: vynel.node.v1.Command.action:type_name -> vynel.node.v1.Command.Action
-	13, // 12: vynel.node.v1.StatsBatch.users:type_name -> vynel.node.v1.UserTraffic
-	14, // 13: vynel.node.v1.StatsBatch.online:type_name -> vynel.node.v1.OnlineUser
-	15, // 14: vynel.node.v1.StatsBatch.metrics:type_name -> vynel.node.v1.Metrics
-	18, // 15: vynel.node.v1.Snapshot.inbounds:type_name -> vynel.node.v1.InboundUsers
-	19, // 16: vynel.node.v1.InboundUsers.users:type_name -> vynel.node.v1.User
-	21, // 17: vynel.node.v1.Delta.ops:type_name -> vynel.node.v1.UserOp
-	1,  // 18: vynel.node.v1.UserOp.kind:type_name -> vynel.node.v1.UserOp.Kind
-	19, // 19: vynel.node.v1.UserOp.user:type_name -> vynel.node.v1.User
-	2,  // 20: vynel.node.v1.NodeGateway.Join:input_type -> vynel.node.v1.JoinRequest
-	4,  // 21: vynel.node.v1.NodeGateway.Connect:input_type -> vynel.node.v1.NodeMessage
-	3,  // 22: vynel.node.v1.NodeGateway.Join:output_type -> vynel.node.v1.JoinResponse
-	9,  // 23: vynel.node.v1.NodeGateway.Connect:output_type -> vynel.node.v1.PanelMessage
-	22, // [22:24] is the sub-list for method output_type
-	20, // [20:22] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	6,  // 0: vynel.node.v1.NodeMessage.hello:type_name -> vynel.node.v1.Hello
+	9,  // 1: vynel.node.v1.NodeMessage.ack:type_name -> vynel.node.v1.Ack
+	8,  // 2: vynel.node.v1.NodeMessage.addresses:type_name -> vynel.node.v1.Addresses
+	13, // 3: vynel.node.v1.NodeMessage.stats:type_name -> vynel.node.v1.StatsBatch
+	12, // 4: vynel.node.v1.NodeMessage.result:type_name -> vynel.node.v1.CommandResult
+	5,  // 5: vynel.node.v1.NodeMessage.update:type_name -> vynel.node.v1.UpdateStatus
+	7,  // 6: vynel.node.v1.Hello.addresses:type_name -> vynel.node.v1.Address
+	7,  // 7: vynel.node.v1.Addresses.addresses:type_name -> vynel.node.v1.Address
+	18, // 8: vynel.node.v1.PanelMessage.snapshot:type_name -> vynel.node.v1.Snapshot
+	21, // 9: vynel.node.v1.PanelMessage.delta:type_name -> vynel.node.v1.Delta
+	17, // 10: vynel.node.v1.PanelMessage.stats_ack:type_name -> vynel.node.v1.StatsAck
+	11, // 11: vynel.node.v1.PanelMessage.command:type_name -> vynel.node.v1.Command
+	0,  // 12: vynel.node.v1.Command.action:type_name -> vynel.node.v1.Command.Action
+	14, // 13: vynel.node.v1.StatsBatch.users:type_name -> vynel.node.v1.UserTraffic
+	15, // 14: vynel.node.v1.StatsBatch.online:type_name -> vynel.node.v1.OnlineUser
+	16, // 15: vynel.node.v1.StatsBatch.metrics:type_name -> vynel.node.v1.Metrics
+	19, // 16: vynel.node.v1.Snapshot.inbounds:type_name -> vynel.node.v1.InboundUsers
+	20, // 17: vynel.node.v1.InboundUsers.users:type_name -> vynel.node.v1.User
+	22, // 18: vynel.node.v1.Delta.ops:type_name -> vynel.node.v1.UserOp
+	1,  // 19: vynel.node.v1.UserOp.kind:type_name -> vynel.node.v1.UserOp.Kind
+	20, // 20: vynel.node.v1.UserOp.user:type_name -> vynel.node.v1.User
+	2,  // 21: vynel.node.v1.NodeGateway.Join:input_type -> vynel.node.v1.JoinRequest
+	4,  // 22: vynel.node.v1.NodeGateway.Connect:input_type -> vynel.node.v1.NodeMessage
+	3,  // 23: vynel.node.v1.NodeGateway.Join:output_type -> vynel.node.v1.JoinResponse
+	10, // 24: vynel.node.v1.NodeGateway.Connect:output_type -> vynel.node.v1.PanelMessage
+	23, // [23:25] is the sub-list for method output_type
+	21, // [21:23] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_vynel_node_v1_node_proto_init() }
@@ -1780,8 +1894,9 @@ func file_vynel_node_v1_node_proto_init() {
 		(*NodeMessage_Addresses)(nil),
 		(*NodeMessage_Stats)(nil),
 		(*NodeMessage_Result)(nil),
+		(*NodeMessage_Update)(nil),
 	}
-	file_vynel_node_v1_node_proto_msgTypes[7].OneofWrappers = []any{
+	file_vynel_node_v1_node_proto_msgTypes[8].OneofWrappers = []any{
 		(*PanelMessage_Snapshot)(nil),
 		(*PanelMessage_Delta)(nil),
 		(*PanelMessage_StatsAck)(nil),
@@ -1793,7 +1908,7 @@ func file_vynel_node_v1_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vynel_node_v1_node_proto_rawDesc), len(file_vynel_node_v1_node_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   20,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

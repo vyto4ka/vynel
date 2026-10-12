@@ -21,6 +21,7 @@ import (
 
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
+	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/web"
 )
 
@@ -35,6 +36,8 @@ type Config struct {
 	Bot           *bot.Bot // Telegram bot (status, backups); nil in tests
 	// NodeAction runs an admin action (service.NodeActions) on a connected node; nil = unavailable.
 	NodeAction func(ctx context.Context, nodeID int64, action string) (detail string, err error)
+	// UpdateStatus is what a node last reported about its update; nil = never reports.
+	UpdateStatus func(nodeID int64) *update.Status
 }
 
 // Server is the web panel.

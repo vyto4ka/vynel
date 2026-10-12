@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate, UpdateInfo } from '../api'
-import { useRunUpdate } from '../updates'
+import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate } from '../api'
+import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
@@ -19,7 +19,8 @@ export function Nodes() {
   const act = useAction()
   const confirm = useConfirm()
   const reload = nodes.reload
-  const updates = useLoad(() => get<UpdateInfo>('updates'), [], 15000)
+  const updates = useUpdates(15000)
+  const [updLog, setUpdLog] = useState<{ id: number; name: string } | null>(null)
   const upd = useRunUpdate(updates.data, () => { updates.reload(); reload() })
   // У локальной ноды версия панели: она обновляется вместе с панелью.
   const updOf = (n: Node) => n.local ? updates.data?.panel : updates.data?.nodes.find((x) => x.id === n.id)
@@ -59,8 +60,7 @@ export function Nodes() {
                     </div>
                   </div>
                   <div className="row" style={{ gap: 6 }}>
-                    {updOf(n)?.updating ? <Badge color="amber"><span className="spinner" /> обновляется</Badge>
-                      : updOf(n)?.available && <Badge color="amber" dot>есть обновление</Badge>}
+                    {updOf(n) && <UpdateChip n={updOf(n)!} latest={updates.data!.latest} onLog={() => setUpdLog({ id: n.local ? 0 : n.id, name: n.local ? 'панель' : n.name })} />}
                     <Badge color={st.color} dot>{st.label}</Badge>
                     <Switch checked={n.enabled} onChange={(v) => act(() => patch(`nodes/${n.id}`, { enabled: v }), v ? 'Нода включена' : 'Нода выключена').then(reload)} />
                     <button className="btn ghost icon sm" title="Проверка: связь, конфиг, DNS, сертификат" onClick={() => setCheckOf(n)}><Icon name="search" /></button>
@@ -75,6 +75,7 @@ export function Nodes() {
                           if (await confirm(n.local ? 'Обновить панель (и ноду на её сервере)? Панель перезапустится, страница обновится сама.' : <>Обновить ноду <b>{n.name}</b>? Около минуты она будет недоступна.</>, 'Обновить', false))
                             upd.run(n.local ? 'panel' : 'node', n.id)
                         } },
+                      { label: 'Лог обновления', icon: 'audit', onClick: () => setUpdLog({ id: n.local ? 0 : n.id, name: n.local ? 'панель' : n.name }) },
                       { label: n.local ? 'Перезапустить службу (и панель)' : 'Перезапустить службу vynel', icon: 'power', disabled: !online,
                         onClick: () => nodeAction(n, 'service', 'Служба перезапускается',
                           n.local ? 'Перезапустить службу vynel? Панель и VPN на этом сервере пропадут на несколько секунд, страница переподключится сама.' : 'Перезапустить службу vynel на ноде? VPN на ней пропадёт на несколько секунд.', 'Перезапустить') },
@@ -172,6 +173,7 @@ export function Nodes() {
 
       {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setAdding(false); setJoin(j); reload() }} />}
       {join && <NodeSetup j={join} onClose={() => { setJoin(null); reload() }} />}
+      {updLog && <UpdateLog id={updLog.id} name={updLog.name} onClose={() => { setUpdLog(null); updates.reload() }} />}
       {checkOf && <NodeSetup node={checkOf} onClose={() => { setCheckOf(null); reload() }} />}
       {editNode && <EditNode n={editNode} onClose={() => setEditNode(null)} onSaved={() => { setEditNode(null); reload() }} />}
       {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}

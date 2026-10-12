@@ -35,7 +35,19 @@ message NodeMessage {
     Addresses addresses = 3;
     StatsBatch stats = 4;
     CommandResult result = 5;
+    UpdateStatus update = 6;
   }
+}
+
+// UpdateStatus is how the node's update (`vynel update`) is going: sent every few seconds while it
+// runs, once more when it ends, and once on every connect so the panel knows the last outcome.
+message UpdateStatus {
+  bool running = 1;
+  bool ok = 2;           // finished without errors (meaningful when not running)
+  int64 started_at = 3;  // unix seconds
+  int64 finished_at = 4; // 0 while running
+  string version = 5;    // vynel version after the update
+  string log = 6;        // the last lines of /var/log/vynel-update.log
 }
 
 message Hello {

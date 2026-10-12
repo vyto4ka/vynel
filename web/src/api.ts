@@ -388,6 +388,11 @@ export interface UpdateNode {
   version: string
   available: boolean
   updating: boolean
+  // sent → running → restarting → done | failed; '' — ничего не происходит
+  state: '' | 'sent' | 'running' | 'restarting' | 'done' | 'failed'
+  startedAt?: number
+  finishedAt?: number
+  log?: string
 }
 
 export interface UpdateInfo {
@@ -396,7 +401,6 @@ export interface UpdateInfo {
   checkError?: string
   checkedAt: number
   panel: UpdateNode
-  lastPanel?: { ok: boolean; at: number; version?: string; error?: string }
   nodes: UpdateNode[]
   count: number
 }

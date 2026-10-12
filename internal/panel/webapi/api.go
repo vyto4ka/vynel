@@ -65,6 +65,7 @@ func (s *Server) routes() {
 	s.handle("GET /api/updates", s.getUpdates)
 	s.handle("POST /api/updates/check", s.checkUpdates)
 	s.handle("POST /api/updates/run", s.runUpdates)
+	s.handle("GET /api/updates/log", s.updateLog)
 
 	s.handle("GET /api/profiles", s.profiles)
 	s.handle("GET /api/profile-templates", s.profileTemplates)

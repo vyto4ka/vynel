@@ -20,6 +20,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
@@ -48,7 +49,8 @@ type Reconciler struct {
 	desired  map[int64]*service.DesiredState
 	revision map[int64]int64
 	sessions map[int64]*session
-	ready    chan struct{} // closed after the first recompute
+	ready    chan struct{}            // closed after the first recompute
+	updates  map[int64]*update.Status // what each node last said about its update
 }
 
 // New creates a reconciler.
@@ -65,6 +67,7 @@ func New(svc *service.Service, log *slog.Logger) *Reconciler {
 		revision: map[int64]int64{},
 		sessions: map[int64]*session{},
 		ready:    make(chan struct{}),
+		updates:  map[int64]*update.Status{},
 	}
 }
 
@@ -296,6 +299,12 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		}
 	case *nodev1.NodeMessage_Addresses:
 		return svc.SyncAddresses(ctx, s.nodeID, toReported(m.Addresses.Addresses))
+	case *nodev1.NodeMessage_Update:
+		u := m.Update
+		s.r.mu.Lock()
+		s.r.updates[s.nodeID] = &update.Status{Running: u.Running, OK: u.Ok, StartedAt: u.StartedAt, FinishedAt: u.FinishedAt, Version: u.Version, Log: u.Log}
+		s.r.mu.Unlock()
+		return nil
 	case *nodev1.NodeMessage_Result:
 		s.mu.Lock()
 		w := s.waiters[m.Result.Id]
@@ -388,6 +397,18 @@ func (r *Reconciler) Command(ctx context.Context, nodeID int64, action nodev1.Co
 	case <-ctx.Done():
 		return nil, fmt.Errorf("no answer from the node: %w", ctx.Err())
 	}
+}
+
+// UpdateStatus is what the node last reported about its update (nil: nothing, or an agent too
+// old to report).
+func (r *Reconciler) UpdateStatus(nodeID int64) *update.Status {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if st := r.updates[nodeID]; st != nil {
+		c := *st
+		return &c
+	}
+	return nil
 }
 
 // Resync makes the next push to the node a full snapshot (admin action «send the config again»).

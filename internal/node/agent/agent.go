@@ -20,6 +20,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/vyto4ka/vynel/internal/node/caddy"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
@@ -66,6 +67,10 @@ type Config struct {
 	// Update starts updating vynel, Xray and Caddy in the background (admin action).
 	// Default: update.Start.
 	Update func(context.Context) error
+	// UpdateStatus reports how the last update went. Default: update.LocalStatus.
+	UpdateStatus func() *update.Status
+	// UpdateEvery is how often a running update is reported, default 2s.
+	UpdateEvery time.Duration
 }
 
 // Agent applies the panel's desired state to Xray.
@@ -113,6 +118,12 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.Update == nil {
 		cfg.Update = update.Start
+	}
+	if cfg.UpdateStatus == nil {
+		cfg.UpdateStatus = update.LocalStatus
+	}
+	if cfg.UpdateEvery == 0 {
+		cfg.UpdateEvery = 2 * time.Second
 	}
 	if cfg.Reboot == nil {
 		cfg.Reboot = func() error { return exec.Command("systemctl", "reboot").Run() }
@@ -268,10 +279,39 @@ func (a *Agent) session(ctx context.Context) error {
 	if err := sendStats(); err != nil {
 		return err
 	}
+	// The last update's outcome on every connect (a node restarted by its own update reports how
+	// it ended), then every few seconds while one runs.
+	var lastUpd *nodev1.UpdateStatus
+	var watchUntil time.Time // right after an update command its "running" record may not be there yet
+	watching := false
+	sendUpdate := func() error {
+		st := a.cfg.UpdateStatus()
+		watching = (st != nil && st.Running) || time.Now().Before(watchUntil)
+		if st == nil {
+			return nil
+		}
+		msg := &nodev1.UpdateStatus{Running: st.Running, Ok: st.OK, StartedAt: st.StartedAt, FinishedAt: st.FinishedAt, Version: st.Version, Log: st.Log}
+		if lastUpd != nil && proto.Equal(lastUpd, msg) {
+			return nil
+		}
+		lastUpd = msg
+		return conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Update{Update: msg}})
+	}
+	if err := sendUpdate(); err != nil {
+		return err
+	}
+	updTick := time.NewTicker(a.cfg.UpdateEvery)
+	defer updTick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-updTick.C:
+			if watching {
+				if err := sendUpdate(); err != nil {
+					return err
+				}
+			}
 		case err := <-errs:
 			return err
 		case <-a.statsCh:
@@ -294,6 +334,9 @@ func (a *Agent) session(ctx context.Context) error {
 				res, after := a.command(ctx, c.Command)
 				if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Result{Result: res}}); err != nil {
 					return err
+				}
+				if c.Command.Action == nodev1.Command_ACTION_UPDATE && res.Error == "" {
+					watching, watchUntil = true, time.Now().Add(30*time.Second)
 				}
 				if after != nil {
 					// The answer reaches the panel first; then the service goes down.
