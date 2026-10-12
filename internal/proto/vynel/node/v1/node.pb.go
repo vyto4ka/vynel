@@ -32,6 +32,7 @@ const (
 	Command_ACTION_RESTART_CADDY Command_Action = 2 // restart Caddy with the applied config
 	Command_ACTION_RESTART_AGENT Command_Action = 3 // restart the vynel service (systemd starts it again)
 	Command_ACTION_REBOOT        Command_Action = 4 // reboot the server
+	Command_ACTION_UPDATE        Command_Action = 5 // update vynel, Xray and Caddy (`vynel update`, in the background)
 )
 
 // Enum value maps for Command_Action.
@@ -42,6 +43,7 @@ var (
 		2: "ACTION_RESTART_CADDY",
 		3: "ACTION_RESTART_AGENT",
 		4: "ACTION_REBOOT",
+		5: "ACTION_UPDATE",
 	}
 	Command_Action_value = map[string]int32{
 		"ACTION_UNSPECIFIED":   0,
@@ -49,6 +51,7 @@ var (
 		"ACTION_RESTART_CADDY": 2,
 		"ACTION_RESTART_AGENT": 3,
 		"ACTION_REBOOT":        4,
+		"ACTION_UPDATE":        5,
 	}
 )
 
@@ -1619,16 +1622,17 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\x05delta\x18\x02 \x01(\v2\x14.vynel.node.v1.DeltaH\x00R\x05delta\x126\n" +
 	"\tstats_ack\x18\x03 \x01(\v2\x17.vynel.node.v1.StatsAckH\x00R\bstatsAck\x122\n" +
 	"\acommand\x18\x04 \x01(\v2\x16.vynel.node.v1.CommandH\x00R\acommandB\x05\n" +
-	"\x03msg\"\xd3\x01\n" +
+	"\x03msg\"\xe6\x01\n" +
 	"\aCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
-	"\x06action\x18\x02 \x01(\x0e2\x1d.vynel.node.v1.Command.ActionR\x06action\"\x80\x01\n" +
+	"\x06action\x18\x02 \x01(\x0e2\x1d.vynel.node.v1.Command.ActionR\x06action\"\x93\x01\n" +
 	"\x06Action\x12\x16\n" +
 	"\x12ACTION_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13ACTION_RESTART_XRAY\x10\x01\x12\x18\n" +
 	"\x14ACTION_RESTART_CADDY\x10\x02\x12\x18\n" +
 	"\x14ACTION_RESTART_AGENT\x10\x03\x12\x11\n" +
-	"\rACTION_REBOOT\x10\x04\"M\n" +
+	"\rACTION_REBOOT\x10\x04\x12\x11\n" +
+	"\rACTION_UPDATE\x10\x05\"M\n" +
 	"\rCommandResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x16\n" +

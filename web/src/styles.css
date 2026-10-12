@@ -139,11 +139,7 @@ code, .mono { font-family: "JetBrains Mono", "Roboto Mono", ui-monospace, SFMono
 .app.collapsed .main { margin-left: var(--sidebar-collapsed); }
 
 .brand { display: flex; align-items: center; gap: 12px; height: 68px; padding: 0 24px; flex: none; }
-.brand-logo {
-  width: 36px; height: 36px; border-radius: var(--shape-md); flex: none;
-  background: conic-gradient(from 200deg, #39c5bb, #137a7f, #ff5fa2, #39c5bb);
-  display: grid; place-items: center; color: var(--crust); font-weight: 800; font-size: 18px;
-}
+.brand-logo { width: 36px; height: 36px; flex: none; display: block; }
 .brand-name { font-weight: 600; font-size: 20px; letter-spacing: .2px; }
 .brand-name span { color: var(--tertiary); }
 
@@ -667,3 +663,18 @@ pre.code {
 .menu-item svg { width: 20px; height: 20px; flex: none; color: var(--on-surface-variant); }
 .menu-item.danger, .menu-item.danger svg { color: var(--error); }
 .menu-divider { height: 1px; margin: 8px 0; background: var(--outline-variant); }
+
+/* M3 banner: update notices on the dashboard */
+.banner {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; padding: 14px 16px 14px 20px;
+  border-radius: var(--shape-lg); background: color-mix(in srgb, var(--primary-container) 55%, var(--container));
+  color: var(--on-primary-container);
+}
+.banner > svg { width: 24px; height: 24px; flex: none; color: var(--primary); }
+.banner b { font-weight: 500; }
+.banner.error { background: color-mix(in srgb, var(--error-container) 60%, var(--container)); color: var(--on-error-container); }
+.banner.error > svg { color: var(--error); }
+.banner-log { margin: 6px 0 4px; white-space: pre-wrap; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; color: inherit; }
+.nav-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--error); color: var(--on-error); font-size: 11px; font-weight: 600; display: inline-grid; place-items: center; }
+.app.collapsed .nav-item { position: relative; }
+.app.collapsed .nav-badge { position: absolute; margin: 0; top: 6px; left: calc(50% + 8px); }

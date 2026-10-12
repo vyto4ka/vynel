@@ -375,3 +375,28 @@ export interface SubRule {
   enabled: boolean
   note?: string
 }
+
+// ---- обновления ----
+
+export interface UpdateNode {
+  id: number
+  code: string
+  name: string
+  flag: string
+  local: boolean
+  online: boolean
+  version: string
+  available: boolean
+  updating: boolean
+}
+
+export interface UpdateInfo {
+  release: string
+  latest: string
+  checkError?: string
+  checkedAt: number
+  panel: UpdateNode
+  lastPanel?: { ok: boolean; at: number; version?: string; error?: string }
+  nodes: UpdateNode[]
+  count: number
+}

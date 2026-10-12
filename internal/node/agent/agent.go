@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/node/state"
 	"github.com/vyto4ka/vynel/internal/node/sysctl"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xray"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
@@ -61,6 +63,9 @@ type Config struct {
 	Restart func()
 	// Reboot reboots the server (admin action). Default: systemctl reboot.
 	Reboot func() error
+	// Update starts updating vynel, Xray and Caddy in the background (admin action).
+	// Default: update.Start.
+	Update func(context.Context) error
 }
 
 // Agent applies the panel's desired state to Xray.
@@ -105,6 +110,9 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.Restart == nil {
 		cfg.Restart = func() { _ = syscall.Kill(os.Getpid(), syscall.SIGTERM) }
+	}
+	if cfg.Update == nil {
+		cfg.Update = update.Start
 	}
 	if cfg.Reboot == nil {
 		cfg.Reboot = func() error { return exec.Command("systemctl", "reboot").Run() }
@@ -156,6 +164,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.log.Warn("cannot get xray version", "err", err)
 	}
 	a.warnings = sysctl.Tune(a.cfg.TuneSysctl)
+	if r := update.LastResult(); r != nil && !r.OK {
+		a.warnings = append(a.warnings, "update failed: "+strings.ReplaceAll(r.Error, "\n", " / ")+" (log: /var/log/vynel-update.log)")
+	}
 	a.caddyVer = a.caddy.Version(ctx)
 	a.mu.Lock()
 	if a.cur != nil {
@@ -355,6 +366,10 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 	case nodev1.Command_ACTION_RESTART_AGENT:
 		res.Detail = "the service restarts now"
 		after = a.cfg.Restart
+	case nodev1.Command_ACTION_UPDATE:
+		if err = a.cfg.Update(ctx); err == nil {
+			res.Detail = "the update is running"
+		}
 	case nodev1.Command_ACTION_REBOOT:
 		res.Detail = "the server reboots now"
 		after = func() {

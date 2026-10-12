@@ -122,7 +122,7 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 func nodeAction(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, action string) (string, error) {
 	commands := map[string]nodev1.Command_Action{
 		"xray": nodev1.Command_ACTION_RESTART_XRAY, "caddy": nodev1.Command_ACTION_RESTART_CADDY,
-		"service": nodev1.Command_ACTION_RESTART_AGENT, "reboot": nodev1.Command_ACTION_REBOOT,
+		"service": nodev1.Command_ACTION_RESTART_AGENT, "reboot": nodev1.Command_ACTION_REBOOT, "update": nodev1.Command_ACTION_UPDATE,
 	}
 	return func(ctx context.Context, nodeID int64, action string) (string, error) {
 		if action == "resync" {

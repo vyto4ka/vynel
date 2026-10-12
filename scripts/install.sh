@@ -944,9 +944,25 @@ build_from_source() {
   red "  note: a source build has no web UI inside (it is built in CI); the panel will say so. Use the release when it is available."
 }
 
+# save_install_env: where this server takes its updates from. `vynel update` (and the panel's
+# «Обновить») runs this script again with the same branch, release and GitHub mirror.
+INSTALL_ENV=/etc/vynel/install.env
+save_install_env() {
+  mkdir -p "$(dirname "$INSTALL_ENV")"
+  {
+    echo "# written by scripts/install.sh; read by \`vynel update\`"
+    printf 'VYNEL_REF=%s\n' "$REF"
+    printf 'VYNEL_RELEASE=%s\n' "$RELEASE"
+    [[ -n "${VYNEL_RELEASE_URL:-}" ]] && printf 'VYNEL_RELEASE_URL=%s\n' "$VYNEL_RELEASE_URL"
+    [[ -n "$GH_PROXY" ]] && printf 'VYNEL_GH_PROXY=%s\n' "$GH_PROXY"
+    true
+  } >"$INSTALL_ENV.new" && mv -f "$INSTALL_ENV.new" "$INSTALL_ENV"
+}
+
 # install_vynel: VYNEL_CHANGED=1 when a new binary was put in place.
 VYNEL_CHANGED=0
 install_vynel() {
+  save_install_env
   info "vynel: checking the release $RELEASE"
   # Right after a push CI rebuilds the release (2–3 minutes): wait for it instead of compiling.
   local attempt rc tries="${VYNEL_RELEASE_TRIES:-10}" netfail=0

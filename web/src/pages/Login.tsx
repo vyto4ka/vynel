@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { get, post } from '../api'
+import { Logo } from '../ui'
 
 export function Login({ onLogin, error: initialError }: { onLogin: () => void; error?: string }) {
   const [login, setLogin] = useState('')
@@ -27,7 +28,7 @@ export function Login({ onLogin, error: initialError }: { onLogin: () => void; e
     <div className="login-wrap">
       <form className="card login" onSubmit={submit}>
         <div className="brand">
-          <div className="brand-logo">v</div>
+          <Logo />
           <div className="brand-name">vyn<span>el</span></div>
         </div>
         <h2>Вход в панель</h2>

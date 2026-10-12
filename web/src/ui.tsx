@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from 'react'
 import { Day } from './api'
 import { fmtBytes, TimeChart } from './charts'
 import { bytes } from './format'
@@ -40,6 +40,23 @@ export function Icon({ name, size }: { name: string; size?: number }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       {paths[name]}
+    </svg>
+  )
+}
+
+// Логотип vynel — тот же, что в README (docs/images/logo.svg).
+export function Logo({ size = 36 }: { size?: number }) {
+  const id = useId()
+  return (
+    <svg className="brand-logo" width={size} height={size} viewBox="0 0 96 96" role="img" aria-label="vynel">
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#39c5bb" />
+          <stop offset="1" stopColor="#ff5fa2" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="88" height="88" rx="24" fill={`url(#${id})`} />
+      <path d="M30 34 L48 66 L66 34" fill="none" stroke="#0d1013" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

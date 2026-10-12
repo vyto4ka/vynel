@@ -1,6 +1,7 @@
 import { get, Overview as OverviewT } from '../api'
 import { bytes, nodeStateInfo } from '../format'
 import { Badge, ChartLegend, Empty, Loading, TrafficChart, useLoad } from '../ui'
+import { UpdateBanner } from '../updates'
 
 export function Overview() {
   const { data, error } = useLoad(() => get<OverviewT>('overview'), [], 15000)
@@ -8,6 +9,7 @@ export function Overview() {
   const u = data.users
   return (
     <>
+      <UpdateBanner />
       <div className="stats">
         <div className="card stat">
           <div className="k">Пользователи</div>

@@ -62,6 +62,9 @@ func (s *Server) routes() {
 	s.handle("POST /api/nodes/{id}/token", s.nodeToken)
 	s.handle("GET /api/nodes/{id}/checklist", s.nodeChecklist)
 	s.handle("POST /api/nodes/{id}/action", s.nodeAction)
+	s.handle("GET /api/updates", s.getUpdates)
+	s.handle("POST /api/updates/check", s.checkUpdates)
+	s.handle("POST /api/updates/run", s.runUpdates)
 
 	s.handle("GET /api/profiles", s.profiles)
 	s.handle("GET /api/profile-templates", s.profileTemplates)

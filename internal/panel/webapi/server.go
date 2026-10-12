@@ -45,6 +45,7 @@ type Server struct {
 	ui      fs.FS
 	api     *http.ServeMux
 	loginMu sync.Mutex // one password check at a time: slows down guessing
+	upd     updates
 }
 
 const (

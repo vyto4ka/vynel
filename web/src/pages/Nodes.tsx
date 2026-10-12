@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate } from '../api'
+import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate, UpdateInfo } from '../api'
+import { useRunUpdate } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
@@ -18,6 +19,10 @@ export function Nodes() {
   const act = useAction()
   const confirm = useConfirm()
   const reload = nodes.reload
+  const updates = useLoad(() => get<UpdateInfo>('updates'), [], 15000)
+  const upd = useRunUpdate(updates.data, () => { updates.reload(); reload() })
+  // У локальной ноды версия панели: она обновляется вместе с панелью.
+  const updOf = (n: Node) => n.local ? updates.data?.panel : updates.data?.nodes.find((x) => x.id === n.id)
 
   // Действия с нодой через её живое соединение с панелью.
   const nodeAction = async (n: Node, action: string, done: string, warn?: React.ReactNode, ok?: string) => {
@@ -30,6 +35,10 @@ export function Nodes() {
     <>
       <div className="toolbar">
         <div className="text-2 grow small">Ноды — серверы с Xray. На каждой свой VLESS-инбаунд со своими ключами; общие настройки берутся из профиля.</div>
+        {(updates.data?.count || 0) > 0 && <button className="btn" onClick={async () => {
+          if (await confirm(<>Обновить все устаревшие серверы до {updates.data!.latest}? Они обновятся <b>одновременно</b>: около минуты подключения не будут работать, затем всё поднимется само. Панель — последней.</>, 'Обновить все', false))
+            upd.run('all')
+        }}><Icon name="refresh" /> Обновить все ({updates.data!.count})</button>}
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" /> Добавить сервер</button>
       </div>
 
@@ -50,6 +59,8 @@ export function Nodes() {
                     </div>
                   </div>
                   <div className="row" style={{ gap: 6 }}>
+                    {updOf(n)?.updating ? <Badge color="amber"><span className="spinner" /> обновляется</Badge>
+                      : updOf(n)?.available && <Badge color="amber" dot>есть обновление</Badge>}
                     <Badge color={st.color} dot>{st.label}</Badge>
                     <Switch checked={n.enabled} onChange={(v) => act(() => patch(`nodes/${n.id}`, { enabled: v }), v ? 'Нода включена' : 'Нода выключена').then(reload)} />
                     <button className="btn ghost icon sm" title="Проверка: связь, конфиг, DNS, сертификат" onClick={() => setCheckOf(n)}><Icon name="search" /></button>
@@ -59,6 +70,11 @@ export function Nodes() {
                       { label: 'Перезапустить Caddy', icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', 'Caddy перезапущен') },
                       { label: 'Отправить конфиг заново', icon: 'nodes', disabled: !online, onClick: () => nodeAction(n, 'resync', 'Конфиг отправлен') },
                       'divider',
+                      { label: updOf(n)?.available ? `Обновить до ${updates.data?.latest}` : 'Обновить vynel, Xray и Caddy', icon: 'refresh', disabled: !online || !!updOf(n)?.updating,
+                        onClick: async () => {
+                          if (await confirm(n.local ? 'Обновить панель (и ноду на её сервере)? Панель перезапустится, страница обновится сама.' : <>Обновить ноду <b>{n.name}</b>? Около минуты она будет недоступна.</>, 'Обновить', false))
+                            upd.run(n.local ? 'panel' : 'node', n.id)
+                        } },
                       { label: n.local ? 'Перезапустить службу (и панель)' : 'Перезапустить службу vynel', icon: 'power', disabled: !online,
                         onClick: () => nodeAction(n, 'service', 'Служба перезапускается',
                           n.local ? 'Перезапустить службу vynel? Панель и VPN на этом сервере пропадут на несколько секунд, страница переподключится сама.' : 'Перезапустить службу vynel на ноде? VPN на ней пропадёт на несколько секунд.', 'Перезапустить') },

@@ -1,8 +1,8 @@
 import { ReactElement, StrictMode, useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
-import { get, post, setUnauthorizedHandler } from './api'
-import { ConfirmProvider, Icon, ToastProvider } from './ui'
+import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
+import { ConfirmProvider, Icon, Logo, ToastProvider, useLoad } from './ui'
 import { Login } from './pages/Login'
 import { Overview } from './pages/Overview'
 import { Stats } from './pages/Stats'
@@ -78,6 +78,8 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
   const [collapsed, setCollapsed] = useState(() => load('vynel.sidebar', 'open') === 'collapsed')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
+  // Сколько серверов отстало от свежей версии — значок у «Нод».
+  const updates = useLoad(() => get<UpdateInfo>('updates'), [], 300000)
 
   // The server ends a session after a few minutes without actions and when the page is closed.
   // Every half a minute the page says it is alive and whether anything was clicked or typed.
@@ -140,7 +142,7 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
     <div className={'app' + (collapsed ? ' collapsed' : '') + (mobileOpen ? ' mobile-open' : '')}>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-logo">v</div>
+          <Logo />
           <div className="brand-name">vyn<span>el</span></div>
         </div>
         <nav className="nav">
@@ -152,6 +154,7 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
                   <Icon name={x.icon} />
                   <span className="nav-label">{x.title}</span>
                   <span className="nav-short">{x.short || x.title}</span>
+                  {x.id === 'nodes' && (updates.data?.count || 0) > 0 && <span className="nav-badge" title="Есть обновление">{updates.data!.count}</span>}
                 </a>
               ))}
             </div>
