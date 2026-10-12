@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -175,9 +174,6 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.log.Warn("cannot get xray version", "err", err)
 	}
 	a.warnings = sysctl.Tune(a.cfg.TuneSysctl)
-	if r := update.LastResult(); r != nil && !r.OK {
-		a.warnings = append(a.warnings, "update failed: "+strings.ReplaceAll(r.Error, "\n", " / ")+" (log: /var/log/vynel-update.log)")
-	}
 	a.caddyVer = a.caddy.Version(ctx)
 	a.mu.Lock()
 	if a.cur != nil {
