@@ -87,19 +87,31 @@ export function UpdateChip({ n, latest, onLog }: { n: UpdateNode; latest: string
 }
 
 // Окно с ходом обновления и последними строками лога сервера.
+// Панель не ответила совсем (не ошибка API): обычно она перезапускается на своё же обновление.
+const offline = (e: string | null) => !!e && /NetworkError|Failed to fetch|Load failed|network/i.test(e)
+
 export function UpdateLog({ id, name, onClose }: { id: number; name: string; onClose: () => void }) {
   const [fast, setFast] = useState(true)
   const { data, error } = useLoad(() => get<UpdateNode>(`updates/log?id=${id}`), [fast], fast ? 2000 : 0)
   useEffect(() => { if (data) setFast(data.updating) }, [data])
+  // Пока панель недоступна, продолжаем спрашивать: вернётся — покажем.
+  useEffect(() => { if (offline(error)) setFast(true) }, [error])
+  const act = useAction()
+  const finished = data?.state === 'done' || data?.state === 'failed'
+  const offlineNote = offline(error) && <div className="alert amber" style={{ marginBottom: 14 }}>Панель не отвечает: похоже, она сейчас перезапускается на обновление. Окно спросит ещё раз само.</div>
   useTick(!!data?.updating)
   const pre = useRef<HTMLPreElement>(null)
   useEffect(() => { if (pre.current) pre.current.scrollTop = pre.current.scrollHeight }, [data?.log])
   const steps: [string, string][] = [['sent', 'Команда отправлена'], ['running', 'Скачивание и установка'], ['restarting', 'Перезапуск служб'], ['done', 'Готово']]
   const at = data ? Math.max(0, steps.findIndex(([k]) => k === data.state)) : 0
   return (
-    <Modal title={`Обновление · ${name}`} onClose={onClose} wide footer={<button className="btn primary" onClick={onClose}>Закрыть</button>}>
-      {!data ? (error ? <div className="alert pink">{error}</div> : <div className="muted">Загрузка…</div>) : (
+    <Modal title={`Обновление · ${name}`} onClose={onClose} wide footer={<>
+      {finished && <button className="btn ghost" onClick={async () => { await act(() => post('updates/dismiss', { id })); onClose() }}>Скрыть статус</button>}
+      <button className="btn primary" onClick={onClose}>Закрыть</button>
+    </>}>
+      {!data ? (offlineNote || (error ? <div className="alert pink">{error}</div> : <div className="muted">Загрузка…</div>)) : (
         <>
+          {offlineNote}
           {data.state === 'failed' ? <div className="alert pink" style={{ marginBottom: 14 }}>Обновление не удалось. Если новая версия не запустилась, вернулась прежняя: сервер работает на ней.</div>
             : data.state === '' ? <div className="muted small" style={{ marginBottom: 14 }}>Сейчас обновление не идёт. Ниже — лог последнего.</div>
               : (

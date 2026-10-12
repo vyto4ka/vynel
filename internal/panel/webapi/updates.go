@@ -35,13 +35,18 @@ type updates struct {
 	latest    string
 	checkErr  string
 	checkedAt time.Time
-	sent      map[int64]time.Time // node id -> «Обновить» pressed (0 = the panel)
-	failed    map[int64]sentFail  // node id -> the command itself failed
+	jobs      map[int64]*updJob // node id -> the update started from the panel (0 = the panel)
+	hidden    map[int64]int64   // node id -> results that finished up to then are dismissed
 }
 
-type sentFail struct {
-	at  time.Time
-	msg string
+// updJob is an update the panel started.
+type updJob struct {
+	sentAt     time.Time
+	version    string // the server's version when «Обновить» was pressed
+	failAt     time.Time
+	failMsg    string    // the command itself failed
+	doneAt     time.Time // the server came back with another version
+	newVersion string
 }
 
 func (u *updates) check(ctx context.Context, force bool) {
@@ -62,49 +67,89 @@ func (u *updates) check(ctx context.Context, force bool) {
 	u.latest, u.checkErr = v, ""
 }
 
-func (u *updates) markSent(id int64, err error) {
+func (u *updates) markSent(id int64, version string, err error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.sent == nil {
-		u.sent, u.failed = map[int64]time.Time{}, map[int64]sentFail{}
+	if u.jobs == nil {
+		u.jobs = map[int64]*updJob{}
 	}
+	j := &updJob{sentAt: time.Now(), version: version}
 	if err != nil {
-		u.failed[id] = sentFail{time.Now(), updateError(err)}
-		delete(u.sent, id)
-		return
+		j.failAt, j.failMsg = j.sentAt, updateError(err)
 	}
-	u.sent[id] = time.Now()
-	delete(u.failed, id)
+	u.jobs[id] = j
 }
 
-// state decides what to show for one server from what the panel did (sent, failed) and what
-// the server reports (st; nil = nothing yet, or an agent too old to report).
-func (u *updates) state(id int64, st *update.Status, online bool, now time.Time) (state string, log string, started, finished int64) {
+// dismiss hides the update state of id until the next update.
+func (u *updates) dismiss(id int64) {
 	u.mu.Lock()
-	sentAt, wasSent := u.sent[id]
-	fail, didFail := u.failed[id]
-	u.mu.Unlock()
+	defer u.mu.Unlock()
+	delete(u.jobs, id)
+	if u.hidden == nil {
+		u.hidden = map[int64]int64{}
+	}
+	u.hidden[id] = time.Now().Unix()
+}
+
+// silentNode explains an update the node never reported.
+const silentNode = "Нода не сообщила о начале обновления за 2 минуты. Скорее всего, на ней версия, которая ещё не умеет " +
+	"обновляться из панели: обновите её один раз установщиком (--mode update), дальше обновления из панели будут видны. " +
+	"Лог на ноде: /var/log/vynel-update.log"
+
+// state decides what to show for one server from what the panel did (its job), what the server
+// reports (st; nil = nothing yet, or an agent too old to report) and the version it runs now.
+func (u *updates) state(id int64, st *update.Status, online bool, version string, now time.Time) (state string, log string, started, finished int64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	if st != nil {
 		log, started, finished = st.Log, st.StartedAt, st.FinishedAt
 	}
-	// The node clock may run a little behind the panel's.
-	reportedSince := func(t time.Time) bool { return st != nil && st.StartedAt >= t.Unix()-30 }
-	switch {
-	case didFail && now.Sub(fail.at) < updateShowDone:
-		return UpdFailed, fail.msg, fail.at.Unix(), fail.at.Unix()
-	case st != nil && st.Running && !online:
-		return UpdRestarting, log, started, 0
-	case st != nil && st.Running:
-		return UpdRunning, log, started, 0
-	case wasSent && !reportedSince(sentAt) && now.Sub(sentAt) < updateSentWait:
-		if !online {
-			return UpdRestarting, "", sentAt.Unix(), 0
+	show := int64(updateShowDone / time.Second)
+	j := u.jobs[id]
+	// The server came back with another version: updated, whatever the panel saw on the way
+	// (an old agent that never reported, or an update done by hand after a failed one).
+	if j != nil && j.doneAt.IsZero() && version != "" && j.version != "" && version != j.version {
+		j.doneAt, j.newVersion = now, version
+	}
+	running := st != nil && st.Running
+	if j != nil && !j.doneAt.IsZero() && !running {
+		if now.Sub(j.doneAt) >= updateShowDone {
+			delete(u.jobs, id)
+			return "", log, started, finished
 		}
-		return UpdSent, "", sentAt.Unix(), 0
-	case wasSent && !reportedSince(sentAt):
-		return UpdFailed, "the node did not report the update within " + updateSentWait.String() +
-			": its agent may be too old to report progress (see /var/log/vynel-update.log on the node)", sentAt.Unix(), now.Unix()
-	case st != nil && st.FinishedAt > 0 && now.Unix()-st.FinishedAt < int64(updateShowDone/time.Second):
+		if st != nil && st.FinishedAt >= j.sentAt.Unix()-30 {
+			if !st.OK {
+				return UpdFailed, log, started, finished
+			}
+			return UpdDone, log, started, finished
+		}
+		return UpdDone, "Версия " + j.version + " → " + j.newVersion, j.sentAt.Unix(), j.doneAt.Unix()
+	}
+	switch {
+	case running && !online:
+		return UpdRestarting, log, started, 0
+	case running:
+		return UpdRunning, log, started, 0
+	}
+	if j != nil {
+		reported := st != nil && st.StartedAt >= j.sentAt.Unix()-30 // the node clock may lag a little
+		switch {
+		case j.failMsg != "" && now.Sub(j.failAt) < updateShowDone:
+			return UpdFailed, j.failMsg, j.failAt.Unix(), j.failAt.Unix()
+		case j.failMsg != "":
+			delete(u.jobs, id)
+		case !reported && now.Sub(j.sentAt) < updateSentWait:
+			if !online {
+				return UpdRestarting, "", j.sentAt.Unix(), 0
+			}
+			return UpdSent, "", j.sentAt.Unix(), 0
+		case !reported && now.Sub(j.sentAt) < updateSentWait+updateShowDone:
+			return UpdFailed, silentNode, j.sentAt.Unix(), j.sentAt.Add(updateSentWait).Unix()
+		case !reported:
+			delete(u.jobs, id)
+		}
+	}
+	if st != nil && st.FinishedAt > u.hidden[id] && now.Unix()-st.FinishedAt < show {
 		if st.OK {
 			return UpdDone, log, started, finished
 		}
@@ -164,7 +209,7 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 	s.upd.mu.Unlock()
 	now := time.Now()
 	info.Panel = UpdateNode{Name: "Панель", Local: true, Online: true, Version: s.cfg.Version, Available: newer(s.cfg.Version, info.Latest)}
-	info.Panel.setState(s.upd.state(0, update.LocalStatus(), true, now))
+	info.Panel.setState(s.upd.state(0, update.LocalStatus(), true, s.cfg.Version, now))
 	if info.Panel.Available {
 		info.Count++
 	}
@@ -180,7 +225,7 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 		}
 		un := UpdateNode{ID: n.ID, Code: n.Code, Name: n.Name, Flag: n.Country, Online: online, Version: n.AgentVersion,
 			Available: newer(n.AgentVersion, info.Latest)}
-		un.setState(s.upd.state(n.ID, st, online, now))
+		un.setState(s.upd.state(n.ID, st, online, n.AgentVersion, now))
 		if un.Available {
 			info.Count++
 		}
@@ -200,6 +245,18 @@ func (s *Server) getUpdates(r *http.Request) (any, error) { return s.updateInfo(
 func (s *Server) checkUpdates(r *http.Request) (any, error) {
 	s.upd.check(r.Context(), true)
 	return s.updateInfo(r.Context(), false)
+}
+
+// dismissUpdate is POST /api/updates/dismiss {"id": N}: hide a finished or failed update.
+func (s *Server) dismissUpdate(r *http.Request) (any, error) {
+	var in struct {
+		ID int64 `json:"id"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	s.upd.dismiss(in.ID)
+	return nil, nil
 }
 
 // updateLog is GET /api/updates/log?id=N (0 = the panel): the server's state and its log.
@@ -241,8 +298,12 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 	}
 	var mu sync.Mutex
 	started, failed := []string{}, map[string]string{}
+	versionOf := map[int64]string{0: info.Panel.Version}
+	for _, n := range info.Nodes {
+		versionOf[n.ID] = n.Version
+	}
 	done := func(name string, id int64, err error) {
-		s.upd.markSent(id, err)
+		s.upd.markSent(id, versionOf[id], err)
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
