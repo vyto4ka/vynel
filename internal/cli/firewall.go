@@ -103,7 +103,35 @@ func firewallCmd() *cobra.Command {
 		Use: "status", Short: "Show what is open and who is banned",
 		RunE: func(cmd *cobra.Command, _ []string) error { return firewallStatus(cmd.Context(), cmd) },
 	}
-	c.AddCommand(status, on, off, allowCmd, deny, unblock)
+	gateway := &cobra.Command{
+		Use:   "gateway open|nodes",
+		Short: "Node gateway port: open to everyone (a node's address changed) or only to the nodes (default)",
+		Args:  cobra.ExactArgs(1), ValidArgs: []string{"open", "nodes"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			conf, err := firewall.LoadConf()
+			if err != nil {
+				return err
+			}
+			switch args[0] {
+			case "open":
+				conf.GatewayOpen = true
+			case "nodes":
+				conf.GatewayOpen = false
+			default:
+				return fmt.Errorf("expected open or nodes")
+			}
+			if err := firewall.SaveConf(conf); err != nil {
+				return err
+			}
+			if conf.GatewayOpen {
+				fmt.Fprintln(cmd.OutOrStdout(), "the node gateway port is open to everyone; once the nodes are back: vynel firewall gateway nodes")
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "the node gateway port is open only to the addresses the nodes connect from (and to everyone while an install token waits)")
+			}
+			return nil
+		},
+	}
+	c.AddCommand(status, on, off, allowCmd, deny, unblock, gateway)
 	return c
 }
 

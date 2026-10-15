@@ -211,7 +211,7 @@ func Run(ctx context.Context, cfg Config) error {
 			DataDir: filepath.Join(cfg.DataDir, "node"), Xray: cfg.Xray, Version: cfg.Version,
 			Log: cfg.Log.With("component", "local-node"), Dial: LocalDialer(ctx, p.Reconciler, node.ID),
 			CaddyBin: cfg.CaddyBin, NginxBin: cfg.NginxBin, WWWDir: cfg.WWWDir, TuneSysctl: cfg.TuneSysctl,
-			Firewall: fw, ExtraPorts: firewall.ListenPort(cfg.GatewayListen, "node gateway"),
+			Firewall: fw, ExtraPorts: gatewayPorts(ctx, p.Service, cfg.GatewayListen),
 		})
 		if err != nil {
 			return err
@@ -231,11 +231,11 @@ func Run(ctx context.Context, cfg Config) error {
 		defer m.Close()
 		run("nginx", func() error { return panelNginxLoop(ctx, p.Service, m, cfg.Log) })
 		if fw != nil {
-			gw := firewall.ListenPort(cfg.GatewayListen, "node gateway")
+			gw := gatewayPorts(ctx, p.Service, cfg.GatewayListen)
 			run("firewall", func() error {
 				fw.Loop(ctx, 15*time.Second, func() []firewall.Port {
 					c, _ := p.Service.PanelNginxConfig(ctx)
-					return append(firewall.NginxPorts(c), gw...)
+					return append(firewall.NginxPorts(c), gw()...)
 				})
 				return nil
 			})
@@ -246,11 +246,11 @@ func Run(ctx context.Context, cfg Config) error {
 		defer m.Close()
 		run("caddy", func() error { return panelCaddyLoop(ctx, p.Service, m, cfg.Log) })
 		if fw != nil {
-			gw := firewall.ListenPort(cfg.GatewayListen, "node gateway")
+			gw := gatewayPorts(ctx, p.Service, cfg.GatewayListen)
 			run("firewall", func() error {
 				fw.Loop(ctx, 15*time.Second, func() []firewall.Port {
 					c, _ := p.Service.PanelCaddyConfig(ctx)
-					return append(firewall.CaddyPorts(c), gw...)
+					return append(firewall.CaddyPorts(c), gw()...)
 				})
 				return nil
 			})
@@ -265,6 +265,23 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	wg.Wait()
 	return err
+}
+
+// gatewayPorts is the node gateway port for the firewall: open to the nodes' addresses only,
+// to everyone while a new node may join (service.GatewayAccess).
+func gatewayPorts(ctx context.Context, svc *service.Service, listen string) func() []firewall.Port {
+	return func() []firewall.Port {
+		ps := firewall.ListenPort(listen, "node gateway")
+		if len(ps) == 0 {
+			return nil
+		}
+		acc, err := svc.GatewayAccess(ctx)
+		if err != nil || acc.Open {
+			return ps
+		}
+		ps[0].From, ps[0].Restricted = acc.IPs, true
+		return ps
+	}
 }
 
 // LocalDialer connects an in-process agent to the reconciler.

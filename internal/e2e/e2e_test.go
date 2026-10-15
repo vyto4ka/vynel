@@ -236,6 +236,13 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	nodeDE := startAgent(t, bin, deDir, app.LocalDialer(ctx, panel.Reconciler, de.ID), apiDE)
 
 	xraytest.Eventually(t, wait, "nodes converge", inSync(ctx, svc, "NL", "DE"))
+	// The gateway remembered where NL connects from: the firewall lets only that address in.
+	if n, err := store.GetNode(ctx, db, nl.ID); err != nil || len(n.PeerIPs) == 0 || n.PeerIPs[0] != "127.0.0.1" {
+		t.Fatalf("NL peer addresses: %v %v", n.PeerIPs, err)
+	}
+	if acc, err := svc.GatewayAccess(ctx); err != nil || acc.Open || len(acc.IPs) != 1 {
+		t.Fatalf("gateway access: %+v %v", acc, err)
+	}
 
 	// A new user appears on both nodes without restarts.
 	alice, err := svc.CreateUser(ctx, actor, service.CreateUserInput{Username: "alice"})

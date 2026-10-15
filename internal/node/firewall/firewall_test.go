@@ -3,6 +3,8 @@ package firewall
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,7 +37,7 @@ func TestPortsFromConfigs(t *testing.T) {
 }
 
 func TestRender(t *testing.T) {
-	s := Render(Spec{SSH: []int{2222}, Ports: []Port{{443, "tcp", "a"}, {443, "tcp", "b"}, {443, "udp", ""}, {2222, "tcp", ""}}})
+	s := Render(Spec{SSH: []int{2222}, Ports: []Port{{Port: 443, Proto: "tcp", Why: "a"}, {Port: 443, Proto: "tcp", Why: "b"}, {Port: 443, Proto: "udp"}, {Port: 2222, Proto: "tcp"}}})
 	for _, want := range []string{"policy drop", "tcp dport { 2222 } accept", "tcp dport { 443 } accept", "udp dport { 443 } accept", "@scanners4", "echo-request"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("no %q in\n%s", want, s)
@@ -47,6 +49,40 @@ func TestRender(t *testing.T) {
 	quiet := Render(Spec{SSH: []int{22}, Conf: Conf{NoTrap: true, NoPing: true}})
 	if strings.Contains(quiet, "add @scanners4") || strings.Contains(quiet, "echo-request") {
 		t.Errorf("trap or ping left in\n%s", quiet)
+	}
+}
+
+// The node gateway: only the nodes' addresses, everyone with GatewayOpen, nobody with none.
+func TestRenderLimitedPort(t *testing.T) {
+	gw := Port{Port: 9443, Proto: "tcp", Why: "node gateway", From: []string{"203.0.113.5", "2001:db8::7", "junk"}, Restricted: true}
+	s := Render(Spec{SSH: []int{22}, Ports: []Port{{Port: 443, Proto: "tcp"}, gw}})
+	for _, want := range []string{"ip saddr { 203.0.113.5 } tcp dport 9443 accept", "ip6 saddr { 2001:db8::7 } tcp dport 9443 accept", "tcp dport { 443 } accept"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("no %q in\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "{ 443, 9443 }") {
+		t.Error("the gateway is open to everyone")
+	}
+	if open := Render(Spec{SSH: []int{22}, Ports: []Port{gw}, Conf: Conf{GatewayOpen: true}}); !strings.Contains(open, "tcp dport { 9443 } accept") {
+		t.Errorf("gateway open:\n%s", open)
+	}
+	none := gw
+	none.From = nil
+	if s := Render(Spec{SSH: []int{22}, Ports: []Port{none}}); strings.Contains(s, "9443") {
+		t.Errorf("a limited port without addresses must stay closed:\n%s", s)
+	}
+	// Allowed by hand wins over the limit.
+	if s := Render(Spec{SSH: []int{22}, Ports: []Port{gw, {Port: 9443, Proto: "tcp", Why: "allowed by hand"}}}); !strings.Contains(s, "tcp dport { 9443 } accept") {
+		t.Errorf("hand-allowed port:\n%s", s)
+	}
+	// nft accepts the ruleset (check mode, nothing is loaded).
+	if _, err := exec.LookPath("nft"); err == nil && os.Getuid() == 0 {
+		cmd := exec.Command("nft", "-c", "-f", "-")
+		cmd.Stdin = strings.NewReader(s)
+		if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "Operation not permitted") {
+			t.Fatalf("nft -c: %v\n%s", err, out)
+		}
 	}
 }
 
@@ -69,7 +105,7 @@ func TestSync(t *testing.T) {
 	defer func() { Runner = defaultRunner }()
 	m := &Manager{}
 	ctx := context.Background()
-	ports := []Port{{443, "tcp", "Caddy"}}
+	ports := []Port{{Port: 443, Proto: "tcp", Why: "nginx"}}
 
 	// Off (no file): nothing loaded.
 	if err := m.Sync(ctx, ports); err != nil || loaded != "" {

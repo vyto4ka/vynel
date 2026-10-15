@@ -61,7 +61,7 @@ type Config struct {
 	// Firewall keeps nftables in step with what this node serves (when `vynel firewall on`);
 	// nil = never touch the firewall (tests).
 	Firewall   *firewall.Manager
-	ExtraPorts []firewall.Port // also let in (the panel's node gateway on an all-in-one server)
+	ExtraPorts func() []firewall.Port // also let in (the panel's node gateway on an all-in-one server)
 	// Restart restarts the whole service (admin action). Default: SIGTERM to this process, and
 	// systemd (Restart=always) starts it again.
 	Restart func()
@@ -509,7 +509,10 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 func (a *Agent) FirewallPorts() []firewall.Port {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	ports := append([]firewall.Port(nil), a.cfg.ExtraPorts...)
+	var ports []firewall.Port
+	if a.cfg.ExtraPorts != nil {
+		ports = append(ports, a.cfg.ExtraPorts()...)
+	}
 	if a.cur != nil {
 		ports = append(ports, firewall.XrayPorts(a.cur.Config)...)
 	}

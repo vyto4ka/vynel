@@ -34,6 +34,7 @@ type Node struct {
 	CaddyVersion    string
 	NginxVersion    string
 	Capabilities    []string // what the agent understands beyond the original protocol ("nginx")
+	PeerIPs         []string // addresses the node connected to the gateway from, newest first
 }
 
 // Can reports whether the node's agent has a capability.
@@ -48,15 +49,15 @@ func (n *Node) Can(capability string) bool {
 
 const nodeCols = `id, name, code, country, domain, base_config_id, tags, local, enabled, cert_serial,
 	agent_version, xray_version, last_seen_at, desired_revision, desired_hash, applied_hash, last_error, sort,
-	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities`
+	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities, peer_ips`
 
 func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	n := &Node{}
 	var base, seen sql.NullInt64
-	var tags, warnings, caps string
+	var tags, warnings, caps, peers string
 	err := sc.Scan(&n.ID, &n.Name, &n.Code, &n.Country, &n.Domain, &base, &tags, &n.Local, &n.Enabled, &n.CertSerial,
 		&n.AgentVersion, &n.XrayVersion, &seen, &n.DesiredRevision, &n.DesiredHash, &n.AppliedHash, &n.LastError, &n.Sort,
-		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps)
+		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps, &peers)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -64,6 +65,7 @@ func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	_ = json.Unmarshal([]byte(tags), &n.Tags)
 	_ = json.Unmarshal([]byte(warnings), &n.Warnings)
 	_ = json.Unmarshal([]byte(caps), &n.Capabilities)
+	_ = json.Unmarshal([]byte(peers), &n.PeerIPs)
 	return n, nil
 }
 
@@ -177,6 +179,35 @@ func SetNodeFacts(ctx context.Context, q DBTX, id int64, f NodeFacts) error {
 	}
 	return execOne(ctx, q, `UPDATE nodes SET caddy_version=?, nginx_version=?, warnings=?, capabilities=? WHERE id=?`,
 		f.CaddyVersion, f.NginxVersion, toJSON(f.Warnings), toJSON(f.Capabilities), id)
+}
+
+// AddNodePeerIP remembers an address the node connected from (the last four, newest first).
+func AddNodePeerIP(ctx context.Context, q DBTX, id int64, ip string) error {
+	var raw string
+	if err := q.QueryRowContext(ctx, `SELECT peer_ips FROM nodes WHERE id=?`, id).Scan(&raw); err != nil {
+		return mapErr(err)
+	}
+	var ips []string
+	_ = json.Unmarshal([]byte(raw), &ips)
+	out := []string{ip}
+	for _, x := range ips {
+		if x != ip && len(out) < 4 {
+			out = append(out, x)
+		}
+	}
+	if len(ips) > 0 && ips[0] == ip {
+		return nil
+	}
+	return execOne(ctx, q, `UPDATE nodes SET peer_ips=? WHERE id=?`, toJSON(out), id)
+}
+
+// PendingInstallTokens counts unused, unexpired install tokens of remote nodes (a local node
+// never joins through the gateway).
+func PendingInstallTokens(ctx context.Context, q DBTX) (int, error) {
+	var n int
+	err := q.QueryRowContext(ctx, `SELECT count(*) FROM node_install_tokens t JOIN nodes n ON n.id = t.node_id
+		WHERE t.used_at IS NULL AND t.expires_at > ? AND n.local = 0`, unix()).Scan(&n)
+	return n, err
 }
 
 // TouchNode updates last_seen_at.

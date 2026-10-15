@@ -115,6 +115,7 @@ func (g *Server) Join(ctx context.Context, req *nodev1.JoinRequest) (*nodev1.Joi
 	} else if n, err := store.GetNode(ctx, g.svc.Store().DB, node.ID); err == nil {
 		node = n
 	}
+	g.notePeer(ctx, node.ID)
 	g.log.Info("node joined", "node", node.Code, "country", node.Country, "peer", peerAddr(ctx))
 	return &nodev1.JoinResponse{CertDer: certDER, CaDer: g.ca.Cert.Raw, NodeId: node.ID, NodeCode: node.Code}, nil
 }
@@ -128,6 +129,7 @@ func (g *Server) Connect(stream grpc.BidiStreamingServer[nodev1.NodeMessage, nod
 	if !node.Enabled {
 		g.log.Info("disabled node connected; it will receive an empty config", "node", node.Code)
 	}
+	g.notePeer(stream.Context(), node.ID)
 	return g.rec.Serve(node.ID, stream)
 }
 
@@ -149,6 +151,22 @@ func (g *Server) authenticate(ctx context.Context) (*store.Node, error) {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	return node, nil
+}
+
+// notePeer remembers the address a node connects from: the firewall opens the gateway port
+// to these addresses only.
+func (g *Server) notePeer(ctx context.Context, nodeID int64) {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return
+	}
+	host, _, err := net.SplitHostPort(p.Addr.String())
+	if err != nil {
+		return
+	}
+	if err := store.AddNodePeerIP(ctx, g.svc.Store().DB, nodeID, host); err != nil {
+		g.log.Warn("cannot store the node's address", "node", nodeID, "err", err)
+	}
 }
 
 func peerAddr(ctx context.Context) string {

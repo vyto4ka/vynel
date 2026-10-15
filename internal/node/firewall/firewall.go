@@ -53,6 +53,11 @@ type Port struct {
 	Port  int    `json:"port"`
 	Proto string `json:"proto"` // tcp | udp
 	Why   string `json:"why,omitempty"`
+	// From limits the port to these source addresses (the node gateway: only the nodes). Empty
+	// = everyone. Conf.GatewayOpen opens such ports to everyone again.
+	From []string `json:"from,omitempty"`
+	// Restricted marks a port meant for From only: with From empty it is closed entirely.
+	Restricted bool `json:"restricted,omitempty"`
 }
 
 func (p Port) String() string { return strconv.Itoa(p.Port) + "/" + p.Proto }
@@ -64,6 +69,9 @@ type Conf struct {
 	NoTrap  bool     `json:"noTrap,omitempty"`  // do not ban port scanners
 	NoPing  bool     `json:"noPing,omitempty"`  // do not answer ping
 	SSHRate int      `json:"sshRate,omitempty"` // new SSH connections per minute per address, 0 = 10
+	// GatewayOpen lets everyone reach ports limited to some addresses (the node gateway), e.g.
+	// when a node's address changed: `vynel firewall gateway open`.
+	GatewayOpen bool `json:"gatewayOpen,omitempty"`
 }
 
 // LoadConf reads the switch; a missing file means "off".
@@ -264,7 +272,11 @@ func dedupe(ps []Port) []Port {
 	seen := map[string]Port{}
 	for _, p := range ps {
 		k := p.String()
-		if old, ok := seen[k]; ok && old.Why != "" {
+		if old, ok := seen[k]; ok {
+			// A port open to everyone (allowed by hand, served publicly) wins over a limited one.
+			if old.Restricted && !p.Restricted {
+				seen[k] = p
+			}
 			continue
 		}
 		seen[k] = p
@@ -344,8 +356,35 @@ func Render(s Spec) string {
 	w("    tcp dport %s ct state new meter ssh4 size 65535 { ip saddr limit rate over %d/minute burst %d packets } drop", ssh, rate, rate)
 	w("    tcp dport %s ct state new meter ssh6 size 65535 { ip6 saddr limit rate over %d/minute burst %d packets } drop", ssh, rate, rate)
 	w("    tcp dport %s accept", ssh)
+	var open, limited []Port
+	for _, p := range ports {
+		if (p.Restricted || len(p.From) > 0) && !s.Conf.GatewayOpen {
+			limited = append(limited, p)
+		} else {
+			open = append(open, p)
+		}
+	}
+	ports = open
 	if set := portSet(ports, "tcp", s.SSH); set != "" {
 		w("    tcp dport %s accept", set)
+	}
+	for _, p := range limited {
+		var v4, v6 []string
+		for _, a := range p.From {
+			if ip := net.ParseIP(a); ip == nil {
+				continue
+			} else if ip.To4() != nil {
+				v4 = append(v4, ip.String())
+			} else {
+				v6 = append(v6, ip.String())
+			}
+		}
+		if len(v4) > 0 {
+			w("    ip saddr { %s } %s dport %d accept", strings.Join(v4, ", "), p.Proto, p.Port)
+		}
+		if len(v6) > 0 {
+			w("    ip6 saddr { %s } %s dport %d accept", strings.Join(v6, ", "), p.Proto, p.Port)
+		}
 	}
 	if set := portSet(ports, "udp", nil); set != "" {
 		w("    udp dport %s accept", set)
