@@ -68,9 +68,22 @@ func realitySpec() InboundSpec {
 	}
 }
 
+// retired parses a template that is no longer built in (still used by these fixtures).
+func retired(id string) *Template {
+	src, ok := RetiredTemplate(id)
+	if !ok {
+		panic("no retired template " + id)
+	}
+	t, err := ParseTemplate([]byte(src))
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
 func xhttpSpec() InboundSpec {
 	return InboundSpec{
-		TemplateID:    "vless-xhttp-vkcdn",
+		Template:      retired("vless-xhttp-vkcdn"),
 		ProfileValues: map[string]any{"UPLINK_PATH": "/upload"},
 		NodeValues:    map[string]any{"CDN_DOMAIN": "cdn.example.com"},
 		Context:       NodeContext{Code: "NL", Name: "Нидерланды", Country: "NL", Domain: "origin.example.com"},
@@ -82,8 +95,11 @@ func TestTemplatesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 4 {
-		t.Fatalf("want 4 templates, got %d", len(ts))
+	if len(ts) != 3 {
+		t.Fatalf("want 3 templates, got %d", len(ts))
+	}
+	if IsBuiltin("vless-xhttp-vkcdn") {
+		t.Fatal("the VK CDN template is no longer built in")
 	}
 }
 
@@ -262,7 +278,7 @@ func TestGenerateValues(t *testing.T) {
 	if len(again) != 0 {
 		t.Fatal("existing values must not be regenerated")
 	}
-	b, _ := GetTemplate("vless-xhttp-vkcdn")
+	b := retired("vless-xhttp-vkcdn")
 	pv, _ := b.GenerateValues(ScopeProfile, nil)
 	if p := pv["UPLINK_PATH"]; p != "/upload" && p != "/hls" && p != "/segment" && p != "/media" {
 		t.Fatalf("path %v", p)

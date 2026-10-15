@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { del, get, Group, patch, post, Profile, ProfileDetails, ProfileTemplate, put, Variable } from '../api'
 import { CodeEditor, parseObject, pretty } from '../code'
+import { templateStarter } from '../templateStarter'
 import { Badge, Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 
 const sourceLabel: Record<string, string> = {
@@ -19,7 +20,7 @@ export function Profiles() {
         <div className="text-2 grow small">
           {tab === 'profiles'
             ? 'Профиль — общие настройки VLESS-инбаунда по шаблону. На каждой ноде из профиля получается свой инбаунд со своими ключами.'
-            : 'Шаблон — заготовка профиля: JSON инбаунда Xray с переменными, точка подключения для подписки и роль Caddy. Встроенные можно скопировать и править копию.'}
+            : 'Шаблон — заготовка профиля: JSON инбаунда Xray с переменными, точка подключения для подписки и роль Caddy. Свой шаблон — кнопка «Новый шаблон» (заготовка с пояснениями) или копия встроенного.'}
         </div>
       </div>
       {tab === 'profiles' ? <ProfileList /> : <TemplateList />}
@@ -364,14 +365,23 @@ export function VariableTable({ vars, values, onChange, empty }: { vars: Variabl
 
 function TemplateList() {
   const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
-  const [edit, setEdit] = useState<{ id: string; source: string; isNew: boolean; readOnly: boolean } | null>(null)
+  const [edit, setEdit] = useState<{ id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean } | null>(null)
   const act = useAction()
   const confirm = useConfirm()
   if (!tpls.data) return <Loading error={tpls.error} />
 
+  const freeID = (base: string) => {
+    let id = base
+    for (let i = 2; tpls.data!.some((x) => x.id === id); i++) id = `${base}-${i}`
+    return id
+  }
+  const create = () => {
+    const src = templateStarter.replace(/^id:.*$/m, `id: ${freeID('my-xhttp')}`)
+    setEdit({ id: '', source: src, isNew: true, readOnly: false, help: true })
+  }
+
   const copy = (t: ProfileTemplate) => {
-    let id = t.id.replace(/-copy(-\d+)?$/, '') + '-copy'
-    for (let i = 2; tpls.data!.some((x) => x.id === id); i++) id = t.id + '-copy-' + i
+    const id = freeID(t.id.replace(/-copy(-\d+)?$/, '') + '-copy')
     const src = t.source
       .replace(/^id:.*$/m, `id: ${id}`)
       .replace(/^title:(.*)$/m, (_m, title) => `title:${title} (копия)`)
@@ -381,6 +391,9 @@ function TemplateList() {
 
   return (
     <>
+      <div className="row" style={{ marginBottom: 14, justifyContent: 'flex-end' }}>
+        <button className="btn primary" onClick={create}><Icon name="plus" /> Новый шаблон</button>
+      </div>
       <div className="cards cols">
         {tpls.data.map((t) => (
           <div key={t.id} className="card">
@@ -429,10 +442,10 @@ function TemplateList() {
 type CheckResult = { ok: boolean; error?: string; id?: string; title?: string; variables?: Variable[]; sample?: Record<string, unknown> }
 type Reference = { reference: { builtins: string[]; generators: string[]; derivations: string[]; lint: string[]; validations: string[]; caddyRoles: string[] } }
 
-function TemplateEditor({ id, source, isNew, readOnly, onClose, onSaved }: { id: string; source: string; isNew: boolean; readOnly: boolean; onClose: () => void; onSaved: () => void }) {
+function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }: { id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean; onClose: () => void; onSaved: () => void }) {
   const [text, setText] = useState(source)
   const [check, setCheck] = useState<CheckResult | null>(null)
-  const [side, setSide] = useState<'check' | 'help'>('check')
+  const [side, setSide] = useState<'check' | 'help'>(help ? 'help' : 'check')
   const ref = useLoad(() => get<Reference>('profile-templates/reference'))
   const act = useAction()
 
@@ -460,7 +473,7 @@ function TemplateEditor({ id, source, isNew, readOnly, onClose, onSaved }: { id:
         <CodeEditor lang="yaml" value={text} onChange={setText} readOnly={readOnly} height="calc(100vh - 230px)" />
         <div className="preview-pane">
           <div className="seg" style={{ marginBottom: 10 }}>
-            <button className={side === 'check' ? 'on' : ''} onClick={() => setSide('check')}>Проверка</button>
+            <button className={side === 'check' ? 'on' : ''} onClick={() => setSide('check')}>Проверка{check && !check.ok && ' ✗'}</button>
             <button className={side === 'help' ? 'on' : ''} onClick={() => setSide('help')}>Справка</button>
           </div>
           {side === 'check' ? (
@@ -478,28 +491,91 @@ function TemplateEditor({ id, source, isNew, readOnly, onClose, onSaved }: { id:
   )
 }
 
+// What the built-in names from /profile-templates/reference mean; unknown names are listed bare.
+const refHelp: Record<string, string> = {
+  TAG: 'тег инбаунда по tag_pattern',
+  INBOUND_PORT: 'порт инбаунда на ноде (только в host)',
+  LISTEN_IP: 'IP, на котором слушает инбаунд (0.0.0.0, если IP не выбран)',
+  NODE_CODE: 'код ноды, например NL',
+  NODE_NAME: 'название ноды',
+  NODE_FLAG: 'флаг страны ноды',
+  NODE_COUNTRY: 'код страны, например NL',
+  XHTTP_EXTRA: 'содержимое xhttp_extra, только в xray_inbound и в кавычках: "${XHTTP_EXTRA}"',
+  hex16: 'случайная hex-строка (16 байт)',
+  path: 'путь: случайный из options или /xxxxxx',
+  shortid: 'shortId для Reality (8 байт hex)',
+  uuid: 'UUID',
+  x25519: 'приватный ключ Reality',
+  x25519_public: 'публичный ключ из приватного: x25519_public(REALITY_PRIVATE_KEY)',
+  xhttp_session_placement: 'где сессия XHTTP, по режиму маскировки: cookie или path',
+  xhttp_seq_placement: 'где номер пакета XHTTP, по режиму маскировки: query или path',
+  xhttp_padding_placement: 'где набивка XHTTP, по режиму маскировки: query или queryInHeader',
+  xhttp_padding_key: 'имя параметра набивки, по режиму маскировки: cb или x_padding',
+  xhttp_padding_obfs: 'включать ли маскировку набивки, по режиму маскировки',
+  domain: 'домен',
+  port: 'порт 1–65535',
+  ip: 'IP-адрес',
+  xhttp_no_nested_extra: 'в extra нет вложенного extra (частая ошибка при копировании)',
+  xhttp_cdn_get_only: 'uplinkHTTPMethod только GET',
+  xhttp_no_header_placement: 'ничего не кладётся в заголовки (CDN режет длинные заголовки)',
+  xhttp_server_max_header_bytes: 'serverMaxHeaderBytes не меньше 65536 (данные в куках)',
+  selfsteal: 'сайт-заглушка для Reality: domain, local_port, decoy',
+  reverse_proxy_xhttp: 'TLS на domain и проксирование path в upstream (Xray на 127.0.0.1)',
+  certificate: 'Caddy только получает сертификат domain для инбаунда (Hysteria2)',
+}
+
 function TemplateHelp({ r }: { r?: Reference['reference'] }) {
-  const list = (xs?: string[]) => (xs || []).map((x) => <code key={x} className="chip static" style={{ marginRight: 4 }}>{x}</code>)
+  const list = (xs?: string[]) => (
+    <ul className="list-plain">
+      {(xs || []).map((x) => <li key={x}><code>{x}</code>{refHelp[x] && ` — ${refHelp[x]}`}</li>)}
+    </ul>
+  )
   return (
     <div className="small text-2 template-help">
+      <p><b>Как добавить свой шаблон</b></p>
+      <ol className="list-plain">
+        <li>«Новый шаблон» открывает рабочую заготовку (VLESS + XHTTP за Caddy) с пояснениями прямо в тексте. Если схема похожа на встроенную, удобнее «Скопировать и изменить» её.</li>
+        <li>Задайте свой <code>id</code>, <code>title</code> и <code>tag_pattern</code> (префикс тега не должен совпадать с другими шаблонами).</li>
+        <li>Вставьте свой инбаунд Xray в <code>xray_inbound</code>. Всё, что отличается между нодами (домен, ключи, shortId), замените на <code>{'${ПЕРЕМЕННЫЕ}'}</code> и опишите их в <code>variables</code>. Список <code>clients</code> оставьте пустым: пользователи добавляются сами.</li>
+        <li>В <code>host</code> опишите, что уйдёт клиентам в подписку: адрес, порт, SNI, отпечаток.</li>
+        <li>Если инбаунд стоит за Caddy (TLS на своём домене или сайт-заглушка), добавьте раздел <code>caddy</code>.</li>
+        <li>Смотрите вкладку «Проверка»: после каждой правки шаблон собирается на пробной ноде NL, ошибка показывается там же. Сохранить можно только рабочий шаблон.</li>
+        <li>Дальше: «Профили» → «Профиль» → выберите шаблон; потом в «Нодах» добавьте профиль на ноды. Переменные с <code>scope: node</code> вводятся при добавлении на ноду.</li>
+      </ol>
+      <p className="muted">Правка своего шаблона сразу пересобирает все инбаунды на нём. Если правка ломает хотя бы одну ноду, она не сохранится.</p>
+
       <p><b>Поля шаблона</b></p>
       <ul className="list-plain">
-        <li><code>id</code> — латиница, цифры, дефис; <code>title</code>, <code>summary</code> — для людей; <code>version</code> — число, увеличивайте при правках.</li>
-        <li><code>tag_pattern</code> — тег инбаунда, обязательно с <code>{'${NODE_CODE}'}</code>; <code>remark_pattern</code> — название в приложениях.</li>
-        <li><code>client.flow</code> — flow клиентов (для Reality: xtls-rprx-vision).</li>
-        <li><code>variables</code> — переменные: <code>name</code>, <code>scope</code> (profile — одна на профиль, node — своя на каждой ноде), <code>source</code> (input, const, generate, derived), <code>default</code>, <code>default_from: node.domain</code>, <code>generator</code>, <code>from</code>, <code>validate</code>, <code>options</code>, <code>secret</code>, <code>optional</code>, <code>description</code>.</li>
-        <li><code>xray_inbound</code> — JSON инбаунда Xray с <code>{'${ПЕРЕМЕННЫМИ}'}</code>. Клиенты подставляются сами (VLESS — id, Hysteria — auth = UUID). Пути на ноде — метками: <code>vynel:cert:домен</code>, <code>vynel:key:домен</code> (сертификат Caddy для домена), <code>vynel:decoy:сайт</code>.</li>
-        <li><code>xhttp_extra</code> — JSON extra для XHTTP (доступен как <code>{'${XHTTP_EXTRA}'}</code>).</li>
-        <li><code>host</code> — точка подключения в подписке: address, port, security, sni, fingerprint, public_key, short_id, flow, network, path, host, mode, alpn. Для XHTTP: <code>xhttp_client_extra</code> — полный клиентский extra вместо серверного, <code>xhttp_client_only</code> — ключи поверх серверного (например xmux). <code>mihomo: true</code> — отдавать XHTTP в Mihomo (1.19+), <code>mihomo_x25519mlkem768: true</code> — для REALITY.</li>
-        <li><code>caddy</code> — что поднять в Caddy: <code>role</code> ({list(r?.caddyRoles)}), domain, local_port/upstream, decoy, path. <code>certificate</code> — Caddy держит сертификат домена для инбаунда (Hysteria2).</li>
-        <li><code>lint</code> — дополнительные проверки.</li>
+        <li><code>id</code> — латиница, цифры, дефис; пока на шаблоне есть профили, не меняется. <code>version</code> — число, увеличивайте при правках. <code>title</code>, <code>summary</code> — для людей.</li>
+        <li><code>tag_pattern</code> — тег инбаунда, обязательно с <code>{'${NODE_CODE}'}</code>: <code>MYX_{'${NODE_CODE}'}</code> → MYX_NL. <code>remark_pattern</code> — название подключения в приложениях.</li>
+        <li><code>protocol</code> — <code>vless</code> или <code>hysteria</code>. <code>client.flow</code> — flow клиентов (для Reality по TCP: <code>xtls-rprx-vision</code>, иначе пусто).</li>
+        <li><code>variables</code> — переменные, ниже подробно.</li>
+        <li><code>xray_inbound</code> — JSON инбаунда Xray с <code>{'${ПЕРЕМЕННЫМИ}'}</code>. Переменная, которая стоит в строке целиком, подставляется со своим типом: <code>"port": "{'${XRAY_PORT}'}"</code> станет числом. Пути к сертификатам на ноде — метками: <code>vynel:cert:домен</code>, <code>vynel:key:домен</code> (сертификат Caddy), <code>vynel:decoy:сайт</code>.</li>
+        <li><code>xhttp_extra</code> — extra для XHTTP, в инбаунде подставляется как <code>"{'${XHTTP_EXTRA}'}"</code>. Клиенты получают тот же extra, если в <code>host</code> не задано иное.</li>
+        <li><code>host</code> — точка подключения в подписке: <code>address</code>, <code>port</code> (можно <code>{'${INBOUND_PORT}'}</code>), <code>security</code> (tls, reality), <code>sni</code>, <code>host</code>, <code>path</code>, <code>alpn</code>, <code>fingerprint</code>, <code>public_key</code>, <code>short_id</code>, <code>flow</code>, <code>network</code>, <code>mode</code>.
+          Для XHTTP: <code>xhttp_client_extra</code> — полный клиентский extra вместо серверного (когда у сервера и клиента разные ключи), <code>xhttp_client_only</code> — ключи поверх серверного (например xmux). <code>mihomo: true</code> — отдавать XHTTP в Mihomo (1.19+).</li>
+        <li><code>caddy</code> — что поднять в Caddy на ноде: <code>role</code> (ниже), <code>domain</code>, <code>local_port</code> или <code>upstream</code>, <code>path</code>, <code>decoy</code>. Без раздела Caddy не трогается.</li>
+        <li><code>node_requirements</code> — порты, DNS-записи и sysctl; попадают в чек-лист ноды.</li>
+        <li><code>lint</code> — дополнительные проверки готового инбаунда (ниже).</li>
       </ul>
-      <p><b>Встроенные переменные</b></p><div>{list(r?.builtins)}</div>
-      <p><b>Генераторы</b> (source: generate)</p><div>{list(r?.generators)}</div>
-      <p><b>Вычисления</b> (source: derived, from: имя(ПЕРЕМЕННАЯ))</p><div>{list(r?.derivations)}</div>
-      <p><b>Проверки значений</b> (validate)</p><div>{list(r?.validations)}</div>
-      <p><b>Lint</b></p><div>{list(r?.lint)}</div>
-      <p className="muted">Подробно — docs/PROFILES.md. Шаблон проверяется пробной сборкой: ключи генерируются, вводимые переменные получают примерные значения.</p>
+
+      <p><b>Переменные</b></p>
+      <ul className="list-plain">
+        <li><code>name</code> — имя заглавными: <code>DOMAIN</code> → в тексте <code>{'${DOMAIN}'}</code>.</li>
+        <li><code>scope</code>: <code>profile</code> — одно значение на профиль, <code>node</code> — своё на каждой ноде.</li>
+        <li><code>source</code>: <code>input</code> — вводит админ; <code>const</code> — константа из <code>default</code> (можно поменять в профиле); <code>generate</code> — генерируется один раз и хранится (<code>generator</code>); <code>derived</code> — вычисляется (<code>from: функция(ПЕРЕМЕННАЯ)</code>), не хранится.</li>
+        <li><code>default</code> — значение по умолчанию; <code>default_from: node.domain</code> — подставить домен ноды.</li>
+        <li><code>options</code> — список вариантов (выпадающий список; для генератора path — из чего выбирать).</li>
+        <li><code>validate</code> — проверка ввода; <code>optional: true</code> — можно не заполнять; <code>secret: true</code> — не показывать значение; <code>description</code> — подсказка под полем.</li>
+      </ul>
+
+      <p><b>Встроенные переменные</b> (объявлять не нужно)</p>{list(r?.builtins)}
+      <p><b>Генераторы</b> (<code>source: generate</code>, <code>generator: …</code>)</p>{list(r?.generators)}
+      <p><b>Вычисления</b> (<code>source: derived</code>, <code>from: …</code>)</p>{list(r?.derivations)}
+      <p><b>Проверки значений</b> (<code>validate</code>)</p>{list(r?.validations)}
+      <p><b>Проверки инбаунда</b> (<code>lint</code>)</p>{list(r?.lint)}
+      <p><b>Роли Caddy</b> (<code>caddy.role</code>)</p>{list(r?.caddyRoles)}
+      <p className="muted">Подробно — docs/PROFILES.md. При проверке ключи генерируются, а вводимые переменные получают примерные значения.</p>
     </div>
   )
 }

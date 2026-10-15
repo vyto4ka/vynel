@@ -7,6 +7,7 @@ import (
 
 	"github.com/vyto4ka/vynel/internal/caddyconf"
 	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // layout returns "domain -> listen" for every site of the node's Caddy config.
@@ -130,6 +131,8 @@ func TestCaddyForeignRealityTargetConflicts(t *testing.T) {
 func TestCaddyCDNOriginBehindReality(t *testing.T) {
 	f := newFixture(t)
 	n, _ := f.aio(t, "")
+	src, _ := xrayconf.RetiredTemplate("vless-xhttp-vkcdn")
+	must(f.s.SaveTemplate(f.ctx, ActorCLI, "", src))
 	cdn := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "CDN", TemplateID: "vless-xhttp-vkcdn", Values: map[string]any{"UPLINK_PATH": "/upload"}}))
 	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: cdn.ID, Values: map[string]any{"CDN_DOMAIN": "cdn.example.com", "ORIGIN_DOMAIN": "origin.example.com"}}))
 	ds := must(f.s.DesiredState(f.ctx, n.ID))

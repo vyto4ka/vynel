@@ -228,6 +228,9 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 			}
 			groupIDs = []int64{g.ID}
 		}
+		if err := adoptRetiredTemplates(ctx, q); err != nil {
+			return err
+		}
 		tpls, err := store.ListUserTemplates(ctx, q)
 		if err != nil {
 			return err
@@ -239,4 +242,33 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 		}
 		return nil
 	})
+}
+
+// adoptRetiredTemplates stores a template that is no longer built in as a custom one when
+// profiles still use it, so they keep rendering and it shows up (editable) in the panel.
+func adoptRetiredTemplates(ctx context.Context, q store.DBTX) error {
+	profiles, err := store.ListProfiles(ctx, q)
+	if err != nil {
+		return err
+	}
+	custom, err := store.ListProfileTemplates(ctx, q)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, t := range custom {
+		have[t.ID] = true
+	}
+	for _, p := range profiles {
+		if have[p.TemplateID] || xrayconf.IsBuiltin(p.TemplateID) {
+			continue
+		}
+		if src, ok := xrayconf.RetiredTemplate(p.TemplateID); ok {
+			if err := store.SaveProfileTemplate(ctx, q, p.TemplateID, src); err != nil {
+				return err
+			}
+			have[p.TemplateID] = true
+		}
+	}
+	return nil
 }

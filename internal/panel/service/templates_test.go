@@ -19,6 +19,52 @@ func customSource(t *testing.T, id, fingerprint string) string {
 	return strings.Replace(src, "title: VLESS Reality (self-steal)", "title: Моя Reality", 1)
 }
 
+// A profile on a template that is no longer built in keeps working: on start the panel stores
+// the template as a custom one.
+func TestRetiredTemplateAdopted(t *testing.T) {
+	f := newFixture(t)
+	src, ok := xrayconf.RetiredTemplate("vless-xhttp-vkcdn")
+	if !ok {
+		t.Fatal("retired template missing")
+	}
+	must(f.s.SaveTemplate(f.ctx, ActorCLI, "", src))
+	node, _, err := f.s.CreateNode(f.ctx, ActorCLI, NodeInput{Name: "Нидерланды", Country: "nl", Domain: "nl.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "CDN", TemplateID: "vless-xhttp-vkcdn"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: node.ID, ProfileID: prof.ID, Values: map[string]any{"CDN_DOMAIN": "cdn.example.com"}}))
+	// What an upgrade looks like: the profile is there, the template is neither built in nor stored.
+	if err := store.DeleteProfileTemplate(f.ctx, f.s.st.DB, "vless-xhttp-vkcdn"); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(f.s.st)
+	if err := s.EnsureDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	var found *TemplateInfo
+	for _, ti := range must(s.ProfileTemplates(f.ctx)) {
+		if ti.ID == "vless-xhttp-vkcdn" {
+			found = &ti
+		}
+	}
+	if found == nil || !found.Custom || len(found.Profiles) != 1 {
+		t.Fatalf("not adopted as a custom template: %+v", found)
+	}
+	ds := must(s.DesiredState(f.ctx, node.ID))
+	if len(ds.Inbounds) != 1 || len(ds.Problems) > 0 {
+		t.Fatalf("inbounds %d, problems %v", len(ds.Inbounds), ds.Problems)
+	}
+	// Unused retired templates are not added.
+	if err := New(f.s.st).EnsureDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(must(store.ListProfileTemplates(f.ctx, f.s.st.DB))); n != 1 {
+		t.Fatalf("custom templates %d", n)
+	}
+}
+
 func TestCustomTemplates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second) // a deadlock fails fast
 	defer cancel()

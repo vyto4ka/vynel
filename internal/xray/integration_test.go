@@ -18,8 +18,13 @@ const testBase = `{"log":{"loglevel":"warning"},"outbounds":[{"tag":"DIRECT","pr
 
 func TestTemplateBConfigAcceptedByXray(t *testing.T) {
 	bin := xraytest.Binary(t)
+	src, _ := xrayconf.RetiredTemplate("vless-xhttp-vkcdn")
+	tpl, err := xrayconf.ParseTemplate([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
 	r, err := xrayconf.RenderInbound(xrayconf.InboundSpec{
-		TemplateID:    "vless-xhttp-vkcdn",
+		Template:      tpl,
 		ProfileValues: map[string]any{"UPLINK_PATH": "/upload"},
 		NodeValues:    map[string]any{"CDN_DOMAIN": "cdn.example.com"},
 		Context:       xrayconf.NodeContext{Code: "NL", Domain: "origin.example.com"},

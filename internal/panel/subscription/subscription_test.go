@@ -16,6 +16,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/xray/xraytest"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 var actor = service.Actor{Kind: "test"}
@@ -45,6 +46,10 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	main, _ := svc.GroupByName(ctx, "Основная")
+	src, _ := xrayconf.RetiredTemplate("vless-xhttp-vkcdn")
+	if _, err := svc.SaveTemplate(ctx, actor, "", src); err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range []service.ProfileInput{
 		{Name: "Reality", TemplateID: "vless-reality-selfsteal"},
 		{Name: "CDN", TemplateID: "vless-xhttp-vkcdn", Values: map[string]any{"UPLINK_PATH": "/upload"}},

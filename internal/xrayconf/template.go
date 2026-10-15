@@ -18,6 +18,12 @@ import (
 //go:embed templates/*.yaml
 var templatesFS embed.FS
 
+// Templates that used to be built in. They are not offered any more; a panel whose profiles still
+// use one gets it as a custom template on start (service.EnsureDefaults), so nothing breaks.
+//
+//go:embed retired/*.yaml
+var retiredFS embed.FS
+
 // Template is a profile template: built-in (embedded YAML) or written in the panel.
 type Template struct {
 	ID            string         `yaml:"id" json:"id"`
@@ -153,6 +159,15 @@ func Templates() ([]*Template, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// RetiredTemplate returns the YAML source of a template that is no longer built in.
+func RetiredTemplate(id string) (string, bool) {
+	raw, err := retiredFS.ReadFile("retired/" + id + ".yaml")
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
 }
 
 // GetTemplate returns a built-in template by id.
