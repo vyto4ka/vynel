@@ -63,6 +63,7 @@ func (a *Answers) restore(s *Answers, fixed Options) {
 		{&a.SubDomain, s.SubDomain}, {&a.Name, s.Name}, {&a.Country, s.Country}, {&a.PublicIP, s.PublicIP},
 		{&a.VPNIP, s.VPNIP}, {&a.SubIP, s.SubIP}, {&a.AdminLogin, s.AdminLogin}, {&a.BotToken, s.BotToken},
 		{&a.Restore, s.Restore}, {&a.SubPath, s.SubPath}, {&a.PanelPath, s.PanelPath},
+		{&a.LoginMode, s.LoginMode}, {&a.SessionPaths, s.SessionPaths},
 	} {
 		keep(f.dst, f.src, "")
 	}

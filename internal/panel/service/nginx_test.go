@@ -196,3 +196,30 @@ func TestNginxTemplateCheck(t *testing.T) {
 		t.Fatal("both sections accepted")
 	}
 }
+
+// Session paths: nginx sends the whole panel domain to the panel, which shows the decoy itself.
+func TestNginxSessionPathsRoute(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "sub.example.com")
+	f.nginxNode(t, n)
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.SetLoginMode(f.ctx, ActorCLI, ModeLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.SetSessionPaths(f.ctx, ActorCLI, true); err != nil {
+		t.Fatal(err)
+	}
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	i := strings.Index(ds.Nginx, "server_name sub.example.com;")
+	if i < 0 {
+		t.Fatal(ds.Nginx)
+	}
+	site := ds.Nginx[i:]
+	site = site[:strings.Index(site, "\n    }\n")]
+	contains(t, site, "location ^~ /s/ {", "location / {", "proxy_pass http://127.0.0.1:2097;")
+	if strings.Contains(site, "@@DECOY@@") {
+		t.Fatalf("the decoy must come from the panel now:\n%s", site)
+	}
+}

@@ -234,6 +234,11 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 	if path, _ := s.WebPath(ctx); path != "" {
 		listen, _ := s.Setting(ctx, SettingWebListen, DefaultWebListen)
 		webRoute = &caddyconf.Route{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: path}
+		if s.SessionPaths(ctx) {
+			// Every login link opens its own random path: the panel gets the whole domain and
+			// shows the decoy itself for paths it does not know.
+			webRoute.PathPrefix = ""
+		}
 	}
 	if webDomain == "" {
 		webDomain = domain
@@ -248,11 +253,17 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 		if webRoute != nil && shared {
 			site.Routes = append(site.Routes, *webRoute)
 		}
-		site.Routes = append(site.Routes, decoyRoute)
+		if webRoute == nil || !shared || webRoute.PathPrefix != "" {
+			site.Routes = append(site.Routes, decoyRoute)
+		}
 		sites = append(sites, site)
 	}
 	if webRoute != nil && !shared {
-		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: webBind, Port: webPort, Routes: []caddyconf.Route{*webRoute, webDecoyRoute}})
+		routes := []caddyconf.Route{*webRoute}
+		if webRoute.PathPrefix != "" {
+			routes = append(routes, webDecoyRoute)
+		}
+		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: webBind, Port: webPort, Routes: routes})
 	}
 	return sites, nil
 }

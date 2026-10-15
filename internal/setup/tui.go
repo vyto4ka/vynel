@@ -47,6 +47,7 @@ type Answers struct {
 	Mode, Domain, SubDomain, Email, Name, Country, PublicIP, VPNIP, SubIP string
 	GatewayListen, AdminLogin, BotToken, Restore, Token                   string
 	SubPath, PanelPath                                                    string
+	LoginMode, SessionPaths                                               string // password | link | miniapp; "yes" = random path per session
 	Firewall, SSHKeysOnly, SSHPort                                        string
 	Purge                                                                 bool
 }
@@ -203,7 +204,7 @@ func Run(o Options) (*Answers, error) {
 	// form would hang before it is drawn. Servers are administered from dark terminals anyway.
 	lipgloss.SetHasDarkBackground(true)
 	a := &Answers{Domain: o.Domain, Email: o.Email, Token: o.Token, PublicIP: o.PublicIP, Country: strings.ToUpper(o.Country),
-		AdminLogin: "admin", GatewayListen: ":9443"}
+		AdminLogin: "admin", GatewayListen: ":9443", LoginMode: "password"}
 	nodes := true
 	var sec []string
 	saved := loadState(o.State)
@@ -395,7 +396,14 @@ func Run(o Options) (*Answers, error) {
 						return "Не обязательно: одного домена достаточно"
 					}, &a.SubDomain))
 		}
-		fields = append(fields, huh.NewInput().Title("Email для Let's Encrypt").Placeholder("можно пусто").Value(&a.Email))
+		fields = append(fields, huh.NewInput().Title("Email для Let's Encrypt").Value(&a.Email).
+			PlaceholderFunc(func() string {
+				if d := domainOf(); d != "" {
+					return "admin@" + d
+				}
+				return "можно пусто"
+			}, a).
+			Description("Enter — оставить подсказку. На него Let's Encrypt пишет о проблемах с сертификатами"))
 		groups = append(groups, huh.NewGroup(fields...).Title("Сервер и домены").
 			Description("Tab / ↓ — следующее поле, Shift+Tab — назад, Enter — дальше"))
 	case "node":
@@ -458,7 +466,18 @@ func Run(o Options) (*Answers, error) {
 					}
 					return nil
 				}),
-			huh.NewInput().Title("Логин веб-панели").Description("Пароль сгенерируется сам и будет показан в конце").Value(&a.AdminLogin).
+			huh.NewSelect[string]().Title("Вход в панель").Value(&a.LoginMode).
+				Options(huh.NewOption("Логин и пароль", "password"),
+					huh.NewOption("Без пароля: одноразовая ссылка из бота или vynel admin login-link", "link"),
+					huh.NewOption("Только через Telegram (Mini App в боте)", "miniapp")).
+				Description("Без пароля его нельзя подобрать; режим меняется потом в панели (Аккаунт)"),
+			huh.NewInput().Title("Логин веб-панели").Value(&a.AdminLogin).
+				DescriptionFunc(func() string {
+					if a.LoginMode != "password" {
+						return "При входе без пароля не нужен — можно оставить"
+					}
+					return "Пароль сгенерируется сам и будет показан в конце"
+				}, &a.LoginMode).
 				Validate(func(s string) error {
 					if !loginRe.MatchString(s) {
 						return errors.New("латиница, цифры и _ . - @")
@@ -470,6 +489,9 @@ func Run(o Options) (*Answers, error) {
 				Validate(func(s string) error {
 					if s != "" && !botRe.MatchString(strings.TrimSpace(s)) {
 						return errors.New("токен вида 123456789:AA…")
+					}
+					if strings.TrimSpace(s) == "" && a.LoginMode == "miniapp" {
+						return errors.New("для входа только через Telegram нужен бот")
 					}
 					return nil
 				}),
@@ -483,6 +505,11 @@ func Run(o Options) (*Answers, error) {
 					return nil
 				}))
 		groups = append(groups, huh.NewGroup(fields...).Title("Панель"))
+		groups = append(groups, huh.NewGroup(
+			huh.NewSelect[string]().Title("Случайный адрес панели на каждую сессию?").Value(&a.SessionPaths).
+				Options(huh.NewOption("Нет, постоянный секретный путь", ""), huh.NewOption("Да", "yes")).
+				Description("Да — у панели не будет постоянного адреса: каждая ссылка открывает свой случайный путь,\nвсё остальное на домене — сайт-заглушка"),
+		).Title("Вход по ссылке").WithHideFunc(func() bool { return a.LoginMode != "link" }))
 	}
 
 	// 4. Security: check boxes.
@@ -534,6 +561,12 @@ func Run(o Options) (*Answers, error) {
 	}
 
 	a.Domain, a.SubDomain = domainOf(), cleanDomain(a.SubDomain)
+	if a.LoginMode != "link" {
+		a.SessionPaths = ""
+	}
+	if a.Email = strings.TrimSpace(a.Email); a.Email == "" && a.Domain != "" && a.Mode != "node" {
+		a.Email = "admin@" + a.Domain
+	}
 	a.Country = strings.ToUpper(a.Country)
 	if a.Name == "" {
 		a.Name = countryName(a.Country)
@@ -575,7 +608,14 @@ func summary(a *Answers, domain string, nodes bool, sec []string, cache *dnsCach
 			line("Ноды", map[bool]string{true: "можно подключать (порт 9443)", false: "только этот сервер"}[nodes])
 		}
 		line("Подписки", "https://"+or(cleanDomain(a.SubDomain), domain)+or(cleanPath(a.SubPath), "/s/")+"<токен>")
-		line("Панель", "путь "+or(cleanPath(a.PanelPath), "случайный")+", логин "+a.AdminLogin+", пароль покажем в конце")
+		switch a.LoginMode {
+		case "link":
+			line("Панель", "вход по одноразовой ссылке (бот, vynel admin login-link)"+map[bool]string{true: ", адрес случайный на каждую сессию", false: ""}[a.SessionPaths == "yes"])
+		case "miniapp":
+			line("Панель", "вход только через Telegram (кнопка «Панель» в боте)")
+		default:
+			line("Панель", "путь "+or(cleanPath(a.PanelPath), "случайный")+", логин "+a.AdminLogin+", пароль покажем в конце")
+		}
 		line("Бот", map[bool]string{true: "настроен", false: "потом, в панели"}[a.BotToken != ""])
 		if a.Restore != "" {
 			line("Бэкап", a.Restore)
@@ -613,7 +653,7 @@ func (a *Answers) Shell(w io.Writer) error {
 		"PUBLIC_IP": a.PublicIP, "VPN_IP": a.VPNIP, "SUB_IP": a.SubIP, "GATEWAY_LISTEN": a.GatewayListen,
 		"ADMIN_LOGIN": a.AdminLogin, "BOT_TOKEN": a.BotToken, "RESTORE": a.Restore, "TOKEN": a.Token,
 		"FIREWALL": a.Firewall, "SSH_KEYS_ONLY": a.SSHKeysOnly, "SSH_PORT": a.SSHPort, "PURGE": "0",
-		"SUB_PATH": a.SubPath, "PANEL_PATH": a.PanelPath,
+		"SUB_PATH": a.SubPath, "PANEL_PATH": a.PanelPath, "LOGIN_MODE": a.LoginMode, "SESSION_PATHS": a.SessionPaths,
 	}
 	if a.Purge {
 		vals["PURGE"] = "1"

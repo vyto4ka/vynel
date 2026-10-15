@@ -237,10 +237,10 @@ func TestBot(t *testing.T) {
 	}
 	tok := link[i+len("#/magic/"):]
 	tok = tok[:strings.IndexAny(tok, `"\`)]
-	if _, err := svc.UseLoginToken(ctx, tok); err != nil {
+	if _, err := svc.UseLoginToken(ctx, tok, ""); err != nil {
 		t.Fatalf("login token: %v", err)
 	}
-	if _, err := svc.UseLoginToken(ctx, tok); err == nil {
+	if _, err := svc.UseLoginToken(ctx, tok, ""); err == nil {
 		t.Fatal("login token worked twice")
 	}
 
@@ -301,7 +301,7 @@ func TestBot(t *testing.T) {
 
 	// A sign-in is reported at once, with a button that ends that session.
 	n = fake.n()
-	ws, err := svc.StartWebSession(ctx, service.LoginPassword, "boss", "203.0.113.5", "Mozilla/5.0 (Windows NT 10.0) Chrome/120", time.Hour)
+	ws, err := svc.StartWebSession(ctx, service.LoginPassword, "boss", "203.0.113.5", "Mozilla/5.0 (Windows NT 10.0) Chrome/120", "", time.Hour)
 	must(err)
 	c = fake.waitCall(t, n, "login notice", textHas("sendMessage", "Вход в панель"))
 	if s, _ := c.Params["text"].(string); !strings.Contains(s, "Chrome · Windows") || !strings.Contains(s, "203.0.113.5") {
@@ -318,7 +318,7 @@ func TestBot(t *testing.T) {
 
 	// A request from another IP ends the session at once, and its message is deleted too.
 	n = fake.n()
-	ws, err = svc.StartWebSession(ctx, service.LoginPassword, "boss", "203.0.113.5", "Mozilla/5.0 (Windows NT 10.0) Chrome/120", time.Hour)
+	ws, err = svc.StartWebSession(ctx, service.LoginPassword, "boss", "203.0.113.5", "Mozilla/5.0 (Windows NT 10.0) Chrome/120", "", time.Hour)
 	must(err)
 	c = fake.waitCall(t, n, "second login notice", textHas("sendMessage", "Вход в панель"))
 	if why := svc.WebSessionCheck(ctx, ws.ID, "198.51.100.9", false); why != service.EndIP {

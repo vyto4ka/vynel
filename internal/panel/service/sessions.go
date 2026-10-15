@@ -85,8 +85,9 @@ func (s *Service) notify(n Notice) {
 	}
 }
 
-// StartWebSession records a sign-in and tells the bot about it.
-func (s *Service) StartWebSession(ctx context.Context, method, actor, ip, userAgent string, ttl time.Duration) (*store.WebSession, error) {
+// StartWebSession records a sign-in and tells the bot about it. path is the session's own URL
+// path ("" = the panel's fixed path).
+func (s *Service) StartWebSession(ctx context.Context, method, actor, ip, userAgent, path string, ttl time.Duration) (*store.WebSession, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
@@ -96,7 +97,7 @@ func (s *Service) StartWebSession(ctx context.Context, method, actor, ip, userAg
 		userAgent = userAgent[:300]
 	}
 	w := &store.WebSession{ID: hex.EncodeToString(b), Method: method, Actor: actor, IP: ip, UserAgent: userAgent,
-		CreatedAt: now, LastSeenAt: now, LastActiveAt: now, ExpiresAt: now + int64(ttl/time.Second)}
+		CreatedAt: now, LastSeenAt: now, LastActiveAt: now, ExpiresAt: now + int64(ttl/time.Second), Path: path}
 	err := s.mutate(ctx, change{actor: Actor{Kind: "web", ID: actor}, action: "web.login", entity: "web",
 		diff: map[string]string{"method": method, "ip": ip}},
 		func(q store.DBTX) error {
@@ -301,23 +302,16 @@ func (s *Service) EndedLoginNotices(ctx context.Context) ([][2]int64, error) {
 
 // PasswordLoginEnabled reports whether the login form works.
 func (s *Service) PasswordLoginEnabled(ctx context.Context) bool {
-	v, _ := s.Setting(ctx, SettingWebPasswordLogin, "true")
-	return v != "false"
+	return s.LoginMode(ctx) == ModePassword
 }
 
-// SetPasswordLogin turns the login form on or off. Off needs a working way in: a bot token and
-// at least one bound admin.
+// SetPasswordLogin turns the login form on or off (the Account page switch): off is link mode,
+// where one-time links from the bot or `vynel admin login-link` let in.
 func (s *Service) SetPasswordLogin(ctx context.Context, actor Actor, on bool) error {
-	if !on {
-		admins, err := s.BotAdmins(ctx)
-		if err != nil {
-			return err
-		}
-		if s.BotToken(ctx) == "" || len(admins) == 0 {
-			return invalid("сначала подключите Telegram-бота и привяжите себя: без пароля в панель можно будет войти только через него")
-		}
+	if on {
+		return s.SetLoginMode(ctx, actor, ModePassword)
 	}
-	return s.SetSetting(ctx, actor, SettingWebPasswordLogin, strconv.FormatBool(on))
+	return s.SetLoginMode(ctx, actor, ModeLink)
 }
 
 // TelegramAppLogin checks Telegram Mini App init data (core.telegram.org/bots/webapps

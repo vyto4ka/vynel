@@ -21,18 +21,19 @@ type WebSession struct {
 	LastActiveAt int64
 	ClosingAt    *int64 // the page reported it was closing; any later request clears it
 	EndReason    string
+	Path         string // the session's own URL path ("/x7.../"); "" = the panel's fixed path
 }
 
 // ActiveAt is when the admin last did something in the session.
 func (w *WebSession) ActiveAt() int64 { return max(w.CreatedAt, w.LastActiveAt) }
 
-const webSessionCols = `id, method, actor, ip, user_agent, created_at, last_seen_at, expires_at, revoked_at, last_active_at, closing_at, end_reason`
+const webSessionCols = `id, method, actor, ip, user_agent, created_at, last_seen_at, expires_at, revoked_at, last_active_at, closing_at, end_reason, path`
 
 func scanWebSession(sc interface{ Scan(...any) error }) (*WebSession, error) {
 	w := &WebSession{}
 	var rev, closing sql.NullInt64
 	if err := sc.Scan(&w.ID, &w.Method, &w.Actor, &w.IP, &w.UserAgent, &w.CreatedAt, &w.LastSeenAt, &w.ExpiresAt, &rev,
-		&w.LastActiveAt, &closing, &w.EndReason); err != nil {
+		&w.LastActiveAt, &closing, &w.EndReason, &w.Path); err != nil {
 		return nil, mapErr(err)
 	}
 	w.RevokedAt, w.ClosingAt = ptrInt(rev), ptrInt(closing)
@@ -41,8 +42,8 @@ func scanWebSession(sc interface{ Scan(...any) error }) (*WebSession, error) {
 
 // CreateWebSession stores a new session.
 func CreateWebSession(ctx context.Context, q DBTX, w *WebSession) error {
-	_, err := q.ExecContext(ctx, `INSERT INTO web_sessions (`+webSessionCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, '')`,
-		w.ID, w.Method, w.Actor, w.IP, w.UserAgent, w.CreatedAt, w.LastSeenAt, w.ExpiresAt, w.LastActiveAt)
+	_, err := q.ExecContext(ctx, `INSERT INTO web_sessions (`+webSessionCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, '', ?)`,
+		w.ID, w.Method, w.Actor, w.IP, w.UserAgent, w.CreatedAt, w.LastSeenAt, w.ExpiresAt, w.LastActiveAt, w.Path)
 	return mapErr(err)
 }
 
@@ -155,4 +156,13 @@ func EndedWebSessionsWithNotices(ctx context.Context, q DBTX, now int64) ([]stri
 func PruneWebSessions(ctx context.Context, q DBTX, before int64) error {
 	_, err := q.ExecContext(ctx, `DELETE FROM web_sessions WHERE expires_at<? OR revoked_at<?`, before, before)
 	return err
+}
+
+// WebPathInUse reports whether a session path belongs to a live session (not revoked, not
+// ended, not expired).
+func WebPathInUse(ctx context.Context, q DBTX, path string, now int64) (bool, error) {
+	var n int
+	err := q.QueryRowContext(ctx, `SELECT count(*) FROM web_sessions WHERE path=? AND revoked_at IS NULL AND end_reason='' AND expires_at > ?`,
+		path, now).Scan(&n)
+	return n > 0, err
 }

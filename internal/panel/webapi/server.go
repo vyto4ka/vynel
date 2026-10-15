@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/decoy"
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/update"
@@ -87,41 +88,85 @@ func (s *Server) Serve(ctx context.Context, addr string) error {
 	return nil
 }
 
-// ServeHTTP serves the UI and the API under the secret path; everything else is a plain 404.
+// ServeHTTP serves the UI and the API under the secret path, or under a session's own path
+// (random per login link, docs/STEALTH.md §1). Everything else is a plain 404 — or the decoy
+// site when sessions have their own paths: then nginx sends the whole domain here.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	base, err := s.svc.WebPath(r.Context())
-	if err != nil || base == "" {
+	ctx := r.Context()
+	fixed, err := s.svc.WebPath(ctx)
+	if err != nil || fixed == "" {
 		http.NotFound(w, r)
 		return
+	}
+	base, own := fixed, ""
+	if !strings.HasPrefix(r.URL.Path+"/", fixed) {
+		if p := firstSegment(r.URL.Path); p != "" && s.svc.WebPathKnown(ctx, p) {
+			base, own = p, p
+		} else {
+			s.notFound(w, r)
+			return
+		}
 	}
 	if r.URL.Path == strings.TrimSuffix(base, "/") {
 		http.Redirect(w, r, base, http.StatusFound)
 		return
 	}
-	if !strings.HasPrefix(r.URL.Path, base) {
-		http.NotFound(w, r)
-		return
-	}
 	h := w.Header()
-	h.Set("X-Frame-Options", "DENY")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Robots-Tag", "noindex, nofollow")
-	h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	// Only Telegram may show the panel in a frame: Telegram Web opens Mini Apps in an iframe.
+	h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors https://web.telegram.org; base-uri 'none'; form-action 'self'")
 
 	rest := strings.TrimPrefix(r.URL.Path, base)
 	if rest == "api" || strings.HasPrefix(rest, "api/") {
 		h.Set("Cache-Control", "no-store")
-		r2 := r.Clone(r.Context())
+		r2 := r.Clone(ctx)
 		r2.URL.Path = "/" + rest
-		r2 = r2.WithContext(context.WithValue(r2.Context(), baseKey{}, base))
+		r2 = r2.WithContext(context.WithValue(context.WithValue(r2.Context(), baseKey{}, base), ownPathKey{}, own))
 		s.api.ServeHTTP(w, r2)
 		return
 	}
 	s.static(w, r, rest)
 }
 
+// notFound answers a path outside the panel: the decoy site when nginx sends the whole domain
+// here (session paths), a plain 404 otherwise.
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if !s.svc.SessionPaths(ctx) {
+		http.NotFound(w, r)
+		return
+	}
+	name, _ := s.svc.Setting(ctx, service.SettingWebDecoy, "")
+	if name == "" {
+		name, _ = s.svc.Setting(ctx, service.SettingSubDecoy, "")
+	}
+	decoy.Serve(w, r, name)
+}
+
+// firstSegment returns "/x/" for "/x/..." ("" when there is none).
+func firstSegment(p string) string {
+	rest, ok := strings.CutPrefix(p, "/")
+	if !ok {
+		return ""
+	}
+	seg, _, _ := strings.Cut(rest, "/")
+	if seg == "" {
+		return ""
+	}
+	return "/" + seg + "/"
+}
+
 type baseKey struct{}
+
+// ownPathKey holds the session path of the request ("" under the panel's fixed path).
+type ownPathKey struct{}
+
+func ownPath(r *http.Request) string {
+	p, _ := r.Context().Value(ownPathKey{}).(string)
+	return p
+}
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request, rest string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -205,6 +250,10 @@ func (s *Server) check(r *http.Request, v string, active bool) (*session, string
 	if sess.Login != login || sess.ID == "" {
 		return nil, "bad"
 	}
+	// A session started from a link with its own path works under that path only.
+	if s.svc.WebSessionPath(ctx, sess.ID) != ownPath(r) {
+		return nil, "bad"
+	}
 	if why := s.svc.WebSessionCheck(ctx, sess.ID, clientIP(r), active); why != "" {
 		return nil, why
 	}
@@ -222,7 +271,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, method, wh
 	if login == "" {
 		login = "admin"
 	}
-	ws, err := s.svc.StartWebSession(r.Context(), method, who, clientIP(r), r.UserAgent(), sessionTTL)
+	ws, err := s.svc.StartWebSession(r.Context(), method, who, clientIP(r), r.UserAgent(), ownPath(r), sessionTTL)
 	if err != nil {
 		return "", err
 	}
@@ -388,8 +437,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
-	if !s.svc.PasswordLoginEnabled(r.Context()) {
-		writeError(w, &httpError{http.StatusForbidden, "вход по паролю выключен — войдите через Telegram-бота (/login)"})
+	if !s.svc.PasswordLoginEnabled(r.Context()) || ownPath(r) != "" {
+		writeError(w, &httpError{http.StatusForbidden, "вход по паролю выключен — войдите по одноразовой ссылке (/login в боте или vynel admin login-link)"})
 		return
 	}
 	s.loginMu.Lock()

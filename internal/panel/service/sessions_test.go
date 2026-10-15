@@ -8,7 +8,7 @@ import (
 func TestWebSessionRules(t *testing.T) {
 	f := newFixture(t)
 	start := func() string {
-		w := must(f.s.StartWebSession(f.ctx, LoginPassword, "admin", "203.0.113.5", "test", time.Hour))
+		w := must(f.s.StartWebSession(f.ctx, LoginPassword, "admin", "203.0.113.5", "test", "", time.Hour))
 		return w.ID
 	}
 

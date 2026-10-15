@@ -29,6 +29,7 @@ MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY
 ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
 VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY="" SUB_PATH="" PANEL_PATH=""
+LOGIN_MODE="" SESSION_PATHS=""
 NO_TUI="${VYNEL_NO_TUI:-0}" TUI=0 SETUP_BIN=""
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -53,7 +54,7 @@ Modes:
 Options:
   --domain DOMAIN        aio: node domain; panel: panel and subscription domain (A record -> this server)
   --sub-domain DOMAIN    aio: separate subscription domain (optional)
-  --email EMAIL          email for Let's Encrypt (optional)
+  --email EMAIL          email for Let's Encrypt (default admin@DOMAIN)
   --name NAME            aio: server name shown in VPN clients
   --country CC           aio: 2-letter country code for the flag (default: detected)
   --ip IP                public IP (default: detected)
@@ -64,6 +65,9 @@ Options:
   --ssh-port random|N    SSH: move to another port (the old one stays until you confirm)
   --gateway-listen ADDR  port for additional nodes (default :9443; 127.0.0.1:9443 = none)
   --admin-login LOGIN    web panel login (default admin; the password is generated)
+  --login-mode MODE      aio/panel: password (default), link (no password: one-time links from the bot
+                         or vynel admin login-link), miniapp (Telegram Mini App only, needs --bot-token)
+  --session-paths        with --login-mode link: a random panel address for every session
   --sub-path PATH        aio/panel: path of subscription links (default /s/), e.g. sub or api/v1/client
   --panel-path PATH      aio/panel: secret path of the web panel (default: random, 12 characters)
   --token TOKEN          node: join token from the panel
@@ -95,6 +99,8 @@ while [[ $# -gt 0 ]]; do
     --ssh-port) SSH_PORT="${2:-}"; shift 2 ;;
     --gateway-listen) GATEWAY_LISTEN="${2:-}"; shift 2 ;;
     --admin-login) ADMIN_LOGIN="${2:-}"; shift 2 ;;
+    --login-mode) LOGIN_MODE="${2:-}"; shift 2 ;;
+    --session-paths) SESSION_PATHS=yes; shift ;;
     --sub-path) SUB_PATH="${2:-}"; shift 2 ;;
     --panel-path) PANEL_PATH="${2:-}"; shift 2 ;;
     --bot-token) BOT_TOKEN="${2:-}"; shift 2 ;;
@@ -1174,6 +1180,27 @@ web_admin() {
   WEB_PASSWORD="$(awk '$1=="password" && NF==2 {print $2}' <<<"$out")"
 }
 
+# login_mode: how admins sign in (after setup_bot: the Mini App mode needs the bot).
+login_mode() {
+  case "${LOGIN_MODE:-password}" in
+    password) return 0 ;;
+    link|miniapp) ;;
+    *) die "--login-mode: password, link or miniapp" ;;
+  esac
+  local args=("$LOGIN_MODE")
+  [[ "$SESSION_PATHS" == yes && "$LOGIN_MODE" == link ]] && args+=(--session-paths)
+  if ! admin web mode "${args[@]}" >/dev/null; then
+    red "  вход только через Telegram требует бота: включён вход по одноразовой ссылке"
+    LOGIN_MODE="link"
+    admin web mode link >/dev/null
+  fi
+}
+
+# default_email: Let's Encrypt account email, admin@<domain> unless given.
+default_email() {
+  [[ -n "$EMAIL" || -z "${1:-}" ]] || EMAIL="admin@$1"
+}
+
 # ---- Telegram bot and restore (aio, panel) ----
 
 ask_bot_and_restore() {
@@ -1242,6 +1269,21 @@ print_bot_block() {
 
 print_web_block() {
   pink "  Веб-панель"
+  case "${LOGIN_MODE:-password}" in
+    link)
+      if [[ "$SESSION_PATHS" == yes ]]; then
+        line "  адрес" "случайный на каждую сессию, по ссылке"
+      else
+        line "  адрес" "$WEB_URL"
+      fi
+      line "  вход" "одноразовая ссылка: /login в Telegram-боте или vynel admin login-link"
+      echo "  Пароля нет: подобрать нечего. Ссылка живёт минуту и открывается один раз."
+      return 0 ;;
+    miniapp)
+      line "  вход" "кнопка «Панель» в Telegram-боте (сначала привяжите себя кодом ниже)"
+      echo "  Из браузера панель не открывается. Вернуть ссылки: vynel admin web mode link"
+      return 0 ;;
+  esac
   line "  адрес" "$WEB_URL"
   line "  логин" "$WEB_LOGIN"
   if [[ -n "$WEB_PASSWORD" ]]; then
@@ -1286,7 +1328,8 @@ do_aio() {
         SUB_DOMAIN="$DOMAIN"
       fi
     fi
-    ask EMAIL "Email для Let's Encrypt (можно пусто)" "$EMAIL"
+    default_email "$DOMAIN"
+    ask EMAIL "Email для Let's Encrypt" "$EMAIL"
     ask COUNTRY "Код страны сервера, для флага в клиентах" "$COUNTRY"
     COUNTRY="$(printf '%s' "$COUNTRY" | tr '[:lower:]' '[:upper:]')"
     [[ -z "$COUNTRY" || "$COUNTRY" =~ ^[A-Z]{2}$ ]] || die "код страны — две латинские буквы, например NL"
@@ -1339,6 +1382,7 @@ do_aio() {
 
   restore_backup
   info "configuring the panel"
+  default_email "$DOMAIN"
   local setup_args=(--domain "$DOMAIN" --sub-domain "$SUB_DOMAIN" --name "$NAME")
   [[ -n "$COUNTRY" ]] && setup_args+=(--country "$COUNTRY")
   [[ -n "$EMAIL" ]] && setup_args+=(--email "$EMAIL")
@@ -1348,6 +1392,7 @@ do_aio() {
   set_paths
   web_admin
   setup_bot
+  login_mode
 
   write_panel_unit " --with-node"
   start_unit vynel
@@ -1409,7 +1454,8 @@ do_panel() {
     echo
     ask PUBLIC_IP "Публичный IP сервера" "$PUBLIC_IP"
     ask_domain DOMAIN "Домен панели и подписок (A-запись на этот IP)" "$DOMAIN"
-    ask EMAIL "Email для Let's Encrypt (можно пусто)" "$EMAIL"
+    default_email "$DOMAIN"
+    ask EMAIL "Email для Let's Encrypt" "$EMAIL"
     ask ADMIN_LOGIN "Логин для веб-панели (пароль сгенерируется сам)" "$ADMIN_LOGIN"
     ask_bot_and_restore
     ask_security
@@ -1437,6 +1483,7 @@ do_panel() {
   restore_backup
   info "configuring the panel"
   admin setting sub.domain "$DOMAIN" >/dev/null
+  default_email "$DOMAIN"
   [[ -n "$EMAIL" ]] && admin setting caddy.email "$EMAIL" >/dev/null
   admin setting install.command "$(script_command)" >/dev/null
   set_paths
@@ -1446,6 +1493,7 @@ do_panel() {
   fi
   web_admin
   setup_bot
+  login_mode
 
   write_panel_unit ""
   start_unit vynel
@@ -1687,7 +1735,7 @@ run_tui() {
   if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
   if [[ $rc -ne 0 ]]; then rm -f "$out"; return 1; fi
   # Only known names, single-quoted values (internal/setup Answers.Shell).
-  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH)='" "$out"; then
+  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH|LOGIN_MODE|SESSION_PATHS)='" "$out"; then
     rm -f "$out"
     return 1
   fi

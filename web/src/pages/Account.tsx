@@ -17,7 +17,7 @@ function browser(ua: string): string {
 }
 
 function Sessions() {
-  const { data, error, reload } = useLoad(() => get<{ sessions: WebSession[]; passwordLogin: boolean }>('sessions'), [], 30000)
+  const { data, error, reload } = useLoad(() => get<{ sessions: WebSession[]; passwordLogin: boolean; loginMode: string; sessionPaths: boolean; hasBot: boolean }>('sessions'), [], 30000)
   const act = useAction()
   const confirm = useConfirm()
   if (!data) return <div className="card card-pad"><Loading error={error} /></div>
@@ -52,19 +52,37 @@ function Sessions() {
         </div>
       </div>
       <div className="card card-pad">
-        <div className="row between" style={{ flexWrap: 'nowrap' }}>
-          <div>
-            <div>Вход по логину и паролю</div>
-            <div className="help muted small">
-              Выключите, чтобы входить только через Telegram-бота: кнопка «Панель» в чате, /login или «Войти в панель». Форма логина пропадёт, подобрать пароль станет нельзя.
-              Выключить можно, когда бот подключён и вы к нему привязаны. Включить обратно с сервера: <code>vynel admin setting web.password_login true</code>
-            </div>
-          </div>
-          <Switch checked={data.passwordLogin} onChange={async (on) => {
-            if (!on && !(await confirm('Выключить вход по паролю? Войти можно будет только через Telegram-бота.', 'Выключить'))) return
-            act(() => put('account/password-login', { on }), on ? 'Вход по паролю включён' : 'Вход по паролю выключен').then(reload)
-          }} />
+        <div style={{ marginBottom: 10 }}>Как входить в панель</div>
+        <div className="seg" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
+          {([['password', 'Логин и пароль'], ['link', 'Только по ссылке'], ['miniapp', 'Только Telegram']] as const).map(([m, label]) => (
+            <button key={m} className={data.loginMode === m ? 'on' : ''} disabled={m === 'miniapp' && !data.hasBot} onClick={async () => {
+              if (m === data.loginMode) return
+              const text = m === 'miniapp'
+                ? 'Панель будет открываться только кнопкой «Панель» в Telegram-боте. Вход из браузера и по ссылкам выключится.'
+                : m === 'link' ? 'Форма логина пропадёт: войти можно будет по одноразовой ссылке — /login в боте или vynel admin login-link на сервере.'
+                : 'Вернуть вход по логину и паролю?'
+              if (!(await confirm(text, 'Сменить'))) return
+              act(() => put('account/login-mode', { mode: m, sessionPaths: false }), 'Режим входа изменён').then(reload)
+            }}>{label}</button>
+          ))}
         </div>
+        <div className="help muted small">
+          {data.loginMode === 'password' && 'Форма логина и пароля. Ссылки из бота и Telegram Mini App тоже работают.'}
+          {data.loginMode === 'link' && <>Без пароля: одноразовая ссылка из бота (/login) или с сервера (<code>vynel admin login-link</code>), а также кнопка «Панель» в боте.</>}
+          {data.loginMode === 'miniapp' && <>Только Telegram Mini App: кнопка «Панель» в боте. Вернуть ссылки с сервера: <code>vynel admin web mode link</code></>}
+          {!data.hasBot && ' «Только Telegram» станет доступно после подключения бота.'}
+        </div>
+        {data.loginMode === 'link' && (
+          <div className="row between" style={{ flexWrap: 'nowrap', marginTop: 14 }}>
+            <div>
+              <div>Случайный адрес на каждую сессию</div>
+              <div className="help muted small">
+                У панели не будет постоянного адреса: каждая ссылка открывает свой случайный путь, и сессия работает только на нём. Всё остальное на домене — сайт-заглушка.
+              </div>
+            </div>
+            <Switch checked={data.sessionPaths} onChange={(on) => act(() => put('account/login-mode', { mode: 'link', sessionPaths: on }), on ? 'Случайные адреса включены' : 'Случайные адреса выключены').then(reload)} />
+          </div>
+        )}
       </div>
     </>
   )

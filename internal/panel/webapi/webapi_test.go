@@ -221,7 +221,7 @@ func TestTemplateEditorAPI(t *testing.T) {
 func TestMagicLogin(t *testing.T) {
 	c, svc, _ := newServer(t)
 	ctx := context.Background()
-	tok, _, err := svc.CreateLoginToken(ctx, service.Actor{Kind: "bot", ID: "42"})
+	tok, _, err := svc.CreateLoginToken(ctx, service.Actor{Kind: "bot", ID: "42"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func TestMagicLogin(t *testing.T) {
 	// Expired.
 	now := time.Now()
 	svc.SetClock(func() time.Time { return now.Add(-2 * time.Minute) })
-	old, _, _ := svc.CreateLoginToken(ctx, service.Actor{Kind: "bot", ID: "42"})
+	old, _, _ := svc.CreateLoginToken(ctx, service.Actor{Kind: "bot", ID: "42"}, "")
 	svc.SetClock(time.Now)
 	if w := c.do("POST", "/api/login/magic", `{"token":"`+old+`"}`, true); w.Code != 401 {
 		t.Fatalf("expired token accepted: %d", w.Code)

@@ -17,6 +17,7 @@ func (s *Server) botRoutes() {
 	s.handle("DELETE /api/sessions/{id}", s.endSession)
 	s.handle("POST /api/sessions/end-others", s.endOtherSessions)
 	s.handle("PUT /api/account/password-login", s.passwordLogin)
+	s.handle("PUT /api/account/login-mode", s.loginMode)
 	s.handle("GET /api/bot", s.botInfo)
 	s.handle("PUT /api/bot", s.botSave)
 	s.handle("POST /api/bot/code", s.botCode)
@@ -38,7 +39,7 @@ func (s *Server) magicLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.loginMu.Lock()
-	issuer, err := s.svc.UseLoginToken(r.Context(), strings.TrimSpace(in.Token))
+	issuer, err := s.svc.UseLoginToken(r.Context(), strings.TrimSpace(in.Token), ownPath(r))
 	if err != nil {
 		time.Sleep(700 * time.Millisecond)
 	}
@@ -203,6 +204,10 @@ func (s *Server) telegramLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
+	if ownPath(r) != "" {
+		writeError(w, &httpError{http.StatusForbidden, "откройте панель кнопкой в боте"})
+		return
+	}
 	s.loginMu.Lock()
 	id, err := s.svc.TelegramAppLogin(r.Context(), in.InitData)
 	if err != nil {
@@ -231,7 +236,7 @@ func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
 		bot = s.cfg.Bot.Status().Username
 	}
 	s.respond(w, r, func(*http.Request) (any, error) {
-		return map[string]any{"password": s.svc.PasswordLoginEnabled(ctx), "bot": bot}, nil
+		return map[string]any{"password": s.svc.PasswordLoginEnabled(ctx) && ownPath(r) == "", "bot": bot, "mode": s.svc.LoginMode(ctx)}, nil
 	})
 }
 
@@ -246,7 +251,9 @@ func (s *Server) sessions(r *http.Request) (any, error) {
 		out = append(out, map[string]any{"id": w.ID, "method": w.Method, "actor": w.Actor, "ip": w.IP, "userAgent": w.UserAgent,
 			"createdAt": w.CreatedAt, "lastSeenAt": w.LastSeenAt, "expiresAt": w.ExpiresAt, "current": w.ID == cur})
 	}
-	return map[string]any{"sessions": out, "passwordLogin": s.svc.PasswordLoginEnabled(r.Context())}, nil
+	ctx := r.Context()
+	return map[string]any{"sessions": out, "passwordLogin": s.svc.PasswordLoginEnabled(ctx),
+		"loginMode": s.svc.LoginMode(ctx), "sessionPaths": s.svc.SessionPaths(ctx), "hasBot": s.svc.BotToken(ctx) != ""}, nil
 }
 
 func (s *Server) endSession(r *http.Request) (any, error) {
@@ -261,6 +268,27 @@ func (s *Server) endSession(r *http.Request) (any, error) {
 func (s *Server) endOtherSessions(r *http.Request) (any, error) {
 	n, err := s.svc.EndWebSessions(r.Context(), actor(r), "", current(r).ID)
 	return map[string]int64{"ended": n}, err
+}
+
+// loginMode sets how admins sign in and whether login links open their own paths.
+func (s *Server) loginMode(r *http.Request) (any, error) {
+	var in struct {
+		Mode         string
+		SessionPaths bool
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ctx := r.Context()
+	if err := s.svc.SetLoginMode(ctx, actor(r), in.Mode); err != nil {
+		return nil, err
+	}
+	if in.Mode == service.ModeLink || !in.SessionPaths {
+		if err := s.svc.SetSessionPaths(ctx, actor(r), in.SessionPaths && in.Mode == service.ModeLink); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"loginMode": s.svc.LoginMode(ctx), "sessionPaths": s.svc.SessionPaths(ctx)}, nil
 }
 
 func (s *Server) passwordLogin(r *http.Request) (any, error) {

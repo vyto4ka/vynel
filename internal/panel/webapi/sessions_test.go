@@ -58,8 +58,12 @@ func TestSessionsAndPasswordLogin(t *testing.T) {
 		t.Fatalf("own session ended: %d", w.Code)
 	}
 
-	// The form can only be switched off with the bot in place.
-	if w := a.do("PUT", "/api/account/password-login", `{"on":false}`, true); w.Code != 400 {
+	// The form goes off without the bot too: `vynel admin login-link` always lets in. Only the
+	// Mini App mode needs the bot.
+	if w := a.do("PUT", "/api/account/login-mode", `{"mode":"miniapp"}`, true); w.Code != 400 {
+		t.Fatalf("miniapp without bot: %d", w.Code)
+	}
+	if w := a.do("PUT", "/api/account/password-login", `{"on":false}`, true); w.Code != 200 {
 		t.Fatalf("password off without bot: %d", w.Code)
 	}
 	bindAdmin(t, svc, 4242)

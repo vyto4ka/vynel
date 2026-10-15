@@ -7,8 +7,8 @@ export function Login({ onLogin, error: initialError }: { onLogin: () => void; e
   const [password, setPassword] = useState('')
   const [error, setError] = useState(initialError || '')
   const [busy, setBusy] = useState(false)
-  const [opts, setOpts] = useState<{ password: boolean; bot: string } | null>(null)
-  useEffect(() => { get<{ password: boolean; bot: string }>('login/options').then(setOpts, () => setOpts({ password: true, bot: '' })) }, [])
+  const [opts, setOpts] = useState<{ password: boolean; bot: string; mode?: string } | null>(null)
+  useEffect(() => { get<{ password: boolean; bot: string; mode?: string }>('login/options').then(setOpts, () => setOpts({ password: true, bot: '' })) }, [])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -35,8 +35,17 @@ export function Login({ onLogin, error: initialError }: { onLogin: () => void; e
         {opts && !opts.password ? (
           <>
             {error && <div className="alert pink" style={{ marginBottom: 14 }}>{error}</div>}
-            <p className="text-2">Вход по паролю выключен. Откройте Telegram-бота панели{opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></>} и нажмите кнопку «Панель» у поля ввода или отправьте <code>/login</code>.</p>
-            <p className="muted small" style={{ marginBottom: 0 }}>Нет доступа к боту — на сервере: <code>vynel admin login-link</code></p>
+            {opts.mode === 'miniapp' ? (
+              <>
+                <p className="text-2">Панель открывается только из Telegram: кнопка «Панель» у поля ввода в боте{opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></>}.</p>
+                <p className="muted small" style={{ marginBottom: 0 }}>Нет доступа к боту — на сервере: <code>vynel admin web mode link</code>, затем <code>vynel admin login-link</code></p>
+              </>
+            ) : (
+              <>
+                <p className="text-2">Вход по одноразовой ссылке. Откройте Telegram-бота панели{opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></>} и отправьте <code>/login</code> или нажмите кнопку «Панель» у поля ввода.</p>
+                <p className="muted small" style={{ marginBottom: 0 }}>Без бота — на сервере: <code>vynel admin login-link</code></p>
+              </>
+            )}
           </>
         ) : <>
         <div className="field">

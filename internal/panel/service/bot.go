@@ -166,9 +166,9 @@ func hashToken(t string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// CreateLoginToken issues a one-time web login token valid for LoginLinkTTL. Only its hash is
-// stored.
-func (s *Service) CreateLoginToken(ctx context.Context, actor Actor) (string, time.Time, error) {
+// CreateLoginToken issues a one-time web login token valid for LoginLinkTTL, opening path ("" =
+// the fixed panel path). Only its hash is stored.
+func (s *Service) CreateLoginToken(ctx context.Context, actor Actor, path string) (string, time.Time, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", time.Time{}, err
@@ -177,21 +177,28 @@ func (s *Service) CreateLoginToken(ctx context.Context, actor Actor) (string, ti
 	exp := s.now().Add(LoginLinkTTL)
 	issuer := actor.Kind + ":" + actor.ID
 	err := s.mutate(ctx, change{actor: actor, action: "web.login_link", entity: "web"},
-		func(q store.DBTX) error { return store.AddLoginToken(ctx, q, hashToken(tok), issuer, exp.Unix()) })
+		func(q store.DBTX) error { return store.AddLoginToken(ctx, q, hashToken(tok), issuer, path, exp.Unix()) })
 	return tok, exp, err
 }
 
-// UseLoginToken consumes a login token. It returns who issued it; ErrNotFound for an unknown,
-// used or expired token.
-func (s *Service) UseLoginToken(ctx context.Context, tok string) (string, error) {
+// UseLoginToken consumes a login token. It returns who issued it and the path it opens;
+// ErrNotFound for an unknown, used or expired token, or one for another path.
+func (s *Service) UseLoginToken(ctx context.Context, tok, path string) (string, error) {
 	if len(tok) < 20 || len(tok) > 100 {
+		return "", ErrNotFound
+	}
+	if s.LoginMode(ctx) == ModeMiniApp {
 		return "", ErrNotFound
 	}
 	var issuer string
 	err := s.mutate(ctx, change{actor: Actor{Kind: "web"}, action: "web.login_link_used", entity: "web"},
 		func(q store.DBTX) error {
+			var p string
 			var err error
-			issuer, err = store.UseLoginToken(ctx, q, hashToken(tok), s.now().Unix())
+			issuer, p, err = store.UseLoginToken(ctx, q, hashToken(tok), s.now().Unix())
+			if err == nil && p != path {
+				return ErrNotFound // a link opens its own path only
+			}
 			return err
 		})
 	return issuer, err
@@ -208,7 +215,20 @@ func (s *Service) LoginLink(ctx context.Context, actor Actor) (string, time.Time
 	if base == "" {
 		return "", time.Time{}, invalid("the panel has no domain (sub.domain / web.domain)")
 	}
-	tok, exp, err := s.CreateLoginToken(ctx, actor)
+	if s.LoginMode(ctx) == ModeMiniApp {
+		return "", time.Time{}, invalid("вход только через Telegram Mini App: ссылки выключены (вернуть: vynel admin web mode link)")
+	}
+	path := ""
+	if s.SessionPaths(ctx) {
+		r, err := randomString(16)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		path = "/" + r + "/"
+		fixed, _ := s.WebPath(ctx)
+		base = strings.TrimSuffix(base, fixed) + path
+	}
+	tok, exp, err := s.CreateLoginToken(ctx, actor, path)
 	if err != nil {
 		return "", time.Time{}, err
 	}
