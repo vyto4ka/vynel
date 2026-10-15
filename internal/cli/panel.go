@@ -30,7 +30,9 @@ func panelCmd() *cobra.Command {
 	f.StringVar(&cfg.LocalNode.Country, "node-country", "", "local node country code (first start only)")
 	f.StringVar(&cfg.LocalNode.Domain, "node-domain", "", "local node domain (first start only)")
 	addXrayFlags(c, &cfg.Xray)
-	f.StringVar(&cfg.CaddyBin, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary")
+	f.StringVar(&cfg.CaddyBin, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary (only for nodes that still run Caddy)")
+	f.StringVar(&cfg.NginxBin, "nginx-bin", "/usr/sbin/nginx", "path to the nginx binary")
+	f.StringVar(&cfg.WWWDir, "www-dir", "/var/www/vynel", "decoy sites, ACME webroot and temp files of nginx")
 	f.BoolVar(&cfg.TuneSysctl, "tune-sysctl", true, "apply BBR/fq/TCP Fast Open on the local node (needs root)")
 	f.BoolVar(&cfg.Firewall, "firewall", true, "keep the nftables firewall in step with what the server serves once `vynel firewall on`")
 	return c

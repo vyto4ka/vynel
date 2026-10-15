@@ -36,6 +36,7 @@ type State struct {
 	Config   []byte    `json:"config"` // Xray config without clients
 	Inbounds []Inbound `json:"inbounds"`
 	Caddy    []byte    `json:"caddy,omitempty"`
+	Nginx    string    `json:"nginx,omitempty"`
 }
 
 // Inbound returns the inbound with tag, or nil.

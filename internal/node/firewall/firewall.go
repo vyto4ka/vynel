@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vyto4ka/vynel/internal/nginxconf"
 )
 
 // Table is the nftables table vynel owns; nothing else is touched.
@@ -176,6 +178,15 @@ func CaddyPorts(cfg []byte) []Port {
 				out = append(out, Port{Port: n, Proto: "tcp", Why: "Caddy"})
 			}
 		}
+	}
+	return out
+}
+
+// NginxPorts lists the public listeners of an nginx config built by package nginxconf.
+func NginxPorts(conf string) []Port {
+	var out []Port
+	for _, l := range nginxconf.PublicListeners(conf) {
+		out = append(out, Port{Port: l.Port, Proto: "tcp", Why: "nginx"})
 	}
 	return out
 }

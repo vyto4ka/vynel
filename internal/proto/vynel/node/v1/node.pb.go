@@ -502,8 +502,12 @@ type Hello struct {
 	Arch         string                 `protobuf:"bytes,5,opt,name=arch,proto3" json:"arch,omitempty"`
 	Addresses    []*Address             `protobuf:"bytes,6,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	CaddyVersion string                 `protobuf:"bytes,7,opt,name=caddy_version,json=caddyVersion,proto3" json:"caddy_version,omitempty"`
-	// Host problems the panel should show: missing BBR, clock skew, no caddy binary...
-	Warnings      []string `protobuf:"bytes,8,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	// Host problems the panel should show: missing BBR, clock skew, no nginx binary...
+	Warnings     []string `protobuf:"bytes,8,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	NginxVersion string   `protobuf:"bytes,9,opt,name=nginx_version,json=nginxVersion,proto3" json:"nginx_version,omitempty"`
+	// What this agent understands beyond the original protocol, e.g. "nginx" (Snapshot.nginx_config).
+	// The panel sends old agents only what they know.
+	Capabilities  []string `protobuf:"bytes,10,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -590,6 +594,20 @@ func (x *Hello) GetCaddyVersion() string {
 func (x *Hello) GetWarnings() []string {
 	if x != nil {
 		return x.Warnings
+	}
+	return nil
+}
+
+func (x *Hello) GetNginxVersion() string {
+	if x != nil {
+		return x.NginxVersion
+	}
+	return ""
+}
+
+func (x *Hello) GetCapabilities() []string {
+	if x != nil {
+		return x.Capabilities
 	}
 	return nil
 }
@@ -1347,12 +1365,14 @@ func (x *StatsAck) GetSeq() uint64 {
 
 // Snapshot is the full desired state: Xray config without clients plus users per inbound.
 type Snapshot struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Revision      int64                  `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
-	Hash          string                 `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
-	XrayConfig    []byte                 `protobuf:"bytes,3,opt,name=xray_config,json=xrayConfig,proto3" json:"xray_config,omitempty"`
-	Inbounds      []*InboundUsers        `protobuf:"bytes,4,rep,name=inbounds,proto3" json:"inbounds,omitempty"`
-	CaddyConfig   []byte                 `protobuf:"bytes,5,opt,name=caddy_config,json=caddyConfig,proto3" json:"caddy_config,omitempty"` // Caddy JSON config; empty = Caddy not needed
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Revision    int64                  `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
+	Hash        string                 `protobuf:"bytes,2,opt,name=hash,proto3" json:"hash,omitempty"`
+	XrayConfig  []byte                 `protobuf:"bytes,3,opt,name=xray_config,json=xrayConfig,proto3" json:"xray_config,omitempty"`
+	Inbounds    []*InboundUsers        `protobuf:"bytes,4,rep,name=inbounds,proto3" json:"inbounds,omitempty"`
+	CaddyConfig []byte                 `protobuf:"bytes,5,opt,name=caddy_config,json=caddyConfig,proto3" json:"caddy_config,omitempty"` // Caddy JSON config for agents without "nginx"; empty = Caddy not needed
+	// nginx.conf built by the panel (package nginxconf) for agents with "nginx"; empty = no web server.
+	NginxConfig   string `protobuf:"bytes,6,opt,name=nginx_config,json=nginxConfig,proto3" json:"nginx_config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1420,6 +1440,13 @@ func (x *Snapshot) GetCaddyConfig() []byte {
 		return x.CaddyConfig
 	}
 	return nil
+}
+
+func (x *Snapshot) GetNginxConfig() string {
+	if x != nil {
+		return x.NginxConfig
+	}
+	return ""
 }
 
 type InboundUsers struct {
@@ -1709,7 +1736,7 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\vfinished_at\x18\x04 \x01(\x03R\n" +
 	"finishedAt\x12\x18\n" +
 	"\aversion\x18\x05 \x01(\tR\aversion\x12\x10\n" +
-	"\x03log\x18\x06 \x01(\tR\x03log\"\x8d\x02\n" +
+	"\x03log\x18\x06 \x01(\tR\x03log\"\xd6\x02\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12!\n" +
 	"\fxray_version\x18\x02 \x01(\tR\vxrayVersion\x12!\n" +
@@ -1718,7 +1745,10 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\x04arch\x18\x05 \x01(\tR\x04arch\x124\n" +
 	"\taddresses\x18\x06 \x03(\v2\x16.vynel.node.v1.AddressR\taddresses\x12#\n" +
 	"\rcaddy_version\x18\a \x01(\tR\fcaddyVersion\x12\x1a\n" +
-	"\bwarnings\x18\b \x03(\tR\bwarnings\"Q\n" +
+	"\bwarnings\x18\b \x03(\tR\bwarnings\x12#\n" +
+	"\rnginx_version\x18\t \x01(\tR\fnginxVersion\x12\"\n" +
+	"\fcapabilities\x18\n" +
+	" \x03(\tR\fcapabilities\"Q\n" +
 	"\aAddress\x12\x0e\n" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x18\n" +
@@ -1777,14 +1807,15 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\x06uptime\x18\a \x01(\x04R\x06uptime\"2\n" +
 	"\bStatsAck\x12\x14\n" +
 	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\xb7\x01\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\xda\x01\n" +
 	"\bSnapshot\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x1f\n" +
 	"\vxray_config\x18\x03 \x01(\fR\n" +
 	"xrayConfig\x127\n" +
 	"\binbounds\x18\x04 \x03(\v2\x1b.vynel.node.v1.InboundUsersR\binbounds\x12!\n" +
-	"\fcaddy_config\x18\x05 \x01(\fR\vcaddyConfig\"{\n" +
+	"\fcaddy_config\x18\x05 \x01(\fR\vcaddyConfig\x12!\n" +
+	"\fnginx_config\x18\x06 \x01(\tR\vnginxConfig\"{\n" +
 	"\fInboundUsers\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x1a\n" +
 	"\bprotocol\x18\x02 \x01(\tR\bprotocol\x12\x12\n" +

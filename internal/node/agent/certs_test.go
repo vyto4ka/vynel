@@ -28,7 +28,8 @@ import (
 
 func TestCertBridge(t *testing.T) {
 	dir := t.TempDir()
-	b := newCertBridge(dir)
+	tlsStore, decoys := filepath.Join(dir, "web", "tls"), filepath.Join(dir, "web", "www", "decoy")
+	b := newCertBridge(dir, tlsStore, decoys)
 	cfg := []byte(`{"inbounds":[{"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"vynel:cert:Node.Example.com","keyFile":"vynel:key:node.example.com"}]},
 		"hysteriaSettings":{"masquerade":{"type":"file","dir":"vynel:decoy:cloud"}}}}]}`)
 	out, doms, err := b.resolve(cfg)
@@ -49,12 +50,12 @@ func TestCertBridge(t *testing.T) {
 	if err := json.Unmarshal(out, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "web", "decoy", "cloud", "index.html")); err != nil {
+	if _, err := os.Stat(filepath.Join(decoys, "cloud", "index.html")); err != nil {
 		t.Fatalf("decoy not installed: %v", err)
 	}
 
 	// A restarted agent recognizes its own placeholder.
-	b2 := newCertBridge(dir)
+	b2 := newCertBridge(dir, tlsStore, decoys)
 	if _, _, err := b2.resolve(cfg); err != nil || !b2.pending("node.example.com") {
 		t.Fatalf("placeholder not recognized after restart: %v", err)
 	}
@@ -77,6 +78,24 @@ func TestCertBridge(t *testing.T) {
 	}
 	if changed, _ := b.sync("node.example.com"); changed {
 		t.Fatal("unchanged certificate reported as changed")
+	}
+
+	// nginx's certificate store wins over Caddy's, but not while it holds a placeholder.
+	nd := filepath.Join(tlsStore, "node.example.com")
+	_ = os.MkdirAll(nd, 0o700)
+	nginxCrt := append([]byte("# nginx\n"), realCrt...)
+	_ = os.WriteFile(filepath.Join(nd, "fullchain.pem"), nginxCrt, 0o600)
+	_ = os.WriteFile(filepath.Join(nd, "privkey.pem"), realKey, 0o600)
+	_ = os.WriteFile(filepath.Join(nd, "placeholder"), nil, 0o600)
+	if changed, _ := b.sync("node.example.com"); changed {
+		t.Fatal("a placeholder in the nginx store replaced Caddy's certificate")
+	}
+	_ = os.Remove(filepath.Join(nd, "placeholder"))
+	if changed, err := b.sync("node.example.com"); err != nil || !changed {
+		t.Fatalf("nginx certificate not taken: %v %v", changed, err)
+	}
+	if got, _ := os.ReadFile(crt); !bytes.Equal(got, nginxCrt) {
+		t.Fatal("nginx certificate not copied")
 	}
 
 	for _, bad := range []string{`"vynel:cert:../../etc/passwd"`, `"vynel:decoy:../x"`, `"vynel:nope:x"`} {

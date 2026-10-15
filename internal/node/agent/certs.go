@@ -25,27 +25,29 @@ import (
 // templates write placeholders and the agent replaces them before starting Xray
 // (docs/PROFILES.md §9.3):
 //
-//	vynel:cert:<domain>  the certificate Caddy got for <domain> (temporary self-signed until then)
+//	vynel:cert:<domain>  the certificate nginx got for <domain> (temporary self-signed until then)
 //	vynel:key:<domain>   its private key
-//	vynel:decoy:<name>   the decoy site directory Caddy serves
+//	vynel:decoy:<name>   the decoy site directory nginx serves
 const placeholderPrefix = "vynel:"
 
 var certDomainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`)
 
-// certBridge copies the certificates Caddy obtains into a stable place for Xray.
+// certBridge copies the certificates nginx's certificate manager obtains (or a Caddy of an older
+// panel did) into a stable place for Xray.
 type certBridge struct {
+	tlsStore     string // package certs: <store>/<domain>/fullchain.pem, privkey.pem, placeholder
 	caddyStorage string // Caddy's data dir: <storage>/certificates/<issuer>/<domain>/<domain>.crt
 	dir          string // where Xray reads them
 	decoyDir     string
 	selfSigned   map[string]bool // domains currently served with a placeholder certificate
 }
 
-func newCertBridge(dataDir string) *certBridge {
-	web := filepath.Join(dataDir, "web")
+func newCertBridge(dataDir, tlsStore, decoyDir string) *certBridge {
 	return &certBridge{
-		caddyStorage: filepath.Join(web, "caddy", "caddy"),
+		tlsStore:     tlsStore,
+		caddyStorage: filepath.Join(dataDir, "web", "caddy", "caddy"),
 		dir:          filepath.Join(dataDir, "certs"),
-		decoyDir:     filepath.Join(web, "decoy"),
+		decoyDir:     decoyDir,
 		selfSigned:   map[string]bool{},
 	}
 }
@@ -125,7 +127,7 @@ func (b *certBridge) path(ph string) (string, string, error) {
 	return "", "", fmt.Errorf("unknown placeholder %s", ph)
 }
 
-// sync makes <dir>/<domain>.crt and .key exist: Caddy's certificate when it has one, else a
+// sync makes <dir>/<domain>.crt and .key exist: the real certificate when there is one, else a
 // self-signed placeholder so Xray can start. It reports whether the files changed.
 // Writes are atomic (rename), so Xray's hourly certificate reload never reads half a file.
 func (b *certBridge) sync(domain string) (bool, error) {
@@ -133,7 +135,7 @@ func (b *certBridge) sync(domain string) (bool, error) {
 		return false, err
 	}
 	crtPath, keyPath := filepath.Join(b.dir, domain+".crt"), filepath.Join(b.dir, domain+".key")
-	if crt, key, ok := b.caddyCert(domain); ok {
+	if crt, key, ok := b.realCert(domain); ok {
 		oldCrt, _ := os.ReadFile(crtPath)
 		oldKey, _ := os.ReadFile(keyPath)
 		b.selfSigned[domain] = false
@@ -160,6 +162,21 @@ func (b *certBridge) sync(domain string) (bool, error) {
 	}
 	b.selfSigned[domain] = true
 	return true, writeAtomic(crtPath, crt)
+}
+
+// realCert finds the domain's real certificate: nginx's store first, then what Caddy stored.
+func (b *certBridge) realCert(domain string) (crt, key []byte, ok bool) {
+	if b.tlsStore != "" {
+		d := filepath.Join(b.tlsStore, domain)
+		if _, err := os.Stat(filepath.Join(d, "placeholder")); os.IsNotExist(err) {
+			crt, err1 := os.ReadFile(filepath.Join(d, "fullchain.pem"))
+			key, err2 := os.ReadFile(filepath.Join(d, "privkey.pem"))
+			if err1 == nil && err2 == nil && len(crt) > 0 && len(key) > 0 {
+				return crt, key, true
+			}
+		}
+	}
+	return b.caddyCert(domain)
 }
 
 // caddyCert finds the newest certificate Caddy stored for the domain (any issuer).

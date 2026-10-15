@@ -58,8 +58,12 @@ message Hello {
   string arch = 5;
   repeated Address addresses = 6;
   string caddy_version = 7;
-  // Host problems the panel should show: missing BBR, clock skew, no caddy binary...
+  // Host problems the panel should show: missing BBR, clock skew, no nginx binary...
   repeated string warnings = 8;
+  string nginx_version = 9;
+  // What this agent understands beyond the original protocol, e.g. "nginx" (Snapshot.nginx_config).
+  // The panel sends old agents only what they know.
+  repeated string capabilities = 10;
 }
 
 message Address {
@@ -154,7 +158,9 @@ message Snapshot {
   string hash = 2;
   bytes xray_config = 3;
   repeated InboundUsers inbounds = 4;
-  bytes caddy_config = 5; // Caddy JSON config; empty = Caddy not needed
+  bytes caddy_config = 5; // Caddy JSON config for agents without "nginx"; empty = Caddy not needed
+  // nginx.conf built by the panel (package nginxconf) for agents with "nginx"; empty = no web server.
+  string nginx_config = 6;
 }
 
 message InboundUsers {

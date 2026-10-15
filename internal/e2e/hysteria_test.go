@@ -206,7 +206,7 @@ func TestHysteria2NextToReality(t *testing.T) {
 
 	// The diagnostics report sees all of it and leaks no user ids.
 	var rep bytes.Buffer
-	agent.Diagnose(ctx, &rep, nodeDir, "test", bin, caddyBin)
+	agent.Diagnose(ctx, &rep, nodeDir, "test", bin, caddyBin, "/usr/sbin/nginx")
 	report := rep.String()
 	for _, want := range []string{"hysteria on 127.0.0.1:", "vless on 127.0.0.1:", "xray -test: OK", "SNI " + domain + ": OK", "issuer=\"Caddy Local Authority"} {
 		if !strings.Contains(report, want) {

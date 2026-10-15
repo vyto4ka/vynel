@@ -24,6 +24,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/node/caddy"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
 	"github.com/vyto4ka/vynel/internal/node/metrics"
+	"github.com/vyto4ka/vynel/internal/node/nginx"
 	"github.com/vyto4ka/vynel/internal/node/state"
 	"github.com/vyto4ka/vynel/internal/node/sysctl"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
@@ -51,9 +52,12 @@ type Config struct {
 	Addresses     func() []*nodev1.Address // defaults to the host's interfaces
 	MaxBackoff    time.Duration            // reconnect backoff cap, default 30s
 	StatsInterval time.Duration            // how often counters are collected, default 10s
-	CaddyBin      string                   // path to caddy ("" = not installed)
+	CaddyBin      string                   // path to caddy ("" = not installed); only for panels that still send Caddy configs
+	NginxBin      string                   // path to nginx ("" = /usr/sbin/nginx)
+	WWWDir        string                   // decoys, ACME webroot and temp files nginx workers use; "" = <DataDir>/web/www
+	NginxUser     string                   // nginx worker user; "" = www-data (tests use root)
 	TuneSysctl    bool                     // apply BBR/fq/TFO on start (needs root)
-	CertInterval  time.Duration            // how often Caddy certificates are copied for Xray, default 1m
+	CertInterval  time.Duration            // how often certificates are renewed and copied for Xray, default 1m
 	// Firewall keeps nftables in step with what this node serves (when `vynel firewall on`);
 	// nil = never touch the firewall (tests).
 	Firewall   *firewall.Manager
@@ -79,6 +83,7 @@ type Agent struct {
 	st    *state.Store
 	proc  *xray.Process
 	caddy *caddy.Manager
+	nginx *nginx.Manager
 
 	mu       sync.Mutex
 	cur      *state.State
@@ -86,12 +91,14 @@ type Agent struct {
 	apiAddr  string
 	xrayVer  string
 	caddyVer string
+	nginxVer string
 	warnings []string
 	metrics  metrics.Collector
 	statsCh  chan struct{} // a batch was queued
 	certs    *certBridge
 	certDoms []string // domains whose certificates the running Xray config uses
 	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
+	nginxCfg string   // the config nginx runs now; only one of the two web servers runs
 	vpnIPs   []string // addresses of connected VPN users, trusted by the firewall
 }
 
@@ -134,9 +141,26 @@ func New(cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	web := filepath.Join(cfg.DataDir, "web")
+	www := cfg.WWWDir
+	if www == "" {
+		www = filepath.Join(web, "www")
+	}
 	a := &Agent{cfg: cfg, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
-		caddy:   &caddy.Manager{Bin: cfg.CaddyBin, DataDir: filepath.Join(cfg.DataDir, "web"), Log: cfg.Log.With("component", "caddy")},
-		statsCh: make(chan struct{}, 1), certs: newCertBridge(cfg.DataDir)}
+		caddy: &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")},
+		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, Log: cfg.Log.With("component", "nginx"),
+			CaddyStorage: filepath.Join(web, "caddy", "caddy")},
+		statsCh: make(chan struct{}, 1)}
+	if err := a.nginx.Init(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	a.certs = newCertBridge(cfg.DataDir, a.nginx.Certs.Dir, a.nginx.DecoyDir())
+	a.nginx.OnCerts = func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.syncCertsLocked(context.Background())
+	}
 	if a.cur, err = st.Load(); err != nil {
 		st.Close()
 		return nil, err
@@ -148,6 +172,7 @@ func New(cfg Config) (*Agent, error) {
 func (a *Agent) Close() {
 	a.proc.Close()
 	a.caddy.Close()
+	a.nginx.Close()
 	a.mu.Lock()
 	if a.api != nil {
 		a.api.Close()
@@ -175,12 +200,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	a.warnings = sysctl.Tune(a.cfg.TuneSysctl)
 	a.caddyVer = a.caddy.Version(ctx)
+	a.nginxVer = a.nginx.Version(ctx)
+	if a.nginxVer == "" {
+		a.warnings = append(a.warnings, "nginx is not installed: apt install nginx libnginx-mod-stream")
+	}
 	a.mu.Lock()
 	if a.cur != nil {
-		if err := a.caddy.Apply(ctx, a.cur.Caddy); err != nil {
-			a.log.Error("cannot start caddy from saved state", "err", err)
-		} else {
-			a.caddyCfg = a.cur.Caddy
+		if err := a.applyWebLocked(ctx, a.cur.Caddy, a.cur.Nginx); err != nil {
+			a.log.Error("cannot start the web server from saved state", "err", err)
 		}
 		if err := a.restartLocked(ctx, a.cur); err != nil {
 			a.log.Error("cannot start xray from saved state", "err", err)
@@ -231,7 +258,10 @@ func (a *Agent) session(ctx context.Context) error {
 	hello := &nodev1.Hello{
 		AgentVersion: a.cfg.Version, XrayVersion: a.xrayVer, AppliedHash: a.AppliedHash(),
 		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: a.cfg.Addresses(),
-		CaddyVersion: a.caddyVer, Warnings: a.warnings,
+		CaddyVersion: a.caddyVer, Warnings: a.warnings, NginxVersion: a.nginxVer,
+	}
+	if a.nginxVer != "" {
+		hello.Capabilities = append(hello.Capabilities, CapNginx)
 	}
 	if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Hello{Hello: hello}}); err != nil {
 		return err
@@ -400,8 +430,12 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 			err = a.restartLocked(ctx, a.cur)
 		}
 		a.mu.Unlock()
-	case nodev1.Command_ACTION_RESTART_CADDY:
-		err = a.caddy.Restart()
+	case nodev1.Command_ACTION_RESTART_CADDY: // the web server: nginx, or Caddy for an old panel
+		if a.nginx.Running() {
+			err = a.nginx.Restart()
+		} else {
+			err = a.caddy.Restart()
+		}
 	case nodev1.Command_ACTION_RESTART_AGENT:
 		res.Detail = "the service restarts now"
 		after = a.cfg.Restart
@@ -429,7 +463,7 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 // ApplySnapshot makes the node run the snapshot. Same structure: users are changed through the
 // Xray API without a restart. Different structure (or API failure): full config and restart.
 func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
-	next := &state.State{Revision: s.Revision, Hash: s.Hash, Config: s.XrayConfig, Caddy: s.CaddyConfig}
+	next := &state.State{Revision: s.Revision, Hash: s.Hash, Config: s.XrayConfig, Caddy: s.CaddyConfig, Nginx: s.NginxConfig}
 	for _, in := range s.Inbounds {
 		si := state.Inbound{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
 		for _, u := range in.Users {
@@ -439,25 +473,22 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	// Caddy first: the Reality target must exist before clients arrive. A Caddy failure does not
-	// stop the VPN config from applying, but the state is saved as "not fully applied" so the
+	// The web server first: the Reality target must exist before clients arrive. A failure does
+	// not stop the VPN config from applying, but the state is saved as "not fully applied" so the
 	// panel keeps retrying and shows the error.
-	caddyErr := a.caddy.Apply(ctx, next.Caddy)
-	if caddyErr != nil {
-		caddyErr = fmt.Errorf("caddy: %w", caddyErr)
-	} else {
-		a.caddyCfg = next.Caddy
+	webErr := a.applyWebLocked(ctx, next.Caddy, next.Nginx)
+	if webErr == nil {
 		a.syncFirewall(ctx) // e.g. port 80 for certificates, even if Xray then fails
 	}
 	commit := func() error {
 		defer a.syncFirewall(ctx)
-		if caddyErr != nil {
+		if webErr != nil {
 			partial := next.Clone()
 			partial.Hash = ""
 			if err := a.commitLocked(partial); err != nil {
 				return err
 			}
-			return caddyErr
+			return webErr
 		}
 		return a.commitLocked(next)
 	}
@@ -469,7 +500,7 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 		a.log.Warn("hot user sync failed, restarting xray with the full config", "err", err)
 	}
 	if err := a.restartLocked(ctx, next); err != nil {
-		return errors.Join(err, caddyErr)
+		return errors.Join(err, webErr)
 	}
 	return commit()
 }
@@ -482,7 +513,49 @@ func (a *Agent) FirewallPorts() []firewall.Port {
 	if a.cur != nil {
 		ports = append(ports, firewall.XrayPorts(a.cur.Config)...)
 	}
-	return append(ports, firewall.CaddyPorts(a.caddyCfg)...)
+	ports = append(ports, firewall.CaddyPorts(a.caddyCfg)...)
+	return append(ports, firewall.NginxPorts(a.nginxCfg)...)
+}
+
+// CapNginx is the capability of agents that run Snapshot.nginx_config.
+const CapNginx = "nginx"
+
+// applyWebLocked runs the web server a snapshot asks for: nginx when the panel sent an nginx
+// config, Caddy when an older panel sent a Caddy one. Only one runs (both want :80 and :443).
+// When the new one fails to start, the old one comes back: Reality needs its target.
+func (a *Agent) applyWebLocked(ctx context.Context, caddyCfg []byte, nginxCfg string) error {
+	if nginxCfg != "" {
+		if a.caddyCfg != nil {
+			_ = a.caddy.Apply(ctx, nil)
+		}
+		if err := a.nginx.Apply(ctx, nginxCfg); err != nil {
+			if a.caddyCfg != nil {
+				if rerr := a.caddy.Apply(ctx, a.caddyCfg); rerr != nil {
+					a.log.Error("cannot bring caddy back", "err", rerr)
+					a.caddyCfg = nil
+				}
+			}
+			return fmt.Errorf("nginx: %w", err)
+		}
+		a.caddyCfg, a.nginxCfg = nil, nginxCfg
+		return nil
+	}
+	wasNginx := a.nginxCfg
+	if wasNginx != "" {
+		_ = a.nginx.Apply(ctx, "")
+		a.nginxCfg = ""
+	}
+	if err := a.caddy.Apply(ctx, caddyCfg); err != nil {
+		a.caddyCfg = nil
+		if wasNginx != "" {
+			if rerr := a.nginx.Apply(ctx, wasNginx); rerr == nil {
+				a.nginxCfg = wasNginx
+			}
+		}
+		return fmt.Errorf("caddy: %w", err)
+	}
+	a.caddyCfg = caddyCfg
+	return nil
 }
 
 // TrustedIPs are the addresses of connected VPN users: they proved who they are with their key,
@@ -681,9 +754,9 @@ func short(h string) string {
 	return h
 }
 
-// certLoop copies renewed Caddy certificates for Xray, which re-reads its certificate files
-// every hour by itself. When a domain gets its first real certificate (it ran on a self-signed
-// placeholder until Caddy got one), Xray is restarted at once instead of an hour later.
+// certLoop renews nginx's certificates and copies them for Xray, which re-reads its certificate
+// files every hour by itself. When a domain gets its first real certificate (it ran on a
+// self-signed placeholder until then), Xray is restarted at once instead of an hour later.
 func (a *Agent) certLoop(ctx context.Context) {
 	t := time.NewTicker(a.cfg.CertInterval)
 	defer t.Stop()
@@ -692,6 +765,10 @@ func (a *Agent) certLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// May take minutes (Let's Encrypt): outside the agent lock. Renewals call OnCerts.
+			if err := a.nginx.RenewCerts(ctx); err != nil {
+				a.log.Warn("certificates", "err", err)
+			}
 			a.mu.Lock()
 			a.syncCertsLocked(ctx)
 			a.mu.Unlock()

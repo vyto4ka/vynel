@@ -19,10 +19,10 @@ import (
 	"github.com/vyto4ka/vynel/internal/xray"
 )
 
-// Diagnose writes a troubleshooting report for this node: versions, what Xray and Caddy run,
+// Diagnose writes a troubleshooting report for this node: versions, what Xray and nginx run,
 // sockets, certificates, the local Reality target, DNS, firewall and the agent's journal.
 // It never prints keys or user ids, so the report can be shared.
-func Diagnose(ctx context.Context, w io.Writer, dataDir, version string, bin xray.Binary, caddyBin string) {
+func Diagnose(ctx context.Context, w io.Writer, dataDir, version string, bin xray.Binary, caddyBin, nginxBin string) {
 	section := func(t string) { fmt.Fprintf(w, "\n===== %s =====\n", t) }
 	run := func(name string, args ...string) {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -41,7 +41,10 @@ func Diagnose(ctx context.Context, w io.Writer, dataDir, version string, bin xra
 	} else {
 		fmt.Fprintf(w, "xray: %v\n", err)
 	}
-	run(caddyBin, "version")
+	run(nginxBin, "-v")
+	if _, err := os.Stat(caddyBin); err == nil {
+		run(caddyBin, "version")
+	}
 	fmt.Fprintf(w, "time %s (Reality needs the clock within ~1 minute of the client's)\n", time.Now().UTC().Format(time.RFC3339))
 
 	section("inbounds (xray.json)")
@@ -94,16 +97,25 @@ func Diagnose(ctx context.Context, w io.Writer, dataDir, version string, bin xra
 		cancel()
 	}
 
-	section("certificates from Caddy")
-	matches, _ := filepath.Glob(filepath.Join(dataDir, "web", "caddy", "caddy", "certificates", "*", "*", "*.crt"))
-	if len(matches) == 0 {
-		fmt.Fprintln(w, "none yet: Caddy has not obtained any certificate (DNS A record? port 80 reachable from the internet?)")
+	section("nginx")
+	conf := filepath.Join(dataDir, "web", "nginx", "nginx.conf")
+	if _, err := os.Stat(conf); err != nil {
+		fmt.Fprintln(w, "no nginx config yet (the panel has not sent one, or it still sends Caddy configs)")
+	} else {
+		run(nginxBin, "-t", "-c", conf)
 	}
-	for _, m := range matches {
+
+	section("certificates")
+	matches, _ := filepath.Glob(filepath.Join(dataDir, "web", "tls", "*", "fullchain.pem"))
+	legacy, _ := filepath.Glob(filepath.Join(dataDir, "web", "caddy", "caddy", "certificates", "*", "*", "*.crt"))
+	if len(matches)+len(legacy) == 0 {
+		fmt.Fprintln(w, "none yet (DNS A record? port 80 reachable from the internet?)")
+	}
+	for _, m := range append(matches, legacy...) {
 		fmt.Fprintf(w, "- %s\n  %s\n", strings.TrimPrefix(m, dataDir+"/"), describeCert(m))
 	}
 
-	section("Reality targets (the local Caddy site)")
+	section("Reality targets (the local site)")
 	for _, t := range dedupe(targets) {
 		addr, sni, _ := strings.Cut(t, "|")
 		fmt.Fprintf(w, "- %s SNI %s: %s\n", addr, sni, probeTLS(addr, sni))
@@ -143,18 +155,41 @@ func describeCert(path string) string {
 	}
 	kind := ""
 	if len(c.Subject.Organization) > 0 && c.Subject.Organization[0] == selfSignedOrg {
-		kind = " [TEMPORARY self-signed: Caddy has no certificate for this domain yet]"
+		kind = " [TEMPORARY self-signed: no certificate for this domain yet]"
 	}
 	return fmt.Sprintf("names=%v issuer=%q valid until %s%s", c.DNSNames, c.Issuer.CommonName, c.NotAfter.UTC().Format("2006-01-02"), kind)
 }
 
 // probeTLS connects like Reality does: TLS 1.3 with h2 to the target with the client's SNI.
+// A local nginx target expects the PROXY header Reality sends (xver), so that is tried too.
 func probeTLS(addr, sni string) string {
-	d := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := tls.DialWithDialer(d, "tcp", addr, &tls.Config{ServerName: sni, NextProtos: []string{"h2", "http/1.1"},
-		MinVersion: tls.VersionTLS13, InsecureSkipVerify: true}) //nolint:gosec // only reporting what the target serves
+	cfg := &tls.Config{ServerName: sni, NextProtos: []string{"h2", "http/1.1"},
+		MinVersion: tls.VersionTLS13, InsecureSkipVerify: true} //nolint:gosec // only reporting what the target serves
+	dial := func(proxy bool) (*tls.Conn, error) {
+		raw, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			return nil, err
+		}
+		_ = raw.SetDeadline(time.Now().Add(5 * time.Second))
+		if proxy {
+			if _, err := io.WriteString(raw, "PROXY TCP4 127.0.0.1 127.0.0.1 1 1\r\n"); err != nil {
+				_ = raw.Close()
+				return nil, err
+			}
+		}
+		c := tls.Client(raw, cfg)
+		if err := c.Handshake(); err != nil {
+			_ = raw.Close()
+			return nil, err
+		}
+		return c, nil
+	}
+	conn, err := dial(false)
 	if err != nil {
-		return "FAILED: " + err.Error() + " (Reality cannot work without its target)"
+		var err2 error
+		if conn, err2 = dial(true); err2 != nil {
+			return "FAILED: " + err.Error() + " (Reality cannot work without its target)"
+		}
 	}
 	defer func() { _ = conn.Close() }()
 	st := conn.ConnectionState()

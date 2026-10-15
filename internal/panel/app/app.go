@@ -38,6 +38,8 @@ type Config struct {
 	LocalNode     service.NodeInput
 	Xray          xray.Binary
 	CaddyBin      string
+	NginxBin      string
+	WWWDir        string // nginx's public files; "" = under DataDir (tests)
 	TuneSysctl    bool
 	Firewall      bool // manage nftables (`vynel firewall on|off` decides whether rules are loaded)
 	Version       string
@@ -207,7 +209,7 @@ func Run(ctx context.Context, cfg Config) error {
 		a, err := agent.New(agent.Config{
 			DataDir: filepath.Join(cfg.DataDir, "node"), Xray: cfg.Xray, Version: cfg.Version,
 			Log: cfg.Log.With("component", "local-node"), Dial: LocalDialer(ctx, p.Reconciler, node.ID),
-			CaddyBin: cfg.CaddyBin, TuneSysctl: cfg.TuneSysctl,
+			CaddyBin: cfg.CaddyBin, NginxBin: cfg.NginxBin, WWWDir: cfg.WWWDir, TuneSysctl: cfg.TuneSysctl,
 			Firewall: fw, ExtraPorts: firewall.ListenPort(cfg.GatewayListen, "node gateway"),
 		})
 		if err != nil {
