@@ -139,6 +139,7 @@ type Node struct {
 	XrayVersion  string    `json:"xrayVersion"`
 	AgentVersion string    `json:"agentVersion"`
 	CaddyVersion string    `json:"caddyVersion"`
+	NginxVersion string    `json:"nginxVersion"`
 	Problems     []string  `json:"problems"`
 	TodayBytes   int64     `json:"todayBytes"`
 	Metrics      *Metrics  `json:"metrics"`
@@ -792,7 +793,7 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 		n := ns.Node
 		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain,
 			Local: n.Local, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
-			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
+			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, NginxVersion: n.NginxVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
 			Inbounds: []Inbound{}, Addresses: []Address{}}
 		if n.LastError != "" {
 			d.Problems = append(d.Problems, n.LastError)

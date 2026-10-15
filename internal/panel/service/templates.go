@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/vyto4ka/vynel/internal/nginxconf"
+	"github.com/vyto4ka/vynel/internal/node/nginx"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
@@ -140,7 +144,66 @@ func (s *Service) CheckTemplate(source string) (*xrayconf.Template, *xrayconf.Re
 	if err != nil {
 		return nil, nil, invalid("sample render: %v", err)
 	}
+	if t.Web() != nil {
+		if err := s.checkTemplateNginx(t, r); err != nil {
+			return nil, nil, invalid("nginx: %v", err)
+		}
+	}
 	return t, r, nil
+}
+
+// NginxCheckBin is the nginx the panel checks templates with; templates are checked without
+// it when it is not installed (nodes still run `nginx -t` before applying).
+var NginxCheckBin = nginx.DefaultBin
+
+// checkTemplateNginx builds the nginx config the sample inbound would get on its own node and
+// lets nginx check it: directives written in the template's nginx section fail here, not on a
+// node.
+func (s *Service) checkTemplateNginx(t *xrayconf.Template, sample *xrayconf.RenderedInbound) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	r := *sample
+	r.Inbound = deepCopyMap(sample.Inbound)
+	r.Template = t
+	spec, problems, err := s.nginxSpec(ctx, &store.Node{Code: xrayconf.SampleContext.Code}, []*xrayconf.RenderedInbound{&r})
+	if err != nil {
+		return err
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	conf, err := nginxconf.Build(spec)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(NginxCheckBin); err != nil {
+		return nil
+	}
+	return nginx.Check(ctx, NginxCheckBin, conf)
+}
+
+// deepCopyMap copies a decoded JSON tree, keeping value types (ints stay ints).
+func deepCopyMap(m map[string]any) map[string]any {
+	var cp func(v any) any
+	cp = func(v any) any {
+		switch t := v.(type) {
+		case map[string]any:
+			out := make(map[string]any, len(t))
+			for k, x := range t {
+				out[k] = cp(x)
+			}
+			return out
+		case []any:
+			out := make([]any, len(t))
+			for i, x := range t {
+				out[i] = cp(x)
+			}
+			return out
+		}
+		return v
+	}
+	out, _ := cp(m).(map[string]any)
+	return out
 }
 
 // SaveTemplate creates or replaces a custom template. oldID is the id being edited ("" = new);

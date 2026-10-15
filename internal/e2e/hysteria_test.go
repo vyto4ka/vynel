@@ -93,7 +93,7 @@ func TestHysteria2NextToReality(t *testing.T) {
 
 	nodeDir := filepath.Join(t.TempDir(), "node")
 	a, err := agent.New(agent.Config{
-		DataDir: nodeDir, Xray: bin, Version: "test", CaddyBin: caddyBin,
+		DataDir: nodeDir, Xray: bin, Version: "test", CaddyBin: caddyBin, NginxUser: nginxUser(),
 		Dial: app.LocalDialer(ctx, panel.Reconciler, node.ID), Log: logger("hy2-node"),
 		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond,
 		StatsInterval: 200 * time.Millisecond, CertInterval: 200 * time.Millisecond,

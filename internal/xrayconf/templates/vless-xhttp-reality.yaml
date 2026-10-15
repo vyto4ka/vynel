@@ -1,9 +1,9 @@
 # Template C — VLESS + XHTTP + REALITY self-steal (docs/PROFILES.md §8).
 # Xray owns public TCP 443; everything that is not a REALITY client is passed to the node's own
-# Caddy site on 127.0.0.1:8443, like template A. The traffic is HTTP requests (XHTTP) instead of
+# nginx site on 127.0.0.1:8443, like template A. The traffic is HTTP requests (XHTTP) instead of
 # one long raw TLS stream: session id in a cookie, sequence and padding in the query string.
 id: vless-xhttp-reality
-version: 2
+version: 3
 title: VLESS XHTTP + REALITY (self-steal)
 summary: XHTTP поверх REALITY на 443, маскировка под собственный сайт. Без Vision.
 tag_pattern: XHTTP_${NODE_CODE}
@@ -43,7 +43,7 @@ variables:
     source: const
     default: 8443
     validate: port
-    description: Локальный порт Caddy с собственным сайтом (TLS 1.3 + HTTP/2).
+    description: Локальный порт nginx с собственным сайтом (TLS 1.3 + HTTP/2).
   - name: PORT
     scope: profile
     source: const
@@ -190,7 +190,7 @@ host:
       hMaxReusableSecs: 600-1800
     noGRPCHeader: true
 
-caddy:
+nginx:
   role: selfsteal
   domain: ${NODE_DOMAIN}
   local_port: ${SELFSTEAL_PORT}

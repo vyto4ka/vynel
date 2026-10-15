@@ -67,10 +67,10 @@ export function Nodes() {
                     <button className="btn ghost icon sm" title="Изменить" onClick={() => setEditNode(n)}><Icon name="edit" /></button>
                     <Menu title="Действия" items={[
                       { label: 'Перезапустить Xray', icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'xray', 'Xray перезапущен') },
-                      { label: 'Перезапустить Caddy', icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', 'Caddy перезапущен') },
+                      { label: 'Перезапустить веб-сервер', icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', 'Веб-сервер перезапущен') },
                       { label: 'Отправить конфиг заново', icon: 'nodes', disabled: !online, onClick: () => nodeAction(n, 'resync', 'Конфиг отправлен') },
                       'divider',
-                      { label: updOf(n)?.available ? `Обновить до ${updates.data?.latest}` : 'Обновить vynel, Xray и Caddy', icon: 'refresh', disabled: !online || !!updOf(n)?.updating,
+                      { label: updOf(n)?.available ? `Обновить до ${updates.data?.latest}` : 'Обновить vynel, Xray и nginx', icon: 'refresh', disabled: !online || !!updOf(n)?.updating,
                         onClick: async () => {
                           if (await confirm(n.local ? 'Обновить панель (и ноду на её сервере)? Панель перезапустится, страница обновится сама.' : <>Обновить ноду <b>{n.name}</b>? Около минуты она будет недоступна.</>, 'Обновить', false))
                             upd.run(n.local ? 'panel' : 'node', n.id)
@@ -123,7 +123,7 @@ export function Nodes() {
                         </>
                       ) : <div className="muted small">Метрик пока нет</div>}
                       <div className="muted small" style={{ marginTop: 10 }}>
-                        Xray {n.xrayVersion || '—'} · агент {n.agentVersion || '—'}{n.caddyVersion && ` · Caddy ${n.caddyVersion}`}
+                        Xray {n.xrayVersion || '—'} · агент {n.agentVersion || '—'}{n.nginxVersion ? ` · nginx ${n.nginxVersion}` : n.caddyVersion && ` · Caddy ${n.caddyVersion}`}
                       </div>
                       {n.addresses.length > 0 && (
                         <div className="row small" style={{ marginTop: 8, gap: 6 }}>
@@ -249,7 +249,7 @@ function NodeSetup({ j, node, onClose }: { j?: JoinInfo; node?: Node; onClose: (
         <>
           <p className="text-2" style={{ marginTop: 0 }}>
             На новом сервере (Ubuntu или Debian, под root, свободные порты 80 и 443, A-запись домена ноды на его IP) выполните одну команду.
-            Она поставит vynel, Xray и Caddy, подключит ноду к панели и запустит её как службу.
+            Она поставит vynel, Xray и nginx, подключит ноду к панели и запустит её как службу.
           </p>
           <CopyField value={j.command || ''} wrap />
           <p className="muted small">Команда одноразовая и действует {j.ttl}. На панели должен быть открыт порт 9443. Окно можно не закрывать: шаги ниже отметятся сами.</p>

@@ -176,7 +176,7 @@ export function UpdateBanner() {
       <Icon name="refresh" />
       <div className="grow">
         <b>Доступна новая версия vynel · {data.latest}</b>
-        <div className="small text-2">Устарели: {what}. Обновятся vynel, Xray и Caddy, данные сохранятся.</div>
+        <div className="small text-2">Устарели: {what}. Обновятся vynel, Xray и nginx, данные сохранятся.</div>
       </div>
       <a className="btn ghost sm" href="#/nodes">Подробнее</a>
       <button className="btn primary sm" onClick={async () => {

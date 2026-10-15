@@ -58,7 +58,7 @@ func siteError(err error) string {
 	var op *net.OpError
 	switch {
 	case errors.As(err, &cert):
-		return "сертификат не подходит: Caddy ещё получает его (до пары минут) или порт 80 закрыт"
+		return "сертификат не подходит: нода ещё получает его (до пары минут) или порт 80 закрыт"
 	case errors.As(err, &dns):
 		return "домен не находится в DNS"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -98,7 +98,7 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 		return steps
 	}
 	rest := [][2]string{{"online", "Нода на связи с панелью"}, {"applied", "Конфигурация применена"}, {"xray", "Xray запущен"},
-		{"caddy", "Caddy запущен"}, {"dns", "Домен указывает на сервер"}, {"site", "Сайт ноды открывается с настоящим сертификатом"}, {"inbounds", "Есть профиль для пользователей"}}
+		{"web", "Веб-сервер установлен"}, {"dns", "Домен указывает на сервер"}, {"site", "Сайт ноды открывается с настоящим сертификатом"}, {"inbounds", "Есть профиль для пользователей"}}
 
 	// 1. The command was run: the node registered with its token.
 	if n.Local {
@@ -139,20 +139,20 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 		return waitRest(rest[2:]...), nil
 	}
 	add("applied", rest[1][1], StepOK, strings.Join(n.Warnings, "; "))
-	// 4–5. Xray and Caddy report their versions once they run.
+	// 4–5. Xray and the web server (nginx, or Caddy on an old agent) report their versions.
 	if n.XrayVersion != "" {
 		add("xray", rest[2][1], StepOK, n.XrayVersion)
 	} else {
 		add("xray", rest[2][1], StepWait, "Xray ещё не сообщил версию")
 	}
-	needCaddy := n.Domain != ""
+	web := webVersion(n)
 	switch {
-	case !needCaddy:
-		add("caddy", rest[3][1], StepSkip, "у ноды нет домена")
-	case n.CaddyVersion != "":
-		add("caddy", rest[3][1], StepOK, n.CaddyVersion)
+	case n.Domain == "":
+		add("web", rest[3][1], StepSkip, "у ноды нет домена")
+	case web != "":
+		add("web", rest[3][1], StepOK, web)
 	default:
-		add("caddy", rest[3][1], StepWait, "Caddy ещё не запущен")
+		add("web", rest[3][1], StepWait, "nginx ещё не установлен на ноде")
 	}
 	// 6. DNS of the node's domain.
 	dnsOK := true
@@ -183,7 +183,7 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 	switch {
 	case n.Domain == "":
 		add("site", rest[5][1], StepSkip, "у ноды нет домена")
-	case !dnsOK || n.CaddyVersion == "":
+	case !dnsOK || web == "":
 		add("site", rest[5][1], StepWait, "")
 	default:
 		if err := SiteCheck(ctx, n.Domain); err != nil {
@@ -209,4 +209,15 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 		add("inbounds", rest[6][1], StepOK, strings.Join(tags, ", "))
 	}
 	return steps, nil
+}
+
+// webVersion names the node's web server: nginx when its agent runs nginx, else Caddy.
+func webVersion(n *store.Node) string {
+	switch {
+	case n.Can(CapNginx) && n.NginxVersion != "":
+		return "nginx " + n.NginxVersion
+	case n.CaddyVersion != "":
+		return "Caddy " + n.CaddyVersion
+	}
+	return ""
 }

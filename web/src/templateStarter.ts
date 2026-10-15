@@ -1,7 +1,7 @@
 // Starting point for the "New template" button: a complete, working template with every
 // section explained in Russian (the panel's language). Checked by the sample render like any
 // other template.
-export const templateStarter = `# Заготовка своего шаблона: VLESS + XHTTP за Caddy на домене ноды.
+export const templateStarter = `# Заготовка своего шаблона: VLESS + XHTTP за nginx на домене ноды.
 # Строки с # — пояснения, их можно удалить. Справа две вкладки: «Проверка» пересобирает
 # шаблон на пробной ноде при каждом изменении, «Справка» описывает все поля.
 
@@ -11,7 +11,7 @@ id: my-xhttp
 version: 1
 # Название и описание — для людей, видны в списке шаблонов и при создании профиля.
 title: Мой XHTTP
-summary: VLESS + XHTTP за Caddy на домене ноды.
+summary: VLESS + XHTTP за nginx на домене ноды.
 # Тег инбаунда на ноде. \${NODE_CODE} обязателен: у каждой ноды свой тег (MYX_NL, MYX_DE).
 tag_pattern: MYX_\${NODE_CODE}
 # Как подключение называется в приложениях.
@@ -33,13 +33,13 @@ variables:
     source: input
     default_from: node.domain
     validate: domain
-    description: Домен, на котором Caddy примет подключения (A-запись на ноду).
+    description: Домен, на котором nginx примет подключения (A-запись на ноду).
   - name: XRAY_PORT
     scope: profile
     source: const
     default: 8090
     validate: port
-    description: Локальный порт Xray за Caddy, наружу не открывается.
+    description: Локальный порт Xray за nginx, наружу не открывается.
   - name: UPLINK_PATH
     scope: profile
     source: generate
@@ -91,8 +91,9 @@ host:
   alpn: [h2, http/1.1]
   fingerprint: \${FINGERPRINT}
 
-# Что поднять в Caddy на ноде: сертификат на DOMAIN и проксирование пути в Xray.
-caddy:
+# Что поднять в nginx на ноде: сертификат на DOMAIN и проксирование пути в Xray.
+# Свои директивы nginx можно вписать в location: | (внутрь location пути) и server: |.
+nginx:
   role: reverse_proxy_xhttp
   domain: \${DOMAIN}
   upstream: 127.0.0.1:\${XRAY_PORT}

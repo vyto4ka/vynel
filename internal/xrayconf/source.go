@@ -47,7 +47,7 @@ func (t *Template) SourceHost() map[string]any {
 }
 
 // WithSources returns a copy of the template whose inbound and/or host are replaced; nil keeps
-// the template's own. Variables, Caddy and lint rules stay the template's.
+// the template's own. Variables, the nginx section and lint rules stay the template's.
 func (t *Template) WithSources(inbound, host map[string]any) (*Template, error) {
 	if inbound == nil && host == nil {
 		return t, nil

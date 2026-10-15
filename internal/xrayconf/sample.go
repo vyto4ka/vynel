@@ -27,7 +27,7 @@ func sampleValue(v Variable) any {
 }
 
 // SampleRender checks a template end to end: it generates keys, fills inputs with defaults or
-// sample values, renders the inbound (with lint) and expands the host and caddy sections, so
+// sample values, renders the inbound (with lint) and expands the host and nginx sections, so
 // a typo in a ${VARIABLE} anywhere is found before the template is saved.
 func SampleRender(t *Template) (*RenderedInbound, error) {
 	profile, node := map[string]any{}, map[string]any{}
@@ -59,7 +59,7 @@ func SampleRender(t *Template) (*RenderedInbound, error) {
 		vals[k] = v
 	}
 	vals["INBOUND_PORT"], _ = r.Inbound["port"].(int)
-	for name, tree := range map[string]map[string]any{"host": t.Host, "caddy": t.Caddy} {
+	for name, tree := range map[string]map[string]any{"host": t.Host, "nginx": t.Web()} {
 		if tree == nil {
 			continue
 		}
@@ -77,7 +77,7 @@ type TemplateReference struct {
 	Derivations []string `json:"derivations"`
 	Lint        []string `json:"lint"`
 	Validations []string `json:"validations"`
-	CaddyRoles  []string `json:"caddyRoles"`
+	WebRoles    []string `json:"webRoles"`
 }
 
 // Reference returns the names known to the renderer.
@@ -107,6 +107,6 @@ func Reference() TemplateReference {
 	}
 	return TemplateReference{
 		Builtins: keys(builtinVars), Generators: keys(generators), Derivations: keys(derivations), Lint: keys(lintRules),
-		Validations: []string{"domain", "port", "path", "ip"}, CaddyRoles: []string{"selfsteal", "reverse_proxy_xhttp", "certificate"},
+		Validations: []string{"domain", "port", "path", "ip"}, WebRoles: WebRoles,
 	}
 }

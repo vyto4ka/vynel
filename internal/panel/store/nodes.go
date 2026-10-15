@@ -32,25 +32,38 @@ type Node struct {
 	StatsSeq        int64
 	Warnings        []string
 	CaddyVersion    string
+	NginxVersion    string
+	Capabilities    []string // what the agent understands beyond the original protocol ("nginx")
+}
+
+// Can reports whether the node's agent has a capability.
+func (n *Node) Can(capability string) bool {
+	for _, c := range n.Capabilities {
+		if c == capability {
+			return true
+		}
+	}
+	return false
 }
 
 const nodeCols = `id, name, code, country, domain, base_config_id, tags, local, enabled, cert_serial,
 	agent_version, xray_version, last_seen_at, desired_revision, desired_hash, applied_hash, last_error, sort,
-	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version`
+	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities`
 
 func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	n := &Node{}
 	var base, seen sql.NullInt64
-	var tags, warnings string
+	var tags, warnings, caps string
 	err := sc.Scan(&n.ID, &n.Name, &n.Code, &n.Country, &n.Domain, &base, &tags, &n.Local, &n.Enabled, &n.CertSerial,
 		&n.AgentVersion, &n.XrayVersion, &seen, &n.DesiredRevision, &n.DesiredHash, &n.AppliedHash, &n.LastError, &n.Sort,
-		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion)
+		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps)
 	if err != nil {
 		return nil, mapErr(err)
 	}
 	n.BaseConfigID, n.LastSeenAt = ptrInt(base), ptrInt(seen)
 	_ = json.Unmarshal([]byte(tags), &n.Tags)
 	_ = json.Unmarshal([]byte(warnings), &n.Warnings)
+	_ = json.Unmarshal([]byte(caps), &n.Capabilities)
 	return n, nil
 }
 
@@ -146,12 +159,24 @@ func SetNodeRuntime(ctx context.Context, q DBTX, id int64, rt NodeRuntime) error
 		rt.AgentVersion, rt.XrayVersion, rt.AppliedHash, rt.LastError, unix(), id)
 }
 
+// NodeFacts are host facts reported in Hello.
+type NodeFacts struct {
+	CaddyVersion string
+	NginxVersion string
+	Warnings     []string
+	Capabilities []string
+}
+
 // SetNodeFacts stores host facts reported in Hello.
-func SetNodeFacts(ctx context.Context, q DBTX, id int64, caddyVersion string, warnings []string) error {
-	if warnings == nil {
-		warnings = []string{}
+func SetNodeFacts(ctx context.Context, q DBTX, id int64, f NodeFacts) error {
+	if f.Warnings == nil {
+		f.Warnings = []string{}
 	}
-	return execOne(ctx, q, `UPDATE nodes SET caddy_version=?, warnings=? WHERE id=?`, caddyVersion, toJSON(warnings), id)
+	if f.Capabilities == nil {
+		f.Capabilities = []string{}
+	}
+	return execOne(ctx, q, `UPDATE nodes SET caddy_version=?, nginx_version=?, warnings=?, capabilities=? WHERE id=?`,
+		f.CaddyVersion, f.NginxVersion, toJSON(f.Warnings), toJSON(f.Capabilities), id)
 }
 
 // TouchNode updates last_seen_at.

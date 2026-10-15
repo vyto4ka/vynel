@@ -1,7 +1,7 @@
 # Template A — VLESS + Reality, self-steal (docs/PROFILES.md §3).
 # Matches the Remnawave config profile from the RemnaSetup "full node" setup.
 id: vless-reality-selfsteal
-version: 2
+version: 3
 title: VLESS Reality (self-steal)
 summary: Основной профиль. Нода маскируется под собственный сайт на своём домене.
 tag_pattern: VLESS_${NODE_CODE}
@@ -39,7 +39,7 @@ variables:
     source: const
     default: 8443
     validate: port
-    description: Локальный порт Caddy с сайтом-заглушкой.
+    description: Локальный порт nginx с сайтом-заглушкой.
   - name: PORT
     scope: profile
     source: const
@@ -99,8 +99,8 @@ host:
   short_id: ${REALITY_SHORT_ID}
   flow: xtls-rprx-vision
 
-# Used by the Caddy integration (stage 6).
-caddy:
+# The site nginx serves as Reality's target.
+nginx:
   role: selfsteal
   domain: ${NODE_DOMAIN}
   local_port: ${SELFSTEAL_PORT}

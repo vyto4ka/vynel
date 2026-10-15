@@ -17,6 +17,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/node/agent"
 	"github.com/vyto4ka/vynel/internal/node/caddy"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
+	"github.com/vyto4ka/vynel/internal/node/nginx"
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/ca"
 	"github.com/vyto4ka/vynel/internal/panel/gateway"
@@ -220,9 +221,28 @@ func Run(ctx context.Context, cfg Config) error {
 		trustedVPN = a.TrustedIPs
 		cfg.Log.Info("local node enabled", "node", node.Code)
 		run("local node", func() error { return a.Run(ctx) })
+	} else if web := filepath.Join(cfg.DataDir, "web"); (&nginx.Manager{Bin: cfg.NginxBin}).Available() {
+		// No local node: the panel runs nginx itself for the subscription and panel domains.
+		m := &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: cfg.WWWDir, Log: cfg.Log.With("component", "nginx"),
+			CaddyStorage: filepath.Join(web, "caddy", "caddy")}
+		if err := m.Init(); err != nil {
+			return err
+		}
+		defer m.Close()
+		run("nginx", func() error { return panelNginxLoop(ctx, p.Service, m, cfg.Log) })
+		if fw != nil {
+			gw := firewall.ListenPort(cfg.GatewayListen, "node gateway")
+			run("firewall", func() error {
+				fw.Loop(ctx, 15*time.Second, func() []firewall.Port {
+					c, _ := p.Service.PanelNginxConfig(ctx)
+					return append(firewall.NginxPorts(c), gw...)
+				})
+				return nil
+			})
+		}
 	} else {
-		// No local node: the panel runs Caddy itself for the subscription domain.
-		m := &caddy.Manager{Bin: cfg.CaddyBin, DataDir: filepath.Join(cfg.DataDir, "web"), Log: cfg.Log.With("component", "caddy")}
+		// Without nginx (not installed yet): Caddy, as before.
+		m := &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")}
 		defer m.Close()
 		run("caddy", func() error { return panelCaddyLoop(ctx, p.Service, m, cfg.Log) })
 		if fw != nil {
@@ -256,6 +276,44 @@ func LocalDialer(ctx context.Context, rec *reconciler.Reconciler, nodeID int64) 
 			nodeEnd.Close()
 		}()
 		return nodeEnd, nil
+	}
+}
+
+// panelNginxLoop keeps the panel's own nginx in line with the subscription and panel settings
+// and renews its certificates.
+func panelNginxLoop(ctx context.Context, svc *service.Service, m *nginx.Manager, log *slog.Logger) error {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	var lastErr string
+	go func() {
+		for {
+			if err := m.RenewCerts(ctx); err != nil {
+				log.Warn("panel certificates", "err", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Minute):
+			}
+		}
+	}()
+	for {
+		conf, err := svc.PanelNginxConfig(ctx)
+		if err == nil {
+			err = m.Apply(ctx, conf)
+		}
+		if err != nil && err.Error() != lastErr {
+			log.Error("panel nginx", "err", err)
+		}
+		lastErr = ""
+		if err != nil {
+			lastErr = err.Error()
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
 	}
 }
 

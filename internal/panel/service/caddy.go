@@ -83,12 +83,12 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 
 	var sites []caddyconf.Site
 	for _, r := range inbounds {
-		if r.Template == nil || r.Template.Caddy == nil {
+		if r.Template == nil || r.Template.Web() == nil {
 			continue
 		}
 		vals := copyMap(r.Values)
 		vals["INBOUND_PORT"], _ = r.Inbound["port"].(int)
-		cm, err := xrayconf.ExpandTree(r.Template.Caddy, vals)
+		cm, err := xrayconf.ExpandTree(r.Template.Web(), vals)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: caddy: %v", r.Tag, err))
 			continue

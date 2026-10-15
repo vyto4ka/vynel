@@ -354,8 +354,8 @@ func (s *Service) Node(ctx context.Context, id int64) (*store.Node, error) {
 
 // NodeActions are the admin actions on a node (the panel's «Действия» menu).
 var NodeActions = map[string]string{
-	"xray": "перезапустить Xray", "caddy": "перезапустить Caddy", "resync": "отправить конфиг заново",
-	"service": "перезапустить службу vynel", "reboot": "перезагрузить сервер", "update": "обновить vynel, Xray и Caddy",
+	"xray": "перезапустить Xray", "caddy": "перезапустить веб-сервер", "resync": "отправить конфиг заново",
+	"service": "перезапустить службу vynel", "reboot": "перезагрузить сервер", "update": "обновить vynel, Xray и nginx",
 }
 
 // LogNodeAction records an admin action on a node in the audit log.

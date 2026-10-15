@@ -39,7 +39,8 @@ type Template struct {
 	XrayInbound   string         `yaml:"xray_inbound" json:"-"`
 	XHTTPExtra    string         `yaml:"xhttp_extra" json:"-"`
 	Host          map[string]any `yaml:"host" json:"host,omitempty"`
-	Caddy         map[string]any `yaml:"caddy" json:"caddy,omitempty"`
+	Nginx         map[string]any `yaml:"nginx" json:"nginx,omitempty"`
+	Caddy         map[string]any `yaml:"caddy" json:"caddy,omitempty"` // the old name of the nginx section
 	Requirements  map[string]any `yaml:"node_requirements" json:"node_requirements,omitempty"`
 
 	Custom bool   `yaml:"-" json:"custom"` // written in the panel, editable
@@ -94,6 +95,70 @@ func (t *Template) parse() error {
 		if _, ok := lintRules[rule]; !ok {
 			return fmt.Errorf("template %s: unknown lint rule %q", t.ID, rule)
 		}
+	}
+	if t.Nginx != nil && t.Caddy != nil {
+		return fmt.Errorf("template %s: both nginx and caddy sections (caddy is the old name of nginx, keep one)", t.ID)
+	}
+	if err := checkWeb(t.Web()); err != nil {
+		return fmt.Errorf("template %s: nginx: %w", t.ID, err)
+	}
+	return nil
+}
+
+// Web is the template's web server section: what nginx serves for the inbound
+// (docs/PROFILES.md §1.3). Templates written for Caddy call it "caddy".
+func (t *Template) Web() map[string]any {
+	if t.Nginx != nil {
+		return t.Nginx
+	}
+	return t.Caddy
+}
+
+// WebRoles are the roles of the nginx section.
+var WebRoles = []string{"selfsteal", "reverse_proxy_xhttp", "certificate"}
+
+// webKeys are the keys of the nginx section and what they hold.
+var webKeys = map[string]string{
+	"role": "string", "domain": "string", "local_port": "scalar", "decoy": "string", "upstream": "string",
+	"path": "string", "server_names": "list", "location": "string", "server": "string",
+}
+
+func checkWeb(w map[string]any) error {
+	if w == nil {
+		return nil
+	}
+	role, _ := w["role"].(string)
+	known := false
+	for _, r := range WebRoles {
+		known = known || r == role
+	}
+	if !known {
+		return fmt.Errorf("role %q is not one of %v", role, WebRoles)
+	}
+	for k, v := range w {
+		kind, ok := webKeys[k]
+		if !ok {
+			return fmt.Errorf("unknown key %q", k)
+		}
+		switch kind {
+		case "string":
+			if _, ok := v.(string); !ok {
+				return fmt.Errorf("%s must be a string", k)
+			}
+		case "list":
+			l, ok := v.([]any)
+			if !ok {
+				return fmt.Errorf("%s must be a list", k)
+			}
+			for _, x := range l {
+				if _, ok := x.(string); !ok {
+					return fmt.Errorf("%s must list strings", k)
+				}
+			}
+		}
+	}
+	if w["location"] != nil && role != "reverse_proxy_xhttp" {
+		return fmt.Errorf("location is for role reverse_proxy_xhttp")
 	}
 	return nil
 }

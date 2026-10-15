@@ -157,6 +157,7 @@ export interface Node {
   xrayVersion: string
   agentVersion: string
   caddyVersion: string
+  nginxVersion: string
   problems: string[]
   todayBytes: number
   metrics: {

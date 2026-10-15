@@ -291,12 +291,15 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		if err := store.SetNodeRuntime(ctx, svc.Store().DB, s.nodeID, store.NodeRuntime{AgentVersion: h.AgentVersion, XrayVersion: h.XrayVersion, AppliedHash: h.AppliedHash}); err != nil {
 			return err
 		}
-		if err := store.SetNodeFacts(ctx, svc.Store().DB, s.nodeID, h.CaddyVersion, h.Warnings); err != nil {
+		facts := store.NodeFacts{CaddyVersion: h.CaddyVersion, NginxVersion: h.NginxVersion, Warnings: h.Warnings, Capabilities: h.Capabilities}
+		if err := store.SetNodeFacts(ctx, svc.Store().DB, s.nodeID, facts); err != nil {
 			return err
 		}
 		for _, w := range h.Warnings {
 			s.r.log.Warn("node warning", "node", s.nodeID, "warning", w)
 		}
+		// What the node can run decides its config (nginx or Caddy): recompute with its facts.
+		s.r.Notify()
 	case *nodev1.NodeMessage_Addresses:
 		return svc.SyncAddresses(ctx, s.nodeID, toReported(m.Addresses.Addresses))
 	case *nodev1.NodeMessage_Update:
@@ -485,7 +488,7 @@ func (s *session) next() *nodev1.PanelMessage {
 		return nil
 	}
 	s.pending, s.pendingAt = ds, now
-	if s.applied != nil && bytes.Equal(s.applied.Config, ds.Config) && bytes.Equal(s.applied.Caddy, ds.Caddy) {
+	if s.applied != nil && bytes.Equal(s.applied.Config, ds.Config) && bytes.Equal(s.applied.Caddy, ds.Caddy) && s.applied.Nginx == ds.Nginx {
 		return &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Delta{Delta: Delta(s.applied, ds, rev)}}
 	}
 	return &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Snapshot{Snapshot: Snapshot(ds, rev)}}
@@ -493,7 +496,7 @@ func (s *session) next() *nodev1.PanelMessage {
 
 // Snapshot converts a desired state to the wire format.
 func Snapshot(ds *service.DesiredState, rev int64) *nodev1.Snapshot {
-	snap := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config, CaddyConfig: ds.Caddy}
+	snap := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config, CaddyConfig: ds.Caddy, NginxConfig: ds.Nginx}
 	for _, in := range ds.Inbounds {
 		iu := &nodev1.InboundUsers{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
 		for _, c := range ds.Users[in.Tag] {

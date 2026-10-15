@@ -41,7 +41,7 @@ func TestNodeChecklist(t *testing.T) {
 	if err := store.SetNodeRuntime(f.ctx, f.s.st.DB, n.ID, store.NodeRuntime{AppliedHash: "h1", XrayVersion: "26.1.1", AgentVersion: "dev"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetNodeFacts(f.ctx, f.s.st.DB, n.ID, "2.10.0", nil); err != nil {
+	if err := store.SetNodeFacts(f.ctx, f.s.st.DB, n.ID, store.NodeFacts{NginxVersion: "1.24.0", Capabilities: []string{CapNginx}}); err != nil {
 		t.Fatal(err)
 	}
 	st := states(true)

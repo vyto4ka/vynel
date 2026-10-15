@@ -20,7 +20,7 @@ export function Profiles() {
         <div className="text-2 grow small">
           {tab === 'profiles'
             ? 'Профиль — общие настройки VLESS-инбаунда по шаблону. На каждой ноде из профиля получается свой инбаунд со своими ключами.'
-            : 'Шаблон — заготовка профиля: JSON инбаунда Xray с переменными, точка подключения для подписки и роль Caddy. Свой шаблон — кнопка «Новый шаблон» (заготовка с пояснениями) или копия встроенного.'}
+            : 'Шаблон — заготовка профиля: JSON инбаунда Xray с переменными, точка подключения для подписки и роль nginx. Свой шаблон — кнопка «Новый шаблон» (заготовка с пояснениями) или копия встроенного.'}
         </div>
       </div>
       {tab === 'profiles' ? <ProfileList /> : <TemplateList />}
@@ -440,7 +440,7 @@ function TemplateList() {
 }
 
 type CheckResult = { ok: boolean; error?: string; id?: string; title?: string; variables?: Variable[]; sample?: Record<string, unknown> }
-type Reference = { reference: { builtins: string[]; generators: string[]; derivations: string[]; lint: string[]; validations: string[]; caddyRoles: string[] } }
+type Reference = { reference: { builtins: string[]; generators: string[]; derivations: string[]; lint: string[]; validations: string[]; webRoles: string[] } }
 
 function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }: { id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean; onClose: () => void; onSaved: () => void }) {
   const [text, setText] = useState(source)
@@ -521,7 +521,7 @@ const refHelp: Record<string, string> = {
   xhttp_server_max_header_bytes: 'serverMaxHeaderBytes не меньше 65536 (данные в куках)',
   selfsteal: 'сайт-заглушка для Reality: domain, local_port, decoy',
   reverse_proxy_xhttp: 'TLS на domain и проксирование path в upstream (Xray на 127.0.0.1)',
-  certificate: 'Caddy только получает сертификат domain для инбаунда (Hysteria2)',
+  certificate: 'nginx только получает сертификат domain для инбаунда (Hysteria2)',
 }
 
 function TemplateHelp({ r }: { r?: Reference['reference'] }) {
@@ -534,11 +534,11 @@ function TemplateHelp({ r }: { r?: Reference['reference'] }) {
     <div className="small text-2 template-help">
       <p><b>Как добавить свой шаблон</b></p>
       <ol className="list-plain">
-        <li>«Новый шаблон» открывает рабочую заготовку (VLESS + XHTTP за Caddy) с пояснениями прямо в тексте. Если схема похожа на встроенную, удобнее «Скопировать и изменить» её.</li>
+        <li>«Новый шаблон» открывает рабочую заготовку (VLESS + XHTTP за nginx) с пояснениями прямо в тексте. Если схема похожа на встроенную, удобнее «Скопировать и изменить» её.</li>
         <li>Задайте свой <code>id</code>, <code>title</code> и <code>tag_pattern</code> (префикс тега не должен совпадать с другими шаблонами).</li>
         <li>Вставьте свой инбаунд Xray в <code>xray_inbound</code>. Всё, что отличается между нодами (домен, ключи, shortId), замените на <code>{'${ПЕРЕМЕННЫЕ}'}</code> и опишите их в <code>variables</code>. Список <code>clients</code> оставьте пустым: пользователи добавляются сами.</li>
         <li>В <code>host</code> опишите, что уйдёт клиентам в подписку: адрес, порт, SNI, отпечаток.</li>
-        <li>Если инбаунд стоит за Caddy (TLS на своём домене или сайт-заглушка), добавьте раздел <code>caddy</code>.</li>
+        <li>Если инбаунд стоит за nginx (TLS на своём домене или сайт-заглушка), добавьте раздел <code>nginx</code>. Готовый конфиг nginx из инструкции вставляется в него как есть: <code>location: |</code> и <code>server: |</code>.</li>
         <li>Смотрите вкладку «Проверка»: после каждой правки шаблон собирается на пробной ноде NL, ошибка показывается там же. Сохранить можно только рабочий шаблон.</li>
         <li>Дальше: «Профили» → «Профиль» → выберите шаблон; потом в «Нодах» добавьте профиль на ноды. Переменные с <code>scope: node</code> вводятся при добавлении на ноду.</li>
       </ol>
@@ -550,11 +550,15 @@ function TemplateHelp({ r }: { r?: Reference['reference'] }) {
         <li><code>tag_pattern</code> — тег инбаунда, обязательно с <code>{'${NODE_CODE}'}</code>: <code>MYX_{'${NODE_CODE}'}</code> → MYX_NL. <code>remark_pattern</code> — название подключения в приложениях.</li>
         <li><code>protocol</code> — <code>vless</code> или <code>hysteria</code>. <code>client.flow</code> — flow клиентов (для Reality по TCP: <code>xtls-rprx-vision</code>, иначе пусто).</li>
         <li><code>variables</code> — переменные, ниже подробно.</li>
-        <li><code>xray_inbound</code> — JSON инбаунда Xray с <code>{'${ПЕРЕМЕННЫМИ}'}</code>. Переменная, которая стоит в строке целиком, подставляется со своим типом: <code>"port": "{'${XRAY_PORT}'}"</code> станет числом. Пути к сертификатам на ноде — метками: <code>vynel:cert:домен</code>, <code>vynel:key:домен</code> (сертификат Caddy), <code>vynel:decoy:сайт</code>.</li>
+        <li><code>xray_inbound</code> — JSON инбаунда Xray с <code>{'${ПЕРЕМЕННЫМИ}'}</code>. Переменная, которая стоит в строке целиком, подставляется со своим типом: <code>"port": "{'${XRAY_PORT}'}"</code> станет числом. Пути к сертификатам на ноде — метками: <code>vynel:cert:домен</code>, <code>vynel:key:домен</code> (сертификат, который получает нода), <code>vynel:decoy:сайт</code>.</li>
         <li><code>xhttp_extra</code> — extra для XHTTP, в инбаунде подставляется как <code>"{'${XHTTP_EXTRA}'}"</code>. Клиенты получают тот же extra, если в <code>host</code> не задано иное.</li>
         <li><code>host</code> — точка подключения в подписке: <code>address</code>, <code>port</code> (можно <code>{'${INBOUND_PORT}'}</code>), <code>security</code> (tls, reality), <code>sni</code>, <code>host</code>, <code>path</code>, <code>alpn</code>, <code>fingerprint</code>, <code>public_key</code>, <code>short_id</code>, <code>flow</code>, <code>network</code>, <code>mode</code>.
           Для XHTTP: <code>xhttp_client_extra</code> — полный клиентский extra вместо серверного (когда у сервера и клиента разные ключи), <code>xhttp_client_only</code> — ключи поверх серверного (например xmux). <code>mihomo: true</code> — отдавать XHTTP в Mihomo (1.19+).</li>
-        <li><code>caddy</code> — что поднять в Caddy на ноде: <code>role</code> (ниже), <code>domain</code>, <code>local_port</code> или <code>upstream</code>, <code>path</code>, <code>decoy</code>. Без раздела Caddy не трогается.</li>
+        <li><code>nginx</code> — что поднять в nginx на ноде: <code>role</code> (ниже), <code>domain</code> (на него получается сертификат), <code>local_port</code> или <code>upstream</code>, <code>path</code>, <code>decoy</code>.
+          <code>server_names</code> — ещё имена этого сайта без своего сертификата (домен CDN, который тот пересылает в Host).
+          <code>location: |</code> — свои директивы внутри <code>location</code> пути вместо стандартного прокси (для роли reverse_proxy_xhttp), <code>server: |</code> — директивы уровня <code>server</code>.
+          Переменные nginx пишутся как обычно (<code>$host</code>), а <code>{'${ИМЯ}'}</code> — это переменные шаблона. Нельзя: <code>include</code>, <code>load_module</code>, сертификаты и пути вне сайта. Шаблон проверяется настоящим <code>nginx -t</code>.
+          Старое имя раздела <code>caddy</code> тоже работает.</li>
         <li><code>node_requirements</code> — порты, DNS-записи и sysctl; попадают в чек-лист ноды.</li>
         <li><code>lint</code> — дополнительные проверки готового инбаунда (ниже).</li>
       </ul>
@@ -574,7 +578,7 @@ function TemplateHelp({ r }: { r?: Reference['reference'] }) {
       <p><b>Вычисления</b> (<code>source: derived</code>, <code>from: …</code>)</p>{list(r?.derivations)}
       <p><b>Проверки значений</b> (<code>validate</code>)</p>{list(r?.validations)}
       <p><b>Проверки инбаунда</b> (<code>lint</code>)</p>{list(r?.lint)}
-      <p><b>Роли Caddy</b> (<code>caddy.role</code>)</p>{list(r?.caddyRoles)}
+      <p><b>Роли nginx</b> (<code>nginx.role</code>)</p>{list(r?.webRoles)}
       <p className="muted">Подробно — docs/PROFILES.md. При проверке ключи генерируются, а вводимые переменные получают примерные значения.</p>
     </div>
   )

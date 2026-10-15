@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/vyto4ka/vynel/internal/caddyconf"
+	"github.com/vyto4ka/vynel/internal/nginxconf"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
@@ -31,7 +32,8 @@ type DesiredInbound struct {
 type DesiredState struct {
 	NodeID   int64
 	Config   []byte
-	Caddy    []byte // Caddy JSON config; nil = Caddy not needed
+	Caddy    []byte // Caddy JSON config for agents without nginx; nil = Caddy not needed
+	Nginx    string // nginx config for agents with the "nginx" capability; "" = no web server
 	Inbounds []DesiredInbound
 	Users    map[string][]xrayconf.Client // by inbound tag, sorted by email
 	Hash     string
@@ -127,8 +129,17 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 				ds.Users[r.Tag] = clients
 			}
 		}
-		// Caddy first: it tells Reality inbounds that front it to pass the client address on.
-		spec, problems, err := s.caddySpec(ctx, n, rendered)
+		// The web server first: it changes Reality inbounds that front it or sit behind its SNI
+		// router. Agents that can run nginx get nginx; older ones keep getting Caddy.
+		var caddySpec caddyconf.Spec
+		var nginxSpec nginxconf.Spec
+		var problems []string
+		useNginx := n.Can(CapNginx)
+		if useNginx {
+			nginxSpec, problems, err = s.nginxSpec(ctx, n, rendered)
+		} else {
+			caddySpec, problems, err = s.caddySpec(ctx, n, rendered)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +157,12 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 			return nil, err
 		}
 		ds.Problems = append(ds.Problems, problems...)
-		if ds.Caddy, err = caddyconf.Build(spec); err != nil {
+		if useNginx {
+			if ds.Nginx, err = nginxconf.Build(nginxSpec); err != nil {
+				ds.Problems = append(ds.Problems, "nginx: "+err.Error())
+				ds.Nginx = ""
+			}
+		} else if ds.Caddy, err = caddyconf.Build(caddySpec); err != nil {
 			ds.Problems = append(ds.Problems, "caddy: "+err.Error())
 			ds.Caddy = nil
 		}
@@ -192,6 +208,9 @@ func hashState(ds *DesiredState) string {
 	h.Write(ds.Config)
 	h.Write([]byte("\x00caddy"))
 	h.Write(ds.Caddy)
+	if ds.Nginx != "" {
+		h.Write([]byte("\x00nginx" + ds.Nginx))
+	}
 	tags := make([]string, 0, len(ds.Users))
 	for t := range ds.Users {
 		tags = append(tags, t)

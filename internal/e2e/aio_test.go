@@ -80,7 +80,7 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	restarted := make(chan string, 2)
 	var updState atomic.Pointer[update.Status]
 	a, err := agent.New(agent.Config{
-		DataDir: filepath.Join(t.TempDir(), "node"), Xray: bin, Version: "test", CaddyBin: caddyBin,
+		DataDir: filepath.Join(t.TempDir(), "node"), Xray: bin, Version: "test", CaddyBin: caddyBin, NginxUser: nginxUser(),
 		Dial: app.LocalDialer(ctx, panel.Reconciler, node.ID), Log: logger("aio-node"),
 		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond, StatsInterval: 200 * time.Millisecond,
 		Restart: func() { restarted <- "service" }, Reboot: func() error { restarted <- "reboot"; return nil },
@@ -108,7 +108,7 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	t.Cleanup(func() { cancel(); <-done; a.Close() })
 	xraytest.Eventually(t, wait, "node converges (xray + caddy)", inSync(ctx, svc, node.Code))
 
-	// A browser on the public port sees an ordinary website with no server banner.
+	// A browser on the public port sees an ordinary website.
 	web := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{ServerName: domain, InsecureSkipVerify: true}, // internal CA in tests
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -128,7 +128,8 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 		if resp.StatusCode != 200 || !strings.Contains(page, "<header><b>") {
 			return fmt.Errorf("status %d body %.80q", resp.StatusCode, page)
 		}
-		if s := resp.Header.Get("Server"); s != "" {
+		// A plain "nginx", like most of the web; never a version.
+		if s := resp.Header.Get("Server"); s != "" && s != "nginx" {
 			return fmt.Errorf("server banner %q", s)
 		}
 		return nil
@@ -291,4 +292,12 @@ func decodeLinks(t *testing.T, body []byte) []string {
 		t.Fatalf("subscription is not base64: %q", body)
 	}
 	return strings.Split(raw, "\n")
+}
+
+// nginxUser runs nginx workers as root in tests: temp dirs are not readable by www-data.
+func nginxUser() string {
+	if os.Getuid() == 0 {
+		return "root"
+	}
+	return ""
 }

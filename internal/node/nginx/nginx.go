@@ -517,3 +517,32 @@ func lastLines(s string, n int) string {
 	}
 	return strings.Join(lines, " | ")
 }
+
+// Check runs `nginx -t` on a config built by nginxconf, with placeholder certificates in a
+// temporary directory (the panel checks profile templates this way).
+func Check(ctx context.Context, bin, conf string) error {
+	if conf == "" {
+		return nil
+	}
+	dir, err := os.MkdirTemp("", "vynel-nginx-check-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	m := &Manager{Bin: bin, DataDir: filepath.Join(dir, "data"), WWWDir: filepath.Join(dir, "www"), User: "nobody nogroup", Log: slog.New(slog.DiscardHandler)}
+	if err := m.Init(); err != nil {
+		return err
+	}
+	if _, err := m.Certs.Ensure(nginxconf.CertDomains(conf)); err != nil {
+		return err
+	}
+	final, err := m.finalize(ctx, conf)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(m.DataDir, "nginx", "nginx.conf")
+	if err := os.WriteFile(path, []byte(final), 0o600); err != nil {
+		return err
+	}
+	return m.test(ctx, path)
+}
