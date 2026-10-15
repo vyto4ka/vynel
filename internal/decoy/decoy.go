@@ -4,12 +4,18 @@
 package decoy
 
 import (
+	"crypto/rand"
 	"embed"
 	"fmt"
 	"io/fs"
+	"math/big"
+	"mime"
+	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 //go:embed sites
@@ -65,4 +71,37 @@ func Install(dir, name string) (string, error) {
 		return os.WriteFile(target, b, 0o644)
 	})
 	return dst, err
+}
+
+// Random picks a site, for a new node or panel.
+func Random() string {
+	names := Names()
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(names))))
+	if err != nil {
+		return names[0]
+	}
+	return names[n.Int64()]
+}
+
+// Serve answers a request with a site the way nginx serves it: clean URLs (/about is
+// about.html or about/index.html), the site's 404 page for anything else.
+func Serve(w http.ResponseWriter, r *http.Request, name string) {
+	if !Valid(name) {
+		name = Names()[0]
+	}
+	p := path.Clean("/" + r.URL.Path)
+	for _, c := range []string{p, p + ".html", path.Join(p, "index.html")} {
+		f := "sites/" + name + c
+		if st, err := fs.Stat(sites, f); err == nil && !st.IsDir() && !strings.HasSuffix(c, "/404.html") {
+			b, _ := sites.ReadFile(f)
+			if ct := mime.TypeByExtension(path.Ext(f)); ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
+			_, _ = w.Write(b)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write(NotFound(name))
 }

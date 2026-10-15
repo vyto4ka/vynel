@@ -125,7 +125,7 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
 		page = string(b)
-		if resp.StatusCode != 200 || !strings.Contains(page, "<header><b>") {
+		if resp.StatusCode != 200 || !strings.Contains(page, `class="brand"`) {
 			return fmt.Errorf("status %d body %.80q", resp.StatusCode, page)
 		}
 		// A plain "nginx", like most of the web; never a version.

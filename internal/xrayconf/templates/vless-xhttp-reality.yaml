@@ -99,7 +99,7 @@ variables:
     scope: node
     source: generate
     generator: path
-    options: [cloud, studio, docs]
+    options: [cloud, studio, docs, coffee, journal]
     default: cloud
     description: Сайт, который видит всё, что не является REALITY-клиентом.
 

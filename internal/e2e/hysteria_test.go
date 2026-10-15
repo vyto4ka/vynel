@@ -149,7 +149,7 @@ func TestHysteria2NextToReality(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != 200 || !strings.Contains(string(b), "<header><b>") {
+		if resp.StatusCode != 200 || !strings.Contains(string(b), `class="brand"`) {
 			return fmt.Errorf("status %d body %.80q", resp.StatusCode, b)
 		}
 		if sum := sha256.Sum256(resp.TLS.PeerCertificates[0].Raw); hex.EncodeToString(sum[:]) != pin {

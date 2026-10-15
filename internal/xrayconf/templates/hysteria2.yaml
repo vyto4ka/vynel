@@ -36,7 +36,7 @@ variables:
     scope: node
     source: generate
     generator: path
-    options: [cloud, studio, docs]
+    options: [cloud, studio, docs, coffee, journal]
     default: cloud
     description: Сайт-заглушка — его отдают и nginx, и Hysteria тем, кто пришёл без пароля (masquerade).
   - name: UDP_IDLE_TIMEOUT

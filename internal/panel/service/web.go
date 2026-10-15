@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/vyto4ka/vynel/internal/decoy"
 	"github.com/vyto4ka/vynel/internal/jointoken"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
@@ -70,6 +71,14 @@ func (s *Service) EnsureWebDefaults(ctx context.Context) error {
 			return err
 		}
 		if err := s.SetSetting(ctx, ActorSystem, SettingWebPath, "/"+r+"/"); err != nil {
+			return err
+		}
+	}
+	// The panel's own domain gets a decoy from the pool, like every node does.
+	if d, err := s.Setting(ctx, SettingSubDecoy, ""); err != nil {
+		return err
+	} else if d == "" {
+		if err := s.SetSetting(ctx, ActorSystem, SettingSubDecoy, decoy.Random()); err != nil {
 			return err
 		}
 	}

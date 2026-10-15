@@ -3,22 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fieldnotes Docs</title>
-<style>
-body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1d2330;background:#f6f7f9}
-header{padding:18px 32px;background:#fff;border-bottom:1px solid #e4e7ec;display:flex;justify-content:space-between;align-items:center}
-header b{color:#0b7a75;font-size:18px}nav a{margin-left:20px;color:#5b6475;text-decoration:none;font-size:14px}
-main{max-width:880px;margin:64px auto;padding:0 24px}h1{font-size:40px;margin:0 0 16px}p{color:#5b6475;line-height:1.6;font-size:17px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:40px}
-.card{background:#fff;border:1px solid #e4e7ec;border-radius:10px;padding:20px}.card h3{margin:0 0 8px;font-size:16px}
-footer{text-align:center;color:#98a1b3;font-size:13px;padding:48px 0}
-</style>
+<title>Stackdocs — documentation for the Stack toolkit</title>
+<meta name="description" content="Documentation for the Stack toolkit: guides, API reference and changelog.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/site.css">
 </head>
 <body>
-<header><b>Fieldnotes Docs</b><nav><a href="/">Home</a><a href="/">About</a><a href="/">Contact</a></nav></header>
+<header><div class="wrap bar"><a class="brand" href="/"><svg viewBox="0 0 32 32"><rect x="5" y="6" width="22" height="5" rx="2" fill="#0f9d76"/><rect x="5" y="13.5" width="22" height="5" rx="2" fill="#0f9d76" opacity=".7"/><rect x="5" y="21" width="22" height="5" rx="2" fill="#0f9d76" opacity=".4"/></svg><b>Stackdocs</b></a><nav><a href="/" class="on">Overview</a><a href="/getting-started">Getting started</a><a href="/guides">Guides</a><a href="/api">API</a><a href="/changelog">Changelog</a></nav></div></header>
 <main>
-<h1>Documentation</h1><p>Guides and reference for the Fieldnotes API. Start with the quickstart, then explore authentication, webhooks and rate limits.</p><div class="cards"><div class="card"><h3>Quickstart</h3><p>Make your first request in five minutes.</p></div><div class="card"><h3>Authentication</h3><p>API keys and OAuth 2.0.</p></div><div class="card"><h3>Webhooks</h3><p>Receive events in real time.</p></div></div>
+<section class="hero"><div class="wrap">
+<div class="kicker">v3.4 documentation</div>
+<h1>Build data pipelines<br>with plain functions.</h1>
+<p class="lead">Stack is an open-source toolkit for small, testable data pipelines. Write steps as functions, run them locally, schedule them anywhere.</p>
+<div class="row"><a class="btn" href="/getting-started">Get started</a><a class="btn ghost" href="/api">API reference</a></div>
+</div></section>
+<section class="band"><div class="wrap grid">
+<div class="card"><h3>Install</h3><p class="muted">One package, no daemon. Python 3.10 or newer.</p></div>
+<div class="card"><h3>Test</h3><p class="muted">Every step is a function: test it with the tools you already use.</p></div>
+<div class="card"><h3>Run</h3><p class="muted">Locally, in a container, or on any scheduler that runs a command.</p></div>
+</div></section>
 </main>
-<footer>&copy; Fieldnotes Docs</footer>
+<footer><div class="wrap foot"><span>&copy; 2026 Stackdocs contributors</span><span>Licensed under Apache 2.0</span></div></footer>
 </body>
 </html>

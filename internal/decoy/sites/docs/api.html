@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API reference — Stackdocs</title>
+<meta name="description" content="Documentation for the Stack toolkit: guides, API reference and changelog.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+<header><div class="wrap bar"><a class="brand" href="/"><svg viewBox="0 0 32 32"><rect x="5" y="6" width="22" height="5" rx="2" fill="#0f9d76"/><rect x="5" y="13.5" width="22" height="5" rx="2" fill="#0f9d76" opacity=".7"/><rect x="5" y="21" width="22" height="5" rx="2" fill="#0f9d76" opacity=".4"/></svg><b>Stackdocs</b></a><nav><a href="/">Overview</a><a href="/getting-started">Getting started</a><a href="/guides">Guides</a><a href="/api" class="on">API</a><a href="/changelog">Changelog</a></nav></div></header>
+<main>
+<section><div class="wrap"><div class="kicker">API reference</div><h2>stack</h2>
+<table><tr><th>Name</th><th>Description</th></tr>
+<tr><td><code>step(fn)</code></td><td>Marks a function as a pipeline step.</td></tr>
+<tr><td><code>pipeline(*steps)</code></td><td>Connects steps; the output of one is the input of the next.</td></tr>
+<tr><td><code>run(p, **kwargs)</code></td><td>Runs a pipeline in the current process.</td></tr>
+<tr><td><code>retry(times, delay)</code></td><td>Decorator that retries a step on failure.</td></tr>
+<tr><td><code>Context</code></td><td>Run metadata available to every step.</td></tr></table></div></section>
+</main>
+<footer><div class="wrap foot"><span>&copy; 2026 Stackdocs contributors</span><span>Licensed under Apache 2.0</span></div></footer>
+</body>
+</html>
