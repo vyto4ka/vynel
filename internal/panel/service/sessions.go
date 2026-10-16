@@ -65,8 +65,21 @@ const (
 
 // Notice is something the bot tells the admins about right away.
 type Notice struct {
-	Kind    string // login | ended
+	Kind    string // login | ended | login-blocked
 	Session *store.WebSession
+	// login-blocked: the address that kept failing to sign in, how often, and until when it
+	// may not try again.
+	IP    string
+	Fails int
+	Until time.Time
+}
+
+// LoginBlocked records that an address failed to sign in too often and is refused for a
+// while: an audit entry and a message to the admins.
+func (s *Service) LoginBlocked(ctx context.Context, ip string, fails int, until time.Time) {
+	diff, _ := json.Marshal(map[string]any{"ip": ip, "fails": fails, "until": until.Unix()})
+	_ = store.AddAudit(ctx, s.st.DB, store.AuditEntry{Actor: "system", Action: "web.login_blocked", Entity: "session", Diff: string(diff)})
+	s.notify(Notice{Kind: "login-blocked", IP: ip, Fails: fails, Until: until})
 }
 
 // notices is buffered: a slow or stopped bot never blocks a login.

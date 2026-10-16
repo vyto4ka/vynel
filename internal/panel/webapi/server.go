@@ -16,7 +16,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/decoy"
@@ -43,13 +42,13 @@ type Config struct {
 
 // Server is the web panel.
 type Server struct {
-	cfg     Config
-	svc     *service.Service
-	log     *slog.Logger
-	ui      fs.FS
-	api     *http.ServeMux
-	loginMu sync.Mutex // one password check at a time: slows down guessing
-	upd     updates
+	cfg   Config
+	svc   *service.Service
+	log   *slog.Logger
+	ui    fs.FS
+	api   *http.ServeMux
+	guard *loginGuard // sign-in attempts per address
+	upd   updates
 }
 
 const (
@@ -67,7 +66,13 @@ func New(cfg Config) *Server {
 	if ui == nil {
 		ui, _ = fs.Sub(web.Dist, "dist")
 	}
-	s := &Server{cfg: cfg, svc: cfg.Service, log: cfg.Log, ui: ui, api: http.NewServeMux()}
+	s := &Server{cfg: cfg, svc: cfg.Service, log: cfg.Log, ui: ui, api: http.NewServeMux(), guard: newLoginGuard()}
+	s.guard.OnBlock = func(ip string, fails int, until time.Time) {
+		s.log.Warn("web sign-in blocked for an address", "ip", ip, "fails", fails, "until", until.Format(time.RFC3339))
+		if s.svc != nil {
+			s.svc.LoginBlocked(context.Background(), ip, fails, until)
+		}
+	}
 	s.routes()
 	return s
 }
@@ -441,13 +446,15 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{http.StatusForbidden, "вход по паролю выключен — войдите по одноразовой ссылке (/login в боте или vynel admin login-link)"})
 		return
 	}
-	s.loginMu.Lock()
-	err := s.svc.CheckAdmin(r.Context(), strings.TrimSpace(in.Login), in.Password)
+	done, err := s.guard.begin(clientIP(r))
 	if err != nil {
-		time.Sleep(700 * time.Millisecond)
+		writeLoginError(w, err)
+		return
 	}
-	s.loginMu.Unlock()
+	err = s.svc.CheckAdmin(r.Context(), strings.TrimSpace(in.Login), in.Password)
+	done(err == nil)
 	if err != nil {
+		time.Sleep(loginFailDelay)
 		s.log.Warn("web login failed", "ip", clientIP(r), "login", in.Login)
 		writeError(w, &httpError{http.StatusUnauthorized, "неверный логин или пароль"})
 		return

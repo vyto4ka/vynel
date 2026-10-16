@@ -63,6 +63,21 @@ func (b *Bot) onLogin(ctx context.Context, w *store.WebSession) {
 	}
 }
 
+// onLoginBlocked tells every admin that an address kept failing to sign in and is refused for
+// a while: someone may be guessing the password.
+func (b *Bot) onLoginBlocked(ctx context.Context, n service.Notice) {
+	api := b.client()
+	if api == nil {
+		return
+	}
+	admins, _ := b.svc.BotAdmins(ctx)
+	text := fmt.Sprintf("🚫 <b>Вход в панель закрыт для адреса</b> <code>%s</code>\n%d неудачных попыток подряд, следующая — после %s.\n\n<i>Это не вы? Кто-то подбирает пароль или старую ссылку входа.</i>",
+		esc(n.IP), n.Fails, b.fmtTime(ctx, n.Until.Unix(), "15:04"))
+	for _, a := range admins {
+		_, _ = api.send(ctx, a.ID, text, nil)
+	}
+}
+
 // dropLoginNotices deletes the sign-in messages of sessions that have ended. It runs when a
 // session ends and on every tick (sessions that simply expired, a bot that was down).
 func (b *Bot) dropLoginNotices(ctx context.Context) {

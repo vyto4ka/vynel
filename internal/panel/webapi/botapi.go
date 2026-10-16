@@ -38,13 +38,15 @@ func (s *Server) magicLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
-	s.loginMu.Lock()
-	issuer, err := s.svc.UseLoginToken(r.Context(), strings.TrimSpace(in.Token), ownPath(r))
+	done, err := s.guard.begin(clientIP(r))
 	if err != nil {
-		time.Sleep(700 * time.Millisecond)
+		writeLoginError(w, err)
+		return
 	}
-	s.loginMu.Unlock()
+	issuer, err := s.svc.UseLoginToken(r.Context(), strings.TrimSpace(in.Token), ownPath(r))
+	done(err == nil)
 	if err != nil {
+		time.Sleep(loginFailDelay)
 		s.log.Warn("web magic login failed", "ip", clientIP(r))
 		writeError(w, &httpError{http.StatusUnauthorized, "ссылка недействительна: она живёт минуту и работает один раз — запросите новую"})
 		return
@@ -208,13 +210,15 @@ func (s *Server) telegramLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &httpError{http.StatusForbidden, "откройте панель кнопкой в боте"})
 		return
 	}
-	s.loginMu.Lock()
-	id, err := s.svc.TelegramAppLogin(r.Context(), in.InitData)
+	done, err := s.guard.begin(clientIP(r))
 	if err != nil {
-		time.Sleep(700 * time.Millisecond)
+		writeLoginError(w, err)
+		return
 	}
-	s.loginMu.Unlock()
+	id, err := s.svc.TelegramAppLogin(r.Context(), in.InitData)
+	done(err == nil)
 	if err != nil {
+		time.Sleep(loginFailDelay)
 		s.log.Warn("web telegram login failed", "ip", clientIP(r), "err", err)
 		writeError(w, &httpError{http.StatusUnauthorized, "Telegram не подтвердил вход: " + strings.TrimPrefix(err.Error(), service.ErrInvalid.Error()+": ")})
 		return

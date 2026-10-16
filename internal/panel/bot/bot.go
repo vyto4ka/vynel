@@ -231,6 +231,8 @@ func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
 				b.onLogin(ctx, n.Session)
 			case n.Kind == "ended":
 				b.dropLoginNotices(ctx)
+			case n.Kind == "login-blocked":
+				b.onLoginBlocked(ctx, n)
 			}
 		case <-tick:
 			return true
