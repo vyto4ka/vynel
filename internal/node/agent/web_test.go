@@ -112,7 +112,7 @@ func TestWebServerSwitch(t *testing.T) {
 	}
 	if s := server(); s != "nginx" || a.caddyCfg != nil {
 		conf, _ := os.ReadFile(filepath.Join(dir, "web", "nginx", "nginx.conf"))
-		errLog, _ := os.ReadFile(filepath.Join(dir, "web", "www", "run", "error.log"))
+		errLog, _ := os.ReadFile(filepath.Join(dir, "web", "nginx", "error.log"))
 		t.Fatalf("nginx expected, got %s\n%s\n%s", s, conf, errLog)
 	}
 	if ports := a.FirewallPorts(); len(ports) != 0 {

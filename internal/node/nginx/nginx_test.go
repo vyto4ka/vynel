@@ -85,6 +85,19 @@ func TestManager(t *testing.T) {
 	if body, err := get(nil); err != nil || !strings.Contains(body, "<html") {
 		t.Fatalf("decoy over the placeholder: %v %.80q", err, body)
 	}
+	// The master's pid file and error log are in the root-only state dir, not in the run dir
+	// the workers own.
+	for _, f := range []string{"nginx.pid", "error.log"} {
+		if _, err := os.Stat(filepath.Join(m.stateDir(), f)); err != nil {
+			t.Fatalf("%s not in the state dir: %v", f, err)
+		}
+		if _, err := os.Stat(filepath.Join(m.runDir(), f)); err == nil {
+			t.Fatalf("%s in the workers' run dir", f)
+		}
+	}
+	if st, _ := os.Stat(m.stateDir()); st == nil || st.Mode().Perm() != 0o700 {
+		t.Fatalf("state dir mode: %v", st)
+	}
 	// Renewal replaces the placeholder with a certificate of the internal CA and reloads.
 	if err := m.RenewCerts(ctx); err != nil || renewed != 1 {
 		t.Fatalf("renew: %v (callbacks %d)", err, renewed)

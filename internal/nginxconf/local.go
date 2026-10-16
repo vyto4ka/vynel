@@ -12,7 +12,8 @@ import (
 type Local struct {
 	Modules []string // full paths of dynamic modules to load (the stream module); empty = built in
 	User    string   // worker user; "" = nginx's default
-	Run     string   // runtime dir
+	Run     string   // runtime dir: the workers' temp files (they own it)
+	State   string   // the master's pid and error log; "" = the run dir. Must not be writable by the workers
 	Certs   string   // certificate store
 	Decoy   string   // decoy sites
 	ACME    string   // HTTP-01 webroot
@@ -43,6 +44,11 @@ func Finalize(conf string, l Local) string {
 	reject := "ssl_reject_handshake on;"
 	if !l.RejectHandshake {
 		reject = "ssl_certificate " + l.DummyCert + ";\n        ssl_certificate_key " + l.DummyKey + ";"
+	}
+	if l.State != "" {
+		// The master (root) writes these: keep them out of the run dir, which the workers own.
+		conf = strings.Replace(conf, "pid "+TokRun+"/nginx.pid;", "pid "+l.State+"/nginx.pid;", 1)
+		conf = strings.Replace(conf, "error_log "+TokRun+"/error.log ", "error_log "+l.State+"/error.log ", 1)
 	}
 	return strings.NewReplacer(
 		TokModules, strings.Join(mods, "\n"),

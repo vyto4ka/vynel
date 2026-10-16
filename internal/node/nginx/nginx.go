@@ -102,6 +102,10 @@ func (m *Manager) Init() error {
 		}
 		_ = os.Chmod(d, 0o755)
 	}
+	// Earlier versions kept these in the run dir; Remove takes away a planted symlink itself,
+	// never what it points to.
+	_ = os.Remove(filepath.Join(m.runDir(), "nginx.pid"))
+	_ = os.Remove(filepath.Join(m.runDir(), "error.log"))
 	return nil
 }
 
@@ -109,6 +113,11 @@ func (m *Manager) confPath() string { return filepath.Join(m.DataDir, "nginx", "
 func (m *Manager) decoyDir() string { return filepath.Join(m.WWWDir, "decoy") }
 func (m *Manager) acmeDir() string  { return filepath.Join(m.WWWDir, "acme") }
 func (m *Manager) runDir() string   { return filepath.Join(m.WWWDir, "run") }
+
+// stateDir holds the pid file and the error log. The master runs as root and opens them on
+// every start and reload, so they live where only root can write: in the workers' run dir a
+// symlink planted by a compromised worker would make root write anywhere (CVE-2016-1247).
+func (m *Manager) stateDir() string { return filepath.Join(m.DataDir, "nginx") }
 
 // DecoyDir is where decoy sites are installed (Hysteria2 masquerade uses them too).
 func (m *Manager) DecoyDir() string {
@@ -200,7 +209,7 @@ func (m *Manager) finalize(ctx context.Context, conf string) (string, error) {
 		return "", fmt.Errorf("SNI routing on a shared port needs the nginx stream module: %s", m.noStream)
 	}
 	l := *m.local
-	l.Run, l.Certs, l.Decoy, l.ACME = m.runDir(), m.Certs.Dir, m.decoyDir(), m.acmeDir()
+	l.Run, l.State, l.Certs, l.Decoy, l.ACME = m.runDir(), m.stateDir(), m.Certs.Dir, m.decoyDir(), m.acmeDir()
 	if !l.RejectHandshake {
 		var err error
 		if l.DummyCert, l.DummyKey, err = m.Certs.Dummy(); err != nil {
@@ -312,13 +321,13 @@ func (m *Manager) test(ctx context.Context, path string) error {
 }
 
 func (m *Manager) startLocked() error {
-	errLog := filepath.Join(m.runDir(), "error.log")
+	errLog := filepath.Join(m.stateDir(), "error.log")
 	cmd := exec.Command(m.bin(), "-p", m.runDir(), "-c", m.confPath(), "-g", "daemon off;")
 	tail := &lineLog{log: m.Log}
 	cmd.Stdout, cmd.Stderr = tail, tail
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	off := fileSize(errLog)
-	pidFile := filepath.Join(m.runDir(), "nginx.pid")
+	pidFile := filepath.Join(m.stateDir(), "nginx.pid")
 	_ = os.Remove(pidFile)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start nginx: %w", err)
@@ -348,7 +357,7 @@ func (m *Manager) startLocked() error {
 // reloadLocked sends SIGHUP: the master re-reads the config (already tested) and replaces the
 // workers gracefully. Problems nginx finds only now (a port in use) go to the error log.
 func (m *Manager) reloadLocked() error {
-	errLog := filepath.Join(m.runDir(), "error.log")
+	errLog := filepath.Join(m.stateDir(), "error.log")
 	off := fileSize(errLog)
 	if err := m.cmd.Process.Signal(syscall.SIGHUP); err != nil {
 		return fmt.Errorf("reload nginx: %w", err)
