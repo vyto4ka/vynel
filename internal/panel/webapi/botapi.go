@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/panel/backup"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 )
 
@@ -74,7 +75,9 @@ func (s *Server) botInfo(r *http.Request) (any, error) {
 		"timezone":    get(service.SettingBotTimezone, service.DefaultTimezone),
 		"alerts":      get(service.SettingBotAlerts, "true") != "false",
 		"alertDelay":  get(service.SettingBotAlertDelay, "60"),
-		"status":      map[string]any{"running": false},
+		// Only whether backups are encrypted; the password never leaves the server.
+		"backupEncrypted": s.svc.BackupPassword(ctx) != "",
+		"status":          map[string]any{"running": false},
 	}
 	if s.cfg.Bot != nil {
 		out["status"] = s.cfg.Bot.Status()
@@ -90,11 +93,18 @@ func (s *Server) botSave(r *http.Request) (any, error) {
 		Timezone    *string `json:"timezone"`
 		Alerts      *bool   `json:"alerts"`
 		AlertDelay  *int    `json:"alertDelay"`
+		// BackupPassword: a new password encrypts backups, "" turns encryption off.
+		BackupPassword *string `json:"backupPassword"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
 	ctx, a := r.Context(), actor(r)
+	if in.BackupPassword != nil {
+		if err := s.svc.SetBackupPassword(ctx, a, *in.BackupPassword); err != nil {
+			return nil, err
+		}
+	}
 	if in.Token != nil {
 		if err := s.svc.SetBotToken(ctx, a, *in.Token); err != nil {
 			return nil, err
@@ -192,7 +202,11 @@ func (s *Server) downloadBackup(r *http.Request) (any, error) {
 	}
 	w := r.Context().Value(writerKey{}).(http.ResponseWriter)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-	return rawResponse{"application/gzip", data}, nil
+	ctype := "application/gzip"
+	if strings.HasSuffix(name, backup.EncryptedExt) {
+		ctype = "application/octet-stream"
+	}
+	return rawResponse{ctype, data}, nil
 }
 
 // telegramLogin signs in an admin who opened the panel as a Telegram Mini App from the bot.

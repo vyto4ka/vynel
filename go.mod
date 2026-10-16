@@ -3,6 +3,7 @@ module github.com/vyto4ka/vynel
 go 1.26.0
 
 require (
+	filippo.io/age v1.2.1
 	github.com/apernet/quic-go v0.59.1-0.20260217092621-db4786c77a22
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
@@ -13,6 +14,7 @@ require (
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/net v0.59.0
+	golang.org/x/term v0.46.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1

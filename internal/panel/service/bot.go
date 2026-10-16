@@ -30,6 +30,8 @@ const (
 	SettingBotAlertState  = "bot.alert_state"  // JSON: messages being edited (survives restarts)
 	SettingBotSummaryTime = "bot.summary_time" // HH:MM of the daily summary, "off" = none
 	SettingBotSummaryLast = "bot.summary_last" // date of the last summary
+	// SettingBackupPassword encrypts backups (Telegram, download, local copies) when set (secret).
+	SettingBackupPassword = "backup.password"
 )
 
 // Defaults of the bot settings.
@@ -44,6 +46,22 @@ const (
 func init() {
 	secretSettings[SettingBotToken] = true
 	secretSettings[settingBotBindCode] = true
+	secretSettings[SettingBackupPassword] = true
+}
+
+// BackupPassword is the password backups are encrypted with ("" = they are not).
+func (s *Service) BackupPassword(ctx context.Context) string {
+	v, _ := s.Setting(ctx, SettingBackupPassword, "")
+	return v
+}
+
+// SetBackupPassword turns backup encryption on (a password) or off (""). The audit log never
+// shows the password.
+func (s *Service) SetBackupPassword(ctx context.Context, actor Actor, password string) error {
+	if password != "" && len([]rune(password)) < 8 {
+		return invalid("пароль бэкапа — не короче 8 символов")
+	}
+	return s.SetSetting(ctx, actor, SettingBackupPassword, password)
 }
 
 // BotAdmin is a Telegram account allowed to use the bot.

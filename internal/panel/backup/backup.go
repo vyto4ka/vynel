@@ -153,7 +153,23 @@ func walk(r io.Reader, fn func(name string, h *tar.Header, body io.Reader) error
 
 // Restore unpacks an archive into dataDir. The panel must be stopped. Existing panel.db and ca/
 // are moved to dataDir/.before-restore-<time> instead of being deleted. It returns where they went.
-func Restore(archive, dataDir string) (*Meta, string, error) {
+// An encrypted backup needs its password (ErrPasswordNeeded without one).
+func Restore(archive, dataDir, password string) (*Meta, string, error) {
+	enc, err := IsEncrypted(archive)
+	if err != nil {
+		return nil, "", err
+	}
+	if enc {
+		if err := os.MkdirAll(dataDir, 0o700); err != nil {
+			return nil, "", err
+		}
+		plain, err := decryptTo(archive, password, dataDir)
+		if err != nil {
+			return nil, "", err
+		}
+		defer func() { _ = os.Remove(plain) }()
+		archive = plain
+	}
 	f, err := os.Open(archive)
 	if err != nil {
 		return nil, "", err

@@ -495,7 +495,7 @@ func Run(o Options) (*Answers, error) {
 					}
 					return nil
 				}),
-			huh.NewInput().Title("Восстановить из бэкапа").Placeholder("путь к .tar.gz, обычно пусто").Value(&a.Restore).
+			huh.NewInput().Title("Восстановить из бэкапа").Placeholder("путь к .tar.gz или .age, обычно пусто").Value(&a.Restore).
 				Validate(func(s string) error {
 					if s = strings.TrimSpace(s); s != "" {
 						if _, err := os.Stat(s); err != nil {

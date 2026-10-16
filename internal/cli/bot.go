@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/vyto4ka/vynel/internal/buildinfo"
 	"github.com/vyto4ka/vynel/internal/panel/backup"
@@ -110,6 +111,23 @@ func adminBackupCmd() *cobra.Command {
 			if dst == "" {
 				dst = backup.FileName(meta, s.BotLocation(ctx))
 			}
+			if pw := s.BackupPassword(ctx); pw != "" {
+				// Encryption is on (backup.password): this copy is encrypted like the others.
+				plain, err := os.ReadFile(tmp.Name())
+				if err != nil {
+					return err
+				}
+				enc, err := backup.Encrypt(plain, pw)
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(tmp.Name(), enc, 0o600); err != nil {
+					return err
+				}
+				if out == "" {
+					dst += backup.EncryptedExt
+				}
+			}
 			if err := os.Rename(tmp.Name(), dst); err != nil {
 				return err
 			}
@@ -136,19 +154,30 @@ func absOr(p, def string) string {
 }
 
 func restoreCmd() *cobra.Command {
-	var dataDir string
+	var dataDir, password string
 	var yes bool
 	c := &cobra.Command{
 		Use:   "restore BACKUP.tar.gz",
 		Short: "Restore the panel from a backup (stop the panel first: systemctl stop vynel)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			f, err := os.Open(args[0])
+			if password == "" {
+				password = os.Getenv("VYNEL_BACKUP_PASSWORD")
+			}
+			enc, err := backup.IsEncrypted(args[0])
 			if err != nil {
 				return err
 			}
-			meta, err := backup.Inspect(f)
-			f.Close()
+			if enc && password == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+				fmt.Fprint(cmd.ErrOrStderr(), "backup password: ")
+				b, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Fprintln(cmd.ErrOrStderr())
+				if err != nil {
+					return err
+				}
+				password = string(b)
+			}
+			meta, err := backup.InspectFile(args[0], password)
 			if err != nil {
 				return err
 			}
@@ -158,7 +187,7 @@ func restoreCmd() *cobra.Command {
 			if _, err := os.Stat(filepath.Join(dataDir, "panel.db")); err == nil && !yes {
 				return fmt.Errorf("%s already has data; it will be moved aside, not deleted — repeat with --yes", dataDir)
 			}
-			_, aside, err := backup.Restore(args[0], dataDir)
+			_, aside, err := backup.Restore(args[0], dataDir, password)
 			if err != nil {
 				return err
 			}
@@ -178,5 +207,6 @@ func restoreCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&dataDir, "data-dir", DefaultPanelDataDir, "panel data directory")
 	c.Flags().BoolVar(&yes, "yes", false, "replace existing data (it is moved aside)")
+	c.Flags().StringVar(&password, "password", "", "password of an encrypted backup (.age); or VYNEL_BACKUP_PASSWORD, or asked")
 	return c
 }

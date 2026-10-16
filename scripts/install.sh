@@ -72,7 +72,8 @@ Options:
   --panel-path PATH      aio/panel: secret path of the web panel (default: random, 12 characters)
   --token TOKEN          node: join token from the panel
   --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
-  --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz)
+  --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz, or .age if encrypted)
+  --backup-password PASS password of an encrypted backup (asked when needed and not given)
   --ref REF              git branch whose release to install (default $REF)
   --gh-proxy URL         prefix for github.com downloads when GitHub is slow or blocked,
                          e.g. https://ghfast.top/ (also VYNEL_GH_PROXY)
@@ -105,6 +106,7 @@ while [[ $# -gt 0 ]]; do
     --panel-path) PANEL_PATH="${2:-}"; shift 2 ;;
     --bot-token) BOT_TOKEN="${2:-}"; shift 2 ;;
     --restore) RESTORE="${2:-}"; shift 2 ;;
+    --backup-password) export VYNEL_BACKUP_PASSWORD="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
     --ref) REF="${2:-}"; shift 2 ;;
     --gh-proxy) GH_PROXY="${2:-}"; shift 2 ;;
@@ -1245,7 +1247,7 @@ ask_bot_and_restore() {
   echo "  Telegram-бот: пользователи из чата, вход в панель без пароля, ночные бэкапы, сообщения о нодах."
   ask BOT_TOKEN "Токен бота от @BotFather (Enter — настроить потом)" "$BOT_TOKEN"
   if [[ -z "$RESTORE" && ! -f "$DATA/panel.db" ]] && ask_yes "Восстановить пользователей и ноды из бэкапа?" n; then
-    ask RESTORE "Путь к файлу бэкапа (.tar.gz)" ""
+    ask RESTORE "Путь к файлу бэкапа (.tar.gz или .age)" ""
   fi
 }
 
@@ -1257,7 +1259,9 @@ restore_backup() {
   info "restoring from $RESTORE"
   systemctl stop vynel 2>/dev/null || true
   local out
-  out="$(vynel restore --data-dir "$DATA" --yes "$RESTORE")" # whole output: `| head` would SIGPIPE under pipefail
+  # An encrypted backup (.age): the password comes from --backup-password, or vynel asks for it
+  # on the terminal. Whole output: `| head` would SIGPIPE under pipefail.
+  out="$(vynel restore --data-dir "$DATA" --yes "$RESTORE")"
   RESTORED="${out%%$'\n'*}"
   green "  $RESTORED"
 }

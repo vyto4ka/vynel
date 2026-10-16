@@ -236,12 +236,20 @@ func (b *Bot) Backup(ctx context.Context) (string, []byte, *backup.Meta, error) 
 		return "", nil, nil, err
 	}
 	name := backup.FileName(meta, b.loc(ctx))
+	data := buf.Bytes()
+	if pw := b.svc.BackupPassword(ctx); pw != "" {
+		// Encryption is on: Telegram, the download and the local copy all get the age file.
+		if data, err = backup.Encrypt(data, pw); err != nil {
+			return "", nil, nil, err
+		}
+		name += backup.EncryptedExt
+	}
 	dir := filepath.Join(b.cfg.DataDir, "backups")
 	if err := os.MkdirAll(dir, 0o700); err == nil {
-		_ = os.WriteFile(filepath.Join(dir, name), buf.Bytes(), 0o600)
+		_ = os.WriteFile(filepath.Join(dir, name), data, 0o600)
 		pruneBackups(dir, keepLocal)
 	}
-	return name, buf.Bytes(), meta, nil
+	return name, data, meta, nil
 }
 
 func pruneBackups(dir string, keep int) {

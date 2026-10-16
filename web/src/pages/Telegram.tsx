@@ -12,6 +12,7 @@ interface BotInfo {
   timezone: string
   alerts: boolean
   alertDelay: string
+  backupEncrypted: boolean
 }
 
 const zones = ['Europe/Moscow', 'Europe/Kaliningrad', 'Europe/Samara', 'Asia/Yekaterinburg', 'Asia/Omsk', 'Asia/Novosibirsk',
@@ -20,6 +21,7 @@ const zones = ['Europe/Moscow', 'Europe/Kaliningrad', 'Europe/Samara', 'Asia/Yek
 export function Telegram() {
   const info = useLoad(() => get<BotInfo>('bot'), [], 10000)
   const [token, setToken] = useState('')
+  const [backupPw, setBackupPw] = useState('')
   const [code, setCode] = useState<{ code: string; minutes: number; link?: string; username?: string } | null>(null)
   const act = useAction()
   const confirm = useConfirm()
@@ -127,6 +129,19 @@ export function Telegram() {
               </select>
             </Field>
           </div>
+          <Field label="Шифровать бэкапы паролем" help={d.backupEncrypted
+            ? 'Включено: бэкапы (Telegram, скачивание, копии на сервере) — файлы .age. Восстановление спросит пароль; без него бэкап не открыть.'
+            : 'Необязательно: Telegram и так доверенное место. С паролем бэкап — файл .age, его открывает vynel restore или age -d.'}>
+            <div className="row">
+              <input className="input" type="password" autoComplete="new-password" placeholder={d.backupEncrypted ? 'новый пароль' : 'не короче 8 символов'}
+                value={backupPw} onChange={(e) => setBackupPw(e.target.value)} />
+              <button className="btn" disabled={backupPw.length < 8}
+                onClick={async () => { if (await save({ backupPassword: backupPw }, 'Бэкапы шифруются')) setBackupPw('') }}>
+                {d.backupEncrypted ? 'Сменить' : 'Включить'}
+              </button>
+              {d.backupEncrypted && <button className="btn ghost" onClick={() => save({ backupPassword: '' }, 'Шифрование бэкапов выключено')}>Выключить</button>}
+            </div>
+          </Field>
           <div className="row">
             <button className="btn" disabled={!st.running || d.admins.length === 0} onClick={() => act(() => post('bot/backup'), 'Бэкап отправлен в Telegram')}>
               <Icon name="telegram" /> Отправить бэкап сейчас
