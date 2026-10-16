@@ -162,3 +162,40 @@ func TestVersionAtLeast(t *testing.T) {
 		}
 	}
 }
+
+// Check needs no free or privileged ports and no local addresses: the panel checks configs
+// for other hosts, often not as root.
+func TestCheckWithoutPorts(t *testing.T) {
+	bin := nginxBin(t)
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	conf, err := nginxconf.Build(nginxconf.Spec{Issuer: "internal", HTTPPort: 80,
+		Streams: []nginxconf.Stream{{Bind: "203.0.113.7", Port: 443, Default: "127.0.0.1:8443",
+			Backends: []nginxconf.Backend{{Names: []string{"r.example.com"}, Addr: "127.0.0.1:10443"}}}},
+		Sites: []nginxconf.Site{
+			{Domain: "a.example.com", Bind: "127.0.0.1", Port: 8443, ProxyProtocol: true, Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "cloud"}}},
+			{Domain: "b.example.com", Bind: "127.0.0.1", Port: busy.Addr().(*net.TCPAddr).Port,
+				Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "docs"}}},
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(context.Background(), bin, conf); err != nil {
+		t.Fatal(err)
+	}
+	bad := strings.Replace(conf, "ssl_protocols", "ssl_protocolz", 1)
+	if err := Check(context.Background(), bin, bad); err == nil || !strings.Contains(err.Error(), "ssl_protocolz") {
+		t.Fatalf("broken config passed: %v", err)
+	}
+}
+
+func TestCheckListens(t *testing.T) {
+	in := "  listen 443 ssl http2 default_server;\n  # listen [::]:443;\n  listen 443 ssl http2;\n  listen 10.0.0.1:443 reuseport;\n"
+	want := "  listen unix:/d/l0.sock ssl http2 default_server;\n  # listen [::]:443;\n  listen unix:/d/l0.sock ssl http2;\n  listen unix:/d/l1.sock;\n"
+	if got := checkListens(in, "/d"); got != want {
+		t.Fatalf("got\n%s", got)
+	}
+}

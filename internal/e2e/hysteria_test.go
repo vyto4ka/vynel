@@ -35,8 +35,8 @@ import (
 )
 
 // TestHysteria2NextToReality: Reality on TCP and Hysteria2 on UDP share one IP and port number.
-// Caddy (behind Reality) gets the certificate for the domain; the agent hands the same file to
-// Hysteria2. Unauthenticated HTTP/3 visitors get the decoy site, clients from the subscription
+// The node's web server (nginx behind Reality) gets the certificate for the domain; the agent
+// hands the same file to Hysteria2. Unauthenticated HTTP/3 visitors get the decoy site, clients from the subscription
 // (Xray JSON, and Mihomo when MIHOMO_BIN is set) get through.
 func TestHysteria2NextToReality(t *testing.T) {
 	bin := xraytest.Binary(t)
@@ -87,6 +87,7 @@ func TestHysteria2NextToReality(t *testing.T) {
 	if err != nil || len(ds.Problems) > 0 {
 		t.Fatalf("desired state: %v %v", err, ds.Problems)
 	}
+	// Before the node says it runs nginx, the panel plans Caddy (old agents): without HTTP/3.
 	if !bytes.Contains(ds.Caddy, []byte(`"protocols":["h1","h2"]`)) {
 		t.Fatalf("caddy keeps HTTP/3 on: %s", ds.Caddy)
 	}
@@ -110,11 +111,15 @@ func TestHysteria2NextToReality(t *testing.T) {
 		t.Fatal(err)
 	}
 	xraytest.Eventually(t, wait, "node converges", inSync(ctx, svc, node.Code))
+	// The panel learns from the Hello that the node runs nginx before the first snapshot.
+	if _, err := os.Stat(filepath.Join(nodeDir, "web", "caddy.json")); !os.IsNotExist(err) {
+		t.Fatalf("Caddy was started on an nginx node: %v", err)
+	}
 
-	// The agent swaps its placeholder for the certificate Caddy issued.
+	// The agent swaps its placeholder for the certificate issued for nginx (the internal CA here).
 	crtPath := filepath.Join(nodeDir, "certs", domain+".crt")
 	var pin string
-	xraytest.Eventually(t, wait, "Caddy's certificate reaches Xray", func() error {
+	xraytest.Eventually(t, wait, "the web server's certificate reaches Xray", func() error {
 		raw, err := os.ReadFile(crtPath)
 		if err != nil {
 			return err
@@ -127,7 +132,7 @@ func TestHysteria2NextToReality(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(c.Issuer.CommonName, "Caddy") {
+		if c.Issuer.CommonName != "vynel local CA" {
 			return fmt.Errorf("issuer %q", c.Issuer.CommonName)
 		}
 		sum := sha256.Sum256(blk.Bytes)
@@ -135,7 +140,7 @@ func TestHysteria2NextToReality(t *testing.T) {
 		return nil
 	})
 
-	// Without a password, HTTP/3 on the Hysteria port is the decoy site, with Caddy's certificate.
+	// Without a password, HTTP/3 on the Hysteria port is the decoy site, with the same certificate.
 	h3 := &http.Client{Timeout: 5 * time.Second, Transport: &http3.Transport{
 		TLSClientConfig: &tls.Config{ServerName: domain, InsecureSkipVerify: true, NextProtos: []string{"h3"}},
 		Dial: func(ctx context.Context, _ string, tc *tls.Config, qc *quic.Config) (*quic.Conn, error) {
@@ -208,7 +213,7 @@ func TestHysteria2NextToReality(t *testing.T) {
 	var rep bytes.Buffer
 	agent.Diagnose(ctx, &rep, nodeDir, "test", bin, caddyBin, "/usr/sbin/nginx")
 	report := rep.String()
-	for _, want := range []string{"hysteria on 127.0.0.1:", "vless on 127.0.0.1:", "xray -test: OK", "SNI " + domain + ": OK", "issuer=\"Caddy Local Authority"} {
+	for _, want := range []string{"hysteria on 127.0.0.1:", "vless on 127.0.0.1:", "xray -test: OK", "SNI " + domain + ": OK", "issuer=\"vynel local CA"} {
 		if !strings.Contains(report, want) {
 			t.Fatalf("diag lacks %q:\n%s", want, report)
 		}

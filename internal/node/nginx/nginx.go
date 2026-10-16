@@ -571,8 +571,27 @@ func Check(ctx context.Context, bin, conf string) error {
 		return err
 	}
 	path := filepath.Join(m.DataDir, "nginx", "nginx.conf")
-	if err := os.WriteFile(path, []byte(final), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(checkListens(final, dir)), 0o600); err != nil {
 		return err
 	}
 	return m.test(ctx, path)
+}
+
+var checkListenRe = regexp.MustCompile(`(?m)^(\s*listen )(\S+?)([ ;].*)$`)
+
+// checkListens moves every listener to a unix socket in dir: nginx -t binds them, and the
+// ports may be privileged (an unprivileged checker) or the addresses another host's (a node's
+// IP checked on the panel). The same address gets the same socket, so nginx still sees
+// duplicate and conflicting listen options.
+func checkListens(conf, dir string) string {
+	socks := map[string]string{}
+	return checkListenRe.ReplaceAllStringFunc(conf, func(line string) string {
+		m := checkListenRe.FindStringSubmatch(line)
+		sock, ok := socks[m[2]]
+		if !ok {
+			sock = filepath.Join(dir, fmt.Sprintf("l%d.sock", len(socks)))
+			socks[m[2]] = sock
+		}
+		return m[1] + "unix:" + sock + strings.Replace(m[3], " reuseport", "", 1)
+	})
 }

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -45,12 +46,13 @@ type Reconciler struct {
 
 	kick chan struct{}
 
-	mu       sync.Mutex
-	desired  map[int64]*service.DesiredState
-	revision map[int64]int64
-	sessions map[int64]*session
-	ready    chan struct{}            // closed after the first recompute
-	updates  map[int64]*update.Status // what each node last said about its update
+	recomputeMu sync.Mutex // the loop and a node's Hello may recompute at once
+	mu          sync.Mutex
+	desired     map[int64]*service.DesiredState
+	revision    map[int64]int64
+	sessions    map[int64]*session
+	ready       chan struct{}            // closed after the first recompute
+	updates     map[int64]*update.Status // what each node last said about its update
 }
 
 // New creates a reconciler.
@@ -134,6 +136,8 @@ func (r *Reconciler) Run(ctx context.Context) error {
 }
 
 func (r *Reconciler) recompute(ctx context.Context) error {
+	r.recomputeMu.Lock()
+	defer r.recomputeMu.Unlock()
 	states, err := r.svc.DesiredStates(ctx)
 	if err != nil {
 		return err
@@ -282,6 +286,21 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		if err := svc.SyncAddresses(ctx, s.nodeID, toReported(h.Addresses)); err != nil {
 			return err
 		}
+		prev, err := store.GetNode(ctx, svc.Store().DB, s.nodeID)
+		if err != nil {
+			return err
+		}
+		facts := store.NodeFacts{CaddyVersion: h.CaddyVersion, NginxVersion: h.NginxVersion, Warnings: h.Warnings, Capabilities: h.Capabilities}
+		if err := store.SetNodeFacts(ctx, svc.Store().DB, s.nodeID, facts); err != nil {
+			return err
+		}
+		// What the node can run decides its config (nginx or Caddy). If that changed, the
+		// first snapshot must already be built for it, not the old web server.
+		if prev.NginxVersion != h.NginxVersion || !slices.Equal(prev.Capabilities, h.Capabilities) {
+			if err := s.r.recompute(ctx); err != nil {
+				return err
+			}
+		}
 		s.mu.Lock()
 		s.hello, s.appliedH, s.applied, s.pending = h, h.AppliedHash, nil, nil
 		if ds := s.r.desiredFor(s.nodeID); ds != nil && ds.Hash == h.AppliedHash {
@@ -291,15 +310,11 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		if err := store.SetNodeRuntime(ctx, svc.Store().DB, s.nodeID, store.NodeRuntime{AgentVersion: h.AgentVersion, XrayVersion: h.XrayVersion, AppliedHash: h.AppliedHash}); err != nil {
 			return err
 		}
-		facts := store.NodeFacts{CaddyVersion: h.CaddyVersion, NginxVersion: h.NginxVersion, Warnings: h.Warnings, Capabilities: h.Capabilities}
-		if err := store.SetNodeFacts(ctx, svc.Store().DB, s.nodeID, facts); err != nil {
-			return err
-		}
 		for _, w := range h.Warnings {
 			s.r.log.Warn("node warning", "node", s.nodeID, "warning", w)
 		}
-		// What the node can run decides its config (nginx or Caddy): recompute with its facts.
-		s.r.Notify()
+		s.wake()
+		s.r.Notify() // reported addresses may change the desired state too
 	case *nodev1.NodeMessage_Addresses:
 		return svc.SyncAddresses(ctx, s.nodeID, toReported(m.Addresses.Addresses))
 	case *nodev1.NodeMessage_Update:
@@ -350,6 +365,9 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		}
 		applied := s.appliedH
 		s.mu.Unlock()
+		if a.Error == "" {
+			s.wake() // a newer state may have been computed while this one was applied
+		}
 		rt := store.NodeRuntime{AppliedHash: applied, LastError: a.Error}
 		if h != nil {
 			rt.AgentVersion, rt.XrayVersion = h.AgentVersion, h.XrayVersion
