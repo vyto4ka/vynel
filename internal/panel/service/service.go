@@ -62,6 +62,7 @@ type Service struct {
 	notices    chan Notice
 	ipOnce     sync.Once
 	ips        *IPTracker
+	grantCheck int64 // when Maintenance last looked for ended grants
 }
 
 // New creates a service over a store.

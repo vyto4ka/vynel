@@ -81,6 +81,7 @@ func (s *Server) routes() {
 	s.editorRoutes()
 
 	s.subscriptionRoutes()
+	s.extraRoutes()
 	s.botRoutes()
 
 	s.handle("GET /api/settings", s.settings)
@@ -450,10 +451,15 @@ func (s *Server) user(r *http.Request) (any, error) {
 		return nil, err
 	}
 	out["daily"] = dailyDTO(daily)
-	hosts, err := s.svc.UserHosts(ctx, id)
+	hosts, err := s.svc.SubscriptionHosts(ctx, u, true)
 	if err != nil {
 		return nil, err
 	}
+	grants, err := s.svc.UserGrants(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out["grants"] = grants
 	links := make([]map[string]any, 0, len(hosts))
 	for _, h := range hosts {
 		links = append(links, map[string]any{"tag": h.Tag, "node": h.NodeCode, "remark": h.Remark, "hidden": h.Hidden, "link": subscription.Link(h, u.UUID)})

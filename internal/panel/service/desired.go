@@ -84,6 +84,33 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 		}
 	}
 
+	// Cascades: their users on entry inbounds, outbounds and rules on entry nodes, the entry
+	// nodes' own users on exit inbounds.
+	activeUsers, err := store.ListUsers(ctx, q, store.UserFilter{Status: store.StatusActive})
+	if err != nil {
+		return nil, err
+	}
+	active := make(map[int64]string, len(activeUsers))
+	for _, u := range activeUsers {
+		active[u.ID] = u.UUID
+	}
+	groupsOf := map[int64][]int64{}
+	for _, m := range members {
+		groupsOf[m.UserID] = append(groupsOf[m.UserID], m.GroupID)
+	}
+	byID := make(map[int64]*store.NodeInbound, len(inbounds))
+	for _, ni := range inbounds {
+		byID[ni.ID] = ni
+	}
+	nodeOn := make(map[int64]bool, len(nodes))
+	for _, n := range nodes {
+		nodeOn[n.ID] = n.Enabled
+	}
+	casc, err := s.planCascades(ctx, q, active, groupsOf, byID, nodeOn)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make(map[int64]*DesiredState, len(nodes))
 	for _, n := range nodes {
 		ds := &DesiredState{NodeID: n.ID, Users: map[string][]xrayconf.Client{}}
@@ -121,10 +148,11 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 				}
 				rendered = append(rendered, r)
 				ds.Inbounds = append(ds.Inbounds, DesiredInbound{Tag: r.Tag, Protocol: r.Protocol, Flow: r.Flow})
-				clients := make([]xrayconf.Client, 0, len(usersByInbound[ni.ID]))
+				clients := make([]xrayconf.Client, 0, len(usersByInbound[ni.ID])+len(casc.clients[ni.ID]))
 				for uid, uuid := range usersByInbound[ni.ID] {
 					clients = append(clients, xrayconf.Client{Email: UserEmail(uid), ID: uuid})
 				}
+				clients = append(clients, casc.clients[ni.ID]...)
 				sort.Slice(clients, func(i, j int) bool { return clients[i].Email < clients[j].Email })
 				ds.Users[r.Tag] = clients
 			}
@@ -143,7 +171,9 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 		if err != nil {
 			return nil, err
 		}
-		cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: baseMap, Inbounds: rendered, APIAddr: apiAddr})
+		ds.Problems = append(ds.Problems, casc.problems[n.ID]...)
+		cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: baseMap, Inbounds: rendered, APIAddr: apiAddr,
+			Outbounds: casc.outbounds[n.ID], FrontRules: casc.rules[n.ID]})
 		if err != nil {
 			// A structural conflict (e.g. two inbounds on one port) blocks the whole node config.
 			ds.Problems = append(ds.Problems, err.Error())

@@ -785,7 +785,7 @@ func adminUserCmd() *cobra.Command {
 			if u.Status != store.StatusActive {
 				fmt.Fprintf(cmd.OutOrStdout(), "warning: user is %s, nodes will reject it\n", u.Status)
 			}
-			hosts, err := s.UserHosts(ctx, u.ID)
+			hosts, err := s.SubscriptionHosts(ctx, u, true)
 			if err != nil {
 				return err
 			}
@@ -793,7 +793,7 @@ func adminUserCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "no inbounds: check the user's groups and `vynel admin group list`")
 			}
 			for _, h := range hosts {
-				if linkAddr != "" {
+				if linkAddr != "" && h.Raw == "" && !strings.HasPrefix(h.Tag, "external-") {
 					h.Address = linkAddr
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s):\n%s\n\n", h.Tag, h.Remark, subscription.Link(h, u.UUID))

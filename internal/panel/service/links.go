@@ -61,6 +61,12 @@ type Host struct {
 	// Client is the profile's own client config (Xray JSON format only); nil = the
 	// subscription routing.
 	Client *ProfileClient
+	// UUID is the host's own secret (a cascade identity, a server from another subscription);
+	// "" = the user's.
+	UUID string
+	// Raw is a link from another subscription that is passed on as it is (vmess, trojan, ss…):
+	// only the links format can carry it.
+	Raw string
 }
 
 // UserInbounds returns the enabled node inbounds (on enabled nodes) a user can use.

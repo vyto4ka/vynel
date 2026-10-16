@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, User } from '../api'
+import { ExternalList } from '../extras'
 import { RoutingForm } from '../routing'
 import { Badge, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 
@@ -10,6 +11,7 @@ const tabs: [string, string][] = [
   ['headers', 'Заголовки'],
   ['rules', 'Форматы'],
   ['routing', 'Маршруты'],
+  ['externals', 'Внешние'],
   ['test', 'Проверка'],
 ]
 
@@ -100,6 +102,7 @@ export function Subscription() {
           {tab === 'apps' && <AppsTab p={page} set={setPage} catalog={c.appCatalog} />}
           {tab === 'headers' && <HeadersTab hs={headers} set={setHeaders} cfg={c} onReset={() => reset('headers')} />}
           {tab === 'rules' && <RulesTab rules={rules} set={setRules} formats={c.formats} onReset={() => reset('rules')} />}
+          {tab === 'externals' && <ExternalList />}
           {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} />}
           {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
         </div>

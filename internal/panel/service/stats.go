@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -31,9 +30,9 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 		}
 		touched := map[int64]bool{}
 		for _, u := range b.Users {
-			id, err := strconv.ParseInt(u.Email, 10, 64)
-			if err != nil {
-				continue // not one of ours
+			id := EmailUser(u.Email) // "<id>", or "<id>.c<n>" through a cascade
+			if id == 0 {
+				continue // not one of ours (a cascade's service user)
 			}
 			ok, err := store.AddUserTraffic(ctx, q, id, nodeID, ts, u.Up, u.Down)
 			if err != nil {
@@ -44,7 +43,7 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 			}
 		}
 		for _, o := range b.Online {
-			if id, err := strconv.ParseInt(o.Email, 10, 64); err == nil {
+			if id := EmailUser(o.Email); id > 0 {
 				if err := store.MarkOnline(ctx, q, id, ts); err != nil {
 					return err
 				}
@@ -154,6 +153,13 @@ func (s *Service) Maintenance(ctx context.Context, prune bool) error {
 	if _, err := s.ResetDueTraffic(ctx); err != nil {
 		return err
 	}
+	// A cascade or merged subscription a user had until now ends: nodes and subscriptions change.
+	now := s.now().Unix()
+	if s.grantCheck > 0 && s.grantsExpiredSince(ctx, s.grantCheck, now) && s.OnChange != nil {
+		s.OnChange()
+	}
+	s.grantCheck = now
+	s.refreshDueExternals(ctx)
 	if prune {
 		return store.PruneStats(ctx, s.st.DB, s.now().Unix())
 	}

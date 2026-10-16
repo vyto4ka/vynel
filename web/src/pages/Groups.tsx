@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
-import { del, get, Group, Node, patch, post, Profile } from '../api'
+import { del, get, GrantRow, Group, Node, patch, post, Profile } from '../api'
+import { GroupExtras } from '../extras'
 import { Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 
 const kindLabel: Record<string, string> = { profile: 'профиль', node: 'нода', node_inbound: 'инбаунд' }
@@ -8,6 +9,7 @@ export function Groups() {
   const groups = useLoad(() => get<Group[]>('groups'))
   const nodes = useLoad(() => get<Node[]>('nodes'))
   const profiles = useLoad(() => get<Profile[]>('profiles'))
+  const grants = useLoad(() => get<GrantRow[]>('grants'))
   const [edit, setEdit] = useState<Group | 'new' | null>(null)
   const act = useAction()
   const confirm = useConfirm()
@@ -61,6 +63,7 @@ export function Groups() {
                   <option value="">+ дать доступ…</option>
                   {options.map((o, i) => g.rules.some((r) => r.kind === o.kind && r.refId === o.refId) ? null : <option key={i} value={i}>{o.label}</option>)}
                 </select>
+                <GroupExtras group={g} grants={grants.data || []} onChanged={grants.reload} />
               </div>
             </div>
           ))}

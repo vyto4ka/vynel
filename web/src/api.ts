@@ -103,6 +103,7 @@ export interface UserDetails {
   trafficByNode: { code: string; bytes: number }[]
   daily: Day[]
   links: { tag: string; node: string; remark: string; hidden: boolean; link: string }[]
+  grants: UserGrant[]
 }
 
 export interface Group {
@@ -440,4 +441,47 @@ export interface UpdateInfo {
   panel: UpdateNode
   nodes: UpdateNode[]
   count: number
+}
+
+// Каскад: вход на одной ноде, выход через другую.
+export interface Cascade {
+  id: number
+  name: string
+  entryInboundId: number
+  exitInboundId: number
+  entry: string
+  exit: string
+  remark: string
+  title: string
+  enabled: boolean
+}
+
+// Чужая подписка, чьи серверы добавляются в наши.
+export interface ExternalSub {
+  id: number
+  name: string
+  url: string
+  enabled: boolean
+  fetchedAt: number | null
+  error: string
+  servers: string[]
+}
+
+export interface GrantRow {
+  id: number
+  userId: number | null
+  groupId: number | null
+  kind: 'cascade' | 'external'
+  refId: number
+  expireAt: number | null
+}
+
+// Что есть у пользователя: своя выдача и/или через группы; одно и то же — один раз.
+export interface UserGrant {
+  kind: 'cascade' | 'external'
+  refId: number
+  expireAt: number | null
+  grantId: number
+  groups: number[]
+  active: boolean
 }

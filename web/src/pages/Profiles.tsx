@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { ClientRouting, del, get, Group, patch, post, Profile, ProfileClient, ProfileDetails, ProfileTemplate, put, Variable } from '../api'
+import { CascadeList } from '../extras'
 import { RoutingForm } from '../routing'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { templateStarter } from '../templateStarter'
@@ -10,21 +11,24 @@ const sourceLabel: Record<string, string> = {
 }
 
 export function Profiles() {
-  const [tab, setTab] = useState<'profiles' | 'templates'>(() => (location.hash.includes('templates') ? 'templates' : 'profiles'))
+  const [tab, setTab] = useState<'profiles' | 'templates' | 'cascades'>(() =>
+    location.hash.includes('templates') ? 'templates' : location.hash.includes('cascades') ? 'cascades' : 'profiles')
   return (
     <>
       <div className="toolbar">
         <div className="seg">
           <button className={tab === 'profiles' ? 'on' : ''} onClick={() => setTab('profiles')}>Профили</button>
           <button className={tab === 'templates' ? 'on' : ''} onClick={() => setTab('templates')}>Шаблоны профилей</button>
+          <button className={tab === 'cascades' ? 'on' : ''} onClick={() => setTab('cascades')}>Каскады</button>
         </div>
         <div className="text-2 grow small">
           {tab === 'profiles'
             ? 'Профиль — общие настройки VLESS-инбаунда по шаблону. На каждой ноде из профиля получается свой инбаунд со своими ключами.'
+            : tab === 'cascades' ? 'Каскад — сервер, где трафик входит на одной ноде и выходит через другую.'
             : 'Шаблон — заготовка профиля: JSON инбаунда Xray с переменными, точка подключения для подписки и роль nginx. Свой шаблон — кнопка «Новый шаблон» (заготовка с пояснениями) или копия встроенного.'}
         </div>
       </div>
-      {tab === 'profiles' ? <ProfileList /> : <TemplateList />}
+      {tab === 'profiles' ? <ProfileList /> : tab === 'cascades' ? <CascadeList /> : <TemplateList />}
     </>
   )
 }

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { del, get, Group, patch, post, Template, User, UserDetails } from '../api'
+import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
 import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
 
@@ -327,12 +328,14 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
         </div>
       </div>
 
+      <UserExtras userId={id} grants={data.grants} groups={groups} onChanged={reload} />
+
       <div className="card">
         <div className="card-head"><h3>Серверы в подписке</h3><span className="card-sub">отдельные ссылки — для ручного импорта</span></div>
         <div className="card-pad">
           {data.links.length === 0 ? <div className="muted">Нет доступных серверов: проверьте группы пользователя и доступы групп.</div> :
-            data.links.map((l) => (
-              <div key={l.tag} style={{ marginBottom: 12 }}>
+            data.links.map((l, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
                 <div className="small text-2" style={{ marginBottom: 5 }}>{l.remark} <span className="muted">· {l.tag}{l.hidden ? ' · скрыт' : ''}</span></div>
                 <CopyField value={l.link} />
               </div>

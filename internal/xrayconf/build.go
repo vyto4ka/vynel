@@ -46,6 +46,10 @@ type NodeConfig struct {
 	Inbounds []*RenderedInbound
 	Clients  map[string][]Client // by inbound tag; may be nil (users added later via API)
 	APIAddr  string              // e.g. 127.0.0.1:10085
+	// Outbounds are added after the base ones (cascades to other nodes); FrontRules go before
+	// the base routing rules, which usually end with a catch-all.
+	Outbounds  []any
+	FrontRules []any
 }
 
 // SystemKeys are the top-level sections the panel owns. They are hidden from the editor.
@@ -101,6 +105,19 @@ func BuildConfig(nc NodeConfig) (map[string]any, error) {
 
 	if err := addEgress(cfg, nc.Inbounds); err != nil {
 		return nil, err
+	}
+	if len(nc.Outbounds) > 0 {
+		obs, _ := cfg["outbounds"].([]any)
+		cfg["outbounds"] = append(obs, deepCopy(map[string]any{"l": nc.Outbounds})["l"].([]any)...)
+	}
+	if len(nc.FrontRules) > 0 {
+		routing, _ := cfg["routing"].(map[string]any)
+		if routing == nil {
+			routing = map[string]any{}
+			cfg["routing"] = routing
+		}
+		rules, _ := routing["rules"].([]any)
+		routing["rules"] = append(deepCopy(map[string]any{"l": nc.FrontRules})["l"].([]any), rules...)
 	}
 
 	obs, _ := cfg["outbounds"].([]any)

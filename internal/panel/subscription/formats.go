@@ -6,9 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -52,11 +49,11 @@ func ParseFormat(s string) (Format, bool) {
 func (f Format) Supports(h service.Host) bool {
 	switch f {
 	case FormatMihomo:
-		return h.Network == "tcp" || h.Network == "hysteria" || (h.Network == "xhttp" && h.Mihomo)
+		return h.Raw == "" && (h.Network == "tcp" || h.Network == "hysteria" || (h.Network == "xhttp" && h.Mihomo))
 	case FormatSingBox:
-		return h.Network == "tcp" || h.Network == "hysteria"
+		return h.Raw == "" && (h.Network == "tcp" || h.Network == "hysteria")
 	}
-	return true
+	return h.Raw == "" || f == FormatBase64
 }
 
 // StubUUID marks a stub server carrying a message instead of a real endpoint.
@@ -69,53 +66,7 @@ func Stub(message string) service.Host {
 
 // Link renders a vless:// link, or hysteria2:// for Hysteria2 hosts (the UUID is the password).
 func Link(h service.Host, uuid string) string {
-	if h.Protocol == "hysteria" {
-		q := url.Values{}
-		if h.SNI != "" {
-			q.Set("sni", h.SNI)
-		}
-		if len(h.ALPN) > 0 {
-			q.Set("alpn", strings.Join(h.ALPN, ","))
-		}
-		q.Set("insecure", "0")
-		return fmt.Sprintf("hysteria2://%s@%s/?%s#%s", uuid, net.JoinHostPort(h.Address, strconv.Itoa(h.Port)), q.Encode(), url.PathEscape(h.Remark))
-	}
-	q := url.Values{}
-	q.Set("encryption", "none")
-	q.Set("type", h.Network)
-	q.Set("security", h.Security)
-	if h.SNI != "" {
-		q.Set("sni", h.SNI)
-	}
-	if h.Fingerprint != "" {
-		q.Set("fp", h.Fingerprint)
-	}
-	switch h.Security {
-	case "reality":
-		q.Set("pbk", h.PublicKey)
-		q.Set("sid", h.ShortID)
-	case "tls":
-		if len(h.ALPN) > 0 {
-			q.Set("alpn", strings.Join(h.ALPN, ","))
-		}
-	}
-	if h.Flow != "" {
-		q.Set("flow", h.Flow)
-	}
-	if h.Network == "xhttp" {
-		if h.HostHeader != "" {
-			q.Set("host", h.HostHeader)
-		}
-		q.Set("path", h.Path)
-		if h.Mode != "" {
-			q.Set("mode", h.Mode)
-		}
-		if len(h.Extra) > 0 {
-			b, _ := json.Marshal(h.Extra)
-			q.Set("extra", string(b))
-		}
-	}
-	return fmt.Sprintf("vless://%s@%s?%s#%s", uuid, net.JoinHostPort(h.Address, strconv.Itoa(h.Port)), q.Encode(), url.PathEscape(h.Remark))
+	return service.HostLink(h, cred(h, uuid))
 }
 
 // Base64 renders links for v2ray-style clients.
@@ -150,6 +101,7 @@ func Mihomo(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte,
 	names := uniqueNames(hosts)
 	proxies := make([]map[string]any, 0, len(hosts))
 	for i, h := range hosts {
+		uuid := cred(h, uuid)
 		if h.Protocol == "hysteria" {
 			p := map[string]any{"name": names[i], "type": "hysteria2", "server": h.Address, "port": h.Port, "password": uuid, "udp": true}
 			if h.SNI != "" {
@@ -288,6 +240,7 @@ func SingBox(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte
 	names := uniqueNames(hosts)
 	outbounds := []map[string]any{{"type": "selector", "tag": "proxy", "outbounds": names}}
 	for i, h := range hosts {
+		uuid := cred(h, uuid)
 		if h.Protocol == "hysteria" {
 			tls := map[string]any{"enabled": true, "server_name": h.SNI}
 			if len(h.ALPN) > 0 {
@@ -326,51 +279,15 @@ func SingBox(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte
 
 // XrayOutbound renders the proxy outbound of a host.
 func XrayOutbound(h service.Host, uuid string) map[string]any {
-	if h.Protocol == "hysteria" {
-		tls := map[string]any{"serverName": h.SNI}
-		if len(h.ALPN) > 0 {
-			tls["alpn"] = h.ALPN
-		}
-		return map[string]any{
-			"tag": "proxy", "protocol": "hysteria",
-			"settings": map[string]any{"version": 2, "address": h.Address, "port": h.Port},
-			"streamSettings": map[string]any{"network": "hysteria", "security": "tls", "tlsSettings": tls,
-				"hysteriaSettings": map[string]any{"version": 2, "auth": uuid}},
-		}
+	return service.HostOutbound(h, cred(h, uuid), "proxy")
+}
+
+// cred is the secret a host takes: its own (a cascade, another subscription) or the user's.
+func cred(h service.Host, uuid string) string {
+	if h.UUID != "" && uuid != StubUUID {
+		return h.UUID
 	}
-	user := map[string]any{"id": uuid, "encryption": "none"}
-	if h.Flow != "" {
-		user["flow"] = h.Flow
-	}
-	ss := map[string]any{"network": h.Network, "security": h.Security}
-	if h.Network == "tcp" {
-		ss["network"] = "raw"
-	}
-	switch h.Security {
-	case "reality":
-		ss["realitySettings"] = map[string]any{"serverName": h.SNI, "fingerprint": h.Fingerprint, "publicKey": h.PublicKey, "shortId": h.ShortID, "spiderX": ""}
-	case "tls":
-		tls := map[string]any{"serverName": h.SNI, "fingerprint": h.Fingerprint}
-		if len(h.ALPN) > 0 {
-			tls["alpn"] = h.ALPN
-		}
-		ss["tlsSettings"] = tls
-	}
-	if h.Network == "xhttp" {
-		xs := map[string]any{"path": h.Path, "mode": h.Mode}
-		if h.HostHeader != "" {
-			xs["host"] = h.HostHeader
-		}
-		if len(h.Extra) > 0 {
-			xs["extra"] = h.Extra
-		}
-		ss["xhttpSettings"] = xs
-	}
-	return map[string]any{
-		"tag": "proxy", "protocol": "vless",
-		"settings":       map[string]any{"vnext": []any{map[string]any{"address": h.Address, "port": h.Port, "users": []any{user}}}},
-		"streamSettings": ss,
-	}
+	return uuid
 }
 
 // XrayJSON renders one full Xray client config per host (KeqDroid, Happ, v2RayTun, v2rayN
