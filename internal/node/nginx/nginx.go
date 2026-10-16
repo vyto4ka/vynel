@@ -51,6 +51,7 @@ type Manager struct {
 	stopping bool
 	closed   bool
 	local    *nginxconf.Local
+	noStream string // why the stream module is unavailable ("" = it is there)
 }
 
 func (m *Manager) bin() string {
@@ -185,12 +186,18 @@ func (m *Manager) Apply(ctx context.Context, conf string) error {
 }
 
 func (m *Manager) finalize(ctx context.Context, conf string) (string, error) {
-	if m.local == nil {
+	stream := strings.Contains(conf, "\nstream {")
+	// Without the stream module, look again: it may have been installed since.
+	if m.local == nil || (stream && m.noStream != "") {
 		l, err := m.detect(ctx)
 		if err != nil {
 			return "", err
 		}
 		m.local = l
+	}
+	if stream && m.noStream != "" {
+		// nginx would only say: unknown directive "stream".
+		return "", fmt.Errorf("SNI routing on a shared port needs the nginx stream module: %s", m.noStream)
 	}
 	l := *m.local
 	l.Run, l.Certs, l.Decoy, l.ACME = m.runDir(), m.Certs.Dir, m.decoyDir(), m.acmeDir()
@@ -200,7 +207,7 @@ func (m *Manager) finalize(ctx context.Context, conf string) (string, error) {
 			return "", err
 		}
 	}
-	if !strings.Contains(conf, "\nstream {") {
+	if !stream {
 		l.Modules = nil
 	}
 	return nginxconf.Finalize(conf, l), nil
@@ -215,6 +222,7 @@ func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 		return nil, fmt.Errorf("nginx -V: %w", err)
 	}
 	l := &nginxconf.Local{}
+	m.noStream = ""
 	// ssl_reject_handshake appeared in nginx 1.19.4 (Ubuntu 22.04 and Debian 11 ship 1.18).
 	if v, _ := exec.CommandContext(ctx, m.bin(), "-v").CombinedOutput(); versionAtLeast(string(v), 1, 19, 4) {
 		l.RejectHandshake = true
@@ -227,12 +235,14 @@ func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 		}
 		mod := filepath.Join(dir, "ngx_stream_module.so")
 		if _, err := os.Stat(mod); err != nil {
+			m.noStream = "no " + mod + ", install it: apt install libnginx-mod-stream"
 			m.Log.Warn("nginx stream module missing: apt install libnginx-mod-stream", "path", mod)
 		} else {
 			l.Modules = []string{mod}
 		}
 	case strings.Contains(string(out), "--with-stream"):
 	default:
+		m.noStream = "this nginx is built without it, install the distribution's nginx and libnginx-mod-stream"
 		m.Log.Warn("nginx built without the stream module: SNI routing unavailable")
 	}
 	l.User = m.User

@@ -1048,17 +1048,40 @@ install_xray() {
 # 80/443, so it is not started by the package and stays disabled.
 install_nginx() {
   info "nginx"
-  if ! command -v nginx >/dev/null 2>&1 || ! dpkg -s libnginx-mod-stream >/dev/null 2>&1; then
-    local policy=0
-    if [[ ! -e /usr/sbin/policy-rc.d ]]; then
-      # The package would start nginx.service, which fails while our web server holds :80.
-      printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d && policy=1
-    fi
-    try_packages nginx libnginx-mod-stream || { [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d; die "cannot install nginx: see $APT_LOG"; }
-    [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d
+  local policy=0
+  if [[ ! -e /usr/sbin/policy-rc.d ]]; then
+    # The package would start nginx.service, which fails while our web server holds :80.
+    printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d && policy=1
   fi
+  # try_packages skips what is installed; a removed package with its config left counts as missing.
+  try_packages nginx libnginx-mod-stream || { [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d; die "cannot install nginx: see $APT_LOG"; }
+  # The package is there but its module is not (files deleted by hand): put them back.
+  local mod
+  mod="$(nginx_stream_missing)"
+  if [[ -n "$mod" ]]; then
+    echo "  $mod is missing — reinstalling libnginx-mod-stream"
+    wait_apt_idle
+    apt_install --reinstall libnginx-mod-stream || true
+  fi
+  [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d
   systemctl disable --now nginx >/dev/null 2>&1 || true
+  mod="$(nginx_stream_missing)"
+  [[ -z "$mod" ]] || red "  nginx has no stream module ($mod): SNI routing on a shared port will not work"
   green "  $(nginx -v 2>&1 | sed 's|^nginx version: ||')"
+}
+
+# nginx_stream_missing: prints the stream module nginx needs but does not have ("" = fine).
+nginx_stream_missing() {
+  local v dir
+  v="$(nginx -V 2>&1)" || return 0
+  case "$v" in
+    *--with-stream=dynamic*)
+      dir="$(sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p' <<<"$v")"
+      [[ -f "${dir:-/usr/lib/nginx/modules}/ngx_stream_module.so" ]] || echo "${dir:-/usr/lib/nginx/modules}/ngx_stream_module.so"
+      ;;
+    *--with-stream*) ;;
+    *) echo "built without --with-stream" ;;
+  esac
 }
 
 # install_caddy [force]: only for servers that still run an older vynel (rollback); new installs

@@ -177,12 +177,17 @@ func testNginxServes(t *testing.T, reject bool) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cmd.Process.Signal(os.Interrupt); _ = cmd.Wait() }()
-	for i := 0; i < 50; i++ {
-		if c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(httpPort)); err == nil {
-			c.Close()
+	// nginx writes its pid into the pid file once every listener is bound (binds are retried for
+	// ~2.5 s); nginx -t above leaves the file empty.
+	want := strconv.Itoa(cmd.Process.Pid)
+	for i := 0; ; i++ {
+		if b, err := os.ReadFile(filepath.Join(run, "nginx.pid")); err == nil && strings.TrimSpace(string(b)) == want {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		if i == 100 {
+			t.Fatal("nginx did not start")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	get := func(sni, host, method, path, body string) (int, string, http.Header) {

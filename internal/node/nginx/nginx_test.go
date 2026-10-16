@@ -199,3 +199,40 @@ func TestCheckListens(t *testing.T) {
 		t.Fatalf("got\n%s", got)
 	}
 }
+
+// A missing stream module is named in the error, and found once installed, without a restart.
+func TestStreamModuleMissing(t *testing.T) {
+	dir := t.TempDir()
+	mods := filepath.Join(dir, "modules")
+	bin := filepath.Join(dir, "nginx")
+	script := "#!/bin/sh\necho 'nginx version: nginx/1.24.0' >&2\n" +
+		"[ \"$1\" = -V ] && echo 'configure arguments: --modules-path=" + mods + " --with-stream=dynamic' >&2\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Bin: bin, DataDir: filepath.Join(dir, "data"), WWWDir: filepath.Join(dir, "www"), User: "nobody",
+		Log: slog.New(slog.DiscardHandler)}
+	if err := m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	conf, err := nginxconf.Build(nginxconf.Spec{Issuer: "internal",
+		Streams: []nginxconf.Stream{{Port: 443, Default: "127.0.0.1:8443",
+			Backends: []nginxconf.Backend{{Names: []string{"r.example.com"}, Addr: "127.0.0.1:10443"}}}},
+		Sites: []nginxconf.Site{{Domain: "a.example.com", Bind: "127.0.0.1", Port: 8443, ProxyProtocol: true,
+			Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "cloud"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := m.finalize(ctx, conf); err == nil || !strings.Contains(err.Error(), "libnginx-mod-stream") {
+		t.Fatalf("missing module: %v", err)
+	}
+	_ = os.MkdirAll(mods, 0o755)
+	if err := os.WriteFile(filepath.Join(mods, "ngx_stream_module.so"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	final, err := m.finalize(ctx, conf)
+	if err != nil || !strings.Contains(final, "load_module "+filepath.Join(mods, "ngx_stream_module.so")) {
+		t.Fatalf("installed module not picked up: %v\n%.300s", err, final)
+	}
+}
