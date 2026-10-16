@@ -180,18 +180,58 @@ func (m *Manager) Apply(ctx context.Context, conf string) error {
 	if err := m.test(ctx, path+".new"); err != nil {
 		return err
 	}
+	// What nginx runs now (or last ran): nginx -t cannot see everything (a port taken by another
+	// program), so a config can still fail at reload or start. The file on disk must then go
+	// back to the one that works, or the next restart or reboot starts from the broken one.
+	prev, _ := os.ReadFile(path)
 	if err := os.Rename(path+".new", path); err != nil {
 		return err
 	}
+	restore := func() {
+		if prev == nil {
+			return
+		}
+		if err := writeAtomic(path, prev); err != nil {
+			m.Log.Error("cannot put the previous nginx config back", "err", err)
+		}
+	}
 	if m.cmd != nil {
 		if err := m.reloadLocked(); err != nil {
+			restore() // nginx kept the previous config in memory; the file matches it again
 			return err
 		}
 	} else if err := m.startLocked(); err != nil {
-		return err
+		if prev == nil {
+			return err
+		}
+		restore()
+		if serr := m.startLocked(); serr != nil {
+			return fmt.Errorf("%w; the previous config does not start either: %w", err, serr)
+		}
+		m.current = m.lastSource()
+		m.Log.Warn("new nginx config did not start, running the previous one", "err", err)
+		return fmt.Errorf("%w (nginx runs the previous config)", err)
 	}
 	m.current = conf
+	if err := writeAtomic(path+".src", []byte(conf)); err != nil {
+		m.Log.Warn("cannot save the nginx config source", "err", err)
+	}
 	return nil
+}
+
+// lastSource is the config (as the panel sent it) that the file on disk was built from.
+func (m *Manager) lastSource() string {
+	if b, err := os.ReadFile(m.confPath() + ".src"); err == nil && len(b) > 0 {
+		return string(b)
+	}
+	return "# the previous config\n" // never equal to a real one: the next Apply rebuilds
+}
+
+func writeAtomic(path string, b []byte) error {
+	if err := os.WriteFile(path+".tmp", b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
 }
 
 func (m *Manager) finalize(ctx context.Context, conf string) (string, error) {

@@ -256,3 +256,78 @@ func testStreamModuleMissing(t *testing.T, flags string) {
 		t.Fatalf("installed module not picked up: %v\n%.300s", err, final)
 	}
 }
+
+// A config that passes nginx -t but cannot bind (a port another program holds) must not stay on
+// disk: nginx keeps or gets back the previous one, also after a restart or a cold start.
+func TestApplyRollback(t *testing.T) {
+	bin := nginxBin(t)
+	dir := t.TempDir()
+	_ = os.Chmod(dir, 0o755)
+	user := ""
+	if os.Getuid() == 0 {
+		user = "root"
+	}
+	newManager := func() *Manager {
+		return &Manager{Bin: bin, DataDir: filepath.Join(dir, "data"), WWWDir: filepath.Join(dir, "www"), User: user,
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	}
+	httpPort := freePort(t)
+	build := func(port int) string {
+		c, err := nginxconf.Build(nginxconf.Spec{Issuer: "internal", HTTPPort: httpPort, HTTPBinds: []string{"127.0.0.1"},
+			Sites: []nginxconf.Site{{Domain: "node.example.com", Bind: "127.0.0.1", Port: port,
+				Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "cloud"}}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	serves := func(port int) bool {
+		c, err := tls.DialWithDialer(&net.Dialer{Timeout: 2 * time.Second}, "tcp", "127.0.0.1:"+strconv.Itoa(port),
+			&tls.Config{ServerName: "node.example.com", InsecureSkipVerify: true}) //nolint:gosec // test
+		if err != nil {
+			return false
+		}
+		_ = c.Close()
+		return true
+	}
+	good := freePort(t)
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	bad := build(busy.Addr().(*net.TCPAddr).Port)
+	ctx := context.Background()
+
+	m := newManager()
+	if err := m.Apply(ctx, build(good)); err != nil {
+		t.Fatal(err)
+	}
+	// Reload: nginx keeps the previous config, and so does the file.
+	if err := m.Apply(ctx, bad); err == nil {
+		t.Fatal("a config that cannot bind was accepted")
+	}
+	if err := m.Restart(); err != nil || !serves(good) {
+		t.Fatalf("restart after a failed reload: %v", err)
+	}
+	m.Close()
+
+	// Cold start (agent restart with the bad config saved as partly applied): the previous
+	// config comes back and runs.
+	m = newManager()
+	defer m.Close()
+	err = m.Apply(ctx, bad)
+	if err == nil || !strings.Contains(err.Error(), "previous config") {
+		t.Fatalf("cold start with a config that cannot bind: %v", err)
+	}
+	if !serves(good) {
+		t.Fatal("the previous config is not running")
+	}
+	if m.current != build(good) {
+		t.Fatal("the manager does not know what runs")
+	}
+	// The next good config applies as usual.
+	if err := m.Apply(ctx, build(good)); err != nil || !serves(good) {
+		t.Fatalf("next apply: %v", err)
+	}
+}
