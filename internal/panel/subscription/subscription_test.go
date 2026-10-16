@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -283,5 +285,38 @@ func TestUnknownTokenLooksLikeAWebsite(t *testing.T) {
 	// After too many misses the IP is banned even with a valid token.
 	if rec := e.get(e.path(), "Happ/3", "hw-1"); rec.Code != 404 {
 		t.Fatalf("banned IP got %d", rec.Code)
+	}
+}
+
+// An address over the user's limit of addresses at once gets the servers the first time; once
+// the nodes report it over the limit, its subscription shows the limit (the HWID-limit header
+// tells the app why) while the user's other address keeps getting the servers.
+func TestIPLimitStub(t *testing.T) {
+	e := newEnv(t)
+	tr := e.svc.IPs()
+	tr.Confirm = 0
+	tr.SetLimits(1, nil)
+	email := strconv.FormatInt(e.user.ID, 10)
+	if links := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1")); len(links) == 0 {
+		t.Fatal("first fetch got no servers")
+	}
+	tr.Report(1, map[string][]string{email: {"198.51.100.1"}})
+	if blocks, _ := tr.Report(1, map[string][]string{email + ".c2": {"198.51.100.1", "192.0.2.1"}}); len(blocks[e.user.ID]) != 1 {
+		t.Fatalf("blocks %v", blocks)
+	}
+	rec := e.get(e.path(), "v2rayNG/1.9", "hw-1")
+	ls := links(t, rec)
+	if len(ls) != 1 || !strings.Contains(ls[0], StubUUID) || !strings.Contains(ls[0], url.PathEscape("лимит подключений: 2/1")) ||
+		rec.Header().Get("x-hwid-max-devices-reached") != "true" {
+		t.Fatalf("stub %v %v", ls, rec.Header())
+	}
+	other := httptest.NewRequest(http.MethodGet, e.path(), nil)
+	other.Header.Set("User-Agent", "v2rayNG/1.9")
+	other.Header.Set("x-hwid", "hw-1")
+	other.RemoteAddr = "198.51.100.1:5000"
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, other)
+	if ls := links(t, w); len(ls) == 0 || strings.Contains(ls[0], StubUUID) {
+		t.Fatalf("the admitted address got %v", ls)
 	}
 }

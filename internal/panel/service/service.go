@@ -60,6 +60,8 @@ type Service struct {
 
 	noticeOnce sync.Once
 	notices    chan Notice
+	ipOnce     sync.Once
+	ips        *IPTracker
 }
 
 // New creates a service over a store.

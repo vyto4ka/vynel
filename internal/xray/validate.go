@@ -4,6 +4,7 @@ package xray
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,4 +69,32 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, " | ")
+}
+
+// SetRules replaces the routing rules of a running Xray through its API (`xray api adrules`,
+// which builds them the same way a config file is read). routing is a config "routing" section:
+// its rules and balancers replace the running ones; the domain strategy stays.
+func (b Binary) SetRules(ctx context.Context, apiAddr string, routing map[string]any) error {
+	raw, err := json.Marshal(map[string]any{"routing": routing})
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "xray-rules-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "rules.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	cmd := b.command(ctx, "api", "adrules", "-s", apiAddr, "-t", "20", path)
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("xray api adrules: %w: %s", err, lastLines(out.String(), 5))
+	}
+	return nil
 }

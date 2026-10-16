@@ -104,6 +104,7 @@ type User struct {
 	ResetStrategy string  `json:"resetStrategy"`
 	HWIDLimit     *int64  `json:"hwidLimit"`
 	HWIDOff       bool    `json:"hwidOff"`
+	IPLimit       *int64  `json:"ipLimit"`
 	ClientType    string  `json:"clientType"`
 	Note          string  `json:"note"`
 	OnlineAt      *int64  `json:"onlineAt"`
@@ -120,7 +121,7 @@ func userDTO(u *store.User, groups []int64) User {
 	}
 	return User{ID: u.ID, Username: u.Username, Status: u.Status, Enabled: !u.Disabled, ExpireAt: u.ExpireAt,
 		TrafficLimit: u.TrafficLimitBytes, TrafficUsed: u.TrafficUsedBytes, LifetimeUsed: u.LifetimeUsedBytes,
-		ResetStrategy: u.ResetStrategy, HWIDLimit: u.HWIDLimit, HWIDOff: u.HWIDOff, ClientType: u.ClientType, Note: u.Note, OnlineAt: u.OnlineAt,
+		ResetStrategy: u.ResetStrategy, HWIDLimit: u.HWIDLimit, HWIDOff: u.HWIDOff, IPLimit: u.IPLimit, ClientType: u.ClientType, Note: u.Note, OnlineAt: u.OnlineAt,
 		CreatedAt: u.CreatedAt, SubLastAt: u.SubLastAt, SubLastUA: u.SubLastUA, GroupIDs: groups, TemplateID: u.TemplateID}
 }
 
@@ -369,13 +370,14 @@ func (s *Server) createUser(r *http.Request) (any, error) {
 		NeverExpires bool    `json:"neverExpires"`
 		TrafficLimit *int64  `json:"trafficLimit"`
 		HWIDLimit    *int64  `json:"hwidLimit"`
+		IPLimit      *int64  `json:"ipLimit"`
 		SubToken     string  `json:"subToken"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
 	ci := service.CreateUserInput{Username: in.Username, TemplateID: in.TemplateID, GroupIDs: in.GroupIDs, Note: in.Note,
-		NeverExpires: in.NeverExpires, TrafficLimitBytes: in.TrafficLimit, HWIDLimit: in.HWIDLimit, SubToken: in.SubToken}
+		NeverExpires: in.NeverExpires, TrafficLimitBytes: in.TrafficLimit, HWIDLimit: in.HWIDLimit, IPLimit: in.IPLimit, SubToken: in.SubToken}
 	if in.ExpireAt != nil {
 		t := time.Unix(*in.ExpireAt, 0)
 		ci.ExpireAt = &t
@@ -426,8 +428,14 @@ func (s *Server) user(r *http.Request) (any, error) {
 			"userAgent": d.UserAgent, "firstSeen": d.FirstSeen, "lastSeen": d.LastSeen, "lastIp": d.LastIP})
 	}
 	out["devices"] = dl
-	limit, _ := s.svc.Setting(ctx, service.SettingHWIDLimit, "3")
+	limit, _ := s.svc.Setting(ctx, service.SettingHWIDLimit, "0")
 	out["hwidDefault"], _ = strconv.Atoi(limit)
+	out["ipDefault"] = s.svc.IPLimitOf(ctx, &store.User{})
+	ips := s.svc.IPs().Online(id)
+	if ips == nil {
+		ips = []service.OnlineAddr{}
+	}
+	out["ips"] = ips
 	byNode, err := s.svc.UserTrafficByNode(ctx, id, 30)
 	if err != nil {
 		return nil, err
@@ -463,6 +471,7 @@ func (s *Server) updateUser(r *http.Request) (any, error) {
 		Note          *string `json:"note"`
 		HWIDLimit     *int64  `json:"hwidLimit"`
 		HWIDOff       *bool   `json:"hwidOff"`
+		IPLimit       *int64  `json:"ipLimit"`
 		ClientType    *string `json:"clientType"`
 		ResetStrategy *string `json:"resetStrategy"`
 		Enabled       *bool   `json:"enabled"`
@@ -479,8 +488,8 @@ func (s *Server) updateUser(r *http.Request) (any, error) {
 	}
 	ctx, a := r.Context(), actor(r)
 	var u *store.User
-	if in.Note != nil || in.HWIDLimit != nil || in.HWIDOff != nil || in.ClientType != nil || in.ResetStrategy != nil {
-		if u, err = s.svc.SetUserDetails(ctx, a, id, service.UserDetailsInput{Note: in.Note, HWIDLimit: in.HWIDLimit, HWIDOff: in.HWIDOff,
+	if in.Note != nil || in.HWIDLimit != nil || in.HWIDOff != nil || in.IPLimit != nil || in.ClientType != nil || in.ResetStrategy != nil {
+		if u, err = s.svc.SetUserDetails(ctx, a, id, service.UserDetailsInput{Note: in.Note, HWIDLimit: in.HWIDLimit, HWIDOff: in.HWIDOff, IPLimit: in.IPLimit,
 			ClientType: in.ClientType, ResetStrategy: in.ResetStrategy}); err != nil {
 			return nil, err
 		}

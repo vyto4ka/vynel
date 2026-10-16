@@ -98,6 +98,7 @@ func startAgent(t *testing.T, bin xray.Binary, dir string, dial agent.Dialer, ap
 	a, err := agent.New(agent.Config{
 		DataDir: dir, Xray: bin, Version: "test", Dial: dial, Log: logger("agent-" + filepath.Base(dir)),
 		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond, StatsInterval: 200 * time.Millisecond,
+		OnlineInterval: 200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)

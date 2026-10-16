@@ -55,6 +55,8 @@ type Reconciler struct {
 	sessions    map[int64]*session
 	ready       chan struct{}            // closed after the first recompute
 	updates     map[int64]*update.Status // what each node last said about its update
+	blocks      *nodev1.IPBlocks         // addresses over users' limits, for every node
+	blocksVer   int64
 }
 
 // New creates a reconciler.
@@ -97,6 +99,9 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	defer poll.Stop()
 	statuses := time.NewTicker(r.StatusEvery)
 	defer statuses.Stop()
+	// Slots of addresses that went away free up even when no node reports.
+	ipTick := time.NewTicker(5 * time.Second)
+	defer ipTick.Stop()
 	lastPrune := -1
 	for {
 		select {
@@ -118,6 +123,11 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			if err != nil || id == lastEvent {
 				continue
 			}
+		case <-ipTick.C:
+			if blocks, changed := r.svc.IPs().Evaluate(); changed {
+				r.setBlocks(blocks)
+			}
+			continue
 		case <-statuses.C:
 			// Expiry, traffic resets and (daily) pruning. Status changes kick us via OnChange.
 			day := time.Now().YearDay()
@@ -143,6 +153,11 @@ func (r *Reconciler) recompute(ctx context.Context) error {
 	states, err := r.svc.DesiredStates(ctx)
 	if err != nil {
 		return err
+	}
+	if err := r.svc.RefreshIPLimits(ctx); err != nil {
+		r.log.Warn("ip limits", "err", err)
+	} else if blocks, changed := r.svc.IPs().Evaluate(); changed {
+		r.setBlocks(blocks)
 	}
 	nodes, err := r.svc.Nodes(ctx)
 	if err != nil {
@@ -188,6 +203,37 @@ func (r *Reconciler) recompute(ctx context.Context) error {
 	return nil
 }
 
+// CapIPLimit is the capability of agents that report online addresses (OnlineIPs) and apply
+// IPBlocks.
+const CapIPLimit = "iplimit"
+
+// setBlocks publishes new blocks; every session sends them to its node.
+func (r *Reconciler) setBlocks(blocks map[int64][]string) {
+	msg := &nodev1.IPBlocks{}
+	ids := make([]int64, 0, len(blocks))
+	for u := range blocks {
+		ids = append(ids, u)
+	}
+	slices.Sort(ids)
+	for _, u := range ids {
+		msg.Blocks = append(msg.Blocks, &nodev1.IPBlock{UserId: u, Ips: blocks[u]})
+	}
+	r.mu.Lock()
+	r.blocks = msg
+	r.blocksVer++
+	sessions := make([]*session, 0, len(r.sessions))
+	for _, s := range r.sessions {
+		sessions = append(sessions, s)
+	}
+	r.mu.Unlock()
+	if len(msg.Blocks) > 0 {
+		r.log.Info("addresses over the limit", "users", len(msg.Blocks))
+	}
+	for _, s := range sessions {
+		s.wake()
+	}
+}
+
 // Connected reports whether a node has a live session.
 func (r *Reconciler) Connected(nodeID int64) bool {
 	r.mu.Lock()
@@ -213,6 +259,7 @@ type session struct {
 	holdUntil time.Time
 	hello     *nodev1.Hello
 	waiters   map[string]chan *nodev1.CommandResult // admin commands sent, by id
+	blocksVer int64                                 // the IPBlocks version the node has (-1 = none)
 }
 
 func (s *session) wake() {
@@ -228,7 +275,7 @@ func (r *Reconciler) Serve(nodeID int64, stream Stream) error {
 	<-r.ready
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
-	s := &session{r: r, nodeID: nodeID, stream: stream, wakeCh: make(chan struct{}, 1), out: make(chan *nodev1.PanelMessage, 64), cancel: cancel}
+	s := &session{r: r, nodeID: nodeID, stream: stream, wakeCh: make(chan struct{}, 1), out: make(chan *nodev1.PanelMessage, 64), cancel: cancel, blocksVer: -1}
 
 	r.mu.Lock()
 	if old, ok := r.sessions[nodeID]; ok {
@@ -239,10 +286,18 @@ func (r *Reconciler) Serve(nodeID int64, stream Stream) error {
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
-		if r.sessions[nodeID] == s {
+		current := r.sessions[nodeID] == s
+		if current {
 			delete(r.sessions, nodeID)
 		}
 		r.mu.Unlock()
+		if current {
+			// Its users are no longer online there.
+			r.svc.IPs().Forget(nodeID)
+			if blocks, changed := r.svc.IPs().Evaluate(); changed {
+				r.setBlocks(blocks)
+			}
+		}
 	}()
 
 	msgs := make(chan *nodev1.NodeMessage)
@@ -319,6 +374,15 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		s.r.Notify() // reported addresses may change the desired state too
 	case *nodev1.NodeMessage_Addresses:
 		return svc.SyncAddresses(ctx, s.nodeID, toReported(m.Addresses.Addresses))
+	case *nodev1.NodeMessage_OnlineIps:
+		online := make(map[string][]string, len(m.OnlineIps.Users))
+		for _, u := range m.OnlineIps.Users {
+			online[u.Email] = u.IpList
+		}
+		if blocks, changed := svc.IPs().Report(s.nodeID, online); changed {
+			s.r.setBlocks(blocks)
+		}
+		return nil
 	case *nodev1.NodeMessage_Update:
 		u := m.Update
 		s.r.mu.Lock()
@@ -472,13 +536,34 @@ func (s *session) pushLoop(ctx context.Context) {
 		case <-s.wakeCh:
 		case <-tick.C:
 		}
-		for _, msg := range s.next() {
+		for _, msg := range append(s.next(), s.nextBlocks()...) {
 			if err := s.stream.Send(msg); err != nil {
 				s.r.log.Warn("send to node failed", "node", s.nodeID, "err", err)
 				return
 			}
 		}
 	}
+}
+
+// nextBlocks returns the IP blocks when the node does not have the latest ones yet. A fresh
+// session always gets them, empty or not: the node may still apply blocks from before.
+func (s *session) nextBlocks() []*nodev1.PanelMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hello == nil || !slices.Contains(s.hello.Capabilities, CapIPLimit) {
+		return nil
+	}
+	s.r.mu.Lock()
+	blocks, ver := s.r.blocks, s.r.blocksVer
+	s.r.mu.Unlock()
+	if ver == s.blocksVer {
+		return nil
+	}
+	s.blocksVer = ver
+	if blocks == nil {
+		blocks = &nodev1.IPBlocks{}
+	}
+	return []*nodev1.PanelMessage{{Msg: &nodev1.PanelMessage_IpBlocks{IpBlocks: blocks}}}
 }
 
 // next decides what to send, if anything.

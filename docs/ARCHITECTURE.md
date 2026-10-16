@@ -384,7 +384,7 @@ https://panel.example.com/install/9fK2...xQ
 
 ```
 если HWID глобально выключен → пропустить
-limit = user.hwid_limit ?? settings.hwid_default_limit   (0 = без лимита)
+limit = user.hwid_limit ?? settings.hwid_default_limit   (0 = без лимита; по умолчанию 0 — одновременные подключения ограничивает лимит IP, USER_GUIDE §6.1)
 если нет x-hwid:
     по умолчанию → отказ «клиент не поддерживает HWID»
     галочка «Пускать клиентов без HWID» (settings.hwid_allow_missing) → пропустить без учёта устройства

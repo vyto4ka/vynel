@@ -250,7 +250,8 @@ type User struct {
 	ResetStrategy     string
 	LastResetAt       *int64
 	HWIDLimit         *int64
-	HWIDOff           bool // no HWID check for this user
+	HWIDOff           bool   // no HWID check for this user
+	IPLimit           *int64 // addresses at once; nil = the default, 0 = unlimited
 	ClientType        string
 	TemplateID        *int64
 	TelegramID        *int64
@@ -266,18 +267,18 @@ type User struct {
 
 const userCols = `id, username, uuid, sub_token, disabled, status, expire_at, traffic_limit_bytes, traffic_used_bytes, lifetime_used_bytes,
 	reset_strategy, last_reset_at, hwid_limit, client_type, template_id, telegram_id, external_id, note, online_at, created_by, created_at, updated_at,
-	sub_last_at, sub_last_ua, hwid_off`
+	sub_last_at, sub_last_ua, hwid_off, ip_limit`
 
 func scanUser(sc interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
-	var expire, limit, reset, hwid, tpl, tg, online, subAt sql.NullInt64
+	var expire, limit, reset, hwid, tpl, tg, online, subAt, ipLimit sql.NullInt64
 	var ext sql.NullString
 	if err := sc.Scan(&u.ID, &u.Username, &u.UUID, &u.SubToken, &u.Disabled, &u.Status, &expire, &limit, &u.TrafficUsedBytes, &u.LifetimeUsedBytes,
 		&u.ResetStrategy, &reset, &hwid, &u.ClientType, &tpl, &tg, &ext, &u.Note, &online, &u.CreatedBy, &u.CreatedAt, &u.UpdatedAt,
-		&subAt, &u.SubLastUA, &u.HWIDOff); err != nil {
+		&subAt, &u.SubLastUA, &u.HWIDOff, &ipLimit); err != nil {
 		return nil, mapErr(err)
 	}
-	u.SubLastAt = ptrInt(subAt)
+	u.SubLastAt, u.IPLimit = ptrInt(subAt), ptrInt(ipLimit)
 	u.ExpireAt, u.TrafficLimitBytes, u.LastResetAt, u.HWIDLimit = ptrInt(expire), ptrInt(limit), ptrInt(reset), ptrInt(hwid)
 	u.TemplateID, u.TelegramID, u.OnlineAt, u.ExternalID = ptrInt(tpl), ptrInt(tg), ptrInt(online), ptrStr(ext)
 	return u, nil
@@ -288,10 +289,10 @@ func CreateUser(ctx context.Context, q DBTX, u *User) error {
 	now := unix()
 	u.CreatedAt, u.UpdatedAt = now, now
 	res, err := q.ExecContext(ctx, `INSERT INTO users (username, uuid, sub_token, disabled, status, expire_at, traffic_limit_bytes, reset_strategy, hwid_limit,
-		hwid_off, client_type, template_id, telegram_id, external_id, note, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		hwid_off, client_type, template_id, telegram_id, external_id, note, created_by, created_at, updated_at, ip_limit)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.Username, u.UUID, u.SubToken, u.Disabled, u.Status, nullInt(u.ExpireAt), nullInt(u.TrafficLimitBytes), u.ResetStrategy, nullInt(u.HWIDLimit),
-		u.HWIDOff, u.ClientType, nullInt(u.TemplateID), nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.CreatedBy, now, now)
+		u.HWIDOff, u.ClientType, nullInt(u.TemplateID), nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.CreatedBy, now, now, nullInt(u.IPLimit))
 	if err != nil {
 		return mapErr(err)
 	}
@@ -303,9 +304,28 @@ func CreateUser(ctx context.Context, q DBTX, u *User) error {
 func UpdateUser(ctx context.Context, q DBTX, u *User) error {
 	u.UpdatedAt = unix()
 	return execOne(ctx, q, `UPDATE users SET username=?, uuid=?, sub_token=?, disabled=?, status=?, expire_at=?, traffic_limit_bytes=?, traffic_used_bytes=?,
-		reset_strategy=?, last_reset_at=?, hwid_limit=?, hwid_off=?, client_type=?, telegram_id=?, external_id=?, note=?, updated_at=? WHERE id=?`,
+		reset_strategy=?, last_reset_at=?, hwid_limit=?, hwid_off=?, client_type=?, telegram_id=?, external_id=?, note=?, updated_at=?, ip_limit=? WHERE id=?`,
 		u.Username, u.UUID, u.SubToken, u.Disabled, u.Status, nullInt(u.ExpireAt), nullInt(u.TrafficLimitBytes), u.TrafficUsedBytes,
-		u.ResetStrategy, nullInt(u.LastResetAt), nullInt(u.HWIDLimit), u.HWIDOff, u.ClientType, nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.UpdatedAt, u.ID)
+		u.ResetStrategy, nullInt(u.LastResetAt), nullInt(u.HWIDLimit), u.HWIDOff, u.ClientType, nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.UpdatedAt,
+		nullInt(u.IPLimit), u.ID)
+}
+
+// UserIPLimits returns the users with their own limit of addresses.
+func UserIPLimits(ctx context.Context, q DBTX) (map[int64]int, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, ip_limit FROM users WHERE ip_limit IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var id, n int64
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = int(n)
+	}
+	return out, rows.Err()
 }
 
 // SetUserStatus changes only the status.

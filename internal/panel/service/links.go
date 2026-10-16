@@ -282,8 +282,8 @@ func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) 
 	if enabled != "true" || u.HWIDOff {
 		return DeviceVerdict{OK: true, Off: true}, nil
 	}
-	limit := 3
-	if v, _ := s.Setting(ctx, SettingHWIDLimit, "3"); v != "" {
+	limit := 0
+	if v, _ := s.Setting(ctx, SettingHWIDLimit, "0"); v != "" {
 		limit, _ = strconv.Atoi(v)
 	}
 	if u.HWIDLimit != nil {

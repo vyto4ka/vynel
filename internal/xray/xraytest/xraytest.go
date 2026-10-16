@@ -134,26 +134,33 @@ type RealityClient struct {
 	ServerName string
 	PublicKey  string
 	ShortID    string
+	// SendThrough is the local address the client connects from (127.0.0.2… stand in for other
+	// devices: Xray does not count 127.0.0.1 as an online address).
+	SendThrough string
 }
 
 // StartRealityClient runs an Xray client exposing SOCKS on the returned port.
 func StartRealityClient(t testing.TB, bin xray.Binary, c RealityClient) int {
 	t.Helper()
 	socks := FreePort(t)
+	out := map[string]any{
+		"protocol": "vless",
+		"settings": map[string]any{"vnext": []any{map[string]any{
+			"address": "127.0.0.1", "port": c.ServerPort,
+			"users": []any{map[string]any{"id": c.UUID, "encryption": "none", "flow": c.Flow}},
+		}}},
+		"streamSettings": map[string]any{
+			"network": "raw", "security": "reality",
+			"realitySettings": map[string]any{"serverName": c.ServerName, "fingerprint": "firefox", "publicKey": c.PublicKey, "shortId": c.ShortID},
+		},
+	}
+	if c.SendThrough != "" {
+		out["sendThrough"] = c.SendThrough
+	}
 	cfg := map[string]any{
-		"log":      map[string]any{"loglevel": "warning"},
-		"inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": socks, "protocol": "socks", "settings": map[string]any{"udp": false}}},
-		"outbounds": []any{map[string]any{
-			"protocol": "vless",
-			"settings": map[string]any{"vnext": []any{map[string]any{
-				"address": "127.0.0.1", "port": c.ServerPort,
-				"users": []any{map[string]any{"id": c.UUID, "encryption": "none", "flow": c.Flow}},
-			}}},
-			"streamSettings": map[string]any{
-				"network": "raw", "security": "reality",
-				"realitySettings": map[string]any{"serverName": c.ServerName, "fingerprint": "firefox", "publicKey": c.PublicKey, "shortId": c.ShortID},
-			},
-		}},
+		"log":       map[string]any{"loglevel": "warning"},
+		"inbounds":  []any{map[string]any{"listen": "127.0.0.1", "port": socks, "protocol": "socks", "settings": map[string]any{"udp": false}}},
+		"outbounds": []any{out},
 	}
 	raw, _ := json.Marshal(cfg)
 	return StartClient(t, bin, raw, socks)

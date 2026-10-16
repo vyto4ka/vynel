@@ -184,7 +184,7 @@ vynel admin user show vasya     # печатает sub url https://nl.example.co
 
 Приложение получит сервер «🇳🇱 Нидерланды» и само будет обновлять подписку. Как выглядит страница, какие кнопки на ней и какие заголовки получают приложения — настраивается в панели: «Подписка» ([USER_GUIDE §5](USER_GUIDE.md#5-подписки-и-приложения)).
 
-> По умолчанию у пользователя **до 3 устройств**, и приложение должно передавать HWID. KeqDroid это делает. Если используешь клиент без HWID, включи `vynel admin setting hwid.allow_missing true`.
+> По умолчанию пользователь может быть подключён **с 3 адресов одновременно** (лимит IP), а число устройств не ограничено. Приложение должно передавать HWID — KeqDroid это делает. Если используешь клиент без HWID, включи `vynel admin setting hwid.allow_missing true`.
 
 Продлить, отключить, лимит трафика, устройства — в карточке пользователя в панели или командами из [USER_GUIDE.md](USER_GUIDE.md).
 
@@ -269,6 +269,7 @@ vynel admin user show vasya     # печатает sub url https://nl.example.co
 | Сертификат не выпускается (`does not answer yet`) | DNS указывает не туда; порт 80 закрыт файрволом хостера; в Cloudflare включено оранжевое облако. Нода повторяет попытки сама (сначала через минуту, потом реже): после исправления подожди пару минут или перезапусти службу. |
 | `node list`: `offline` / `syncing` | `journalctl -u vynel -e`. Перезапуск: `systemctl restart vynel`. |
 | PROBLEMS: `net.core.default_qdisc=…` | Ядро не дало включить fq/BBR (бывает на OpenVZ/LXC). VPN работает и без этого. |
+| В приложении сервер «⛔ Превышен лимит подключений: 4/3» | Слишком много адресов сразу. Лишние отпустятся сами, когда отключатся другие устройства; поднять лимит: в карточке пользователя или `vynel admin setting ip.default_limit 5`. |
 | В приложении сервер «⛔ Лимит устройств 3/3» | Освободить место: `vynel admin user devices vasya`, затем `… --rm ID`. Или поднять лимит: `vynel admin setting hwid.default_limit 5`. |
 | «⛔ Приложение не передаёт HWID» | Клиент без HWID. Используй KeqDroid, выключи HWID пользователю в его карточке или `vynel admin setting hwid.allow_missing true`. |
 | «⛔ Подписка истекла» / «Трафик исчерпан» | `vynel admin user extend vasya --months 1` / `vynel admin user reset vasya`. |

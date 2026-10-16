@@ -183,6 +183,7 @@ type CreateUserInput struct {
 	NeverExpires      bool
 	TrafficLimitBytes *int64
 	HWIDLimit         *int64
+	IPLimit           *int64  // addresses at once; nil = the default, 0 = unlimited
 	GroupIDs          []int64 // nil = template's groups
 	ClientType        string
 	Note              string
@@ -251,6 +252,9 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 			}
 			if in.HWIDLimit != nil {
 				u.HWIDLimit = in.HWIDLimit
+			}
+			if in.IPLimit != nil && *in.IPLimit >= 0 {
+				u.IPLimit = in.IPLimit
 			}
 			u.ClientType = firstNonEmpty(in.ClientType, firstNonEmpty(tpl.ClientType, "auto"))
 			if u.Note == "" {

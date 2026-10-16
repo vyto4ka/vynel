@@ -233,6 +233,8 @@ func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
 				b.dropLoginNotices(ctx)
 			case n.Kind == "login-blocked":
 				b.onLoginBlocked(ctx, n)
+			case n.Kind == "ip-limit":
+				b.onIPLimit(ctx, n)
 			}
 		case <-tick:
 			return true

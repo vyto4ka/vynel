@@ -36,7 +36,15 @@ message NodeMessage {
     StatsBatch stats = 4;
     CommandResult result = 5;
     UpdateStatus update = 6;
+    OnlineIPs online_ips = 7;
   }
+}
+
+// OnlineIPs is who is connected right now and from where, sent every few seconds by agents
+// with the "iplimit" capability (not queued: only the latest list matters). The panel adds the
+// lists of all nodes up to enforce each user's limit of addresses at once.
+message OnlineIPs {
+  repeated OnlineUser users = 1;
 }
 
 // UpdateStatus is how the node's update (`vynel update`) is going: sent every few seconds while it
@@ -89,7 +97,20 @@ message PanelMessage {
     Delta delta = 2;
     StatsAck stats_ack = 3;
     Command command = 4;
+    IPBlocks ip_blocks = 5;
   }
+}
+
+// IPBlocks is the full list of addresses users connect from above their limit (agents with
+// "iplimit"). The agent routes their new connections to a blackhole and drops the open ones; a
+// user missing from the list is no longer blocked anywhere.
+message IPBlocks {
+  repeated IPBlock blocks = 1;
+}
+
+message IPBlock {
+  int64 user_id = 1;        // matches the user's emails: "<id>" and "<id>.<anything>"
+  repeated string ips = 2;  // IPv4 addresses and IPv6 /64 networks
 }
 
 // Command is an admin action on the node (panel: «Ноды» → «Действия»).
@@ -135,6 +156,7 @@ message UserTraffic {
 message OnlineUser {
   string email = 1;
   int32 ips = 2;
+  repeated string ip_list = 3; // in OnlineIPs only
 }
 
 message Metrics {

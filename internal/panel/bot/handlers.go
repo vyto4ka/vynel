@@ -446,7 +446,7 @@ func (b *Bot) userText(ctx context.Context, u *store.User) string {
 		if *u.HWIDLimit == 0 {
 			lim = "∞"
 		}
-	} else if def, _ := b.svc.Setting(ctx, service.SettingHWIDLimit, "3"); def != "" {
+	} else if def, _ := b.svc.Setting(ctx, service.SettingHWIDLimit, "0"); def != "" {
 		lim = def
 	}
 	if u.HWIDOff {

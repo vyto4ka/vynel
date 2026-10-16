@@ -53,6 +53,7 @@ export interface User {
   resetStrategy: string
   hwidLimit: number | null
   hwidOff: boolean
+  ipLimit: number | null
   clientType: string
   note: string
   onlineAt: number | null
@@ -75,6 +76,15 @@ export interface Device {
   lastIp: string
 }
 
+// Адрес пользователя в онлайне (лимит IP): занял слот, ждёт или заблокирован.
+export interface OnlineAddr {
+  addr: string
+  since: number
+  seen: number
+  admitted: boolean
+  blocked: boolean
+}
+
 export interface Day {
   day: number
   up: number
@@ -88,6 +98,8 @@ export interface UserDetails {
   subError?: string
   devices: Device[]
   hwidDefault: number
+  ipDefault: number
+  ips: OnlineAddr[]
   trafficByNode: { code: string; bytes: number }[]
   daily: Day[]
   links: { tag: string; node: string; remark: string; hidden: boolean; link: string }[]

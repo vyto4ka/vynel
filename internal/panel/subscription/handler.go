@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -197,6 +198,12 @@ func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.R
 		return nil, "Трафик исчерпан"
 	case store.StatusDisabled:
 		return nil, "Подписка отключена"
+	}
+	// An address over the user's limit of addresses at once: it got the servers once, then the
+	// nodes reported it and blocked it. The same header as the HWID limit tells the app why.
+	if blocked, count, limit := h.svc.IPs().Verdict(u.ID, ip); blocked {
+		w.Header().Set("x-hwid-max-devices-reached", "true")
+		return nil, fmt.Sprintf("Превышен лимит подключений: %d/%d — отключите лишние устройства", count, limit)
 	}
 	v, err := h.svc.CheckDevice(ctx, u, service.DeviceInfo{
 		HWID: r.Header.Get("x-hwid"), Platform: r.Header.Get("x-device-os"), OSVersion: r.Header.Get("x-ver-os"),

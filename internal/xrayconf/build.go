@@ -29,6 +29,10 @@ const DefaultBaseJSON = `{
 // DirectTag is the default outbound the egress rules clone.
 const DirectTag = "DIRECT"
 
+// IPBlockTag is the blackhole outbound of addresses over a user's limit (docs/USER_GUIDE.md
+// §6.1): the agent routes them there through the routing API.
+const IPBlockTag = "VYNEL_BLOCK"
+
 // Client is a user written into an inbound's clients list.
 type Client struct {
 	Email string `json:"email"` // stable user key for stats, never the username
@@ -99,10 +103,22 @@ func BuildConfig(nc NodeConfig) (map[string]any, error) {
 		return nil, err
 	}
 
+	obs, _ := cfg["outbounds"].([]any)
+	hasBlock := false
+	for _, o := range obs {
+		if m, ok := o.(map[string]any); ok && m["tag"] == IPBlockTag {
+			hasBlock = true
+		}
+	}
+	if !hasBlock {
+		// Last: the first outbound stays the default.
+		cfg["outbounds"] = append(obs, map[string]any{"tag": IPBlockTag, "protocol": "blackhole"})
+	}
+
 	cfg["api"] = map[string]any{
 		"tag":      "api",
 		"listen":   nc.APIAddr,
-		"services": []any{"HandlerService", "StatsService", "LoggerService"},
+		"services": []any{"HandlerService", "StatsService", "LoggerService", "RoutingService"},
 	}
 	cfg["stats"] = map[string]any{}
 	cfg["policy"] = map[string]any{

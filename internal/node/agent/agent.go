@@ -52,12 +52,15 @@ type Config struct {
 	Addresses     func() []*nodev1.Address // defaults to the host's interfaces
 	MaxBackoff    time.Duration            // reconnect backoff cap, default 30s
 	StatsInterval time.Duration            // how often counters are collected, default 10s
-	CaddyBin      string                   // path to caddy ("" = not installed); only for panels that still send Caddy configs
-	NginxBin      string                   // path to nginx ("" = /usr/sbin/nginx)
-	WWWDir        string                   // decoys, ACME webroot and temp files nginx workers use; "" = <DataDir>/web/www
-	NginxUser     string                   // nginx worker user; "" = www-data (tests use root)
-	TuneSysctl    bool                     // apply BBR/fq/TFO on start (needs root)
-	CertInterval  time.Duration            // how often certificates are renewed and copied for Xray, default 1m
+	// OnlineInterval is how often the addresses of online users are sent, default 5s (only
+	// changes; the same list again every 30s).
+	OnlineInterval time.Duration
+	CaddyBin       string        // path to caddy ("" = not installed); only for panels that still send Caddy configs
+	NginxBin       string        // path to nginx ("" = /usr/sbin/nginx)
+	WWWDir         string        // decoys, ACME webroot and temp files nginx workers use; "" = <DataDir>/web/www
+	NginxUser      string        // nginx worker user; "" = www-data (tests use root)
+	TuneSysctl     bool          // apply BBR/fq/TFO on start (needs root)
+	CertInterval   time.Duration // how often certificates are renewed and copied for Xray, default 1m
 	// Firewall keeps nftables in step with what this node serves (when `vynel firewall on`);
 	// nil = never touch the firewall (tests).
 	Firewall   *firewall.Manager
@@ -100,6 +103,10 @@ type Agent struct {
 	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
 	nginxCfg string   // the config nginx runs now; only one of the two web servers runs
 	vpnIPs   []string // addresses of connected VPN users, trusted by the firewall
+	// ipBlocks are the panel's addresses over users' limits; blocksApplied: the running Xray
+	// has block rules in front of its own.
+	ipBlocks      []*nodev1.IPBlock
+	blocksApplied bool
 }
 
 // New opens the agent's state. Call Run to start.
@@ -115,6 +122,9 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.StatsInterval == 0 {
 		cfg.StatsInterval = 10 * time.Second
+	}
+	if cfg.OnlineInterval == 0 {
+		cfg.OnlineInterval = 5 * time.Second
 	}
 	if cfg.CertInterval == 0 {
 		cfg.CertInterval = time.Minute
@@ -260,7 +270,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: a.cfg.Addresses(),
 		CaddyVersion: a.caddyVer, Warnings: a.warnings, NginxVersion: a.nginxVer,
 	}
-	hello.Capabilities = append(hello.Capabilities, CapChunks)
+	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit)
 	if a.nginxVer != "" {
 		hello.Capabilities = append(hello.Capabilities, CapNginx)
 	}
@@ -330,10 +340,23 @@ func (a *Agent) session(ctx context.Context) error {
 	}
 	updTick := time.NewTicker(a.cfg.UpdateEvery)
 	defer updTick.Stop()
+	onlineTick := time.NewTicker(a.cfg.OnlineInterval)
+	defer onlineTick.Stop()
+	var lastOnline *nodev1.OnlineIPs
+	var lastOnlineAt time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-onlineTick.C:
+			msg := a.onlineIPs(ctx)
+			if msg == nil || (lastOnline != nil && proto.Equal(msg, lastOnline) && time.Since(lastOnlineAt) < 30*time.Second) {
+				continue
+			}
+			if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_OnlineIps{OnlineIps: msg}}); err != nil {
+				return err
+			}
+			lastOnline, lastOnlineAt = msg, time.Now()
 		case <-updTick.C:
 			if watching {
 				if err := sendUpdate(); err != nil {
@@ -370,6 +393,10 @@ func (a *Agent) session(ctx context.Context) error {
 					// The answer reaches the panel first; then the service goes down.
 					time.AfterFunc(time.Second, after)
 				}
+				continue
+			}
+			if b, ok := m.Msg.(*nodev1.PanelMessage_IpBlocks); ok {
+				a.SetIPBlocks(ctx, b.IpBlocks.Blocks)
 				continue
 			}
 			if sa, ok := m.Msg.(*nodev1.PanelMessage_StatsAck); ok {
@@ -705,6 +732,11 @@ func (a *Agent) restartLocked(ctx context.Context, st *state.State) error {
 	defer cancel()
 	if err := a.api.WaitReady(wctx); err != nil {
 		return fmt.Errorf("%w; xray output: %v", err, a.proc.Tail())
+	}
+	// A new Xray runs the config's rules only: the blocks go in front again.
+	a.blocksApplied = false
+	if err := a.applyBlocksLocked(ctx, st); err != nil {
+		a.log.Error("cannot apply address blocks after the restart", "err", err)
 	}
 	return nil
 }

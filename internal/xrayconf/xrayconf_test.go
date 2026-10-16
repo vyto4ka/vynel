@@ -142,6 +142,12 @@ func TestGoldenRealityMatchesPDF(t *testing.T) {
 		}
 		delete(cfg, k)
 	}
+	// The panel's own blackhole for addresses over the limit is not part of the profile.
+	obs := cfg["outbounds"].([]any)
+	if last := obs[len(obs)-1].(map[string]any); last["tag"] != IPBlockTag {
+		t.Fatalf("no %s outbound: %v", IPBlockTag, last)
+	}
+	cfg["outbounds"] = obs[:len(obs)-1]
 	assertJSONEqual(t, readFixture(t, "pdf_reality.json"), cfg)
 }
 
@@ -322,7 +328,10 @@ func TestEgressRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	outs := cfg["outbounds"].([]any)
-	last := outs[len(outs)-1].(map[string]any)
+	if last := outs[len(outs)-1].(map[string]any); last["tag"] != IPBlockTag || last["protocol"] != "blackhole" {
+		t.Fatalf("block outbound: %v", last)
+	}
+	last := outs[len(outs)-2].(map[string]any)
 	if last["tag"] != "DIRECT@203.0.113.12" || last["sendThrough"] != "203.0.113.12" {
 		t.Fatalf("egress outbound: %v", last)
 	}

@@ -389,3 +389,22 @@ func (b *Bot) firewallAction(ctx context.Context, api *client, chat, msg int64, 
 	}
 	return ""
 }
+
+// onIPLimit tells the admins that a user connects from more addresses than allowed: the extra
+// ones are blocked on the nodes (at most one message per user in a few hours).
+func (b *Bot) onIPLimit(ctx context.Context, n service.Notice) {
+	api := b.client()
+	if api == nil {
+		return
+	}
+	admins, _ := b.svc.BotAdmins(ctx)
+	addrs := make([]string, 0, len(n.Addrs))
+	for _, a := range n.Addrs {
+		addrs = append(addrs, "<code>"+esc(a)+"</code>")
+	}
+	text := fmt.Sprintf("🌐 <b>%s</b> подключается с %d адресов при лимите %d\nЗаблокированы: %s\n\n<i>Лишние адреса не пускаются, пока не освободится место; подписка с них показывает «лимит».</i>",
+		esc(n.User), n.Count, n.Limit, strings.Join(addrs, ", "))
+	for _, a := range admins {
+		_, _ = api.send(ctx, a.ID, text, nil)
+	}
+}

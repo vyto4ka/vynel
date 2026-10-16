@@ -257,6 +257,7 @@ type UserDetailsInput struct {
 	Note          *string
 	HWIDLimit     *int64 // <0 = back to the default limit
 	HWIDOff       *bool  // true = no HWID check for this user
+	IPLimit       *int64 // addresses at once; <0 = back to the default, 0 = unlimited
 	ClientType    *string
 	ResetStrategy *string
 }
@@ -282,6 +283,14 @@ func (s *Service) SetUserDetails(ctx context.Context, actor Actor, id int64, in 
 		}
 		if in.HWIDOff != nil {
 			u.HWIDOff = *in.HWIDOff
+		}
+		if in.IPLimit != nil {
+			if *in.IPLimit < 0 {
+				u.IPLimit = nil
+			} else {
+				v := *in.IPLimit
+				u.IPLimit = &v
+			}
 		}
 		if in.ClientType != nil {
 			u.ClientType = firstNonEmpty(*in.ClientType, "auto")

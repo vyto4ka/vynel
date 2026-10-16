@@ -229,6 +229,17 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
           <div className="k">Устройства</div><div>{u.hwidOff
             ? <span className="amber-text">HWID не проверяется — пускает любое приложение</span>
             : <>{data.devices.length} из {(u.hwidLimit ?? data.hwidDefault) || '∞'} {u.hwidLimit == null && <span className="muted">(по умолчанию)</span>}</>}</div>
+          <div className="k">Адреса сразу</div><div>
+            {data.ips.length} из {(u.ipLimit ?? data.ipDefault) || '∞'} {u.ipLimit == null && <span className="muted">(по умолчанию)</span>}
+            {data.ips.length > 0 && <div className="row small" style={{ marginTop: 6, gap: 6 }}>
+              {data.ips.map((a) => (
+                <span key={a.addr} className={'chip static' + (a.blocked ? ' pink-text' : '')}
+                  title={a.blocked ? 'сверх лимита — заблокирован на нодах' : a.admitted ? `подключён с ${dateTime(a.since)}` : 'проверяется (короткие подключения не считаются)'}>
+                  {a.blocked ? '⛔ ' : a.admitted ? '' : '… '}<span className="mono">{a.addr}</span>
+                </span>
+              ))}
+            </div>}
+          </div>
           <div className="k">Группы</div><div>{u.groupIds.map((g) => groups.find((x) => x.id === g)?.name).filter(Boolean).join(', ') || <span className="pink-text">нет — серверов в подписке не будет</span>}</div>
           <div className="k">Онлайн</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">сейчас</span> : ago(u.onlineAt)}</div>
           <div className="k">Подписка обновлялась</div><div>{ago(u.subLastAt)} {u.subLastUA && <span className="muted small">· {u.subLastUA}</span>}</div>
@@ -329,16 +340,17 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
         </div>
       </div>
 
-      {editing && <EditUser u={u} hwidDefault={data.hwidDefault} groups={groups} onClose={() => setEditing(false)}
+      {editing && <EditUser u={u} hwidDefault={data.hwidDefault} ipDefault={data.ipDefault} groups={groups} onClose={() => setEditing(false)}
         onSaved={() => { setEditing(false); reload(); onChanged() }} />}
     </Drawer>
   )
 }
 
-function EditUser({ u, hwidDefault, groups, onClose, onSaved }: { u: User; hwidDefault: number; groups: Group[]; onClose: () => void; onSaved: () => void }) {
+function EditUser({ u, hwidDefault, ipDefault, groups, onClose, onSaved }: { u: User; hwidDefault: number; ipDefault: number; groups: Group[]; onClose: () => void; onSaved: () => void }) {
   const [expire, setExpire] = useState(toDateInput(u.expireAt))
   const [limitGB, setLimitGB] = useState(u.trafficLimit ? String(Math.round((u.trafficLimit / GiB) * 100) / 100) : '')
   const [hwid, setHwid] = useState(u.hwidLimit == null ? '' : String(u.hwidLimit))
+  const [ipLimit, setIPLimit] = useState(u.ipLimit == null ? '' : String(u.ipLimit))
   const [reset, setReset] = useState(u.resetStrategy)
   const [clientType, setClientType] = useState(u.clientType)
   const [note, setNote] = useState(u.note)
@@ -351,6 +363,7 @@ function EditUser({ u, hwidDefault, groups, onClose, onSaved }: { u: User; hwidD
     const body: any = {
       note, clientType, resetStrategy: reset, groupIds,
       hwidLimit: hwid === '' ? -1 : Number(hwid),
+      ipLimit: ipLimit === '' ? -1 : Number(ipLimit),
       setTrafficLimit: true, trafficLimit: limitGB ? Math.round(Number(limitGB) * GiB) : 0,
     }
     if (exp) body.expireAt = exp
@@ -377,6 +390,9 @@ function EditUser({ u, hwidDefault, groups, onClose, onSaved }: { u: User; hwidD
           </Field>
           <Field label="Лимит устройств" help={`Пусто — по умолчанию (${hwidDefault || '∞'}), 0 — без лимита`}>
             <input className="input" inputMode="numeric" value={hwid} onChange={(e) => setHwid(e.target.value.replace(/\D/g, ''))} placeholder={String(hwidDefault)} />
+          </Field>
+          <Field label="Лимит IP одновременно" help={`Пусто — по умолчанию (${ipDefault || '∞'}), 0 — без лимита`}>
+            <input className="input" inputMode="numeric" value={ipLimit} onChange={(e) => setIPLimit(e.target.value.replace(/\D/g, ''))} placeholder={String(ipDefault)} />
           </Field>
         </div>
         <Field label="Формат подписки" help="«Авто» определяет формат по приложению — обычно менять не нужно">
