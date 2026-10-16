@@ -24,6 +24,9 @@ type Route struct {
 	PathPrefix string // "" matches everything
 	Decoy      string // KindDecoy: site name (see package decoy)
 	Upstream   string // KindProxy/KindStream: host:port
+	// InterceptErrors: nginx answers the upstream's errors with the site's own error page (the
+	// subscriptions: an unknown token must look like any other missing page). Caddy ignores it.
+	InterceptErrors bool
 }
 
 // Site is a domain served by Caddy.

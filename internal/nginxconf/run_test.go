@@ -137,13 +137,29 @@ func testNginxServes(t *testing.T, reject bool) {
 	bl, _ := net.Listen("tcp", "127.0.0.1:0")
 	go func() { _ = backend.Serve(bl) }()
 	defer func() { _ = backend.Close() }()
+	// The subscription server: its own 404 for unknown tokens.
+	subs := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/s/good" {
+			fmt.Fprint(w, "subscription")
+			return
+		}
+		http.Error(w, "go 404", http.StatusNotFound)
+	})}
+	sl, _ := net.Listen("tcp", "127.0.0.1:0")
+	go func() { _ = subs.Serve(sl) }()
+	defer func() { _ = subs.Close() }()
+	down := freePort(t) // nothing listens: nginx itself answers 502
 
 	conf, err := Build(Spec{
 		HTTPPort: httpPort,
 		Streams: []Stream{{Bind: "127.0.0.1", Port: streamPort, Default: "127.0.0.1:" + strconv.Itoa(httpsPort),
 			Backends: []Backend{{Names: []string{"reality.test"}, Addr: xray.Addr().String()}}}},
 		Sites: []Site{
-			{Domain: "a.test", LocalPort: httpsPort, ProxyProtocol: true, Routes: []Route{{Kind: KindDecoy, Decoy: "one"}}},
+			{Domain: "a.test", LocalPort: httpsPort, ProxyProtocol: true, Routes: []Route{
+				{Kind: KindProxy, PathPrefix: "/s/", Upstream: sl.Addr().String(), InterceptErrors: true},
+				{Kind: KindProxy, PathPrefix: "/down/", Upstream: "127.0.0.1:" + strconv.Itoa(down)},
+				{Kind: KindDecoy, Decoy: "one"},
+			}},
 			{Domain: "strict.test", LocalPort: strictPort, Routes: []Route{{Kind: KindDecoy, Decoy: "one"}}},
 			{Domain: "origin.test", Names: []string{"cdn.test"}, LocalPort: httpsPort, ProxyProtocol: true, Default: true, Routes: []Route{
 				{Kind: KindStream, PathPrefix: "/upload", Upstream: bl.Addr().String()},
@@ -241,6 +257,14 @@ func testNginxServes(t *testing.T, reject bool) {
 	}
 	c, b, _ = get("a.test", "a.test", "GET", "/about", "")
 	check("clean URL", c, b, 200, "one about")
+	// The subscription prefix: a known token passes, an unknown one is the site's own 404 page,
+	// and a backend that is down shows that page too, not nginx's.
+	c, b, _ = get("a.test", "a.test", "GET", "/s/good", "")
+	check("subscription", c, b, 200, "subscription")
+	c, b, _ = get("a.test", "a.test", "GET", "/s/unknown", "")
+	check("unknown token", c, b, 404, "one not found")
+	c, b, _ = get("a.test", "a.test", "GET", "/down/x", "")
+	check("backend down", c, b, 404, "one not found")
 	c, b, _ = get("a.test", "a.test", "GET", "/docs", "")
 	check("directory page", c, b, 200, "one docs")
 	c, b, _ = get("a.test", "a.test", "GET", "/nope", "")

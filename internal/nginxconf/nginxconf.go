@@ -49,6 +49,9 @@ type Route struct {
 	Decoy      string // KindDecoy: site name (see package decoy)
 	Upstream   string // KindProxy/KindStream: host:port
 	Raw        string // KindRaw: directives inside the location block
+	// InterceptErrors (KindProxy): the upstream's 404 becomes the site's own 404 page, so a
+	// path served by the panel looks like any other missing page of the site.
+	InterceptErrors bool
 }
 
 // Site is a domain served over HTTPS.
@@ -402,6 +405,9 @@ func decoyLocation(w func(int, string, ...any), indent int, path, decoy string) 
 
 func errorPages(w func(int, string, ...any), indent int, decoy string) {
 	w(indent, "error_page 404 /404.html;")
+	// nginx's own error pages name nginx; a site whose backend is down or restarting shows its
+	// usual missing page instead.
+	w(indent, "error_page 403 500 502 503 504 =404 /404.html;")
 	w(indent, "location = /404.html { root %s/%s; internal; }", TokDecoy, decoy)
 }
 
@@ -445,6 +451,9 @@ func locations(w func(int, string, ...any), rs []Route) error {
 			w(2, "location %s {", locationPath(p))
 			w(3, "proxy_pass http://%s;", r.Upstream)
 			proxyHeaders(w, 3)
+			if r.InterceptErrors {
+				w(3, "proxy_intercept_errors on;")
+			}
 			w(3, "client_max_body_size 16m;")
 			w(2, "}")
 		case KindStream:

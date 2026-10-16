@@ -249,7 +249,7 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 	if domain != "" {
 		prefix := s.SubPrefix(ctx)
 		listen, _ := s.Setting(ctx, SettingSubListen, DefaultSubListen)
-		site := caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: []caddyconf.Route{{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix}}}
+		site := caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: []caddyconf.Route{{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix, InterceptErrors: true}}}
 		if webRoute != nil && shared {
 			site.Routes = append(site.Routes, *webRoute)
 		}
