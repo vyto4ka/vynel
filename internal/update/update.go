@@ -229,15 +229,36 @@ func Run(ctx context.Context, w io.Writer) error {
 	saveResult(Result{Running: true, StartedAt: started})
 	fmt.Fprintf(out, "vynel update %s: branch %s, release %s\n", time.Now().Format(time.RFC3339), s.Ref, s.Release)
 
-	// The current installer from the branch (fixes to the update itself arrive with it); the
-	// one built into this binary when GitHub does not answer.
-	script, err := get(ctx, s.scriptURL(), 4<<20)
-	if err != nil || !strings.HasPrefix(string(script), "#!") {
-		if err == nil {
-			err = errors.New("not a script")
+	// The installer runs as root, so where it comes from matters. With a release key (signed
+	// releases) it is the release's own installer, run only when the signature and its checksum
+	// match; a bad signature stops the update. Without a key it is the branch's installer (fixes
+	// to the update itself arrive with it), or the one built into this binary when GitHub does
+	// not answer.
+	key, err := releaseKey()
+	if err != nil {
+		saveResult(Result{StartedAt: started, At: time.Now().Unix(), Error: err.Error()})
+		return err
+	}
+	var script []byte
+	if key != nil {
+		var note string
+		script, note, err = signedInstaller(ctx, s, key)
+		if err != nil {
+			fmt.Fprintf(out, "update stopped: %v\n", err)
+			saveResult(Result{StartedAt: started, At: time.Now().Unix(), Error: err.Error()})
+			return err
 		}
-		fmt.Fprintf(out, "cannot download the installer (%v): using the one built into this version\n", err)
-		script = scripts.Install
+		fmt.Fprintln(out, note)
+	} else {
+		fmt.Fprintln(out, "releases are not signed (no key: scripts/release-key.sh): the installer is not verified")
+		script, err = get(ctx, s.scriptURL(), 4<<20)
+		if err != nil || !strings.HasPrefix(string(script), "#!") {
+			if err == nil {
+				err = errors.New("not a script")
+			}
+			fmt.Fprintf(out, "cannot download the installer (%v): using the one built into this version\n", err)
+			script = scripts.Install
+		}
 	}
 	tmp, err := os.CreateTemp("", "vynel-install-*.sh")
 	if err != nil {

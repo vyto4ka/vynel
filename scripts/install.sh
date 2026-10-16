@@ -1007,6 +1007,30 @@ install_vynel() {
 
 # install_xray [force]: latest Xray release; skipped when it is already installed. An update keeps
 # the old one if the download fails.
+# xray_digest_ok URL FILE: FILE against Xray's own URL.dgst (SHA2-256). The digest is taken
+# straight from GitHub when it answers, so a mirror (--gh-proxy) cannot swap both the archive and
+# its checksum; through the mirror otherwise. No digest at all: said, not fatal.
+xray_digest_ok() {
+  local d want got
+  d="$(mktemp)"
+  if ! curl -fsSL --max-time 20 "$1.dgst" -o "$d" 2>/dev/null && ! curl -fsSL --max-time 20 "$(gh "$1.dgst")" -o "$d" 2>/dev/null; then
+    rm -f "$d"
+    red "  Xray: no checksum file (.dgst) — not verified"
+    return 0
+  fi
+  want="$(awk '$1 == "SHA2-256=" {print $2}' "$d")"
+  rm -f "$d"
+  if [[ -z "$want" ]]; then
+    red "  Xray: the checksum file has no SHA2-256 — not verified"
+    return 0
+  fi
+  got="$(sha256sum "$2" | awk '{print $1}')"
+  if [[ "$got" != "$want" ]]; then
+    red "  Xray: the download does not match its checksum (changed on the way?)"
+    return 1
+  fi
+}
+
 install_xray() {
   if [[ -x /usr/local/share/xray/xray && "${1:-}" != force ]]; then
     ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
@@ -1025,7 +1049,7 @@ install_xray() {
   tmp="$(mktemp)"
   local url="https://github.com/XTLS/Xray-core/releases/latest/download/$asset"
   [[ -n "$latest" ]] && url="https://github.com/XTLS/Xray-core/releases/download/$latest/$asset"
-  if fetch "$(gh "$url")" "$tmp" "Xray ${latest:-latest}" && unzip -tq "$tmp" >/dev/null 2>&1; then
+  if fetch "$(gh "$url")" "$tmp" "Xray ${latest:-latest}" && unzip -tq "$tmp" >/dev/null 2>&1 && xray_digest_ok "$url" "$tmp"; then
     # Unpack aside and swap files: writing over a running xray fails with "Text file busy".
     local dir
     dir="$(mktemp -d)"
