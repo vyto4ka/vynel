@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -61,6 +62,73 @@ func TestNginxRealityOnly(t *testing.T) {
 	in := inboundByTag(t, ds.Config, "VLESS_NL")
 	if in["port"] != float64(443) || in["listen"] != "0.0.0.0" {
 		t.Fatalf("Reality moved: %v %v", in["listen"], in["port"])
+	}
+}
+
+// One domain for Reality, the panel and subscriptions (the minimal all-in-one): every name the
+// panel's site has is a Reality name, so Reality keeps :443 and the site sits on its target.
+func TestNginxOneDomainNoRouter(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "nl.example.com")
+	f.nginxNode(t, n)
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	if strings.Contains(ds.Nginx, "ssl_preread") || strings.Contains(ds.Nginx, "\nstream {") {
+		t.Fatalf("SNI router for names Reality already has:\n%s", ds.Nginx)
+	}
+	contains(t, ds.Nginx, "listen 127.0.0.1:8443 ssl proxy_protocol http2;", "server_name nl.example.com;", "location ^~ /s/ {")
+	in := inboundByTag(t, ds.Config, "VLESS_NL")
+	if in["port"] != float64(443) || in["listen"] != "0.0.0.0" {
+		t.Fatalf("Reality moved: %v %v", in["listen"], in["port"])
+	}
+	// The firewall opens 443 for Reality and 80 for nginx; the target on loopback stays closed.
+	open := map[string]bool{}
+	for _, p := range append(firewall.XrayPorts(ds.Config), firewall.NginxPorts(ds.Nginx)...) {
+		open[fmt.Sprintf("%d/%s", p.Port, p.Proto)] = true
+	}
+	if !open["443/tcp"] || !open["80/tcp"] || open["8443/tcp"] {
+		t.Fatalf("firewall ports %v", open)
+	}
+}
+
+// Reality with extra server names (e.g. names an operator's whitelist lets through): a site on
+// one of them needs no router; a site on another name gets one that sends every Reality name to
+// Xray.
+func TestNginxRealityExtraNames(t *testing.T) {
+	for _, tc := range []struct {
+		sub    string
+		router bool
+	}{{"nl.example.com", false}, {"sub.example.com", true}} {
+		f := newFixture(t)
+		n, prof := f.aio(t, tc.sub)
+		f.nginxNode(t, n)
+		if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+			t.Fatal(err)
+		}
+		must(f.s.UpdateProfile(f.ctx, ActorCLI, prof.ID, ProfileInput{Name: prof.Name, Override: map[string]any{
+			"streamSettings": map[string]any{"realitySettings": map[string]any{"serverNames": []any{"nl.example.com", "wl.example.ru"}}}}}))
+		ds := must(f.s.DesiredState(f.ctx, n.ID))
+		if len(ds.Problems) > 0 {
+			t.Fatal(ds.Problems)
+		}
+		in := inboundByTag(t, ds.Config, "VLESS_NL")
+		names := in["streamSettings"].(map[string]any)["realitySettings"].(map[string]any)["serverNames"]
+		if fmt.Sprint(names) != "[nl.example.com wl.example.ru]" {
+			t.Fatalf("%s: server names %v", tc.sub, names)
+		}
+		if got := strings.Contains(ds.Nginx, "ssl_preread on;"); got != tc.router {
+			t.Fatalf("%s: router %v, want %v", tc.sub, got, tc.router)
+		}
+		if tc.router {
+			contains(t, ds.Nginx, "nl.example.com 127.0.0.1:10443;", "wl.example.ru 127.0.0.1:10443;", "default 127.0.0.1:8443;")
+		} else if in["port"] != float64(443) {
+			t.Fatalf("Reality moved to %v", in["port"])
+		}
 	}
 }
 

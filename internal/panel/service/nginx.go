@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/vyto4ka/vynel/internal/caddyconf"
 	"github.com/vyto4ka/vynel/internal/nginxconf"
@@ -21,6 +23,19 @@ type nginxFront struct {
 	inbound map[string]any
 	names   []string
 	routed  bool // public sites share its (IP, port): nginx routes by SNI in front of it
+}
+
+// covers reports whether every name a site answers on is one of the Reality inbound's names.
+func (f *nginxFront) covers(site nginxconf.Site) bool {
+	if site.Default {
+		return false // a default site must also get the names nobody else has
+	}
+	for _, n := range append([]string{site.Domain}, site.Names...) {
+		if !slices.ContainsFunc(f.names, func(r string) bool { return strings.EqualFold(r, n) }) {
+			return false
+		}
+	}
+	return true
 }
 
 // nginxSpec builds the node's nginx config from its inbounds and, for the panel's own server,
@@ -171,6 +186,13 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 				front = f
 				break
 			}
+		}
+		if front != nil && front.localPort != 0 && front.covers(site) {
+			// Every name of the site is a Reality name: Xray hands such connections to its
+			// target anyway, so the site joins the target and Reality keeps the port to itself.
+			site.Bind, site.Port, site.LocalPort, site.ProxyProtocol = "", 0, front.localPort, true
+			spec.Sites = append(spec.Sites, site)
+			continue
 		}
 		if front != nil {
 			if front.localPort == 0 {
