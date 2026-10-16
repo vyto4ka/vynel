@@ -305,7 +305,7 @@ do_uninstall() {
     systemctl disable vynel-ips 2>/dev/null || true
     rm -f /etc/systemd/system/vynel-ips.service
     rm -rf "$DATA" "$NODE_DATA" /etc/sysctl.d/90-vynel.conf "$SRC" /etc/vynel \
-      /usr/local/bin/vynel /usr/local/bin/vynel.prev /usr/local/bin/xray /usr/local/bin/caddy /usr/local/share/xray
+      /usr/local/bin/vynel /usr/local/bin/vynel.prev /usr/local/bin/xray /usr/local/bin/caddy /usr/local/share/xray /var/www/vynel /var/www/vynel-node
   fi
   green "removed$([[ $PURGE -eq 1 ]] && echo " with all data")"
 }
@@ -1043,7 +1043,26 @@ install_xray() {
   green "  $(/usr/local/bin/xray version 2>/dev/null | head -1)"
 }
 
-# install_caddy [force]
+# install_nginx: nginx from the distribution with the stream module (SNI routing on a shared
+# port). vynel runs its own nginx instance; the distribution's nginx.service must not hold ports
+# 80/443, so it is not started by the package and stays disabled.
+install_nginx() {
+  info "nginx"
+  if ! command -v nginx >/dev/null 2>&1 || ! dpkg -s libnginx-mod-stream >/dev/null 2>&1; then
+    local policy=0
+    if [[ ! -e /usr/sbin/policy-rc.d ]]; then
+      # The package would start nginx.service, which fails while our web server holds :80.
+      printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d && policy=1
+    fi
+    try_packages nginx libnginx-mod-stream || { [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d; die "cannot install nginx: see $APT_LOG"; }
+    [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d
+  fi
+  systemctl disable --now nginx >/dev/null 2>&1 || true
+  green "  $(nginx -v 2>&1 | sed 's|^nginx version: ||')"
+}
+
+# install_caddy [force]: only for servers that still run an older vynel (rollback); new installs
+# use nginx.
 install_caddy() {
   if [[ -x /usr/local/bin/caddy && "${1:-}" != force ]]; then
     return 0
@@ -1103,7 +1122,7 @@ write_panel_unit() {
   local extra="$1"
   cat >"$PANEL_UNIT" <<EOF
 [Unit]
-Description=vynel panel${extra:+ with a local node (Xray + Caddy)}
+Description=vynel panel${extra:+ with a local node (Xray + nginx)}
 After=network-online.target
 Wants=network-online.target
 
@@ -1121,7 +1140,7 @@ EOF
 write_node_unit() {
   cat >"$NODE_UNIT" <<EOF
 [Unit]
-Description=vynel VPN node (Xray + Caddy)
+Description=vynel node (Xray + nginx)
 After=network-online.target
 Wants=network-online.target
 
@@ -1152,7 +1171,7 @@ wait_cert() {
     if [[ "$code" == "200" ]]; then CERT_OK=1; return 0; fi
     sleep 2
   done
-  red "https://$1/ does not answer yet (DNS or port 80 not reachable?). Caddy keeps retrying; see journalctl -u vynel"
+  red "https://$1/ does not answer yet (DNS or port 80 not reachable?). The certificate is retried by itself; see journalctl -u vynel"
 }
 
 # set_paths: the subscription link path and the panel's secret path, when given.
@@ -1375,7 +1394,7 @@ do_aio() {
 
   install_vynel
   install_xray
-  install_caddy
+  install_nginx
   drop_temp_swap
   # 443/udp: Hysteria2 inbounds (docs/PROFILES.md §9).
   if [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]]; then open_ports 80 443 443/udp; else open_ports 80 443 443/udp "${GATEWAY_LISTEN##*:}"; fi
@@ -1476,7 +1495,7 @@ do_panel() {
   check_ports
 
   install_vynel
-  install_caddy
+  install_nginx
   drop_temp_swap
   open_ports 80 443 "${GATEWAY_LISTEN##*:}"
 
@@ -1554,7 +1573,7 @@ do_node() {
 
   install_vynel
   install_xray
-  install_caddy
+  install_nginx
   drop_temp_swap
   open_ports 80 443 443/udp
 
@@ -1612,15 +1631,32 @@ wait_active() {
   return 1
 }
 
+# backup_before_update: the panel's database and CA before anything changes
+# (/var/lib/vynel/backups, the bot keeps its nightly ones there too).
+backup_before_update() {
+  [[ $PANEL_INSTALLED -eq 1 ]] || return 0
+  local dir="$DATA/backups" out
+  mkdir -p "$dir"
+  if out="$(cd "$dir" && vynel admin --data-dir "$DATA" backup --out "pre-update-$(date +%Y%m%d-%H%M%S).tar.gz" 2>&1)"; then
+    green "  backup: $dir/${out%%:*}"
+  else
+    red "  could not write a backup before the update: $out"
+    ask_yes "Продолжить без бэкапа?" n || die "отменено"
+  fi
+}
+
 do_update() {
   echo "  installed: $(installed_text) · $(vynel version 2>/dev/null || echo '?')"
   if [[ $WIZARD -eq 1 ]]; then
-    ask_yes "Обновить vynel, Xray и Caddy до свежих версий? Данные сохранятся" y || die "отменено"
+    ask_yes "Обновить vynel, Xray и nginx? Данные сохранятся" y || die "отменено"
   fi
   ensure_packages "${BASE_PKGS[@]}"
+  backup_before_update
   install_vynel || exit 1
   if [[ $PANEL_WITH_NODE -eq 1 || $NODE_INSTALLED -eq 1 ]]; then install_xray force; fi
-  install_caddy force
+  # nginx replaces Caddy: the new agent switches as soon as it runs; Caddy's binary and
+  # certificates stay for a rollback to the previous vynel.
+  install_nginx
   drop_temp_swap
 
   local units=() u failed=()
@@ -1651,7 +1687,7 @@ do_update() {
   echo
   line "Версия" "$(vynel version 2>/dev/null | awk '{print $2}')"
   line "Xray" "$(xray version 2>/dev/null | head -1 | awk '{print $2}' || echo —)"
-  line "Caddy" "$(caddy version 2>/dev/null | awk '{print $1}' || echo —)"
+  line "nginx" "$(nginx -v 2>&1 | sed 's|^nginx version: nginx/||' || echo —)"
   if [[ $PANEL_INSTALLED -eq 1 ]]; then
     line "Панель" "$(systemctl is-active vynel 2>/dev/null || true)"
     WEB_URL="$(admin web 2>/dev/null | awk '$1=="url" {print $2}')"

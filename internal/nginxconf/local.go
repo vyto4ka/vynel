@@ -17,6 +17,10 @@ type Local struct {
 	Decoy   string   // decoy sites
 	ACME    string   // HTTP-01 webroot
 	IPv6    bool     // the host can listen on IPv6
+	// RejectHandshake: nginx 1.19.4+ can cut a handshake (ssl_reject_handshake). Older nginx
+	// gets DummyCert/DummyKey, a self-signed certificate for no real name, and closes (444).
+	RejectHandshake     bool
+	DummyCert, DummyKey string
 }
 
 // Finalize fills the agent's tokens in a config built by Build.
@@ -36,6 +40,10 @@ func Finalize(conf string, l Local) string {
 	if l.IPv6 {
 		ipv6 = ""
 	}
+	reject := "ssl_reject_handshake on;"
+	if !l.RejectHandshake {
+		reject = "ssl_certificate " + l.DummyCert + ";\n        ssl_certificate_key " + l.DummyKey + ";"
+	}
 	return strings.NewReplacer(
 		TokModules, strings.Join(mods, "\n"),
 		TokUser, user,
@@ -44,6 +52,7 @@ func Finalize(conf string, l Local) string {
 		TokDecoy, l.Decoy,
 		TokACME, l.ACME,
 		TokIPv6, ipv6,
+		TokReject, reject,
 	).Replace(conf)
 }
 

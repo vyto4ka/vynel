@@ -281,7 +281,7 @@ func Run(o Options) (*Answers, error) {
 	switch a.Mode {
 	case "update":
 		ok := true
-		if err := run(huh.NewGroup(huh.NewConfirm().Title("Обновить vynel, Xray и Caddy до свежих версий?").
+		if err := run(huh.NewGroup(huh.NewConfirm().Title("Обновить vynel, Xray и nginx до свежих версий?").
 			Description("Пользователи, ключи и настройки сохраняются. Если новая версия не запустится, вернётся прежняя.").
 			Affirmative("Обновить").Negative("Отмена").Value(&ok))); err != nil {
 			return nil, err

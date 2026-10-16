@@ -13,13 +13,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Fetch Xray and build Caddy for integration tests
-        run: make xray caddy
+      - name: Fetch Xray, build Caddy (old agents) and Pebble (ACME) for integration tests
+        run: make xray caddy pebble
+      - name: nginx with the stream module
+        run: sudo apt-get update -q && sudo apt-get install -y -q nginx libnginx-mod-stream
       - name: Test
         env:
           XRAY_BIN: ${{ github.workspace }}/.cache/xray/xray
           XRAY_LOCATION_ASSET: ${{ github.workspace }}/.cache/xray
           CADDY_BIN: ${{ github.workspace }}/.cache/caddy/caddy
+          NGINX_BIN: /usr/sbin/nginx
+          PEBBLE_BIN: ${{ github.workspace }}/.cache/pebble/pebble
         run: go test -count=1 -race ./...
       - name: Build
         run: make build-all

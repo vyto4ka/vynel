@@ -151,3 +151,14 @@ func TestImportCaddy(t *testing.T) {
 		t.Fatal("still a placeholder")
 	}
 }
+
+func TestVersionAtLeast(t *testing.T) {
+	for out, want := range map[string]bool{
+		"nginx version: nginx/1.18.0 (Ubuntu)": false, "nginx version: nginx/1.19.4": true, "nginx version: nginx/1.19.3": false,
+		"nginx version: nginx/1.24.0 (Ubuntu)": true, "nginx version: nginx/1.22.1": true, "nginx version: nginx/2.0.0": true, "garbage": false,
+	} {
+		if got := versionAtLeast(out, 1, 19, 4); got != want {
+			t.Errorf("%q: %v", out, got)
+		}
+	}
+}

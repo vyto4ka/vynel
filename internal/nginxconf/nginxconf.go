@@ -6,9 +6,11 @@
 //   - stream {}: on a public port shared by several TLS consumers, ssl_preread routes each
 //     connection by SNI (Reality inbounds of Xray, the HTTPS sites of this config); anything
 //     else, including connections without SNI, goes to the HTTPS sites;
-//   - http {}: HTTPS sites grouped by listener, each listener with a catch-all default server
-//     (a decoy with the first site's certificate), so an unknown Host or SNI is still served
-//     like any web server would; :80 answers ACME HTTP-01 and redirects to HTTPS.
+//   - http {}: HTTPS sites grouped by listener. A connection with a name no site has, or with
+//     no name at all, is cut at the handshake (strict SNI: a scan by IP learns no domain) —
+//     unless a site on that listener is marked Default (a CDN origin: CDNs may come with their
+//     own name or none), then that site answers it, like a lone nginx with one site does;
+//   - :80 answers ACME HTTP-01 and redirects to HTTPS.
 package nginxconf
 
 import (
@@ -37,6 +39,7 @@ const (
 	TokDecoy   = "@@DECOY@@"   // decoy sites: <name>/index.html ...
 	TokACME    = "@@ACME@@"    // ACME HTTP-01 webroot
 	TokIPv6    = "#ipv6#"      // line prefix: uncommented when the host has IPv6
+	TokReject  = "@@REJECT@@"  // cuts a TLS handshake: ssl_reject_handshake, or a dummy certificate on old nginx
 )
 
 // Route is one location of a site.
@@ -57,6 +60,9 @@ type Site struct {
 	LocalPort int      // >0: served on 127.0.0.1:LocalPort (behind Reality or the SNI router)
 	Routes    []Route
 	Server    string // directives at server level, written in a profile template
+	// Default: the site also answers names no other site on its listener has and connections
+	// without SNI (a CDN origin). Without one, such connections are cut at the handshake.
+	Default bool
 	// ProxyProtocol: the listener expects a PROXY header (from Reality's xver or the SNI
 	// router), so the backends see the client's address instead of 127.0.0.1.
 	ProxyProtocol bool
@@ -104,6 +110,7 @@ func Build(spec Spec) (string, error) {
 		local    bool
 		proxy    bool
 		domains  []string
+		def      string // the Default site, if any
 		names    map[string][]string
 		routes   map[string][]Route
 		snippets map[string][]string
@@ -143,6 +150,9 @@ func Build(spec Spec) (string, error) {
 			srv.snippets[s.Domain] = append(srv.snippets[s.Domain], strings.TrimSpace(s.Server))
 		}
 		srv.proxy = srv.proxy || s.ProxyProtocol
+		if s.Default && srv.def == "" {
+			srv.def = s.Domain
+		}
 	}
 	// A name may belong to one site per listener only: nginx would pick one silently.
 	for _, srv := range servers {
@@ -308,36 +318,26 @@ func Build(spec Spec) (string, error) {
 				w(indent, "real_ip_header proxy_protocol;")
 			}
 		}
-		// Default server: unknown names and connections without SNI see a decoy instead of a
-		// TLS error, the way a lone nginx with one site behaves.
-		first := srv.domains[0]
 		w(1, "")
 		w(1, "# %s", srv.listen)
-		w(1, "server {")
-		for _, l := range listens {
-			w(2, "%s", strings.Replace(l, ";", " default_server;", 1))
-		}
-		w(2, "server_name _;")
-		realIP(2)
-		certLines(w, 2, first)
-		defDecoy := ""
-		for _, d := range srv.domains {
-			if dd := decoyOf(srv.routes[d]); dd != "" {
-				defDecoy = dd
-				break
+		if srv.def == "" {
+			// Strict SNI: unknown names and connections without one get no certificate.
+			w(1, "server {")
+			for _, l := range listens {
+				w(2, "%s", strings.Replace(l, ";", " default_server;", 1))
 			}
+			w(2, "server_name _;")
+			w(2, "%s", TokReject)
+			w(2, "return 444;")
+			w(1, "}")
 		}
-		if defDecoy == "" {
-			w(2, "location / { return 404; }")
-		} else {
-			decoyLocation(w, 2, "/", defDecoy)
-			errorPages(w, 2, defDecoy)
-		}
-		w(1, "}")
 
 		for _, d := range srv.domains {
 			w(1, "server {")
 			for _, l := range listens {
+				if d == srv.def {
+					l = strings.Replace(l, ";", " default_server;", 1)
+				}
 				w(2, "%s", l)
 			}
 			w(2, "server_name %s;", strings.Join(append([]string{d}, srv.names[d]...), " "))
@@ -389,15 +389,6 @@ func listenLines(bind string, port int, opts string) []string {
 func certLines(w func(int, string, ...any), indent int, domain string) {
 	w(indent, "ssl_certificate %s/%s/fullchain.pem;", TokCerts, domain)
 	w(indent, "ssl_certificate_key %s/%s/privkey.pem;", TokCerts, domain)
-}
-
-func decoyOf(rs []Route) string {
-	for _, r := range rs {
-		if r.Kind == KindDecoy && r.Decoy != "" {
-			return r.Decoy
-		}
-	}
-	return ""
 }
 
 // decoyLocation serves a decoy site with clean URLs: /about is about.html or about/index.html.

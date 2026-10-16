@@ -100,7 +100,7 @@ message Command {
     ACTION_RESTART_CADDY = 2; // restart Caddy with the applied config
     ACTION_RESTART_AGENT = 3; // restart the vynel service (systemd starts it again)
     ACTION_REBOOT = 4;        // reboot the server
-    ACTION_UPDATE = 5;        // update vynel, Xray and Caddy (`vynel update`, in the background)
+    ACTION_UPDATE = 5;        // update vynel, Xray and nginx (`vynel update`, in the background)
   }
   string id = 1;
   Action action = 2;

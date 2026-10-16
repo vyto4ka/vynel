@@ -128,7 +128,9 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 			if loc := str(cm["location"]); loc != "" {
 				route = nginxconf.Route{Kind: nginxconf.KindRaw, Raw: loc, PathPrefix: str(cm["path"])}
 			}
-			sites = append(sites, nginxconf.Site{Domain: str(cm["domain"]), Names: names, Bind: bind, Port: 443,
+			// A CDN origin answers any name and connections without SNI: CDNs may come with
+			// their own domain in SNI and Host, or with none.
+			sites = append(sites, nginxconf.Site{Domain: str(cm["domain"]), Names: names, Bind: bind, Port: 443, Default: true,
 				Server: str(cm["server"]), Routes: []nginxconf.Route{route, decoyRoute}})
 		}
 	}

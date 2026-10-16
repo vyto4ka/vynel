@@ -1,5 +1,5 @@
 // Package firewall keeps an nftables table that lets in only what this server really serves:
-// SSH, the Xray inbounds, the Caddy sites and the node gateway. Everything else is dropped
+// SSH, the Xray inbounds, the nginx sites and the node gateway. Everything else is dropped
 // silently, and an address that knocks on many closed ports is taken for a scanner and dropped
 // entirely for a day, so the server looks like a plain web server with nothing else on it
 // (docs/INSTALL_GUIDE.md §10).

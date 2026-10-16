@@ -399,6 +399,30 @@ func (m *Manager) Import(domain string, certPEM, keyPEM []byte) (bool, error) {
 	return true, nil
 }
 
+// Dummy returns a self-signed certificate for no real name (made once): what nginx without
+// ssl_reject_handshake shows to connections it then closes, so no domain leaks.
+func (m *Manager) Dummy() (cert, key string, err error) {
+	dir := filepath.Join(m.Dir, "_default")
+	cert, key = filepath.Join(dir, "fullchain.pem"), filepath.Join(dir, "privkey.pem")
+	if _, err := os.Stat(cert); err == nil {
+		return cert, key, nil
+	}
+	k, err := newKey()
+	if err != nil {
+		return "", "", err
+	}
+	tpl := &x509.Certificate{SerialNumber: serial(), Subject: pkix.Name{CommonName: "localhost"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().AddDate(10, 0, 0)}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, k.Public(), k)
+	if err != nil {
+		return "", "", err
+	}
+	if err := writeKey(key, k); err != nil {
+		return "", "", err
+	}
+	return cert, key, atomicWrite(cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644)
+}
+
 // Domains lists the domains in the store.
 func (m *Manager) Domains() []string {
 	ents, _ := os.ReadDir(m.Dir)

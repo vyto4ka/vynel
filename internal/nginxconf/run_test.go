@@ -87,12 +87,20 @@ func write(t *testing.T, path, body string) {
 
 // TestNginxServes runs the generated config in a real nginx: SNI routing with PROXY headers,
 // decoys with clean URLs and their 404 page, unknown and missing SNI, a CDN name without its
-// own certificate, an XHTTP stream location that passes a GET body, ACME and the redirect on :80.
+// own certificate, an XHTTP stream location that passes a GET body, ACME and the redirect on
+// :80, and strict SNI on a listener without a default site — with ssl_reject_handshake and with
+// the dummy certificate old nginx gets.
 func TestNginxServes(t *testing.T) {
+	for _, reject := range []bool{true, false} {
+		t.Run(map[bool]string{true: "reject_handshake", false: "dummy_cert"}[reject], func(t *testing.T) { testNginxServes(t, reject) })
+	}
+}
+
+func testNginxServes(t *testing.T, reject bool) {
 	bin := nginxBin(t)
 	root := t.TempDir()
 	_ = os.Chmod(root, 0o755)
-	streamPort, httpsPort, httpPort := freePort(t), freePort(t), freePort(t)
+	streamPort, httpsPort, httpPort, strictPort := freePort(t), freePort(t), freePort(t), freePort(t)
 
 	// Reality stand-in: reads the PROXY header the router sends, then answers.
 	xray, err := net.Listen("tcp", "127.0.0.1:0")
@@ -127,7 +135,8 @@ func TestNginxServes(t *testing.T) {
 			Backends: []Backend{{Names: []string{"reality.test"}, Addr: xray.Addr().String()}}}},
 		Sites: []Site{
 			{Domain: "a.test", LocalPort: httpsPort, ProxyProtocol: true, Routes: []Route{{Kind: KindDecoy, Decoy: "one"}}},
-			{Domain: "origin.test", Names: []string{"cdn.test"}, LocalPort: httpsPort, ProxyProtocol: true, Routes: []Route{
+			{Domain: "strict.test", LocalPort: strictPort, Routes: []Route{{Kind: KindDecoy, Decoy: "one"}}},
+			{Domain: "origin.test", Names: []string{"cdn.test"}, LocalPort: httpsPort, ProxyProtocol: true, Default: true, Routes: []Route{
 				{Kind: KindStream, PathPrefix: "/upload", Upstream: bl.Addr().String()},
 				{Kind: KindDecoy, Decoy: "two"},
 			}},
@@ -151,7 +160,10 @@ func TestNginxServes(t *testing.T) {
 	if os.Getuid() == 0 {
 		user = "root"
 	}
-	final := Finalize(conf, Local{Modules: streamModules(t, bin), User: user, Run: run, Certs: certs, Decoy: decoys, ACME: acme})
+	selfSigned(t, certs, "dummy.invalid")
+	dummy := filepath.Join(certs, "dummy.invalid")
+	final := Finalize(conf, Local{Modules: streamModules(t, bin), User: user, Run: run, Certs: certs, Decoy: decoys, ACME: acme,
+		RejectHandshake: reject, DummyCert: filepath.Join(dummy, "fullchain.pem"), DummyKey: filepath.Join(dummy, "privkey.pem")})
 	cfgPath := filepath.Join(root, "nginx.conf")
 	write(t, cfgPath, final)
 	if out, err := exec.Command(bin, "-t", "-q", "-p", run, "-c", cfgPath).CombinedOutput(); err != nil {
@@ -219,12 +231,42 @@ func TestNginxServes(t *testing.T) {
 	check("directory page", c, b, 200, "one docs")
 	c, b, _ = get("a.test", "a.test", "GET", "/nope", "")
 	check("decoy 404", c, b, 404, "one not found")
+	// The CDN origin is this listener's default: it answers unknown names and no SNI.
 	c, b, _ = get("unknown.test", "unknown.test", "GET", "/", "")
-	check("unknown SNI", c, b, 200, "one home")
+	check("unknown SNI", c, b, 200, "two home")
 	c, b, _ = get("", "unknown.test", "GET", "/", "")
-	check("no SNI", c, b, 200, "one home")
-	c, b, _ = get("", "origin.test", "GET", "/", "")
-	check("no SNI, known Host", c, b, 200, "two home")
+	check("no SNI", c, b, 200, "two home")
+	c, b, _ = get("", "a.test", "GET", "/", "")
+	check("no SNI, known Host", c, b, 200, "one home")
+	// A listener without a default site: strict SNI, no certificate for strangers.
+	strict := func(sni string) error {
+		tc, err := tls.Dial("tcp", "127.0.0.1:"+strconv.Itoa(strictPort), &tls.Config{ServerName: sni, InsecureSkipVerify: true}) //nolint:gosec // test
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tc.Close() }()
+		if names := tc.ConnectionState().PeerCertificates[0].DNSNames; len(names) > 0 && names[0] == "strict.test" && sni != "strict.test" {
+			return fmt.Errorf("a stranger got the site's certificate")
+		}
+		if sni == "strict.test" {
+			return nil
+		}
+		// Old nginx: a dummy certificate, then the request is closed without an answer.
+		_, _ = tc.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n\r\n"))
+		buf := make([]byte, 64)
+		if n, _ := tc.Read(buf); n > 0 {
+			return fmt.Errorf("a stranger got an answer: %q", buf[:n])
+		}
+		return fmt.Errorf("closed")
+	}
+	if err := strict("strict.test"); err != nil {
+		t.Fatalf("own name on the strict listener: %v", err)
+	}
+	for _, sni := range []string{"", "other.test"} {
+		if err := strict(sni); err == nil || strings.Contains(err.Error(), "stranger") {
+			t.Fatalf("strict SNI %q: %v", sni, err)
+		}
+	}
 	// The CDN case: VK forwards the client's Host (and SNI) with the CDN domain.
 	c, b, _ = get("cdn.test", "cdn.test", "GET", "/upload/abc?x=1", "payload")
 	check("CDN name, GET with body", c, b, 200, "GET /upload/abc body=payload xff=127.0.0.1 host=cdn.test")

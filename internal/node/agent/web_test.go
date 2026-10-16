@@ -60,10 +60,14 @@ func TestWebServerSwitch(t *testing.T) {
 		return c
 	}
 	server := func() string {
-		tr := &http.Transport{TLSClientConfig: &tls.Config{ServerName: "node.example.com", InsecureSkipVerify: true}} //nolint:gosec // test
+		tr := &http.Transport{TLSClientConfig: &tls.Config{ServerName: "node.example.com", InsecureSkipVerify: true}, //nolint:gosec // test
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "tcp", "127.0.0.1:"+strconv.Itoa(httpsPort))
+			}}
 		var last error
 		for i := 0; i < 30; i++ {
-			resp, err := (&http.Client{Transport: tr, Timeout: 3 * time.Second}).Get("https://127.0.0.1:" + strconv.Itoa(httpsPort) + "/")
+			// The site's own name in SNI and Host: anything else is cut (strict SNI).
+			resp, err := (&http.Client{Transport: tr, Timeout: 3 * time.Second}).Get("https://node.example.com/")
 			if err == nil {
 				resp.Body.Close()
 				if s := strings.ToLower(resp.Header.Get("Server")); s != "" {
@@ -107,7 +111,9 @@ func TestWebServerSwitch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if s := server(); s != "nginx" || a.caddyCfg != nil {
-		t.Fatalf("nginx expected, got %s", s)
+		conf, _ := os.ReadFile(filepath.Join(dir, "web", "nginx", "nginx.conf"))
+		errLog, _ := os.ReadFile(filepath.Join(dir, "web", "www", "run", "error.log"))
+		t.Fatalf("nginx expected, got %s\n%s\n%s", s, conf, errLog)
 	}
 	if ports := a.FirewallPorts(); len(ports) != 0 {
 		t.Fatalf("loopback listeners are not public: %v", ports)

@@ -13,7 +13,7 @@ func updateCmd() *cobra.Command {
 	var foreground, check bool
 	c := &cobra.Command{
 		Use:   "update",
-		Short: "Update vynel, Xray and Caddy on this server (data is kept)",
+		Short: "Update vynel, Xray and nginx on this server (data is kept)",
 		Long: "Runs the installer in update mode from the branch this server was installed from\n" +
 			"(/etc/vynel/install.env). By default it starts in the background as the systemd unit\n" +
 			"vynel-update and returns: follow it with `journalctl -u vynel-update -f`.",

@@ -67,7 +67,7 @@ type Config struct {
 	Restart func()
 	// Reboot reboots the server (admin action). Default: systemctl reboot.
 	Reboot func() error
-	// Update starts updating vynel, Xray and Caddy in the background (admin action).
+	// Update starts updating vynel, Xray and nginx in the background (admin action).
 	// Default: update.Start.
 	Update func(context.Context) error
 	// UpdateStatus reports how the last update went. Default: update.LocalStatus.
@@ -505,7 +505,7 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	return commit()
 }
 
-// FirewallPorts is what this node serves: public Xray inbounds, Caddy sites and the extras.
+// FirewallPorts is what this node serves: public Xray inbounds, nginx (or Caddy) sites and the extras.
 func (a *Agent) FirewallPorts() []firewall.Port {
 	a.mu.Lock()
 	defer a.mu.Unlock()

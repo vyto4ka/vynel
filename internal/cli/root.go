@@ -21,7 +21,7 @@ var logLevel string
 func Execute() int {
 	root := &cobra.Command{
 		Use:           "vynel",
-		Short:         "vynel: VPN panel and node (Xray + Caddy)",
+		Short:         "vynel: VPN panel and node (Xray + nginx)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(*cobra.Command, []string) error {

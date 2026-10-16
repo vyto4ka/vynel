@@ -194,6 +194,12 @@ func (m *Manager) finalize(ctx context.Context, conf string) (string, error) {
 	}
 	l := *m.local
 	l.Run, l.Certs, l.Decoy, l.ACME = m.runDir(), m.Certs.Dir, m.decoyDir(), m.acmeDir()
+	if !l.RejectHandshake {
+		var err error
+		if l.DummyCert, l.DummyKey, err = m.Certs.Dummy(); err != nil {
+			return "", err
+		}
+	}
 	if !strings.Contains(conf, "\nstream {") {
 		l.Modules = nil
 	}
@@ -209,6 +215,10 @@ func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 		return nil, fmt.Errorf("nginx -V: %w", err)
 	}
 	l := &nginxconf.Local{}
+	// ssl_reject_handshake appeared in nginx 1.19.4 (Ubuntu 22.04 and Debian 11 ship 1.18).
+	if v, _ := exec.CommandContext(ctx, m.bin(), "-v").CombinedOutput(); versionAtLeast(string(v), 1, 19, 4) {
+		l.RejectHandshake = true
+	}
 	switch {
 	case strings.Contains(string(out), "--with-stream=dynamic"):
 		dir := "/usr/lib/nginx/modules"
@@ -248,6 +258,26 @@ func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 		}
 	}
 	return l, nil
+}
+
+var nginxVersionRe = regexp.MustCompile(`nginx/(\d+)\.(\d+)\.(\d+)`)
+
+func versionAtLeast(out string, major, minor, patch int) bool {
+	m := nginxVersionRe.FindStringSubmatch(out)
+	if m == nil {
+		return false
+	}
+	v := [3]int{}
+	for i := range v {
+		v[i], _ = strconv.Atoi(m[i+1])
+	}
+	want := [3]int{major, minor, patch}
+	for i := range v {
+		if v[i] != want[i] {
+			return v[i] > want[i]
+		}
+	}
+	return true
 }
 
 func lookup(name string) bool {

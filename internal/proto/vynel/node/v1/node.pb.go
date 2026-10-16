@@ -32,7 +32,7 @@ const (
 	Command_ACTION_RESTART_CADDY Command_Action = 2 // restart Caddy with the applied config
 	Command_ACTION_RESTART_AGENT Command_Action = 3 // restart the vynel service (systemd starts it again)
 	Command_ACTION_REBOOT        Command_Action = 4 // reboot the server
-	Command_ACTION_UPDATE        Command_Action = 5 // update vynel, Xray and Caddy (`vynel update`, in the background)
+	Command_ACTION_UPDATE        Command_Action = 5 // update vynel, Xray and nginx (`vynel update`, in the background)
 )
 
 // Enum value maps for Command_Action.
