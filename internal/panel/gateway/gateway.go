@@ -82,6 +82,8 @@ func (g *Server) Serve(ctx context.Context, addr string) error {
 		grpc.Creds(credentials.NewTLS(tlsCfg)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 30 * time.Second, Timeout: 10 * time.Second}),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
+		// Above gRPC's default 4 MB (large stats batches, whole snapshots for older agents).
+		grpc.MaxRecvMsgSize(nodev1.MaxMessage), grpc.MaxSendMsgSize(nodev1.MaxMessage),
 	)
 	nodev1.RegisterNodeGatewayServer(srv, g)
 	go func() {

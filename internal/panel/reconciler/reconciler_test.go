@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
@@ -46,5 +47,52 @@ func TestSnapshotKeepsInboundOrder(t *testing.T) {
 	s := Snapshot(ds, 3)
 	if s.Inbounds[0].Tag != "B" || len(s.Inbounds[1].Users) != 1 || s.Revision != 3 {
 		t.Fatalf("snapshot %+v", s)
+	}
+}
+
+func bigDesired(users int, hash string) *service.DesiredState {
+	ds := &service.DesiredState{Config: []byte(`{}`), Hash: hash, Users: map[string][]xrayconf.Client{},
+		Inbounds: []service.DesiredInbound{{Tag: "VLESS_NL", Protocol: "vless"}}}
+	for i := 0; i < users; i++ {
+		ds.Users["VLESS_NL"] = append(ds.Users["VLESS_NL"], xrayconf.Client{Email: strconv.Itoa(1000000 + i), ID: "00000000-0000-4000-8000-" + strconv.Itoa(100000000000+i)})
+	}
+	return ds
+}
+
+// Agents with "chunks" get a big snapshot in parts, older ones whole; a delta that grew as big
+// as a snapshot (a bulk change) goes in parts too.
+func TestNextSendsParts(t *testing.T) {
+	r := New(nil, nil)
+	s := &session{r: r, nodeID: 1}
+	ds := bigDesired(100000, "big")
+	r.desired[1], r.revision[1] = ds, 3
+
+	s.hello = &nodev1.Hello{}
+	if msgs := s.next(); len(msgs) != 1 || msgs[0].GetSnapshot().GetParts() != 0 {
+		t.Fatalf("old agent: %d messages", len(msgs))
+	}
+	s.pending, s.hello = nil, &nodev1.Hello{Capabilities: []string{CapChunks}}
+	msgs := s.next()
+	if len(msgs) < 4 {
+		t.Fatalf("agent with chunks: %d messages", len(msgs))
+	}
+	for i, m := range msgs {
+		if sn := m.GetSnapshot(); sn == nil || sn.Part != int32(i) || sn.Parts != int32(len(msgs)) || sn.Hash != "big" {
+			t.Fatalf("part %d: %+v", i, m)
+		}
+	}
+	if s.pending != ds {
+		t.Fatal("the snapshot is not pending as a whole")
+	}
+	// The node acknowledged the small state; now almost every user changes.
+	s.pending, s.applied, s.appliedH = nil, bigDesired(10, "small"), "small"
+	if msgs := s.next(); len(msgs) < 4 || msgs[0].GetSnapshot() == nil {
+		t.Fatalf("huge delta: %d messages, first %T", len(msgs), msgs[0].Msg)
+	}
+	// A small change stays a delta.
+	r.desired[1] = bigDesired(11, "small+1")
+	s.pending = nil
+	if msgs := s.next(); len(msgs) != 1 || msgs[0].GetDelta() == nil {
+		t.Fatalf("small delta: %d messages", len(msgs))
 	}
 }

@@ -18,6 +18,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
@@ -470,19 +472,17 @@ func (s *session) pushLoop(ctx context.Context) {
 		case <-s.wakeCh:
 		case <-tick.C:
 		}
-		msg := s.next()
-		if msg == nil {
-			continue
-		}
-		if err := s.stream.Send(msg); err != nil {
-			s.r.log.Warn("send to node failed", "node", s.nodeID, "err", err)
-			return
+		for _, msg := range s.next() {
+			if err := s.stream.Send(msg); err != nil {
+				s.r.log.Warn("send to node failed", "node", s.nodeID, "err", err)
+				return
+			}
 		}
 	}
 }
 
 // next decides what to send, if anything.
-func (s *session) next() *nodev1.PanelMessage {
+func (s *session) next() []*nodev1.PanelMessage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.hello == nil {
@@ -506,10 +506,22 @@ func (s *session) next() *nodev1.PanelMessage {
 		return nil
 	}
 	s.pending, s.pendingAt = ds, now
+	parts := s.hello != nil && slices.Contains(s.hello.Capabilities, CapChunks)
 	if s.applied != nil && bytes.Equal(s.applied.Config, ds.Config) && bytes.Equal(s.applied.Caddy, ds.Caddy) && s.applied.Nginx == ds.Nginx {
-		return &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Delta{Delta: Delta(s.applied, ds, rev)}}
+		d := Delta(s.applied, ds, rev)
+		// A bulk change makes a delta as big as a snapshot; that one can go in parts.
+		if !parts || proto.Size(d) <= PartBytes {
+			return []*nodev1.PanelMessage{{Msg: &nodev1.PanelMessage_Delta{Delta: d}}}
+		}
 	}
-	return &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Snapshot{Snapshot: Snapshot(ds, rev)}}
+	if !parts {
+		return []*nodev1.PanelMessage{{Msg: &nodev1.PanelMessage_Snapshot{Snapshot: Snapshot(ds, rev)}}}
+	}
+	var out []*nodev1.PanelMessage
+	for _, p := range SnapshotParts(ds, rev, PartBytes) {
+		out = append(out, &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Snapshot{Snapshot: p}})
+	}
+	return out
 }
 
 // Snapshot converts a desired state to the wire format.
@@ -523,6 +535,53 @@ func Snapshot(ds *service.DesiredState, rev int64) *nodev1.Snapshot {
 		snap.Inbounds = append(snap.Inbounds, iu)
 	}
 	return snap
+}
+
+// CapChunks is the agent capability to take a snapshot in parts (Snapshot.part, parts).
+const CapChunks = "chunks"
+
+// PartBytes is the size a snapshot part aims at: far below the gRPC message limit (agents
+// without "chunks" still have gRPC's 4 MB) and small enough to keep the stream responsive.
+const PartBytes = 1 << 20
+
+// SnapshotParts splits a snapshot for an agent with CapChunks. A small one stays whole
+// (parts = 0). Otherwise part 0 carries the configs and every part carries users up to about
+// limit bytes; an inbound that does not fit continues at the start of the next part.
+func SnapshotParts(ds *service.DesiredState, rev int64, limit int) []*nodev1.Snapshot {
+	whole := Snapshot(ds, rev)
+	if proto.Size(whole) <= limit {
+		return []*nodev1.Snapshot{whole}
+	}
+	cur := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config, CaddyConfig: ds.Caddy, NginxConfig: ds.Nginx}
+	size := proto.Size(cur)
+	out := []*nodev1.Snapshot{cur}
+	next := func() {
+		cur = &nodev1.Snapshot{Revision: rev, Hash: ds.Hash}
+		size = proto.Size(cur)
+		out = append(out, cur)
+	}
+	for _, in := range whole.Inbounds {
+		head := func() *nodev1.InboundUsers {
+			iu := &nodev1.InboundUsers{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
+			cur.Inbounds = append(cur.Inbounds, iu)
+			size += proto.Size(iu) + 8
+			return iu
+		}
+		iu := head()
+		for _, u := range in.Users {
+			n := proto.Size(u) + 8
+			if size+n > limit && len(iu.Users) > 0 {
+				next()
+				iu = head()
+			}
+			iu.Users = append(iu.Users, u)
+			size += n
+		}
+	}
+	for i, p := range out {
+		p.Part, p.Parts = int32(i), int32(len(out))
+	}
+	return out
 }
 
 // Delta lists the user operations turning from into to (same structure).

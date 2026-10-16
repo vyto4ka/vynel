@@ -260,6 +260,7 @@ func (a *Agent) session(ctx context.Context) error {
 		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: a.cfg.Addresses(),
 		CaddyVersion: a.caddyVer, Warnings: a.warnings, NginxVersion: a.nginxVer,
 	}
+	hello.Capabilities = append(hello.Capabilities, CapChunks)
 	if a.nginxVer != "" {
 		hello.Capabilities = append(hello.Capabilities, CapNginx)
 	}
@@ -288,7 +289,8 @@ func (a *Agent) session(ctx context.Context) error {
 	defer addrTick.Stop()
 	resendTick := time.NewTicker(time.Minute)
 	defer resendTick.Stop()
-	var sentUpTo uint64 // highest seq sent in this session
+	var sentUpTo uint64       // highest seq sent in this session
+	parts := &snapshotParts{} // a snapshot sent in parts, while they come in
 	sendStats := func() error {
 		batches, err := a.st.Pending(sentUpTo, 50)
 		if err != nil {
@@ -379,7 +381,7 @@ func (a *Agent) session(ctx context.Context) error {
 				}
 				continue
 			}
-			ack := a.handle(ctx, m)
+			ack := a.handle(ctx, m, parts)
 			if ack == nil {
 				continue
 			}
@@ -390,10 +392,17 @@ func (a *Agent) session(ctx context.Context) error {
 	}
 }
 
-func (a *Agent) handle(ctx context.Context, m *nodev1.PanelMessage) *nodev1.Ack {
+func (a *Agent) handle(ctx context.Context, m *nodev1.PanelMessage, parts *snapshotParts) *nodev1.Ack {
 	switch msg := m.Msg.(type) {
 	case *nodev1.PanelMessage_Snapshot:
-		s := msg.Snapshot
+		s, err := parts.add(msg.Snapshot)
+		if err != nil {
+			a.log.Warn("snapshot part dropped", "err", err)
+			return &nodev1.Ack{Revision: msg.Snapshot.Revision, Hash: msg.Snapshot.Hash, Error: err.Error()}
+		}
+		if s == nil {
+			return nil // more parts to come; the snapshot is acknowledged as a whole
+		}
 		ack := &nodev1.Ack{Revision: s.Revision, Hash: s.Hash}
 		if err := a.ApplySnapshot(ctx, s); err != nil {
 			a.log.Error("apply snapshot failed", "revision", s.Revision, "err", err)

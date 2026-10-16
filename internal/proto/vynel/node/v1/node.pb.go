@@ -1372,7 +1372,13 @@ type Snapshot struct {
 	Inbounds    []*InboundUsers        `protobuf:"bytes,4,rep,name=inbounds,proto3" json:"inbounds,omitempty"`
 	CaddyConfig []byte                 `protobuf:"bytes,5,opt,name=caddy_config,json=caddyConfig,proto3" json:"caddy_config,omitempty"` // Caddy JSON config for agents without "nginx"; empty = Caddy not needed
 	// nginx.conf built by the panel (package nginxconf) for agents with "nginx"; empty = no web server.
-	NginxConfig   string `protobuf:"bytes,6,opt,name=nginx_config,json=nginxConfig,proto3" json:"nginx_config,omitempty"`
+	NginxConfig string `protobuf:"bytes,6,opt,name=nginx_config,json=nginxConfig,proto3" json:"nginx_config,omitempty"`
+	// A large snapshot goes in parts to agents with the "chunks" capability (one gRPC message has
+	// a size limit). parts = 0: the whole snapshot. Otherwise part 0 carries the configs, every
+	// part carries some of the users (an inbound may continue in the next part), and the agent
+	// applies the snapshot once the last part (parts-1) of the same revision and hash is in.
+	Part          int32 `protobuf:"varint,7,opt,name=part,proto3" json:"part,omitempty"`
+	Parts         int32 `protobuf:"varint,8,opt,name=parts,proto3" json:"parts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1447,6 +1453,20 @@ func (x *Snapshot) GetNginxConfig() string {
 		return x.NginxConfig
 	}
 	return ""
+}
+
+func (x *Snapshot) GetPart() int32 {
+	if x != nil {
+		return x.Part
+	}
+	return 0
+}
+
+func (x *Snapshot) GetParts() int32 {
+	if x != nil {
+		return x.Parts
+	}
+	return 0
 }
 
 type InboundUsers struct {
@@ -1807,7 +1827,7 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\x06uptime\x18\a \x01(\x04R\x06uptime\"2\n" +
 	"\bStatsAck\x12\x14\n" +
 	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x10\n" +
-	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\xda\x01\n" +
+	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\x84\x02\n" +
 	"\bSnapshot\x12\x1a\n" +
 	"\brevision\x18\x01 \x01(\x03R\brevision\x12\x12\n" +
 	"\x04hash\x18\x02 \x01(\tR\x04hash\x12\x1f\n" +
@@ -1815,7 +1835,9 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"xrayConfig\x127\n" +
 	"\binbounds\x18\x04 \x03(\v2\x1b.vynel.node.v1.InboundUsersR\binbounds\x12!\n" +
 	"\fcaddy_config\x18\x05 \x01(\fR\vcaddyConfig\x12!\n" +
-	"\fnginx_config\x18\x06 \x01(\tR\vnginxConfig\"{\n" +
+	"\fnginx_config\x18\x06 \x01(\tR\vnginxConfig\x12\x12\n" +
+	"\x04part\x18\a \x01(\x05R\x04part\x12\x14\n" +
+	"\x05parts\x18\b \x01(\x05R\x05parts\"{\n" +
 	"\fInboundUsers\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12\x1a\n" +
 	"\bprotocol\x18\x02 \x01(\tR\bprotocol\x12\x12\n" +

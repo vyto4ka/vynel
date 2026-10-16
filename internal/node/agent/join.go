@@ -168,6 +168,9 @@ func GRPCDialer(dir string) (Dialer, func(), error) {
 	conn, err := grpc.NewClient(info.Addr,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30 * time.Second, Timeout: 10 * time.Second, PermitWithoutStream: true}),
+		// gRPC's default limit is 4 MB; a whole snapshot of a big node (an older panel does not
+		// send parts) or a large stats batch may be more.
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(nodev1.MaxMessage), grpc.MaxCallSendMsgSize(nodev1.MaxMessage)),
 	)
 	if err != nil {
 		return nil, nil, err

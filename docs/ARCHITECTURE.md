@@ -584,6 +584,8 @@ NodeMessage  = Hello{agent_ver, xray_ver, applied_revision, os, arch}
              | SelfTestResult{id, ok, latency_ms, error?}
 
 PanelMessage = Snapshot{revision, xray_config, nginx_config (caddy_config — старым агентам), users_by_inbound}
+               # большой снимок агентам с capability "chunks" уходит частями (part/parts, ~1 МБ),
+               # агент собирает их и применяет целиком; лимит сообщения gRPC — 64 МБ с обеих сторон
              | Delta{from_rev, to_rev, ops[Upsert/RemoveUser]}
              | StatsAck{seq}
              | Command{restart_xray | update_agent | fetch_logs | self_test}

@@ -161,6 +161,12 @@ message Snapshot {
   bytes caddy_config = 5; // Caddy JSON config for agents without "nginx"; empty = Caddy not needed
   // nginx.conf built by the panel (package nginxconf) for agents with "nginx"; empty = no web server.
   string nginx_config = 6;
+  // A large snapshot goes in parts to agents with the "chunks" capability (one gRPC message has
+  // a size limit). parts = 0: the whole snapshot. Otherwise part 0 carries the configs, every
+  // part carries some of the users (an inbound may continue in the next part), and the agent
+  // applies the snapshot once the last part (parts-1) of the same revision and hash is in.
+  int32 part = 7;
+  int32 parts = 8;
 }
 
 message InboundUsers {
