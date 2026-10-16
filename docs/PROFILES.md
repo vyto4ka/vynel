@@ -1,6 +1,6 @@
 # Шаблоны профилей
 
-> **Статус:** шаблоны A, C и D (Hysteria2) встроены; B (VK CDN) больше не встроен (§4). Переменные, наследование, lint, Caddy и проверки конфигов реализованы. Свои шаблоны пишутся в веб-панели («Профили» → «Шаблоны профилей» → «Новый шаблон» или копия встроенного) → правка YAML → проверка пробной сборкой; хранятся в базе панели (таблица `profile_templates`). Не реализованы: внешние шаги VK на странице-инструкции (§4.6), автопроверки edge CDN (§4.7), режим отладки (§2, §4.9).
+> **Статус:** шаблоны A, C и D (Hysteria2) встроены; B (VK CDN) больше не встроен (§4). Переменные, наследование, lint, конфиг nginx и проверки конфигов реализованы. Свои шаблоны пишутся в веб-панели («Профили» → «Шаблоны профилей» → «Новый шаблон» или копия встроенного) → правка YAML → проверка пробной сборкой; хранятся в базе панели (таблица `profile_templates`). Не реализованы: внешние шаги VK на странице-инструкции (§4.6), автопроверки edge CDN (§4.7), режим отладки (§2, §4.9).
 
 Описание встроенных шаблонов профилей Xray: технические характеристики, что используется и как это автоматизировано.
 Основа — две реальные рабочие схемы:
@@ -8,7 +8,7 @@
 - **A. VLESS + Reality, self-steal.** Как ставилось через Remnawave + RemnaSetup (Remnanode → «полная установка»: Caddy self-steal + BBR, без WARP).
 - **B. VLESS + XHTTP через VK Cloud CDN.** По гайду «Узел xHTTP за VK Cloud CDN» (packet-up, данные в куках, набивка в query).
 - **C. VLESS + XHTTP + REALITY, self-steal.** По ТЗ «XHTTP + REALITY» (stream-up, резервный packet-up): XHTTP напрямую на ноду, без CDN, под маской своего сайта (§8).
-- **D. Hysteria2.** QUIC на UDP 443 рядом с A/C на том же домене и том же сертификате, который Caddy уже получил для сайта-заглушки (§9).
+- **D. Hysteria2.** QUIC на UDP 443 рядом с A/C на том же домене и том же сертификате, который нода уже получила для сайта-заглушки (§9).
 
 Цель — чтобы в нашей панели оба профиля ставились **выбором шаблона и заполнением 1–3 полей**. Всё, что в Remnawave делается руками (ключи, shortIds, SNI, extra в хосте, nginx/certbot, BBR, видимость хоста), делает панель.
 
@@ -20,7 +20,7 @@
 
 ```
 Шаблон (встроенный, версионируется вместе с кодом)
-  └─ описывает: переменные, кусок Xray (инбаунд), кусок Caddy, точку подключения,
+  └─ описывает: переменные, кусок Xray (инбаунд), кусок nginx, точку подключения,
                требования к ноде, внешние шаги, проверки
 
 Профиль (создаётся админом из шаблона, хранится в БД) — общий конфиг
@@ -65,12 +65,47 @@ title: "VLESS Reality (self-steal)"
 summary: "Основной профиль. Нода маскируется под собственный сайт на своём домене."
 variables: [...]          # §1.2
 xray_inbound: {...}       # JSON-фрагмент с ${VAR}
-caddy: {...}              # что должен поднять Caddy ноды
+nginx: {...}              # что должен поднять nginx ноды (старое имя раздела — caddy)
 host: {...}               # точка подключения по умолчанию (что уйдёт в подписку)
 node_requirements: {...}  # порты, DNS, тюнинг ядра
 external_steps: [...]     # шаги вне сервера (DNS, CDN), попадают на страницу-инструкцию
 checks: [...]             # автоматические проверки после установки
 lint: [...]               # дополнительные правила валидации
+```
+
+**Раздел `nginx:`** — что поднять в nginx на ноде для этого инбаунда. Старое имя `caddy:` тоже читается; оба раздела сразу — ошибка.
+
+| Ключ | Что это |
+|------|---------|
+| `role` | `selfsteal` — сайт-заглушка за Reality (цель `target`); `reverse_proxy_xhttp` — HTTPS-сайт, который проксирует путь в XHTTP Xray (источник для CDN); `certificate` — только сертификат домена (Hysteria2), сайт слушает лишь `127.0.0.1` |
+| `domain` | Домен сайта, на него нода получает сертификат |
+| `local_port` | Локальный порт сайта (`selfsteal`, `certificate`), обычно `${SELFSTEAL_PORT}` = 8443 |
+| `upstream`, `path` | Куда и по какому пути проксировать (`reverse_proxy_xhttp`), например `127.0.0.1:${XRAY_PORT}` и `${UPLINK_PATH}` |
+| `decoy` | Сайт-заглушка (`${DECOY_SITE}`) |
+| `server_names` | Ещё имена этого сайта **без своего сертификата**, например `${CDN_DOMAIN}`: CDN пересылает в Host своё имя |
+| `location: \|` | Свои директивы внутри `location` пути `path` вместо стандартного потокового прокси. Только для `reverse_proxy_xhttp` |
+| `server: \|` | Свои директивы уровня `server` |
+
+`${ИМЯ}` — переменные шаблона, переменные nginx пишутся как обычно (`$host`). В своих директивах нельзя: `include`, `load_module`, `perl`/`lua`/`js`, `ssl_certificate*`, `pid`, `user`, `error_log`; скобки должны быть парными. Если на панели установлен nginx, проверка шаблона запускает настоящий `nginx -t` на пробном конфиге.
+
+Пример: источник для CDN с директивами из гайда как есть.
+
+```yaml
+nginx:
+  role: reverse_proxy_xhttp
+  domain: ${ORIGIN_DOMAIN}
+  server_names: [ "${CDN_DOMAIN}" ]      # имя CDN в Host, сертификат на него не нужен
+  path: ${UPLINK_PATH}
+  upstream: 127.0.0.1:${XRAY_PORT}
+  location: |
+    proxy_pass http://127.0.0.1:${XRAY_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    client_max_body_size 0;
+  server: |
+    large_client_header_buffers 8 64k;
 ```
 
 ### 1.4 Свой JSON профиля
@@ -138,7 +173,7 @@ lint: [...]               # дополнительные правила вали
 - API-инбаунд `127.0.0.1:<random>` и правило роутинга к нему;
 - `clients` в каждом инбаунде (из пользователей групп).
 
-**Режим отладки ноды** (кнопка в карточке ноды, по умолчанию на 15 минут): `loglevel: info`, лог Xray и access-лог Caddy стримятся в UI. По таймеру всё откатывается само. Это заменяет из гайда ручную правку `log` в профиле, `docker logs`, `tail -f` и `tcpdump`.
+**Режим отладки ноды** (кнопка в карточке ноды, по умолчанию на 15 минут): `loglevel: info`, лог Xray и access-лог nginx стримятся в UI. По таймеру всё откатывается само. Это заменяет из гайда ручную правку `log` в профиле, `docker logs`, `tail -f` и `tcpdump`.
 
 ---
 
@@ -150,7 +185,7 @@ lint: [...]               # дополнительные правила вали
 |----------|----------|
 | Протокол | VLESS, `decryption: none` |
 | Транспорт | `raw` (бывший `tcp`) |
-| Безопасность | REALITY, `target` = локальный Caddy (`127.0.0.1:8443`) |
+| Безопасность | REALITY, `target` = локальный nginx (`127.0.0.1:8443`), адрес клиента передаётся заголовком PROXY v2 (`xver: 2`) |
 | Flow | `xtls-rprx-vision` (ставится каждому клиенту) |
 | Порт снаружи | `443/tcp` |
 | Маскировка | self-steal: SNI = собственный домен ноды, за ним живой сайт с настоящим сертификатом Let's Encrypt |
@@ -158,7 +193,7 @@ lint: [...]               # дополнительные правила вали
 | Sockopt | `tcpFastOpen`, `tcpcongestion: bbr`, `tcpKeepAliveIdle: 45`, `tcpKeepAliveInterval: 45` |
 | Fingerprint клиента | `firefox` (как в рабочей схеме; меняется в точке подключения) |
 | Что нужно | VPS с IP, не заблокированным в РФ; домен или поддомен с A-записью на IP ноды |
-| Компоненты на ноде | Xray, Caddy (сайт-заглушка + ACME), BBR |
+| Компоненты на ноде | Xray, nginx (сайт-заглушка), сертификат Let's Encrypt (получает агент), BBR |
 
 ### 3.2 Переменные
 
@@ -169,9 +204,9 @@ lint: [...]               # дополнительные правила вали
 | `LISTEN_IP` | node | адрес инбаунда | `203.0.113.12` | По умолчанию основной IP; см. INBOUNDS.md §2 |
 | `REALITY_PRIVATE_KEY` | node | generate `x25519` | — | secret. Публичный ключ вычисляется и уходит в подписку |
 | `REALITY_SHORT_ID` | node | generate `shortid` (8 байт hex) | `a1b2c3d4e5f60718` | Вместо `for i in {1..20}; do head -c 8 /dev/urandom \| xxd -p; done` |
-| `SELFSTEAL_PORT` | profile | const | `8443` | Локальный порт Caddy |
+| `SELFSTEAL_PORT` | profile | const | `8443` | Локальный порт nginx |
 | `PORT` | profile | const | `443` | |
-| `DECOY_SITE` | node | generate `pick(templates)` | `cloud-storage` | Какой шаблон сайта-заглушки показать |
+| `DECOY_SITE` | node | generate (случайный из списка) | `cloud` | Какой сайт-заглушку показать: `cloud`, `studio`, `docs`, `coffee`, `journal` |
 
 Админу в итоге нужно ввести **только домен ноды**. Остальное генерируется.
 
@@ -205,35 +240,43 @@ lint: [...]               # дополнительные правила вали
 }
 ```
 
-Клиенты при рендере: `{ "id": user.uuid, "email": user.id, "flow": "xtls-rprx-vision" }`.
+Клиенты при рендере: `{ "id": user.uuid, "email": user.id, "flow": "xtls-rprx-vision" }`. Если `target` локальный, панель при сборке ставит `xver: 2`: nginx получает адрес клиента заголовком PROXY.
 
-### 3.4 Caddy на ноде
+### 3.4 nginx на ноде
 
-Эквивалент Caddyfile (на ноду уходит JSON через Admin API):
+Панель собирает `nginx.conf` (пакет `internal/nginxconf`), агент подставляет свои пути, проверяет конфиг `nginx -t` и перечитывает его по SIGHUP. Отвергнутый конфиг не применяется: работает прежний, ошибка видна в карточке ноды. nginx — пакет дистрибутива (`nginx` + `libnginx-mod-stream`), но свой экземпляр, дочерний процесс агента; системный `nginx.service` выключен. Упрощённо для шаблона A:
 
-```caddy
-{
-    https_port 8443
-    default_bind 127.0.0.1          # self-steal-сайт снаружи не торчит, только через Reality
-    servers { protocols h1 h2 }
-}
+```nginx
+http {
+    server_tokens off;                       # заголовок Server: nginx, без версии
+    ssl_protocols TLSv1.2 TLSv1.3;
 
-http://${NODE_DOMAIN} {
-    bind 0.0.0.0                    # :80 наружу — ACME HTTP-01 и редирект
-    redir https://${NODE_DOMAIN}{uri} permanent
-}
-
-https://${NODE_DOMAIN}:8443 {
-    tls {
-        issuer acme { disable_tlsalpn_challenge }   # 443 занят Xray → только HTTP-01
+    server {                                 # :80 наружу — ACME HTTP-01 и редирект
+        listen 80 default_server;
+        location ^~ /.well-known/acme-challenge/ { root <webroot>; }
+        location / { return 301 https://$host$request_uri; }
     }
-    root * /var/lib/vynel-node/decoy/${DECOY_SITE}
-    file_server
-    header -Server
+    server {                                 # self-steal-сайт снаружи не торчит, только через Reality
+        listen 127.0.0.1:8443 ssl proxy_protocol http2;
+        server_name ${NODE_DOMAIN};
+        real_ip_header proxy_protocol;
+        ssl_certificate     <data>/web/tls/${NODE_DOMAIN}/fullchain.pem;
+        ssl_certificate_key <data>/web/tls/${NODE_DOMAIN}/privkey.pem;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        location / {
+            root <decoy>/${DECOY_SITE};
+            try_files $uri $uri.html $uri/index.html =404;   # адреса без .html: /pricing
+        }
+        error_page 404 /404.html;
+    }
 }
 ```
 
-Как это работает: браузер или сканер приходит на `nl2.vyto4ka.ru:443`. Reality не видит валидной авторизации и прозрачно передаёт TCP в `127.0.0.1:8443`. Caddy отдаёт настоящий сайт с настоящим сертификатом этого домена.
+Как это работает: браузер или сканер приходит на `nl2.vyto4ka.ru:443`. Reality не видит валидной авторизации и прозрачно передаёт TCP в `127.0.0.1:8443`. nginx отдаёт настоящий сайт с настоящим сертификатом этого домена.
+
+**Строгий SNI.** Соединение с именем, которого нет ни у одного сайта, или без SNI обрывается на рукопожатии: `ssl_reject_handshake` в nginx 1.19.4+, а в более старом (1.18 в Ubuntu 22.04 и Debian 11) — фиктивный самоподписанный сертификат без настоящего имени и закрытие (444). Запрос с Host, которого нет ни у одного сайта, тоже остаётся без ответа (444). Сканер по IP домен не узнает. Исключение — CDN-источник (§4.4).
+
+**Сертификат** получает сам агент (`internal/certs`): пока его нет — временный самоподписанный (nginx без файла не стартует), затем Let's Encrypt по HTTP-01 (webroot отдаёт nginx на `:80`; `:443` занят Xray). Продление за 30 дней до конца срока, после ошибки — повтор с паузой от минуты, которая удваивается до 6 часов. Хранилище: `<data>/web/tls/<домен>/fullchain.pem`, `privkey.pem`. Сертификаты, которые уже получил Caddy прежней версии, переносятся без перевыпуска ([MIGRATION_NGINX.md](MIGRATION_NGINX.md)).
 
 ### 3.5 Точка подключения (подписка) — заполняется автоматически
 
@@ -266,7 +309,7 @@ https://${NODE_DOMAIN}:8443 {
 | # | Проверка | Откуда | Ожидание |
 |---|----------|--------|----------|
 | 1 | `getent hosts ${NODE_DOMAIN}` = IP ноды | панель + страница-инструкция | ✓ до запуска скрипта |
-| 2 | Caddy получил сертификат | нода | сертификат для `${NODE_DOMAIN}` в хранилище Caddy |
+| 2 | Нода получила сертификат | нода | сертификат Let's Encrypt для `${NODE_DOMAIN}` в `<data>/web/tls/` |
 | 3 | TLS на `:443` без Reality-клиента отдаёт сертификат `${NODE_DOMAIN}` | панель | маскировка работает |
 | 4 | `xray` слушает `:443`, инбаунд `vless-reality` с N клиентами | нода | |
 | 5 | BBR активен (`sysctl net.ipv4.tcp_congestion_control`) | нода | `bbr` |
@@ -298,14 +341,14 @@ https://${NODE_DOMAIN}:8443 {
 |----------|----------|
 | Протокол | VLESS, `decryption: none` |
 | Транспорт | XHTTP, `mode: packet-up` |
-| Цепочка | Клиент → **VK Cloud CDN** (edge MegaFon, TLS LE) → HTTPS → **Caddy** на ноде (`ORIGIN_DOMAIN`, TLS LE) → HTTP → **Xray** `127.0.0.1:${XRAY_PORT}` |
+| Цепочка | Клиент → **VK Cloud CDN** (edge MegaFon, TLS LE) → HTTPS → **nginx** на ноде (`ORIGIN_DOMAIN`, TLS LE) → HTTP → **Xray** `127.0.0.1:${XRAY_PORT}` |
 | Ограничения CDN | Пропускает только `GET`/`HEAD`, вырезает длинные нестандартные заголовки (`X-Padding` и т.п.), по умолчанию кэширует |
 | Как обходим | Данные вверх в куках `pb_0, pb_1, …`, набивка в query `?cb=…`, сессия в куке `media_sid`, номер пакета в query `?offset=N`, без SSE-заголовка |
 | Flow | нет |
-| Порт снаружи | `443/tcp` (Caddy) или общий с Reality (§5) |
+| Порт снаружи | `443/tcp` (nginx) или общий с Reality (§5) |
 | Fingerprint клиента | `chrome`, ALPN `h2,http/1.1` |
 | Что нужно | Домен источника (A-запись на ноду), персональный CDN-домен (CNAME на VK), аккаунт VK Cloud |
-| Компоненты на ноде | Xray, Caddy (TLS + reverse proxy), BBR |
+| Компоненты на ноде | Xray, nginx (TLS + reverse proxy), BBR |
 | Когда использовать | Когда прямые IP нод блокируются, а CDN VK доступен (белые списки, мобильные сети) |
 
 ### 4.2 Переменные
@@ -355,33 +398,40 @@ https://${NODE_DOMAIN}:8443 {
 
 В шаблоне блок `extra` хранится **отдельно** как `xhttp_extra_shared`. Из него рендерятся и инбаунд, и точка подключения, поэтому рассинхрон «сервер ↔ хост» невозможен.
 
-### 4.4 Caddy на ноде (вместо nginx + certbot)
+### 4.4 nginx на ноде (как в гайде, без certbot)
 
-```caddy
-https://${ORIGIN_DOMAIN} {
-    reverse_proxy 127.0.0.1:${XRAY_PORT} {
-        flush_interval -1                 # = proxy_buffering off
-        request_buffers 0                 # = proxy_request_buffering off
-        transport http {
-            versions 1.1
-            read_timeout  3600s           # = proxy_read_timeout
-            write_timeout 3600s           # = proxy_send_timeout
-        }
+Раздел шаблона `role: reverse_proxy_xhttp` даёт сайт `ORIGIN_DOMAIN` с потоковым прокси на Xray. Без `location:` панель пишет стандартный блок — тот же, что в гайде:
+
+```nginx
+server {
+    listen 443 ssl http2;                    # или 127.0.0.1:8443 за SNI-роутером (§5)
+    server_name ${ORIGIN_DOMAIN} ${CDN_DOMAIN};   # CDN_DOMAIN — из server_names
+    ssl_certificate     <data>/web/tls/${ORIGIN_DOMAIN}/fullchain.pem;
+    ssl_certificate_key <data>/web/tls/${ORIGIN_DOMAIN}/privkey.pem;
+    location ^~ ${UPLINK_PATH} {
+        proxy_pass http://127.0.0.1:${XRAY_PORT};
+        proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        client_max_body_size 0;
     }
-    request_body { max_size 0 }           # = client_max_body_size 0
-    log { output file /var/log/vynel-node/xhttp_access.log }   # только в режиме отладки
+    location / { ... }                       # сайт-заглушка
 }
 ```
 
+Если в гайде что-то настроено иначе, директивы вписываются в шаблон как есть: `location: |` заменяет содержимое блока пути, `server: |` добавляет директивы уровня `server`, `server_names` — имена без своего сертификата (пример — §1.3).
+
 Соответствие гайду:
 
-| nginx в гайде | Caddy у нас |
-|---------------|-------------|
-| `certbot certonly --standalone` | автоматический ACME (HTTP-01 на `:80`) |
-| `listen 443 ssl http2` (+ ловушка с `http2 on` в 1.18) | h2 по умолчанию, версия ни при чём |
-| `large_client_header_buffers 16 16k` | лимит заголовков Go/Caddy 1 МБ по умолчанию, хватает с запасом. Явно задаём `servers { max_header_size 256KB }` |
-| `proxy_set_header Host $host` | Caddy сохраняет Host по умолчанию |
-| `proxy_set_header Connection ""` | Caddy управляет hop-by-hop заголовками сам |
+| nginx в гайде | У нас |
+|---------------|-------|
+| `certbot certonly --standalone` | сертификат получает агент (Let's Encrypt, HTTP-01 на `:80`), продлевает сам |
+| `listen 443 ssl http2` | так же; TLS 1.2/1.3, HSTS |
+| `large_client_header_buffers 16 16k` | на уровне `http` уже `8 256k` (данные в куках); своё значение — в `server: \|` |
+| `proxy_set_header Host $host`, `proxy_http_version 1.1`, `Connection ""` | есть в стандартном блоке |
+| «Заголовок Host: Пересылать» в VK CDN | имя CDN в `server_names`; кроме того, сайт CDN-источника — сервер по умолчанию на своём листенере и отвечает на любое имя и соединения без SNI |
 
 ### 4.5 Точка подключения — заполняется автоматически
 
@@ -431,7 +481,7 @@ https://${ORIGIN_DOMAIN} {
 | # | Проверка | Откуда | Ожидание |
 |---|----------|--------|----------|
 | 1 | `http://127.0.0.1:${XRAY_PORT}${UPLINK_PATH}/` | нода | `400` (Xray жив) |
-| 2 | `https://${ORIGIN_DOMAIN}${UPLINK_PATH}/` | нода | `400` (Caddy и сертификат ок) |
+| 2 | `https://${ORIGIN_DOMAIN}${UPLINK_PATH}/` | нода | `400` (nginx и сертификат ок) |
 | 3 | `https://${CDN_DOMAIN}${UPLINK_PATH}/?t=rand` | панель | `400` (CDN, edge-сертификат, проксирование) |
 | 4 | Нет `cache: HIT` в ответе edge | панель | кэш выключен |
 | 5 | Самотест клиентом через CDN | панель | 204 |
@@ -455,7 +505,7 @@ https://${ORIGIN_DOMAIN} {
 | Было в гайде | У нас |
 |--------------|-------|
 | Править `log` в профиле, `docker restart`, `grep` по логу | Кнопка «Отладка 15 мин», лог Xray в UI с фильтром `padding\|session\|upload\|payload\|validate` |
-| `tail -f xhttp_access.log \| cut -c1-160` | Access-лог Caddy в UI (в режиме отладки) |
+| `tail -f xhttp_access.log \| cut -c1-160` | Access-лог nginx в UI (в режиме отладки) |
 | `tcpdump` на `lo` | Команда агенту `capture_headers(30s)`: первые N запросов к `${UPLINK_PATH}` с заголовками, показываются в UI |
 | Таблица «Симптом → причина» | Встроена в страницу проверок: результат проверки → подсказка |
 
@@ -463,27 +513,30 @@ https://${ORIGIN_DOMAIN} {
 
 ## 5. Совмещение A + B на одной ноде
 
-Гайд B предполагает ноду **без** self-steal, потому что Reality занимает `:443`. В нашей схеме оба модуля уживаются на одном порту: Reality отдаёт весь «чужой» трафик в Caddy.
+Гайд B предполагает ноду **без** self-steal, потому что Reality занимает `:443`. В нашей схеме оба модуля уживаются на одном порту: `:443` занимает nginx и разводит соединения по SNI (`stream {}` с `ssl_preread`), не расшифровывая их.
 
 ```
-:443 → Xray Reality (serverNames = [NODE_DOMAIN])
-        ├─ Reality-клиент                       → vless-reality
-        └─ всё остальное (браузеры, VK CDN edge) → Caddy 127.0.0.1:8443
-                                                    ├─ SNI NODE_DOMAIN   → сайт-заглушка
-                                                    └─ SNI ORIGIN_DOMAIN → reverse_proxy → Xray 127.0.0.1:8085 (xhttp)
-:80  → Caddy (ACME HTTP-01 для обоих доменов, редирект)
+:443 → nginx stream, разводка по SNI
+        ├─ SNI NODE_DOMAIN (serverNames Reality) → Xray Reality 127.0.0.1:10443 (PROXY)
+        │                                          ├─ Reality-клиент → vless-reality
+        │                                          └─ всё остальное  → nginx 127.0.0.1:8443
+        └─ любое другое имя и без SNI (браузеры, VK CDN edge) → nginx 127.0.0.1:8443 (PROXY)
+                                                    ├─ NODE_DOMAIN                → сайт-заглушка
+                                                    └─ ORIGIN_DOMAIN, CDN_DOMAIN  → прокси → Xray 127.0.0.1:8085 (xhttp)
+:80  → nginx (ACME HTTP-01 для обоих доменов, 301 на https)
 ```
 
-Рендерер выбирает раскладку автоматически. Это частный случай общего резолвера портов, который работает с любым набором IP (INBOUNDS.md §2.3):
+Рендерер выбирает раскладку автоматически. Это частный случай общей раскладки портов, которая работает с любым набором IP (INBOUNDS.md §2.3):
 
-| Инбаунды на одном IP | Кто на `:443` | Где Caddy TLS |
+| Инбаунды на одном IP | Кто на `:443` | Где HTTPS nginx |
 |---------------------------|---------------|---------------|
-| только A | Xray (Reality) | `127.0.0.1:8443` |
-| только B | Caddy | `0.0.0.0:443` |
-| A + B | Xray (Reality) | `127.0.0.1:8443`, два сайта по SNI |
+| только A | Xray (Reality) | `127.0.0.1:8443` (цель Reality) |
+| только B | nginx | `0.0.0.0:443` |
+| A + B | nginx (SNI-роутер), Xray переезжает на `127.0.0.1:10443` | `127.0.0.1:8443`, два сайта по SNI |
 
 Замечания:
-- В режиме A+B Caddy видит клиентов (включая edge VK) с адреса `127.0.0.1`. Для статистики это не важно, трафик считает Xray по пользователям. Если нужны реальные IP в логах Caddy, включаем `xver: 1` в Reality и `proxy_protocol` в Caddy. Это опция, по умолчанию выключена.
+- В режиме A+B Xray слушает `127.0.0.1:10000+порт` и принимает заголовок PROXY (`acceptProxyProtocol`), а в подписке остаётся публичный порт 443. nginx получает адрес клиента заголовком PROXY и от роутера, и от Reality (`xver: 2`), поэтому в логах видны настоящие IP, а не `127.0.0.1`.
+- Сайт CDN-источника — сервер по умолчанию на своём листенере: отвечает и на имя CDN, и на соединения без SNI. Остальные неизвестные имена обрываются на рукопожатии TLS, домен сканер не узнаёт.
 - Один сервер — две точки подключения в подписке: «🇳🇱 Нидерланды» (прямая) и «🇳🇱 Нидерланды · CDN» (через VK). Если они в одной группе, клиент видит обе. Можно развести по группам, например CDN только для группы «Мобильные».
 
 ---
@@ -503,7 +556,7 @@ https://${ORIGIN_DOMAIN} {
 | Firewall | Если найден ufw или firewalld, открываются порты из `node_requirements` | |
 | Сайты-заглушки | Набор статичных шаблонов в бинаре, выбирается случайно на ноду | RemnaSetup self-steal |
 
-Docker на ноде **не нужен**: Xray и Caddy — отдельные бинарники под systemd (в отличие от `remnanode` в контейнере).
+Docker на ноде **не нужен**: Xray (бинарь) и nginx (пакет дистрибутива `nginx` + `libnginx-mod-stream`) работают дочерними процессами службы `vynel-node` (в отличие от `remnanode` в контейнере).
 
 ---
 
@@ -514,10 +567,12 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 2. Каждый инбаунд ноды: шаблон ⊕ профиль (defaults + override) ⊕ переменные ноды ⊕ override ноды
    + listen/egress IP (INBOUNDS.md §1.4, §2.4)
 3. Подстановка ${VAR} → проверка: все переменные заданы, типы валидны
-4. Сборка Xray: base + инбаунды ноды + системные секции (api/stats/policy) + clients
-5. Сборка Caddy: резолвер портов по (IP, порт) (INBOUNDS.md §2.3) → JSON для Admin API
-   + outbounds DIRECT@ip и правила inboundTag → outbound для sendThrough
-6. Lint инбаундов (§4.8) + `xray run -test` на панели
+4. Сборка nginx: раскладка портов по (IP, порт) (INBOUNDS.md §2.3) → nginx.conf с метками @@...@@
+   вместо путей ноды; если Reality делит IP:443 с сайтами — SNI-роутер, Reality переезжает
+   на 127.0.0.1:10000+порт. Агентам старых версий — JSON Caddy (MIGRATION_NGINX.md)
+5. Сборка Xray: base + инбаунды ноды (уже с новыми listen/port) + системные секции
+   (api/stats/policy) + clients + outbounds DIRECT@ip и правила inboundTag → outbound для sendThrough
+6. Lint инбаундов (§4.8) + `xray run -test` на панели; нода перед применением проверяет nginx.conf `nginx -t`
 7. Точки подключения: host-шаблоны профилей + переменные → hosts (с учётом ручных override)
 8. revision++ → Snapshot ноде
 ```
@@ -528,17 +583,17 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 
 ## 8. Шаблон C — VLESS + XHTTP + REALITY (self-steal)
 
-Файл: `internal/xrayconf/templates/vless-xhttp-reality.yaml`. Источник — ТЗ «XHTTP + REALITY» (Remnawave + Nginx); Nginx заменён на Caddy из шаблона A.
+Файл: `internal/xrayconf/templates/vless-xhttp-reality.yaml`. Источник — ТЗ «XHTTP + REALITY» (Remnawave + Nginx); сайт за REALITY — тот же nginx, что в шаблоне A.
 
 ### 8.1 Технические характеристики
 
 | Что | Значение |
 |-----|----------|
-| Вход | TCP `:443`, Xray REALITY; всё «чужое» уходит на свой сайт в Caddy `127.0.0.1:8443` (как в A) |
+| Вход | TCP `:443`, Xray REALITY; всё «чужое» уходит на свой сайт в nginx `127.0.0.1:8443` (как в A) |
 | Транспорт | XHTTP, режим `stream-up` (основной) или `packet-up` (резервный) — переменная `XHTTP_MODE` |
 | Flow | пусто: Vision поверх XHTTP не работает |
 | Маскировка запросов | сессия в куке `media_sid`, номер пакета `offset` и набивка `cb` в query (`repeat-x`, 100–1000 байт) |
-| Сертификат | не нужен Xray: REALITY; сайт в Caddy получает сертификат сам (ACME на `:80`) |
+| Сертификат | не нужен Xray: REALITY; сертификат сайта в nginx получает агент (ACME на `:80`) |
 | Fingerprint | `chrome`, выбирается переменной `FINGERPRINT` |
 | Маскировка запросов | `XHTTP_OBFS`: `compat` (по умолчанию) или `cookie` — см. §8.3 |
 | Mihomo | отдаётся (`xhttp-opts`, `reuse-settings`, `support-x25519mlkem768: true`); нужен Mihomo 1.19+ |
@@ -603,8 +658,8 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 ### 8.5 Ограничения
 
 - Один режим на один `IP:443`. Шаблоны A и C тоже не встанут на один IP: оба хотят Xray на внешнем `:443`. Панель покажет конфликт портов. Для C нужен второй IP ноды или другой порт.
-- Шаблон B (CDN) с C совмещается так же, как с A (§5): CDN-домен уходит в Caddy за REALITY.
-- На ноде должна быть A-запись `NODE_DOMAIN`, иначе Caddy не получит сертификат и маскировочный сайт не откроется.
+- Шаблон B (CDN) с C совмещается так же, как с A (§5): nginx разводит по SNI, CDN-домен уходит в nginx, имя REALITY — в Xray.
+- На ноде должна быть A-запись `NODE_DOMAIN`, иначе нода не получит сертификат и маскировочный сайт останется на временном самоподписанном.
 
 ### 8.6 Как проверено
 
@@ -616,7 +671,7 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 
 ---
 
-## 9. Шаблон D — Hysteria2 на сертификате Caddy
+## 9. Шаблон D — Hysteria2 на сертификате ноды
 
 Файл: `internal/xrayconf/templates/hysteria2.yaml`. Xray 26.x умеет Hysteria2 сам (`"protocol": "hysteria"`, `"network": "hysteria"`), отдельный бинарник не нужен.
 
@@ -625,12 +680,12 @@ Docker на ноде **не нужен**: Xray и Caddy — отдельные �
 Hysteria2 работает поверх QUIC (UDP), поэтому хорошо держит каналы с потерями, где TCP-протоколы проседают. На одной ноде и одном IP:
 
 ```
-TCP :443 → Xray REALITY (A или C) → чужое → Caddy 127.0.0.1:8443 (сайт NODE_DOMAIN)
+TCP :443 → Xray REALITY (A или C) → чужое → nginx 127.0.0.1:8443 (сайт NODE_DOMAIN)
 UDP :443 → Xray Hysteria2 (D)     → без пароля → тот же сайт-заглушка по HTTP/3
-TCP :80  → Caddy: ACME HTTP-01 → сертификат NODE_DOMAIN → его же читает Hysteria2
+TCP :80  → nginx: ACME HTTP-01 → агент получает сертификат NODE_DOMAIN → его же читает Hysteria2
 ```
 
-- **Порты.** Hysteria занимает UDP, Reality — TCP: один номер порта не конфликтует. Проверка дубликатов в сборке учитывает транспорт. Caddy больше не включает HTTP/3 (`protocols: h1, h2`), чтобы не забирать UDP 443.
+- **Порты.** Hysteria занимает UDP, Reality — TCP: один номер порта не конфликтует. Проверка дубликатов в сборке учитывает транспорт. nginx слушает только TCP (HTTP/1.1 и HTTP/2, без HTTP/3), UDP 443 остаётся Hysteria.
 - **Firewall.** Установщик ноды открывает в ufw `443/udp`. Если у хостера свой firewall, откройте UDP 443 там.
 - **Пользователи.** Пароль Hysteria — UUID пользователя. Добавление и удаление идут через API Xray без перезапуска, как у VLESS. Статистика считается так же, по email.
 
@@ -640,11 +695,11 @@ TCP :80  → Caddy: ACME HTTP-01 → сертификат NODE_DOMAIN → его
 |------------|-----|----------|
 | `NODE_DOMAIN` | нода | домен ноды: SNI, сертификат, адрес в подписке |
 | `PORT` | профиль | `443` (UDP) |
-| `SELFSTEAL_PORT` | профиль | `8443` — тот же сайт Caddy, что у A; сайты совмещаются |
+| `SELFSTEAL_PORT` | профиль | `8443` — тот же сайт nginx, что у A; сайты совмещаются |
 | `DECOY_SITE` | нода | сайт-заглушка; поставьте тот же, что у Reality-инбаунда ноды, тогда TCP и HTTP/3 покажут одно и то же |
 | `UDP_IDLE_TIMEOUT` | профиль | `60` секунд |
 
-Роль Caddy `certificate` гарантирует, что для `NODE_DOMAIN` есть сайт, а значит и сертификат. Нужен он, даже когда на ноде нет Reality: сайт тогда слушает только `127.0.0.1`, а сертификат приходит через `:80`.
+Роль nginx `certificate` гарантирует, что для `NODE_DOMAIN` есть сайт, а значит и сертификат. Нужен он, даже когда на ноде нет Reality: сайт тогда слушает только `127.0.0.1`, а сертификат приходит через `:80`.
 
 ### 9.3 Сертификат: как он попадает в Xray
 
@@ -652,14 +707,16 @@ TCP :80  → Caddy: ACME HTTP-01 → сертификат NODE_DOMAIN → его
 
 | Метка | Что подставляет агент |
 |-------|-----------------------|
-| `vynel:cert:<домен>`, `vynel:key:<домен>` | `<data>/certs/<домен>.crt/.key` — копия из хранилища Caddy (`certificates/<issuer>/<домен>/`) |
-| `vynel:decoy:<сайт>` | каталог сайта-заглушки, который отдаёт и Caddy |
+| `vynel:cert:<домен>`, `vynel:key:<домен>` | `<data>/certs/<домен>.crt/.key` — копия из хранилища сертификатов ноды (`<data>/web/tls/<домен>/fullchain.pem`, `privkey.pem`) |
+| `vynel:decoy:<сайт>` | каталог сайта-заглушки, который отдаёт и nginx |
 
 Как живёт сертификат:
 
-1. **До выпуска.** Пока Caddy не получил сертификат, агент кладёт временный самоподписанный, иначе Xray не стартует. Клиенты с проверкой сертификата в это время не подключатся. Обычно это секунды после установки.
-2. **Выпуск.** Агент раз в минуту сверяет копию с хранилищем Caddy. Когда появляется первый настоящий сертификат, Xray перезапускается сразу.
-3. **Продление.** Caddy продлевает сертификат за 30 дней до конца. Агент копирует новый файл атомарно, а Xray сам перечитывает файлы сертификата раз в час, без перезапуска.
+1. **До выпуска.** Пока настоящего сертификата нет, агент кладёт временный самоподписанный, иначе Xray не стартует. Клиенты с проверкой сертификата в это время не подключатся. Обычно это секунды или минуты после установки.
+2. **Выпуск.** Агент раз в минуту продлевает то, что пора (§3.4), и сверяет копию с хранилищем. Когда появляется первый настоящий сертификат, Xray перезапускается сразу.
+3. **Продление.** Агент продлевает сертификат за 30 дней до конца, копирует новый файл атомарно, а Xray сам перечитывает файлы сертификата раз в час, без перезапуска.
+
+На ноде, которая ещё получает конфиг Caddy от панели старой версии, сертификат по-прежнему берётся из хранилища Caddy.
 
 ### 9.4 Подписка
 
@@ -674,11 +731,11 @@ TCP :80  → Caddy: ACME HTTP-01 → сертификат NODE_DOMAIN → его
 
 ### 9.5 Как проверено
 
-- `TestHysteria2NextToReality` (e2e). Панель, агент, настоящие Caddy и Xray. Reality на TCP и Hysteria2 на UDP одного порта. Проверено, что:
-  - агент взял сертификат из хранилища Caddy;
+- `TestHysteria2NextToReality` (e2e). Панель, агент, настоящие веб-сервер и Xray. Reality на TCP и Hysteria2 на UDP одного порта. Проверено, что:
+  - агент отдал Hysteria2 сертификат сайта ноды;
   - по HTTP/3 без пароля отдаётся сайт-заглушка с тем же сертификатом;
   - трафик проходит через клиента Xray из JSON-подписки и через Mihomo из YAML-подписки.
-- `TestCertSwapRestartsXray`. На настоящем Xray: сначала отдаётся временный сертификат, после появления сертификата Caddy — выпущенный.
+- `TestCertSwapRestartsXray`. На настоящем Xray: сначала отдаётся временный сертификат, после появления настоящего сертификата — выпущенный.
 
 ### 9.6 Ограничения
 
