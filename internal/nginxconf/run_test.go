@@ -44,8 +44,8 @@ func streamModules(t *testing.T, bin string) []string {
 	if err != nil {
 		t.Fatalf("nginx -V: %v", err)
 	}
-	if !strings.Contains(string(out), "--with-stream=dynamic") {
-		return nil
+	if regexp.MustCompile(`--with-stream(\s|$)`).Match(out) {
+		return nil // built in
 	}
 	dir := "/usr/lib/nginx/modules"
 	if m := regexp.MustCompile(`--modules-path=(\S+)`).FindSubmatch(out); m != nil {
@@ -97,6 +97,15 @@ func TestNginxServes(t *testing.T) {
 }
 
 func testNginxServes(t *testing.T, reject bool) {
+	if reject {
+		// ssl_reject_handshake: nginx 1.19.4+ (Ubuntu 22.04 ships 1.18).
+		v, _ := exec.Command(nginxBin(t), "-v").CombinedOutput()
+		var major, minor, patch int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(string(v)), "nginx version: nginx/"), "%d.%d.%d", &major, &minor, &patch); err == nil &&
+			major*1_000_000+minor*1_000+patch < 1_019_004 {
+			t.Skipf("nginx %d.%d.%d has no ssl_reject_handshake", major, minor, patch)
+		}
+	}
 	bin := nginxBin(t)
 	root := t.TempDir()
 	_ = os.Chmod(root, 0o755)

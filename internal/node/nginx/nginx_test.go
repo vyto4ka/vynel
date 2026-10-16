@@ -202,11 +202,18 @@ func TestCheckListens(t *testing.T) {
 
 // A missing stream module is named in the error, and found once installed, without a restart.
 func TestStreamModuleMissing(t *testing.T) {
+	// Ubuntu 22.04's nginx -V names no stream flag at all, Debian 12's says --with-stream=dynamic.
+	for name, flags := range map[string]string{"jammy": "--with-threads", "bookworm": "--with-stream=dynamic --with-threads"} {
+		t.Run(name, func(t *testing.T) { testStreamModuleMissing(t, flags) })
+	}
+}
+
+func testStreamModuleMissing(t *testing.T, flags string) {
 	dir := t.TempDir()
 	mods := filepath.Join(dir, "modules")
 	bin := filepath.Join(dir, "nginx")
 	script := "#!/bin/sh\necho 'nginx version: nginx/1.24.0' >&2\n" +
-		"[ \"$1\" = -V ] && echo 'configure arguments: --modules-path=" + mods + " --with-stream=dynamic' >&2\nexit 0\n"
+		"[ \"$1\" = -V ] && echo 'configure arguments: --modules-path=" + mods + " " + flags + "' >&2\nexit 0\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

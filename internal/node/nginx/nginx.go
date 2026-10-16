@@ -213,7 +213,15 @@ func (m *Manager) finalize(ctx context.Context, conf string) (string, error) {
 	return nginxconf.Finalize(conf, l), nil
 }
 
-var modulesPathRe = regexp.MustCompile(`--modules-path=(\S+)`)
+var (
+	modulesPathRe  = regexp.MustCompile(`--modules-path=(\S+)`)
+	staticStreamRe = regexp.MustCompile(`--with-stream(\s|$)`)
+)
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
 
 // detect finds the stream module, the worker user and IPv6 support.
 func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
@@ -227,23 +235,21 @@ func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 	if v, _ := exec.CommandContext(ctx, m.bin(), "-v").CombinedOutput(); versionAtLeast(string(v), 1, 19, 4) {
 		l.RejectHandshake = true
 	}
+	// The stream module is either built in (--with-stream) or a file in the modules dir. Do
+	// not go by --with-stream=dynamic: Ubuntu 22.04 builds its modules in a separate pass and
+	// its nginx -V does not mention stream at all.
+	dir := "/usr/lib/nginx/modules"
+	if mm := modulesPathRe.FindSubmatch(out); mm != nil {
+		dir = string(mm[1])
+	}
+	mod := filepath.Join(dir, "ngx_stream_module.so")
 	switch {
-	case strings.Contains(string(out), "--with-stream=dynamic"):
-		dir := "/usr/lib/nginx/modules"
-		if mm := modulesPathRe.FindSubmatch(out); mm != nil {
-			dir = string(mm[1])
-		}
-		mod := filepath.Join(dir, "ngx_stream_module.so")
-		if _, err := os.Stat(mod); err != nil {
-			m.noStream = "no " + mod + ", install it: apt install libnginx-mod-stream"
-			m.Log.Warn("nginx stream module missing: apt install libnginx-mod-stream", "path", mod)
-		} else {
-			l.Modules = []string{mod}
-		}
-	case strings.Contains(string(out), "--with-stream"):
+	case staticStreamRe.Match(out):
+	case fileExists(mod):
+		l.Modules = []string{mod}
 	default:
-		m.noStream = "this nginx is built without it, install the distribution's nginx and libnginx-mod-stream"
-		m.Log.Warn("nginx built without the stream module: SNI routing unavailable")
+		m.noStream = "no " + mod + ", install it: apt install libnginx-mod-stream"
+		m.Log.Warn("nginx stream module missing: apt install libnginx-mod-stream", "path", mod)
 	}
 	l.User = m.User
 	if l.User == "" {

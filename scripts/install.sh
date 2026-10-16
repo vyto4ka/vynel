@@ -1074,14 +1074,10 @@ install_nginx() {
 nginx_stream_missing() {
   local v dir
   v="$(nginx -V 2>&1)" || return 0
-  case "$v" in
-    *--with-stream=dynamic*)
-      dir="$(sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p' <<<"$v")"
-      [[ -f "${dir:-/usr/lib/nginx/modules}/ngx_stream_module.so" ]] || echo "${dir:-/usr/lib/nginx/modules}/ngx_stream_module.so"
-      ;;
-    *--with-stream*) ;;
-    *) echo "built without --with-stream" ;;
-  esac
+  # Built in, or a module file (Ubuntu 22.04's nginx -V does not mention stream at all).
+  grep -qE -- '--with-stream( |$)' <<<"$v" && return 0
+  dir="$(sed -n 's/.*--modules-path=\([^ ]*\).*/\1/p' <<<"$v")"
+  [[ -f "${dir:-/usr/lib/nginx/modules}/ngx_stream_module.so" ]] || echo "${dir:-/usr/lib/nginx/modules}/ngx_stream_module.so"
 }
 
 # install_caddy [force]: only for servers that still run an older vynel (rollback); new installs
