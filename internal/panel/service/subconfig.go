@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
 // Subscription look and response headers (docs/USER_GUIDE.md §5). Stored as JSON settings so
@@ -34,12 +36,41 @@ var SubFormats = []string{"base64", "mihomo", "singbox", "xray", "html"}
 // DefaultSubRules are the built-in rules (docs/ARCHITECTURE.md §8.3).
 func DefaultSubRules() []SubRule {
 	return []SubRule{
-		{`(?i)keqdroid|keqdis`, "base64", true, "KeqDroid лучше всего читает ссылки vless://"},
+		{`(?i)keqdroid|keqdis`, "xray", true, keqdroidNote},
 		{`(?i)karing`, "base64", true, "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся"},
 		{`(?i)clash|mihomo|stash|flclash|koala`, "mihomo", true, "Clash-клиенты"},
 		{`(?i)sing-?box|\bSF[AIMT]\b`, "singbox", true, "sing-box и его приложения"},
 		{`(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, "base64", true, "Приложения на ядре Xray"},
 	}
+}
+
+const (
+	keqdroidNote    = "KeqDroid: полный конфиг Xray с маршрутами и DNS"
+	oldKeqdroidNote = "KeqDroid лучше всего читает ссылки vless://"
+)
+
+// migrateKeqDroidRule moves the KeqDroid rule saved with the old default (links) to Xray JSON,
+// which KeqDroid takes as a regular profile with routing. A rule the admin changed is left alone.
+func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
+	raw, ok, err := store.GetSetting(ctx, q, SettingSubRules)
+	if err != nil || !ok || strings.TrimSpace(raw) == "" {
+		return err
+	}
+	var rs []SubRule
+	if json.Unmarshal([]byte(raw), &rs) != nil {
+		return nil
+	}
+	changed := false
+	for i := range rs {
+		if rs[i].Pattern == `(?i)keqdroid|keqdis` && rs[i].Format == "base64" && rs[i].Note == oldKeqdroidNote {
+			rs[i].Format, rs[i].Note, changed = "xray", keqdroidNote, true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	b, _ := json.Marshal(rs)
+	return store.SetSetting(ctx, q, SettingSubRules, string(b))
 }
 
 // SubRules returns the configured User-Agent rules (the defaults until changed).
@@ -261,7 +292,7 @@ func DefaultSubHeaders() []SubHeader {
 // SubAppCatalog lists known apps; the enabled ones form the default page.
 var SubAppCatalog = []SubApp{
 	{ID: "keqdroid", Name: "KeqDroid", Link: "keqdroid://install-config?url={url_enc}", Download: "https://github.com/Lemonochka/keqdroid/releases/latest",
-		Platforms: []string{"android", "windows", "linux"}, Enabled: true, Note: "Рекомендуем: ссылки VLESS, HWID, объявления"},
+		Platforms: []string{"android", "windows", "linux"}, Enabled: true, Note: "Рекомендуем: маршруты, HWID, объявления"},
 	{ID: "happ", Name: "Happ", Link: "happ://add/{url}", Download: "https://www.happ.su/",
 		Platforms: []string{"android", "ios", "windows", "macos", "linux"}, Enabled: true},
 	{ID: "v2raytun", Name: "v2RayTun", Link: "v2raytun://import/{url}", Download: "https://v2raytun.com/",

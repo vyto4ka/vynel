@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { del, get, Group, patch, post, Profile, ProfileDetails, ProfileTemplate, put, Variable } from '../api'
+import { ClientRouting, del, get, Group, patch, post, Profile, ProfileClient, ProfileDetails, ProfileTemplate, put, Variable } from '../api'
+import { RoutingForm } from '../routing'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { templateStarter } from '../templateStarter'
-import { Badge, Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Empty, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 const sourceLabel: Record<string, string> = {
   input: 'вводится', const: 'константа', generate: 'генерируется', derived: 'вычисляется',
@@ -164,7 +165,8 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
   const [values, setValues] = useState<Record<string, string>>({})
   const [inboundText, setInboundText] = useState('')
   const [hostText, setHostText] = useState('')
-  const [tab, setTab] = useState<'params' | 'inbound' | 'host'>('params')
+  const [tab, setTab] = useState<'params' | 'inbound' | 'host' | 'client'>('params')
+  const [client, setClient] = useState<ProfileClient>({ custom: false, mode: '' })
   const [regenerate, setRegenerate] = useState(false)
   const [preview, setPreview] = useState<{ items: PreviewItem[]; error?: string } | null>(null)
   const [selected, setSelected] = useState(0)
@@ -180,11 +182,13 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
     setValues(Object.fromEntries(Object.entries(p.values).map(([k, v]) => [k, v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)])))
     setInboundText(pretty(p.inboundSource ?? {}))
     setHostText(pretty(p.hostSource ?? {}))
+    setClient(p.client ?? { custom: false, mode: '' })
   }, [loaded.data])
 
   const inboundSrc = parseObject(inboundText)
   const hostSrc = parseObject(hostText)
-  const jsonError = inboundSrc.error || hostSrc.error
+  const clientError = client.custom && client.mode === 'json' ? clientConfigError(client.config || '') : undefined
+  const jsonError = inboundSrc.error || hostSrc.error || clientError
   const tplInbound = loaded.data?.template?.inboundSource
   const tplHost = loaded.data?.template?.hostSource
   const ownInbound = !!inboundSrc.value && !!tplInbound && canon(inboundSrc.value) !== canon(tplInbound)
@@ -193,8 +197,8 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
   const body = useMemo(() => {
     const vals: Record<string, string> = {}
     for (const v of vars) if (v.scope === 'profile' && v.source !== 'derived' && values[v.name] !== undefined) vals[v.name] = values[v.name]
-    return { name, tagPattern, remarkPattern, values: vals, inboundSource: inboundSrc.value, hostSource: hostSrc.value, regenerateKeys: regenerate }
-  }, [name, tagPattern, remarkPattern, values, inboundText, hostText, regenerate, vars])
+    return { name, tagPattern, remarkPattern, values: vals, inboundSource: inboundSrc.value, hostSource: hostSrc.value, regenerateKeys: regenerate, client }
+  }, [name, tagPattern, remarkPattern, values, inboundText, hostText, regenerate, vars, client])
 
   // Предпросмотр: что получит каждая нода, пересчитывается после паузы в правках.
   useEffect(() => {
@@ -232,6 +236,7 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
         <button className={tab === 'params' ? 'on' : ''} onClick={() => setTab('params')}>Параметры</button>
         <button className={tab === 'inbound' ? 'on' : ''} onClick={() => setTab('inbound')}>Сервер · JSON{ownInbound && <span className="dot-own" title="свой, не как в шаблоне" />}</button>
         <button className={tab === 'host' ? 'on' : ''} onClick={() => setTab('host')}>Подписка · JSON{ownHost && <span className="dot-own" title="свой, не как в шаблоне" />}</button>
+        <button className={tab === 'client' ? 'on' : ''} onClick={() => setTab('client')}>Клиент{client.custom && <span className="dot-own" title="кастомный профиль клиента" />}</button>
       </div>
       <div className="editor-split">
         {tab === 'params' ? <div>
@@ -258,7 +263,9 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
               На каждой ноде свои: {vars.filter((v) => v.scope === 'node').map((v) => <span key={v.name} className="mono">{v.name} </span>)} — они в «Ноды» → инбаунд → «Настроить».
             </div>
           )}
-        </div> : (
+        </div> : tab === 'client' ? (
+          <ClientEditor c={client} set={setClient} base={p.subRouting} error={clientError} />
+        ) : (
           <SourceEditor
             kind={tab}
             text={tab === 'inbound' ? inboundText : hostText}
@@ -295,6 +302,61 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
         </div>
       </div>
     </Modal>
+  )
+}
+
+// Пример для режима «свой JSON»: сервер подставится в outbound с тегом proxy.
+const clientExample = {
+  log: { loglevel: 'warning' },
+  dns: { servers: [{ address: '77.88.8.8', domains: ['geosite:category-ru'], skipFallback: true }, 'https://1.1.1.1/dns-query'] },
+  inbounds: [{ tag: 'socks', listen: '127.0.0.1', port: 10808, protocol: 'socks', settings: { udp: true }, sniffing: { enabled: true, routeOnly: true, destOverride: ['http', 'tls', 'quic'] } }],
+  outbounds: [{ tag: 'proxy' }, { tag: 'direct', protocol: 'freedom' }, { tag: 'block', protocol: 'blackhole' }],
+  routing: { domainStrategy: 'IPIfNonMatch', rules: [
+    { type: 'field', ip: ['geoip:private', 'geoip:ru'], outboundTag: 'direct' },
+    { type: 'field', domain: ['geosite:category-ru'], outboundTag: 'direct' },
+    { type: 'field', network: 'tcp,udp', outboundTag: 'proxy' },
+  ] },
+}
+
+// Конфиг клиента — объект или список из одного объекта (так его отдают подписки).
+function clientConfigError(text: string): string | undefined {
+  try {
+    const v = JSON.parse(text)
+    const one = Array.isArray(v) ? (v.length === 1 ? v[0] : null) : v
+    if (one === null || typeof one !== 'object' || Array.isArray(one)) return 'нужен JSON-объект конфига: { … }'
+  } catch (e: any) {
+    return e.message
+  }
+  return undefined
+}
+
+// ClientEditor — «Кастомный профиль клиента»: свои маршруты или целый конфиг Xray для серверов профиля.
+function ClientEditor({ c, set, base, error }: { c: ProfileClient; set: (c: ProfileClient) => void; base?: ClientRouting; error?: string }) {
+  const mode = c.mode || 'routing'
+  return (
+    <div>
+      <label className="row" style={{ gap: 10, marginBottom: 12 }}>
+        <Switch checked={c.custom} onChange={(v) => set({ ...c, custom: v, mode: c.mode || 'routing', routing: c.routing ?? base })} />
+        <span>
+          <b>Кастомный профиль клиента</b>
+          <div className="small text-2">Свои маршруты и DNS для серверов этого профиля вместо общих (Подписка → Маршруты). Действует в формате Xray JSON: KeqDroid, Happ, v2RayTun</div>
+        </span>
+      </label>
+      {c.custom && <>
+        <div className="seg" style={{ marginBottom: 12 }}>
+          <button className={mode === 'routing' ? 'on' : ''} onClick={() => set({ ...c, mode: 'routing', routing: c.routing ?? base })}>Настройки</button>
+          <button className={mode === 'json' ? 'on' : ''} onClick={() => set({ ...c, mode: 'json', config: c.config || pretty(clientExample) })}>Конфиг JSON</button>
+        </div>
+        {mode === 'routing' && c.routing && <RoutingForm r={c.routing} set={(r) => set({ ...c, routing: r })} />}
+        {mode === 'json' && <>
+          <div className="small text-2" style={{ marginBottom: 8 }}>
+            Полный конфиг клиента Xray. Outbound с тегом <span className="mono">proxy</span> заменится сервером (если его нет — сервер встанет первым), «remarks» — его названием.
+          </div>
+          <CodeEditor lang="json" value={c.config || ''} onChange={(v) => set({ ...c, config: v })} height="calc(100vh - 380px)" />
+          {error && <div className="small pink-text">{error}</div>}
+        </>}
+      </>}
+    </div>
   )
 }
 

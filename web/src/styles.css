@@ -278,7 +278,8 @@ input[type="color"] { border-radius: var(--shape-sm); cursor: pointer; }
 .row.between { justify-content: space-between; }
 .grow { flex: 1; min-width: 0; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-@media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 16px; }
+@media (max-width: 600px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
 
 /* ---------- checkbox and switch ---------- */
 .check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; color: var(--on-surface); min-height: 32px; }

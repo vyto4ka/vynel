@@ -58,6 +58,9 @@ type Host struct {
 	// (xhttp needs Mihomo 1.19+, so templates opt in). MLKEM: support-x25519mlkem768 in reality-opts.
 	Mihomo bool
 	MLKEM  bool
+	// Client is the profile's own client config (Xray JSON format only); nil = the
+	// subscription routing.
+	Client *ProfileClient
 }
 
 // UserInbounds returns the enabled node inbounds (on enabled nodes) a user can use.
@@ -155,6 +158,9 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 	}
 	if v := str(hm["remark"]); v != "" {
 		h.Remark = v
+	}
+	if c := ClientOf(p); c.Custom {
+		h.Client = &c
 	}
 	if l, ok := hm["alpn"].([]any); ok {
 		for _, a := range l {

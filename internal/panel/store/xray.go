@@ -52,6 +52,7 @@ type Profile struct {
 	Override        map[string]any
 	Inbound         map[string]any // own inbound source; nil = the template's
 	Host            map[string]any // own connection point source; nil = the template's
+	Client          string         // own client config for subscriptions (JSON service.ProfileClient); "" = none
 	TagPattern      string
 	RemarkPattern   string
 	CreatedAt       int64
@@ -59,13 +60,13 @@ type Profile struct {
 }
 
 const profileCols = `id, name, template_id, template_version, values_json, override_json, tag_pattern, remark_pattern, created_at, updated_at,
-	inbound_json, host_json`
+	inbound_json, host_json, client_json`
 
 func scanProfile(sc interface{ Scan(...any) error }) (*Profile, error) {
 	p := &Profile{}
 	var vals, over, inbound, host string
 	if err := sc.Scan(&p.ID, &p.Name, &p.TemplateID, &p.TemplateVersion, &vals, &over, &p.TagPattern, &p.RemarkPattern, &p.CreatedAt, &p.UpdatedAt,
-		&inbound, &host); err != nil {
+		&inbound, &host, &p.Client); err != nil {
 		return nil, mapErr(err)
 	}
 	var err error
@@ -93,8 +94,8 @@ func CreateProfile(ctx context.Context, q DBTX, p *Profile) error {
 	now := unix()
 	p.CreatedAt, p.UpdatedAt = now, now
 	res, err := q.ExecContext(ctx, `INSERT INTO profiles (name, template_id, template_version, values_json, override_json, tag_pattern, remark_pattern, created_at, updated_at,
-		inbound_json, host_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.TemplateID, p.TemplateVersion, toJSON(p.Values), toJSON(p.Override),
-		p.TagPattern, p.RemarkPattern, now, now, sourceJSON(p.Inbound), sourceJSON(p.Host))
+		inbound_json, host_json, client_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, p.Name, p.TemplateID, p.TemplateVersion, toJSON(p.Values), toJSON(p.Override),
+		p.TagPattern, p.RemarkPattern, now, now, sourceJSON(p.Inbound), sourceJSON(p.Host), p.Client)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -106,8 +107,8 @@ func CreateProfile(ctx context.Context, q DBTX, p *Profile) error {
 func UpdateProfile(ctx context.Context, q DBTX, p *Profile) error {
 	p.UpdatedAt = unix()
 	return execOne(ctx, q, `UPDATE profiles SET name=?, values_json=?, override_json=?, tag_pattern=?, remark_pattern=?, updated_at=?,
-		inbound_json=?, host_json=? WHERE id=?`,
-		p.Name, toJSON(p.Values), toJSON(p.Override), p.TagPattern, p.RemarkPattern, p.UpdatedAt, sourceJSON(p.Inbound), sourceJSON(p.Host), p.ID)
+		inbound_json=?, host_json=?, client_json=? WHERE id=?`,
+		p.Name, toJSON(p.Values), toJSON(p.Override), p.TagPattern, p.RemarkPattern, p.UpdatedAt, sourceJSON(p.Inbound), sourceJSON(p.Host), p.Client, p.ID)
 }
 
 // sourceJSON stores a profile source; nil (use the template's) is an empty string.

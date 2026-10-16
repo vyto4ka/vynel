@@ -278,6 +278,7 @@ func startMihomo(t *testing.T, profile []byte) int {
 	doc["mixed-port"] = port
 	doc["rules"] = []string{"MATCH,VPN"}
 	doc["geodata-mode"] = false
+	delete(doc, "dns") // nameserver-policy with geosite needs downloads too
 	dir := t.TempDir()
 	raw, _ := yaml.Marshal(doc)
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), raw, 0o600); err != nil {

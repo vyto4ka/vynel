@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, User } from '../api'
+import { ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, User } from '../api'
+import { RoutingForm } from '../routing'
 import { Badge, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 const tabs: [string, string][] = [
@@ -8,6 +9,7 @@ const tabs: [string, string][] = [
   ['apps', 'Приложения'],
   ['headers', 'Заголовки'],
   ['rules', 'Форматы'],
+  ['routing', 'Маршруты'],
   ['test', 'Проверка'],
 ]
 
@@ -33,6 +35,7 @@ export function Subscription() {
   const [page, setPage] = useState<SubPage | null>(null)
   const [headers, setHeaders] = useState<SubHeader[] | null>(null)
   const [rules, setRules] = useState<SubRule[] | null>(null)
+  const [routing, setRouting] = useState<ClientRouting | null>(null)
   const [userId, setUserId] = useState(0)
   const act = useAction()
   const confirm = useConfirm()
@@ -43,14 +46,16 @@ export function Subscription() {
       setPage(cfg.data.page)
       setHeaders(cfg.data.headers)
       setRules(cfg.data.rules)
+      setRouting(cfg.data.routing)
     }
   }, [cfg.data])
 
   const dirty = useMemo(() => {
-    if (!cfg.data || !basics || !page || !headers || !rules) return false
+    if (!cfg.data || !basics || !page || !headers || !rules || !routing) return false
     return JSON.stringify(basics) !== JSON.stringify(cfg.data.basics) || JSON.stringify(page) !== JSON.stringify(cfg.data.page) ||
-      JSON.stringify(headers) !== JSON.stringify(cfg.data.headers) || JSON.stringify(rules) !== JSON.stringify(cfg.data.rules)
-  }, [cfg.data, basics, page, headers, rules])
+      JSON.stringify(headers) !== JSON.stringify(cfg.data.headers) || JSON.stringify(rules) !== JSON.stringify(cfg.data.rules) ||
+      JSON.stringify(routing) !== JSON.stringify(cfg.data.routing)
+  }, [cfg.data, basics, page, headers, rules, routing])
 
   // Предпросмотр обновляется с небольшой задержкой после правок.
   const [previewSrc, setPreviewSrc] = useState('')
@@ -60,15 +65,16 @@ export function Subscription() {
     return () => clearTimeout(t)
   }, [basics, page, userId])
 
-  if (!cfg.data || !basics || !page || !headers || !rules) return <Loading error={cfg.error} />
+  if (!cfg.data || !basics || !page || !headers || !rules || !routing) return <Loading error={cfg.error} />
   const c = cfg.data
 
   const save = async () => {
-    const r = await act(() => put<SubConfig>('subscription', { basics, page, headers, rules }), 'Сохранено — приложения получат изменения при следующем обновлении')
+    const r = await act(() => put<SubConfig>('subscription', { basics, page, headers, rules, routing }), 'Сохранено — приложения получат изменения при следующем обновлении')
     if (r) cfg.setData(r)
   }
-  const reset = async (part: 'headers' | 'page' | 'rules') => {
-    const q = { headers: 'Вернуть заголовки по умолчанию? Ваши правки заголовков пропадут.', page: 'Вернуть страницу и приложения по умолчанию?', rules: 'Вернуть правила форматов по умолчанию?' }
+  const reset = async (part: 'headers' | 'page' | 'rules' | 'routing') => {
+    const q = { headers: 'Вернуть заголовки по умолчанию? Ваши правки заголовков пропадут.', page: 'Вернуть страницу и приложения по умолчанию?', rules: 'Вернуть правила форматов по умолчанию?',
+      routing: 'Вернуть маршруты по умолчанию (RU напрямую, DNS Яндекс / DoH)?' }
     if (!(await confirm(q[part], 'Вернуть'))) return
     const r = await act(() => post<SubConfig>('subscription/reset', { part }), 'Возвращено по умолчанию')
     if (r) cfg.setData(r)
@@ -83,7 +89,7 @@ export function Subscription() {
         </div>
         <div className="grow" />
         {dirty && <span className="pink-text small">есть несохранённые изменения</span>}
-        <button className="btn ghost" disabled={!dirty} onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers); setRules(c.rules) }}>Отменить</button>
+        <button className="btn ghost" disabled={!dirty} onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers); setRules(c.rules); setRouting(c.routing) }}>Отменить</button>
         <button className="btn primary" disabled={!dirty} onClick={save}>Сохранить</button>
       </div>
 
@@ -94,6 +100,7 @@ export function Subscription() {
           {tab === 'apps' && <AppsTab p={page} set={setPage} catalog={c.appCatalog} />}
           {tab === 'headers' && <HeadersTab hs={headers} set={setHeaders} cfg={c} onReset={() => reset('headers')} />}
           {tab === 'rules' && <RulesTab rules={rules} set={setRules} formats={c.formats} onReset={() => reset('rules')} />}
+          {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} />}
           {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
         </div>
         {showPreview && (
@@ -108,6 +115,27 @@ export function Subscription() {
             {previewSrc && <iframe title="Страница подписки" src={previewSrc} />}
           </div>
         )}
+      </div>
+    </>
+  )
+}
+
+function RoutingTab({ r, set, onReset }: { r: ClientRouting; set: (r: ClientRouting) => void; onReset: () => void }) {
+  return (
+    <>
+      <div className="card card-pad">
+        <h3 style={{ marginTop: 0 }}>Маршруты в приложениях</h3>
+        <div className="card-sub" style={{ marginBottom: 14 }}>
+          Уходят вместе с серверами в форматах с маршрутизацией: Xray JSON (KeqDroid, Happ, v2RayTun), Clash / Mihomo и sing-box. Ссылкам vless:// маршруты не передаются.
+        </div>
+        <RoutingForm r={r} set={set} />
+      </div>
+      <div className="card card-pad small text-2">
+        <p style={{ marginTop: 0 }}>
+          У профиля можно включить «Кастомный профиль клиента» (Профили → профиль → «Клиент»): свои маршруты или целый JSON-конфиг Xray для его серверов.
+          Это действует в Xray JSON — там у каждого сервера свой конфиг. Mihomo и sing-box получают один файл на все серверы и берут маршруты отсюда.
+        </p>
+        <button className="btn ghost sm" onClick={onReset}>Вернуть маршруты по умолчанию</button>
       </div>
     </>
   )

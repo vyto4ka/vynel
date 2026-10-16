@@ -35,7 +35,12 @@ func (s *Server) subConfig(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	routing, err := s.svc.ClientRouting(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
+		"routing": routing, "defaultRouting": service.DefaultClientRouting(),
 		"basics": s.svc.SubBasicsGet(ctx), "headers": hs, "page": page,
 		"headerCatalog": service.SubHeaderCatalog, "appCatalog": service.SubAppCatalog,
 		"defaultHeaders": service.DefaultSubHeaders(), "defaultPage": service.DefaultSubPage(),
@@ -44,10 +49,11 @@ func (s *Server) subConfig(r *http.Request) (any, error) {
 }
 
 type subDraft struct {
-	Basics  *service.SubBasics   `json:"basics"`
-	Headers *[]service.SubHeader `json:"headers"`
-	Page    *service.SubPage     `json:"page"`
-	Rules   *[]service.SubRule   `json:"rules"`
+	Basics  *service.SubBasics     `json:"basics"`
+	Headers *[]service.SubHeader   `json:"headers"`
+	Page    *service.SubPage       `json:"page"`
+	Rules   *[]service.SubRule     `json:"rules"`
+	Routing *service.ClientRouting `json:"routing"`
 }
 
 func (s *Server) subSave(r *http.Request) (any, error) {
@@ -84,6 +90,11 @@ func (s *Server) subSave(r *http.Request) (any, error) {
 			return nil, err
 		}
 	}
+	if in.Routing != nil {
+		if err := s.svc.SetClientRouting(ctx, a, in.Routing); err != nil {
+			return nil, err
+		}
+	}
 	return s.subConfig(r)
 }
 
@@ -106,8 +117,12 @@ func (s *Server) subReset(r *http.Request) (any, error) {
 		if err := s.svc.SetSubRules(ctx, a, nil); err != nil {
 			return nil, err
 		}
+	case "routing":
+		if err := s.svc.SetClientRouting(ctx, a, nil); err != nil {
+			return nil, err
+		}
 	default:
-		return nil, badRequest("part must be headers, page or rules")
+		return nil, badRequest("part must be headers, page, rules or routing")
 	}
 	return s.subConfig(r)
 }

@@ -25,6 +25,8 @@ type ProfileInput struct {
 	RemarkPattern string // optional
 	// RegenerateKeys re-creates the profile's generated values (e.g. a random path).
 	RegenerateKeys bool
+	// Client is the profile's own client config for subscriptions; nil leaves it as it is.
+	Client *ProfileClient
 }
 
 // CreateProfile creates a profile from a template.
@@ -188,6 +190,16 @@ func (s *Service) applyProfile(ctx context.Context, q store.DBTX, id int64, in P
 	}
 	if in.RemarkPattern != "" {
 		p.RemarkPattern = in.RemarkPattern
+	}
+	if in.Client != nil {
+		if err := CheckProfileClient(in.Client); err != nil {
+			return nil, err
+		}
+		p.Client = ""
+		if in.Client.Custom {
+			b, _ := json.Marshal(in.Client)
+			p.Client = string(b)
+		}
 	}
 	p.TemplateVersion = tpl.Version
 	if err := store.UpdateProfile(ctx, q, p); err != nil {
@@ -598,4 +610,13 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// ClientOf reads a profile's own client config (zero when it has none).
+func ClientOf(p *store.Profile) ProfileClient {
+	var c ProfileClient
+	if p.Client != "" {
+		_ = json.Unmarshal([]byte(p.Client), &c)
+	}
+	return c
 }

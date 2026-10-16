@@ -250,6 +250,9 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 		if err := adoptRetiredTemplates(ctx, q); err != nil {
 			return err
 		}
+		if err := migrateKeqDroidRule(ctx, q); err != nil {
+			return err
+		}
 		tpls, err := store.ListUserTemplates(ctx, q)
 		if err != nil {
 			return err

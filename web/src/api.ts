@@ -217,6 +217,8 @@ export interface ProfileDetails {
   hostSource?: Record<string, any>
   ownInbound?: boolean
   ownHost?: boolean
+  client: ProfileClient
+  subRouting?: ClientRouting
   template?: {
     id: string; title: string; summary: string; version: number; variables: Variable[]; custom: boolean; tagPattern: string; remarkPattern: string
     inboundSource: Record<string, any>; hostSource: Record<string, any>
@@ -368,6 +370,28 @@ export interface SubConfig {
   rules: SubRule[]
   defaultRules: SubRule[]
   formats: string[]
+  routing: ClientRouting
+  defaultRouting: ClientRouting
+}
+
+// Маршрутизация, которую подписка отдаёт приложениям (Xray JSON, Mihomo, sing-box).
+export interface ClientRouting {
+  ruDirect: boolean
+  dnsDirect: string[]
+  dnsProxy: string[]
+  torrent: 'proxy' | 'direct' | 'block'
+  blockAds: boolean
+  direct: string[]
+  proxy: string[]
+  block: string[]
+}
+
+// Свой клиентский конфиг профиля (галочка «Кастомный профиль клиента»).
+export interface ProfileClient {
+  custom: boolean
+  mode: 'routing' | 'json' | ''
+  routing?: ClientRouting
+  config?: string
 }
 
 export interface SubRule {

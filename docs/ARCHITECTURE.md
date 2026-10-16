@@ -403,7 +403,8 @@ limit = user.hwid_limit ?? settings.hwid_default_limit   (0 = без лимит�
 
   | Клиент | Формат |
   |--------|--------|
-  | KeqDroid и приложения на ядре Xray | base64 (+ заголовки приложений) |
+  | KeqDroid | Xray JSON с маршрутами и DNS (+ заголовки приложений) |
+  | другие приложения на ядре Xray | base64 (+ заголовки приложений) |
   | приложения на ядре Mihomo | Mihomo YAML |
   | приложения на ядре sing-box | sing-box JSON |
   | Xray-клиенты, которые понимают полный JSON | Xray JSON |

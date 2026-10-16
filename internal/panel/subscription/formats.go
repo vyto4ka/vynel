@@ -146,7 +146,7 @@ func uniqueNames(hosts []service.Host) []string {
 }
 
 // Mihomo renders a Clash Meta / Mihomo profile.
-func Mihomo(hosts []service.Host, uuid string) ([]byte, error) {
+func Mihomo(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte, error) {
 	names := uniqueNames(hosts)
 	proxies := make([]map[string]any, 0, len(hosts))
 	for i, h := range hosts {
@@ -198,7 +198,10 @@ func Mihomo(hosts []service.Host, uuid string) ([]byte, error) {
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": false,
 		"proxies":      proxies,
 		"proxy-groups": []map[string]any{{"name": "VPN", "type": "select", "proxies": names}},
-		"rules":        []string{"GEOIP,private,DIRECT,no-resolve", "MATCH,VPN"},
+		"rules":        mihomoRules(r, "VPN"),
+	}
+	if dns := mihomoDNS(r, "VPN"); dns != nil {
+		doc["dns"] = dns
 	}
 	return yaml.Marshal(doc)
 }
@@ -280,8 +283,8 @@ func mihomoValue(v any, asString bool) any {
 	return v
 }
 
-// SingBox renders a sing-box (1.11+) profile with a TUN inbound.
-func SingBox(hosts []service.Host, uuid string) ([]byte, error) {
+// SingBox renders a sing-box (1.12+) profile with a TUN inbound.
+func SingBox(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte, error) {
 	names := uniqueNames(hosts)
 	outbounds := []map[string]any{{"type": "selector", "tag": "proxy", "outbounds": names}}
 	for i, h := range hosts {
@@ -308,14 +311,15 @@ func SingBox(hosts []service.Host, uuid string) ([]byte, error) {
 		outbounds = append(outbounds, o)
 	}
 	outbounds = append(outbounds, map[string]any{"type": "direct", "tag": "direct"})
+	route, dns := singBoxRouting(r)
 	doc := map[string]any{
 		"log":       map[string]any{"level": "warn"},
 		"inbounds":  []map[string]any{{"type": "tun", "tag": "tun-in", "address": []string{"172.19.0.1/30"}, "auto_route": true, "strict_route": true}},
 		"outbounds": outbounds,
-		"route": map[string]any{
-			"auto_detect_interface": true, "final": "proxy",
-			"rules": []map[string]any{{"action": "sniff"}, {"protocol": "dns", "action": "hijack-dns"}, {"ip_is_private": true, "outbound": "direct"}},
-		},
+		"route":     route,
+	}
+	if dns != nil {
+		doc["dns"] = dns
 	}
 	return json.MarshalIndent(doc, "", "  ")
 }
@@ -369,29 +373,12 @@ func XrayOutbound(h service.Host, uuid string) map[string]any {
 	}
 }
 
-// XrayJSON renders one full Xray client config per host (Happ, v2RayTun, v2rayN "JSON" subscriptions).
-func XrayJSON(hosts []service.Host, uuid string) ([]byte, error) {
+// XrayJSON renders one full Xray client config per host (KeqDroid, Happ, v2RayTun, v2rayN
+// "JSON" subscriptions), with DNS and routing: a profile's own client config wins over r.
+func XrayJSON(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte, error) {
 	configs := make([]map[string]any, 0, len(hosts))
 	for _, h := range hosts {
-		configs = append(configs, map[string]any{
-			"remarks": h.Remark,
-			"log":     map[string]any{"loglevel": "warning"},
-			"dns":     map[string]any{"servers": []string{"1.1.1.1", "8.8.8.8"}},
-			"inbounds": []any{
-				map[string]any{"tag": "socks", "listen": "127.0.0.1", "port": 10808, "protocol": "socks",
-					"settings": map[string]any{"udp": true},
-					"sniffing": map[string]any{"enabled": true, "routeOnly": true, "destOverride": []string{"http", "tls", "quic"}}},
-				map[string]any{"tag": "http", "listen": "127.0.0.1", "port": 10809, "protocol": "http"},
-			},
-			"outbounds": []any{
-				XrayOutbound(h, uuid),
-				map[string]any{"tag": "direct", "protocol": "freedom"},
-				map[string]any{"tag": "block", "protocol": "blackhole"},
-			},
-			"routing": map[string]any{"domainStrategy": "IPIfNonMatch", "rules": []any{
-				map[string]any{"type": "field", "ip": []string{"geoip:private"}, "outboundTag": "direct"},
-			}},
-		})
+		configs = append(configs, xrayClient(h, uuid, r))
 	}
 	return json.MarshalIndent(configs, "", "  ")
 }

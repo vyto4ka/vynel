@@ -157,16 +157,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A refused client gets no credentials at all, only a server named after the reason.
 		hosts, uuid = []service.Host{Stub("⛔ " + reason)}, StubUUID
 	}
+	routing, err := h.svc.ClientRouting(ctx)
+	if err != nil {
+		h.log.Warn("subscription routing", "err", err)
+	}
 	var body []byte
 	switch format {
 	case FormatMihomo:
-		body, err = Mihomo(hosts, uuid)
+		body, err = Mihomo(hosts, uuid, routing)
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	case FormatSingBox:
-		body, err = SingBox(hosts, uuid)
+		body, err = SingBox(hosts, uuid, routing)
 		w.Header().Set("Content-Type", "application/json")
 	case FormatXray:
-		body, err = XrayJSON(hosts, uuid)
+		body, err = XrayJSON(hosts, uuid, routing)
 		w.Header().Set("Content-Type", "application/json")
 	default:
 		body = Base64(hosts, uuid)

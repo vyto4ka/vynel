@@ -158,11 +158,13 @@ type profileEdit struct {
 	TagPattern     string         `json:"tagPattern"`
 	RemarkPattern  string         `json:"remarkPattern"`
 	RegenerateKeys bool           `json:"regenerateKeys"`
+	// Client is the profile's own client config for subscriptions; absent = unchanged.
+	Client *service.ProfileClient `json:"client"`
 }
 
 func (e profileEdit) input() service.ProfileInput {
 	return service.ProfileInput{Name: e.Name, Values: cleanValues(dropMasked(e.Values)), Override: e.Override,
-		Inbound: e.Inbound, Host: e.Host,
+		Inbound: e.Inbound, Host: e.Host, Client: e.Client,
 		TagPattern: e.TagPattern, RemarkPattern: e.RemarkPattern, RegenerateKeys: e.RegenerateKeys}
 }
 
@@ -183,7 +185,11 @@ func (s *Server) profileDTO(ctx context.Context, p *store.Profile) map[string]an
 		over = map[string]any{}
 	}
 	out := map[string]any{"id": p.ID, "name": p.Name, "templateId": p.TemplateID, "values": maskValues(p.Values, secretNames(t)),
-		"override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "templateVersion": p.TemplateVersion}
+		"override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "templateVersion": p.TemplateVersion,
+		"client": service.ClientOf(p)}
+	if r, err := s.svc.ClientRouting(ctx); err == nil {
+		out["subRouting"] = r // the starting point of the profile's own routing
+	}
 	if t != nil {
 		out["template"] = map[string]any{"id": t.ID, "title": t.Title, "summary": t.Summary, "version": t.Version, "variables": t.Variables,
 			"custom": t.Custom, "tagPattern": t.TagPattern, "remarkPattern": t.RemarkPattern,
