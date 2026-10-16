@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vynel — гайд</title>
+<meta name="description" content="Установка панели vynel на один сервер и работа с ней: домен, проверки, профили, шаблоны, обновления, команды, Telegram-бот.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 96 96%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%2339c5bb%22/%3E%3Cstop offset=%221%22 stop-color=%22%23ff5fa2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x=%224%22 y=%224%22 width=%2288%22 height=%2288%22 rx=%2224%22 fill=%22url(%23g)%22/%3E%3Cpath d=%22M30 34 L48 66 L66 34%22 fill=%22none%22 stroke=%22%230d1013%22 stroke-width=%229%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,650&display=swap" rel="stylesheet">
+<style>
+  /* The panel's palette: Catppuccin-style layered dark neutrals in Miku teal, pastel teal and pink. */
+  :root {
+    color-scheme: dark;
+    --crust: #0d1316; --mantle: #121b1f; --base: #172226;
+    --c-low: #1b272b; --c: #1f2c31; --c-high: #243137; --c-highest: #2b383d;
+    --text: #d1e1e8; --subtext: #b3c7cf; --muted: #84969d; --outline: #324045; --overlay: #65747b;
+    --miku: #75e0d7; --on-miku: #003633; --miku-deep: #00544f; --miku-soft: rgba(117, 224, 215, .12);
+    --pink: #ff94ba; --pink-deep: #672b42; --pink-soft: rgba(255, 148, 186, .12);
+    --amber: #f5c572; --amber-soft: rgba(245, 197, 114, .12);
+    --red: #fb8276; --red-soft: rgba(251, 130, 118, .12);
+    --ok: #8fd99a;
+    --sans: "Roboto Flex", Roboto, Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --ease: cubic-bezier(.2, 0, 0, 1);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 76px; }
+  body {
+    margin: 0; background: var(--base); color: var(--text);
+    font: 15.5px/1.6 var(--sans); letter-spacing: .1px; -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(117, 224, 215, .10), transparent 60%),
+      radial-gradient(700px 420px at -10% 10%, rgba(255, 148, 186, .07), transparent 60%);
+  }
+  a { color: var(--miku); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ::selection { background: var(--pink-deep); color: #ffd7e4; }
+  :focus-visible { outline: 3px solid var(--miku); outline-offset: 2px; border-radius: 6px; }
+  .page { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 32px 16px 96px; }
+
+  /* Header */
+  header.top { display: flex; gap: 18px; align-items: center; margin-bottom: 22px; }
+  header.top svg { flex: none; width: 56px; height: 56px; filter: drop-shadow(0 6px 18px rgba(57, 197, 187, .25)); }
+  .eyebrow { margin: 0 0 2px; font: 600 12px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--pink); }
+  h1 { margin: 0; font-size: clamp(24px, 4.6vw, 34px); line-height: 1.15; font-weight: 650; letter-spacing: -.3px; }
+  .lead { color: var(--subtext); margin: 6px 0 0; max-width: 680px; }
+
+  /* Tabs */
+  .tabs-bar {
+    position: sticky; top: 0; z-index: 5; margin: 0 -16px 22px; padding: 10px 16px;
+    background: color-mix(in srgb, var(--base) 88%, transparent); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--outline);
+  }
+  .tabs { display: flex; gap: 6px; padding: 4px; background: var(--c-low); border: 1px solid var(--outline); border-radius: 999px; width: max-content; max-width: 100%; }
+  .tabs button {
+    appearance: none; border: 0; cursor: pointer; font: 500 14.5px/1 var(--sans); color: var(--subtext);
+    padding: 10px 18px; border-radius: 999px; background: transparent; display: flex; gap: 8px; align-items: center;
+    transition: background .2s var(--ease), color .2s var(--ease);
+  }
+  .tabs button:hover { background: var(--c-high); color: var(--text); }
+  .tabs button[aria-selected="true"] { background: var(--miku); color: var(--on-miku); }
+  .tabs .n { font: 600 12px/1 var(--mono); opacity: .8; }
+
+  /* Cards */
+  .card { background: var(--c); border: 1px solid var(--outline); border-radius: 16px; padding: 18px 20px; }
+  section { margin: 34px 0 0; }
+  h2 { font-size: 21px; line-height: 1.3; margin: 0 0 12px; font-weight: 650; display: flex; gap: 10px; align-items: baseline; }
+  h2 .sn { font: 600 13px/1 var(--mono); color: var(--pink); }
+  h3 { font-size: 16.5px; margin: 22px 0 8px; font-weight: 600; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  li::marker { color: var(--miku); }
+  b, strong { font-weight: 600; color: #e6f2f6; }
+  code { font: 13px/1.5 var(--mono); background: var(--c-high); border: 1px solid var(--outline); border-radius: 6px; padding: 1px 5px; color: #d6eef0; word-break: break-word; }
+  kbd { font: 600 12px/1 var(--mono); background: var(--c-highest); border: 1px solid var(--overlay); border-bottom-width: 2px; border-radius: 6px; padding: 3px 6px; }
+
+  /* Your data */
+  .vars { margin-bottom: 6px; }
+  .vars summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .vars summary::-webkit-details-marker { display: none; }
+  .vars summary h2 { margin: 0; }
+  .vars summary .chev { transition: transform .2s var(--ease); color: var(--muted); }
+  .vars[open] summary .chev { transform: rotate(180deg); }
+  .progress { font: 12.5px/1 var(--mono); color: var(--muted); }
+  .vars-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 14px; }
+  .field label { display: block; font: 600 12px/1.3 var(--mono); color: var(--miku); margin-bottom: 4px; }
+  .field .hint { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+  .field input {
+    width: 100%; font: 14px/1.2 var(--mono); color: var(--text); background: var(--mantle);
+    border: 1px solid var(--outline); border-radius: 10px; padding: 10px 12px; outline: none;
+    transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  .field input::placeholder { color: var(--overlay); }
+  .field input:focus { border-color: var(--miku); box-shadow: 0 0 0 3px var(--miku-soft); }
+  .vars-foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .link-btn { appearance: none; background: none; border: 0; color: var(--pink); cursor: pointer; font: inherit; padding: 0; }
+  .link-btn:hover { text-decoration: underline; }
+  .v { color: var(--miku); font-weight: 600; }
+  .v.empty { color: var(--pink); background: var(--pink-soft); border-radius: 4px; padding: 0 3px; font-weight: 500; }
+
+  /* Contents */
+  .toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
+  .toc a { display: inline-block; font-size: 13px; padding: 5px 11px; border-radius: 999px; background: var(--c-low); border: 1px solid var(--outline); color: var(--subtext); }
+  .toc a:hover { color: var(--text); border-color: var(--overlay); text-decoration: none; }
+
+  /* Steps */
+  .step { display: grid; grid-template-columns: 34px 1fr; gap: 12px; margin: 14px 0; }
+  .step .num {
+    width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--miku-soft); color: var(--miku); border: 1px solid rgba(117, 224, 215, .35); font: 600 13px/1 var(--mono);
+  }
+  .step-body { min-width: 0; }
+  .step-body > p:first-child { margin-top: 3px; }
+
+  /* Code */
+  .code { margin: 10px 0; border: 1px solid var(--outline); border-radius: 12px; overflow: hidden; background: var(--crust); }
+  .code-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; background: var(--c-low); border-bottom: 1px solid var(--outline); }
+  .code-name { font: 12px/1 var(--mono); color: var(--muted); }
+  .copy {
+    appearance: none; cursor: pointer; font: 500 12.5px/1 var(--sans); color: var(--miku);
+    background: var(--miku-soft); border: 1px solid rgba(117, 224, 215, .3); border-radius: 999px; padding: 6px 12px;
+  }
+  .copy:hover { background: rgba(117, 224, 215, .2); }
+  .copy.done { color: var(--on-miku); background: var(--miku); }
+  pre { margin: 0; padding: 12px 14px; overflow-x: auto; font: 13px/1.6 var(--mono); color: #d6eef0; white-space: pre; }
+  pre code { background: none; border: 0; padding: 0; font: inherit; color: inherit; }
+  pre .c { color: var(--overlay); }
+  .out { border-top: 1px dashed var(--outline); background: var(--mantle); }
+  .out pre { color: var(--subtext); }
+  .out .tag { display: block; padding: 6px 14px 0; font: 600 11px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ok); }
+
+  /* Callouts */
+  .note { border-radius: 12px; padding: 10px 14px; margin: 12px 0; border: 1px solid; font-size: 14.5px; }
+  .note b:first-child { margin-right: 4px; }
+  .tip { background: var(--miku-soft); border-color: rgba(117, 224, 215, .3); }
+  .warn { background: var(--amber-soft); border-color: rgba(245, 197, 114, .35); }
+  .warn b:first-child { color: var(--amber); }
+  .danger { background: var(--red-soft); border-color: rgba(251, 130, 118, .35); }
+  .danger b:first-child { color: var(--red); }
+  .tip b:first-child { color: var(--miku); }
+
+  /* Tables */
+  .table-scroll { overflow-x: auto; margin: 10px 0; border: 1px solid var(--outline); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--outline); }
+  th { font: 600 12px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: var(--c-low); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { white-space: nowrap; }
+  td.wrap, th.wrap { white-space: normal; }
+
+  /* Diagram */
+  .diagram { font: 12.5px/1.55 var(--mono); color: var(--subtext); background: var(--crust); border: 1px solid var(--outline); border-radius: 12px; padding: 14px; overflow-x: auto; white-space: pre; margin: 10px 0; }
+  .diagram .h { color: var(--miku); }
+  .diagram .p { color: var(--pink); }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin: 12px 0; }
+  .mini { background: var(--c-low); border: 1px solid var(--outline); border-radius: 14px; padding: 14px 16px; }
+  .mini h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  .mini p { margin: 0; font-size: 14px; color: var(--subtext); }
+  .pill { display: inline-block; font: 600 11.5px/1 var(--mono); padding: 4px 8px; border-radius: 999px; background: var(--pink-soft); color: var(--pink); vertical-align: 1px; }
+  .pill.t { background: var(--miku-soft); color: var(--miku); }
+
+  details.more { margin: 12px 0; border: 1px solid var(--outline); border-radius: 12px; background: var(--c-low); }
+  details.more > summary { cursor: pointer; padding: 10px 14px; font-weight: 500; color: var(--subtext); }
+  details.more > summary:hover { color: var(--text); }
+  details.more > div { padding: 0 14px 12px; }
+
+  .panel[hidden] { display: none; }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--outline); color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+  @media (max-width: 560px) {
+    body { font-size: 15px; }
+    .card { padding: 14px; }
+    .tabs button { padding: 9px 12px; font-size: 14px; }
+    .step { grid-template-columns: 28px 1fr; gap: 10px; }
+    .step .num { width: 26px; height: 26px; font-size: 12px; }
+    td:first-child { white-space: normal; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="top">
+  <svg viewBox="0 0 96 96" role="img" aria-label="vynel">
+    <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#39c5bb"/><stop offset="1" stop-color="#ff5fa2"/></linearGradient></defs>
+    <rect x="4" y="4" width="88" height="88" rx="24" fill="url(#lg)"/>
+    <path d="M30 34 L48 66 L66 34" fill="none" stroke="#0d1013" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <p class="eyebrow">vynel · гайд</p>
+    <h1>Панель на одном сервере: установка и работа</h1>
+    <p class="lead">Первая вкладка — с нуля до работающей панели: домен, проверка DNS, установщик, проверки после. Вторая — повседневная работа: пользователи, профили, шаблоны, обновления, команды и Telegram-бот.</p>
+  </div>
+</header>
+
+<details class="card vars" id="vars" open>
+  <summary>
+    <h2>Ваши данные</h2>
+    <span><span class="progress" id="progress"></span> <span class="chev" aria-hidden="true">▾</span></span>
+  </summary>
+  <p style="color:var(--subtext);font-size:14px;margin-top:10px">Впишите свои значения: они подставятся во все команды на обеих вкладках, а кнопка «Копировать» скопирует готовую команду. Хранятся только в этом браузере.</p>
+  <div class="vars-grid" id="vars-grid"></div>
+  <div class="vars-foot">
+    <span>Пустые поля подсвечены розовым в тексте; у некоторых есть значение по умолчанию.</span>
+    <button class="link-btn" id="reset" type="button">очистить всё</button>
+  </div>
+</details>
+
+<div class="tabs-bar">
+  <div class="tabs" role="tablist" aria-label="Разделы гайда">
+    <button role="tab" id="tab-install" aria-controls="install" aria-selected="true"><span class="n">1</span> Установка</button>
+    <button role="tab" id="tab-usage" aria-controls="usage" aria-selected="false"><span class="n">2</span> Использование</button>
+  </div>
+</div>
+
+<main id="guide">
+
+<!-- ═══════════════════════════════ 1. INSTALL ═══════════════════════════════ -->
+<div class="panel" id="install" role="tabpanel" aria-labelledby="tab-install">
+
+<ul class="toc">
+  <li><a href="#i-what">Что получится</a></li>
+  <li><a href="#i-need">Что нужно</a></li>
+  <li><a href="#i-domain">Домен</a></li>
+  <li><a href="#i-dns">Проверка DNS</a></li>
+  <li><a href="#i-run">Установщик</a></li>
+  <li><a href="#i-login">Вход в панель</a></li>
+  <li><a href="#i-check">Проверка после</a></li>
+  <li><a href="#i-user">Первый пользователь</a></li>
+  <li><a href="#i-fix">Если не так</a></li>
+</ul>
+
+<section id="i-what">
+  <h2><span class="sn">00</span> Что получится</h2>
+  <p>Один сервер, один домен. На нём сразу всё: веб-панель, подписки, сайт-заглушка и сам вход для клиентов (VLESS + Reality). Снаружи сервер выглядит как обычный сайт с HTTPS.</p>
+  <div class="diagram"><span class="h">:443</span>  → Xray (Reality, имя <span class="v" data-v="DOMAIN"></span>)
+          ├─ свой клиент (ключ Reality)  → выход в интернет
+          └─ всё остальное               → nginx 127.0.0.1:8443
+                                             ├─ /<span class="p">секретный-путь</span>/  → веб-панель
+                                             ├─ /s/<span class="p">токен</span>           → подписка
+                                             └─ остальное             → сайт-заглушка
+<span class="h">:80</span>   → nginx: сертификат Let's Encrypt, редирект на https
+<span class="h">:9443</span> → подключение других серверов (нод), только с их адресов</div>
+  <div class="grid2">
+    <div class="mini"><h4>Маскировка</h4><p>Браузер и сканер видят сайт: один из пяти многостраничных сайтов-заглушек, настоящий сертификат, HSTS, TLS 1.2/1.3.</p></div>
+    <div class="mini"><h4>Свой nginx</h4><p>vynel держит собственный nginx и сам получает и продлевает сертификаты. Системный nginx выключается.</p></div>
+    <div class="mini"><h4>Защита</h4><p>Файрвол vynel: открыто только нужное, сканеры портов блокируются, SSH — по ключу и на другом порту по желанию.</p></div>
+  </div>
+</section>
+
+<section id="i-need">
+  <h2><span class="sn">01</span> Что нужно</h2>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Что</th><th class="wrap">Зачем и какое</th></tr></thead>
+    <tbody>
+      <tr><td>Сервер (VPS)</td><td class="wrap">Ubuntu 22.04+ или Debian 11+, amd64 или arm64, от 1 ГБ RAM. Лучше чистый: на нём не должно быть другого веб-сервера, Remnawave, 3x-ui и т.п.</td></tr>
+      <tr><td>root по SSH</td><td class="wrap">Установщик ставит службы и пакеты</td></tr>
+      <tr><td>Порты 80 и 443</td><td class="wrap">443 — вход клиентов и сайт, 80 — выпуск сертификата. Для Hysteria2 ещё UDP 443. В файрволе хостера (security groups) они должны быть открыты</td></tr>
+      <tr><td>Домен</td><td class="wrap">Любой, можно поддомен: <code>{{DOMAIN}}</code>. Без домена нет сертификата, а без сертификата нет ни маскировки, ни HTTPS для подписок</td></tr>
+      <tr><td>IP доступен из РФ</td><td class="wrap">Если до сервера доходит SSH без обходов — всё хорошо</td></tr>
+    </tbody>
+  </table></div>
+  <div class="step"><span class="num">1</span><div class="step-body">
+    <p>Проверьте, что порты свободны:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>ss -ltnp '( sport = :80 or sport = :443 )'</code></pre>
+      <div class="out"><span class="tag">ожидание</span><pre>(пусто — порты свободны)</pre></div></div>
+    <p>Если там кто-то есть (например, <code>nginx</code> или <code>apache2</code>), остановите его: <code>systemctl disable --now nginx</code>.</p>
+  </div></div>
+</section>
+
+<section id="i-domain">
+  <h2><span class="sn">02</span> Подготовка домена</h2>
+  <p>Нужна одна A-запись: <code>{{DOMAIN}}</code> → <code>{{SERVER_IP}}</code>. Её создают там, где у домена DNS: у регистратора или в Cloudflare.</p>
+  <div class="step"><span class="num">2</span><div class="step-body">
+    <p>Откройте раздел DNS и добавьте запись:</p>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Поле</th><th class="wrap">Значение</th></tr></thead>
+      <tbody>
+        <tr><td>Тип</td><td class="wrap"><code>A</code></td></tr>
+        <tr><td>Имя</td><td class="wrap">поддомен (например, <code>nl</code>) или полное <code>{{DOMAIN}}</code> — как принято у регистратора</td></tr>
+        <tr><td>Значение</td><td class="wrap"><code>{{SERVER_IP}}</code></td></tr>
+        <tr><td>TTL</td><td class="wrap">авто или 300</td></tr>
+      </tbody>
+    </table></div>
+  </div></div>
+  <div class="note danger"><b>Cloudflare:</b> облако у записи должно быть <b>серым</b> (DNS only), не оранжевым. Через прокси Cloudflare Reality работать не будет, а сертификат не выпустится.</div>
+  <div class="note tip"><b>Второй домен не обязателен.</b> По желанию подпискам и панели можно дать свой домен на том же сервере (<code>sub.example.com</code>): тогда ссылка подписки не совпадает с адресом сервера. nginx сам разведёт имена на одном 443.</div>
+</section>
+
+<section id="i-dns">
+  <h2><span class="sn">03</span> Проверка, что домен применился</h2>
+  <p>Записи расходятся от минуты до часа. Не запускайте установку, пока публичный DNS не отдаёт ваш IP: иначе сертификат не выпустится с первой попытки (установщик и нода повторят сами, но быстрее дождаться).</p>
+  <div class="step"><span class="num">3</span><div class="step-body">
+    <p>Публичные DNS Cloudflare и Google — у себя на компьютере (Windows, macOS, Linux):</p>
+    <div class="code"><div class="code-bar"><span class="code-name">свой компьютер</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>nslookup {{DOMAIN}} 1.1.1.1
+nslookup {{DOMAIN}} 8.8.8.8</code></pre>
+      <div class="out"><span class="tag">ожидание</span><pre>Name:    {{DOMAIN}}
+Address: {{SERVER_IP}}</pre></div></div>
+  </div></div>
+  <div class="step"><span class="num">4</span><div class="step-body">
+    <p>То же с сервера, плюс проверка, что это именно этот сервер:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>curl -s "https://dns.google/resolve?name={{DOMAIN}}&amp;type=A" | grep -o '"data":"[^"]*"'
+curl -4s https://ifconfig.me; echo</code></pre>
+      <div class="out"><span class="tag">ожидание</span><pre>"data":"{{SERVER_IP}}"
+{{SERVER_IP}}</pre></div></div>
+    <p>Оба IP должны совпасть. Пусто в первой строке — запись ещё не разошлась или опечатка в имени. Другой IP — запись указывает не туда (или старая запись ещё в кэше: подождите TTL).</p>
+  </div></div>
+  <div class="note tip"><b>Установщик проверяет DNS и сам:</b> прямо под полем домена он показывает <code>✓ {{DOMAIN}} → {{SERVER_IP}}</code> или что не так, в том числе оранжевое облако Cloudflare.</div>
+</section>
+
+<section id="i-run">
+  <h2><span class="sn">04</span> Установщик</h2>
+  <div class="step"><span class="num">5</span><div class="step-body">
+    <p>Под root на сервере:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)</code></pre></div>
+    <p>Откроется форма в терминале. Первым пунктом выберите <b>«Всё на этом сервере: панель + VPN»</b>.</p>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Клавиши</th><th class="wrap">Что делают</th></tr></thead>
+      <tbody>
+        <tr><td><kbd>Tab</kbd> / <kbd>↓</kbd></td><td class="wrap">следующее поле; <kbd>Shift</kbd>+<kbd>Tab</kbd> — назад</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td class="wrap">дальше; в поле с серым значением — оставить его</td></tr>
+        <tr><td><kbd>Пробел</kbd> или <kbd>x</kbd></td><td class="wrap">поставить или снять галочку</td></tr>
+        <tr><td><kbd>Esc</kbd> / <kbd>Ctrl</kbd>+<kbd>C</kbd></td><td class="wrap">выйти, ничего не установив. Ответы сохранятся и подставятся при следующем запуске</td></tr>
+      </tbody>
+    </table></div>
+  </div></div>
+  <div class="step"><span class="num">6</span><div class="step-body">
+    <p><b>Экран «Сервер и домены».</b></p>
+    <ul>
+      <li><b>Публичный IP</b> — подставлен сам: <code>{{SERVER_IP}}</code>. Если адресов несколько, форма спросит, какой отдать клиентам, а какой панели и подпискам.</li>
+      <li><b>Домен сервера</b> — <code>{{DOMAIN}}</code>. Если DNS уже указывает на этот сервер, домен стоит серым: просто <kbd>Enter</kbd>.</li>
+      <li><b>Отдельный домен подписок и панели</b> — обычно пусто.</li>
+      <li><b>Email для Let's Encrypt</b> — серым стоит <code>admin@{{DOMAIN}}</code>, <kbd>Enter</kbd> оставляет его. Можно вписать свой: <code>{{LE_EMAIL}}</code>.</li>
+    </ul>
+  </div></div>
+  <div class="step"><span class="num">7</span><div class="step-body">
+    <p><b>Экран «Панель».</b></p>
+    <ul>
+      <li><b>Код страны и название</b> — определяются по IP, можно не трогать. Это флаг и имя сервера в приложениях.</li>
+      <li><b>Подключать другие серверы в будущем?</b> — «да» откроет порт 9443 для нод (только их адресам).</li>
+      <li><b>Путь подписок</b> (<code>/s/</code>) и <b>секретный путь панели</b> (случайный) — можно оставить.</li>
+      <li><b>Вход в панель</b> — режим, ниже <a href="#i-login">таблица</a>.</li>
+      <li><b>Логин</b> — <code>{{ADMIN_LOGIN}}</code>. Пароль сгенерируется сам.</li>
+      <li><b>Токен Telegram-бота</b> — от <a href="https://t.me/BotFather">@BotFather</a>, можно потом в панели.</li>
+      <li><b>Восстановить из бэкапа</b> — обычно пусто; путь к <code>.tar.gz</code>, если переезжаете.</li>
+    </ul>
+  </div></div>
+  <div class="step"><span class="num">8</span><div class="step-body">
+    <p><b>Экран «Безопасность».</b> Галочки: файрвол (рекомендуется), SSH только по ключу (предлагается, только если ключи на сервере уже есть), SSH на случайный порт. Порт меняется безопасно: новый открывается рядом со старым, установщик просит проверить вход по нему из другого окна, и только потом закрывает 22.</p>
+  </div></div>
+  <div class="step"><span class="num">9</span><div class="step-body">
+    <p><b>Итоговый экран</b> показывает, что будет установлено, и состояние DNS каждого домена. «Установить» — и 1–3 минуты ожидания: пакеты, vynel, Xray, nginx, сертификат, запуск.</p>
+    <p>В конце — таблица с адресом панели, логином и паролем:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">итог установки</span></div>
+<pre>  Веб-панель
+    адрес                   https://{{DOMAIN}}/k9Qm2xT7aB3c/
+    логин                   {{ADMIN_LOGIN}}
+    пароль                  dzU3LxPNfCNR3F9s
+  Сохраните пароль: он показывается один раз. Адрес секретный — без него панель не найти.</pre></div>
+    <div class="note warn"><b>Сохраните адрес и пароль.</b> На любом другом пути домена открывается сайт-заглушка, так что адрес панели — такой же секрет, как пароль. Забыли — <code>vynel admin web</code> покажет адрес, <code>vynel admin web password</code> выдаст новый пароль.</div>
+  </div></div>
+  <details class="more"><summary>Установка без вопросов (для скриптов)</summary><div>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh) \
+  --mode aio --domain {{DOMAIN}} --email {{LE_EMAIL}} --admin-login {{ADMIN_LOGIN}} --yes</code></pre></div>
+    <p>Ещё флаги: <code>--sub-domain</code>, <code>--name "Нидерланды"</code>, <code>--country NL</code>, <code>--bot-token …</code>, <code>--login-mode link --session-paths</code>, <code>--firewall off</code>, <code>--ssh-keys-only</code>, <code>--ssh-port random</code>, <code>--sub-path</code>, <code>--panel-path</code>, <code>--restore файл.tar.gz</code>, <code>--no-tui</code> (вопросы по одному).</p>
+  </div></details>
+</section>
+
+<section id="i-login">
+  <h2><span class="sn">05</span> Как входить в панель</h2>
+  <p>Режим выбирается в установщике, потом меняется в панели («Аккаунт») или командой.</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Режим</th><th class="wrap">Как войти</th><th>Флаги</th></tr></thead>
+    <tbody>
+      <tr><td>Логин и пароль</td><td class="wrap">Форма входа. Ссылки из бота и Mini App тоже работают</td><td>по умолчанию</td></tr>
+      <tr><td>Только по ссылке</td><td class="wrap">Без пароля: одноразовая ссылка из бота (<code>/login</code>) или <code>vynel admin login-link</code>. Живёт минуту, открывается один раз</td><td><code>--login-mode link</code></td></tr>
+      <tr><td>Случайный адрес</td><td class="wrap">То же, но постоянного адреса у панели нет: каждая ссылка открывает свой случайный путь, остальное — заглушка</td><td><code>--session-paths</code></td></tr>
+      <tr><td>Только Telegram</td><td class="wrap">Кнопка «Панель» в боте (Mini App). Из браузера не открыть. Нужен токен бота</td><td><code>--login-mode miniapp</code></td></tr>
+    </tbody>
+  </table></div>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin web mode link --session-paths   <span class="c"># или: password, miniapp</span>
+vynel admin login-link                      <span class="c"># ссылка входа на 1 минуту</span></code></pre></div>
+  <div class="note tip"><b>Потеряли доступ к боту в режиме «только Telegram»?</b> На сервере: <code>vynel admin web mode link</code>, затем <code>vynel admin login-link</code>.</div>
+</section>
+
+<section id="i-check">
+  <h2><span class="sn">06</span> Проверка после установки</h2>
+  <div class="step"><span class="num">10</span><div class="step-body">
+    <p>Нода работает и конфиг применён:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin node list</code></pre>
+      <div class="out"><span class="tag">ожидание</span><pre>STATE: in sync, PROBLEMS пусто, XRAY — версия</pre></div></div>
+  </div></div>
+  <div class="step"><span class="num">11</span><div class="step-body">
+    <p>Сайт отвечает и сертификат настоящий (сразу после установки минуту-две может стоять временный самоподписанный — это нормально):</p>
+    <div class="code"><div class="code-bar"><span class="code-name">свой компьютер или сервер</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>curl -sI https://{{DOMAIN}}/ | head -n 1
+echo | openssl s_client -connect {{DOMAIN}}:443 -servername {{DOMAIN}} 2&gt;/dev/null | openssl x509 -noout -issuer -enddate</code></pre>
+      <div class="out"><span class="tag">ожидание</span><pre>HTTP/2 200
+issuer=C = US, O = Let's Encrypt, CN = …
+notAfter=…  (через ~90 дней; продление само, за 30 дней)</pre></div></div>
+  </div></div>
+  <div class="step"><span class="num">12</span><div class="step-body">
+    <div class="table-scroll"><table>
+      <thead><tr><th>Что открыть</th><th class="wrap">Что увидеть</th></tr></thead>
+      <tbody>
+        <tr><td>Адрес панели из итога</td><td class="wrap">Форма входа (или «войдите по ссылке»), после входа — дашборд</td></tr>
+        <tr><td><code>https://{{DOMAIN}}/</code></td><td class="wrap">Обычный сайт с замком. Панели там не видно</td></tr>
+        <tr><td><code>https://{{DOMAIN}}/что-угодно</code></td><td class="wrap">Страница 404 того же сайта</td></tr>
+        <tr><td>Ссылка подписки</td><td class="wrap">Страница с QR-кодом и кнопками приложений</td></tr>
+        <tr><td><code>vynel firewall status</code></td><td class="wrap">Открыты SSH, 80, 443 (и 9443 для нод, если включали)</td></tr>
+      </tbody>
+    </table></div>
+  </div></div>
+  <details class="more"><summary>Полный отчёт для поиска проблем</summary><div>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel node diag --data-dir /var/lib/vynel/node &gt; diag.txt</code></pre></div>
+    <p>Версии, запущенные инбаунды, <code>xray -test</code>, <code>nginx -t</code>, сертификаты, ответ сайта, DNS, порты, файрвол и последние строки журнала. Ключей и UUID пользователей в отчёте нет — им можно делиться.</p>
+  </div></details>
+</section>
+
+<section id="i-user">
+  <h2><span class="sn">07</span> Первый пользователь</h2>
+  <div class="step"><span class="num">13</span><div class="step-body">
+    <p>В панели: «Пользователи» → «+ Пользователь» → имя <code>{{USERNAME}}</code> → «Создать». Откроется карточка со ссылкой подписки, QR-кодом и кнопкой «Копировать». Или в терминале:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin user add {{USERNAME}}
+vynel admin user show {{USERNAME}}   <span class="c"># sub url https://{{DOMAIN}}/s/…</span></code></pre></div>
+  </div></div>
+  <div class="step"><span class="num">14</span><div class="step-body">
+    <p>Ссылку открывают на телефоне в браузере: там QR-код и кнопки приложений. Рекомендуем <a href="https://github.com/Lemonochka/keqdroid">KeqDroid</a> (Android, Windows, Linux): кнопка «Добавить в KeqDroid» стоит первой. Или вставить ссылку в приложение: «Добавить подписку» / «Импорт из буфера».</p>
+    <div class="note tip"><b>По умолчанию до 3 устройств</b> на пользователя, а приложение должно передавать HWID — KeqDroid это делает. Срок по шаблону «Стандарт» — 3 месяца.</div>
+  </div></div>
+</section>
+
+<section id="i-fix">
+  <h2><span class="sn">08</span> Если что-то не так</h2>
+  <p>Сначала журнал: <code>journalctl -u vynel -e</code> (последние строки) или <code>journalctl -u vynel -f</code> (вживую).</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Симптом</th><th class="wrap">Что делать</th></tr></thead>
+    <tbody>
+      <tr><td><code>ports 80/443 are in use</code></td><td class="wrap">Порт занят другим веб-сервером: <code>ss -ltnp '( sport = :80 or sport = :443 )'</code>, остановить его, запустить установщик снова</td></tr>
+      <tr><td><code>✗ домен → ничего</code></td><td class="wrap">A-записи нет или она не разошлась — <a href="#i-dns">шаг 3</a></td></tr>
+      <tr><td>Сертификат не выпускается</td><td class="wrap">DNS не туда, порт 80 закрыт у хостера, оранжевое облако Cloudflare. Нода повторяет сама; после исправления подождите пару минут</td></tr>
+      <tr><td>Нода не <code>in sync</code></td><td class="wrap">Ошибка видна в карточке ноды. Перезапуск: <code>systemctl restart vynel</code></td></tr>
+      <tr><td>Забыли адрес или пароль</td><td class="wrap"><code>vynel admin web</code> / <code>vynel admin web password</code></td></tr>
+      <tr><td>Заблокировал себя файрволом</td><td class="wrap">Бот: «🧱 Файрвол» → «Разблокировать всех»; с другого IP — <code>vynel firewall unblock all</code>; консоль хостера — <code>vynel firewall off</code></td></tr>
+      <tr><td>Начать с нуля</td><td class="wrap"><code>bash &lt;(curl …/install.sh) --mode uninstall --purge --yes</code>, потом установить заново</td></tr>
+    </tbody>
+  </table></div>
+  <p>Подробнее — <a href="https://github.com/vyto4ka/vynel/blob/main/docs/INSTALL_GUIDE.md">INSTALL_GUIDE.md</a>: отдельная панель и ноды, несколько IP, защита сервера.</p>
+</section>
+</div>
+
+<!-- ═══════════════════════════════ 2. USAGE ═══════════════════════════════ -->
+<div class="panel" id="usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
+
+<ul class="toc">
+  <li><a href="#u-map">Как устроено</a></li>
+  <li><a href="#u-panel">Панель</a></li>
+  <li><a href="#u-users">Пользователи</a></li>
+  <li><a href="#u-groups">Группы и шаблоны</a></li>
+  <li><a href="#u-sub">Подписка</a></li>
+  <li><a href="#u-profiles">Профили</a></li>
+  <li><a href="#u-templates">Шаблоны профилей</a></li>
+  <li><a href="#u-nodes">Ещё сервер</a></li>
+  <li><a href="#u-update">Обновление</a></li>
+  <li><a href="#u-bot">Telegram-бот</a></li>
+  <li><a href="#u-backup">Бэкапы</a></li>
+  <li><a href="#u-fw">Файрвол</a></li>
+  <li><a href="#u-cli">Команды</a></li>
+  <li><a href="#u-diag">Диагностика</a></li>
+</ul>
+
+<section id="u-map">
+  <h2><span class="sn">00</span> Как устроено</h2>
+  <div class="diagram">Шаблон профиля  ──►  Профиль (общие настройки)  ──►  Инбаунд ноды (VLESS_<span class="v" data-v="NODE_CODE"></span>…)
+                                                                 ▲
+Пользователь ──► Группы ──── правила доступа ────────────────────┘
+       │
+       └─► Подписка: одна ссылка → все серверы, доступные через группы</div>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Понятие</th><th class="wrap">Что это</th></tr></thead>
+    <tbody>
+      <tr><td>Нода</td><td class="wrap">Сервер, к которому подключаются клиенты (Xray + nginx). В all-in-one живёт на сервере панели, код — <code>{{NODE_CODE}}</code></td></tr>
+      <tr><td>Шаблон профиля</td><td class="wrap">Готовая схема: VLESS + Reality или Hysteria2</td></tr>
+      <tr><td>Профиль</td><td class="wrap">Ваши общие настройки на основе шаблона. Изменение применяется на всех нодах</td></tr>
+      <tr><td>Инбаунд ноды</td><td class="wrap">Профиль на конкретной ноде со своими ключами: <code>VLESS_{{NODE_CODE}}</code></td></tr>
+      <tr><td>Группа</td><td class="wrap">К чему есть доступ: профиль целиком, нода или один инбаунд</td></tr>
+      <tr><td>Шаблон пользователя</td><td class="wrap">Что получает новый пользователь: срок, лимиты, группы</td></tr>
+      <tr><td>Точка подключения</td><td class="wrap">Как сервер выглядит в приложении: «🇳🇱 Нидерланды»</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note tip"><b>Если вы с Remnawave:</b> профиль + инбаунд ≈ Config Profile, группа ≈ Internal Squad, точка подключения ≈ Host.</div>
+  <p>Всё, что есть в панели, есть и в терминале: <code>vynel admin …</code> на сервере панели. Справка у любой команды: <code>vynel admin user --help</code>.</p>
+</section>
+
+<section id="u-panel">
+  <h2><span class="sn">01</span> Веб-панель</h2>
+  <div class="grid2">
+    <div class="mini"><h4>Дашборд и статистика</h4><p>Онлайн, трафик, графики за 24 ч – 90 дней, нагрузка нод, топ пользователей, баннер новой версии.</p></div>
+    <div class="mini"><h4>Пользователи</h4><p>Поиск и фильтры, карточка: подписка с QR, продление +1/3/6/12 мес, устройства, лимиты.</p></div>
+    <div class="mini"><h4>Группы и шаблоны</h4><p>Кто какие серверы видит и что получает новый пользователь.</p></div>
+    <div class="mini"><h4>Подписка</h4><p>Название, объявление, страница, кнопки приложений, заголовки, правила форматов, проверка ответа.</p></div>
+    <div class="mini"><h4>Ноды и профили</h4><p>Серверы, их инбаунды и ключи; профили и шаблоны профилей с проверкой на лету.</p></div>
+    <div class="mini"><h4>Настройки и Telegram</h4><p>Домены и IP, путь и домен панели, заглушка, сертификаты, бот, сводки, бэкапы.</p></div>
+  </div>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin web                       <span class="c"># адрес панели и логин</span>
+vynel admin web password              <span class="c"># новый пароль (сессии разлогинятся)</span>
+vynel admin setting web.path /новый-путь/   <span class="c"># сменить секретный путь</span></code></pre></div>
+  <p>Безопасность входа: сессия закрывается после 5 минут бездействия и привязана к IP; о каждом входе бот присылает сообщение с кнопкой «Завершить эту сессию». Открытые сессии — «Аккаунт» или <code>/sessions</code> в боте.</p>
+</section>
+
+<section id="u-users">
+  <h2><span class="sn">02</span> Пользователи</h2>
+  <p>В панели — «Пользователи». Статусы: <span class="pill t">active</span> работает, <span class="pill">expired</span> истёк срок, <span class="pill">limited</span> кончился трафик, <span class="pill">disabled</span> отключён. Неактивный пропадает со всех нод за секунды, а в приложении вместо серверов видит причину «⛔ …».</p>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin user add {{USERNAME}}                    <span class="c"># срок и группы — из шаблона по умолчанию</span>
+vynel admin user add {{USERNAME}} --template Пробный
+vynel admin user list --status active
+vynel admin user show {{USERNAME}}                   <span class="c"># статус, трафик, ссылка подписки</span>
+vynel admin user extend {{USERNAME}} --months 1      <span class="c"># или --days 7</span>
+vynel admin user disable {{USERNAME}}                <span class="c"># enable — включить обратно</span>
+vynel admin user reset {{USERNAME}}                  <span class="c"># обнулить трафик</span>
+vynel admin user reissue {{USERNAME}}                <span class="c"># новая ссылка, старая перестанет работать</span>
+vynel admin user devices {{USERNAME}}                <span class="c"># устройства; --rm ID — отвязать</span>
+vynel admin user rm {{USERNAME}}</code></pre></div>
+  <p><b>Своя ссылка подписки</b> вместо случайной: поле «Ссылка подписки» при создании или <code>vynel admin user link {{USERNAME}} {{USERNAME}}-phone-01</code> (8–64 символа: латиница, цифры, <code>_</code>, <code>-</code>).</p>
+</section>
+
+<section id="u-groups">
+  <h2><span class="sn">03</span> Группы и шаблоны пользователей</h2>
+  <p><b>Группа</b> решает, какие серверы видит пользователь. Установка создала «Основную» с доступом ко всему профилю «Reality»: новая нода с этим профилем сразу появится у всех в группе. Групп у пользователя может быть несколько — доступы складываются.</p>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin group add Тест
+vynel admin group grant Тест profile Reality          <span class="c"># весь профиль, включая будущие ноды</span>
+vynel admin group grant Тест node {{NODE_CODE}}                <span class="c"># все инбаунды ноды</span>
+vynel admin group grant Тест inbound VLESS_{{NODE_CODE}}       <span class="c"># один инбаунд</span>
+vynel admin user groups {{USERNAME}} --group Основная --group Тест</code></pre></div>
+  <p><b>Шаблон пользователя</b> — что получает новый пользователь, если указать только имя. Изменение шаблона не трогает уже созданных.</p>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin template add Пробный --days 3 --limit-gb 5 --reset no --group Основная
+vynel admin template add Год --months 12 --group Основная --default</code></pre></div>
+</section>
+
+<section id="u-sub">
+  <h2><span class="sn">04</span> Подписка и приложения</h2>
+  <p>Ссылка вида <code>https://{{DOMAIN}}/s/&lt;токен&gt;</code>. Формат ответа выбирается по приложению:</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Кто запрашивает</th><th class="wrap">Что получает</th></tr></thead>
+    <tbody>
+      <tr><td>KeqDroid и приложения на Xray</td><td class="wrap">Список ссылок <code>vless://</code>, <code>hysteria2://</code></td></tr>
+      <tr><td>Mihomo (Clash Meta)</td><td class="wrap">Профиль YAML</td></tr>
+      <tr><td>sing-box</td><td class="wrap">Профиль JSON</td></tr>
+      <tr><td>Браузер</td><td class="wrap">Страница: срок, трафик, QR-код, кнопки «Добавить в …»</td></tr>
+    </tbody>
+  </table></div>
+  <p>Явно: <code>…/s/&lt;токен&gt;/clash</code>, <code>/singbox</code>, <code>/json</code>, <code>/base64</code>. Неверный токен открывает 404 сайта-заглушки, а IP, который перебирает токены, банится на час.</p>
+  <p>Раздел <b>«Подписка»</b> в панели: название и объявление в приложениях, страница (тема, цвет, тексты с переменными <code>{username}</code>, <code>{days_left}</code>…), кнопки приложений (первая — KeqDroid), HTTP-заголовки, правила «какой формат какому приложению» и вкладка «Проверка» — что получит конкретное приложение. Всё видно в предпросмотре до сохранения.</p>
+  <div class="note tip"><b>Устройства (HWID).</b> По умолчанию до 3 на пользователя. Лимит — <code>vynel admin setting hwid.default_limit 5</code>; клиенты без HWID — выключить проверку пользователю в карточке или <code>vynel admin setting hwid.allow_missing true</code>.</div>
+</section>
+
+<section id="u-profiles">
+  <h2><span class="sn">05</span> Профили и инбаунды</h2>
+  <p>Установка создала профиль «Reality» и инбаунд <code>VLESS_{{NODE_CODE}}</code> — этого достаточно для начала. Настройка идёт на трёх уровнях:</p>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Уровень</th><th class="wrap">Что это</th><th>Где</th></tr></thead>
+    <tbody>
+      <tr><td>Шаблон профиля</td><td class="wrap">JSON инбаунда Xray с <code>${ПЕРЕМЕННЫМИ}</code>, точка подключения, раздел nginx, проверки</td><td>Профили → Шаблоны</td></tr>
+      <tr><td>Профиль</td><td class="wrap">Шаблон + ваши значения. Общий для всех нод</td><td>Профили → Изменить</td></tr>
+      <tr><td>Инбаунд ноды</td><td class="wrap">Профиль на ноде: ключи, домен, порт, IP входа и выхода</td><td>Ноды → «Настроить»</td></tr>
+    </tbody>
+  </table></div>
+  <p>Справа в редакторе — «Что получат ноды»: итоговый конфиг каждой ноды с несохранёнными правками. Если правка ломает хоть одну ноду, сохранить нельзя.</p>
+  <h3>Два протокола</h3>
+  <div class="grid2">
+    <div class="mini"><h4>VLESS + Reality</h4><p>TCP 443, маскировка под свой сайт-заглушку. Профиль «Reality» есть сразу после установки.</p></div>
+    <div class="mini"><h4>Hysteria2</h4><p>UDP 443 рядом с Reality, на сертификате ноды. Хорош на мобильных сетях. Нужен открытый UDP 443.</p></div>
+  </div>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin profile templates                         <span class="c"># шаблоны и их переменные</span>
+vynel admin profile add --name Hysteria2 --template hysteria2
+vynel admin inbound attach --node {{NODE_CODE}} --profile Hysteria2
+vynel admin inbound list                              <span class="c"># инбаунды: адрес, ключи pbk/sid</span>
+vynel admin inbound set VLESS_{{NODE_CODE}} --regenerate-keys  <span class="c"># новые ключи Reality</span>
+vynel admin inbound host VLESS_{{NODE_CODE}} --set remark="🇳🇱 Амстердам"</code></pre></div>
+</section>
+
+<section id="u-templates">
+  <h2><span class="sn">06</span> Свои шаблоны профилей</h2>
+  <p>Обычно не нужны: VLESS + Reality и Hysteria2 уже встроены. Если захочется своё — «Профили» → «Шаблоны профилей» → <b>«Новый шаблон»</b> (заготовка с пояснениями к каждому разделу) или «Скопировать и изменить» у встроенного. На вкладке «Справка» — все поля, переменные и проверки.</p>
+  <p>Каждая правка проверяется пробной сборкой на тестовой ноде: ошибка YAML, неизвестная <code>${ПЕРЕМЕННАЯ}</code> или ошибка nginx видны сразу. Используемый шаблон нельзя удалить, а правка, которая ломает хоть одну ноду, не сохранится. Формат — <a href="https://github.com/vyto4ka/vynel/blob/main/docs/PROFILES.md">PROFILES.md</a>.</p>
+</section>
+
+<section id="u-nodes">
+  <h2><span class="sn">07</span> Ещё один сервер</h2>
+  <div class="step"><span class="num">1</span><div class="step-body"><p>A-запись домена новой ноды → IP <b>нового</b> сервера (в Cloudflare — серое облако).</p></div></div>
+  <div class="step"><span class="num">2</span><div class="step-body"><p>В панели: «Ноды» → «Добавить сервер» → домен, профили. Страну и название можно не заполнять — их определит установщик ноды по IP.</p></div></div>
+  <div class="step"><span class="num">3</span><div class="step-body">
+    <p>Панель покажет команду с токеном (одноразовый, 24 часа). Выполните её на новом сервере:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на новом сервере</span></div>
+<pre>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/…/scripts/install.sh) --mode node --token vyn1.…</pre></div>
+    <p>Через минуту нода станет «работает», и пользователи групп с доступом к её профилям получат новый сервер в подписке сами.</p>
+  </div></div>
+  <div class="note warn"><b>Порт 9443</b> на панели открыт только адресам нод. Нода сменила IP и не подключается — на панели <code>vynel firewall gateway open</code>, после подключения <code>vynel firewall gateway nodes</code>.</div>
+</section>
+
+<section id="u-update">
+  <h2><span class="sn">08</span> Обновление</h2>
+  <p><b>Из панели.</b> Раз в полчаса панель сверяет версии. Если есть новая — баннер на дашборде и значок у «Нод». «Обновить всё» обновляет все ноды разом, панель — последней; около минуты подключения не работают. Ход обновления и лог видны прямо на карточке ноды. Одна нода — меню «⋮» → «Обновить».</p>
+  <p><b>На сервере:</b></p>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel update --check          <span class="c"># только сравнить версии</span>
+vynel update                  <span class="c"># в фоне; следить: journalctl -u vynel-update -f</span>
+vynel update --foreground     <span class="c"># здесь и сейчас</span></code></pre></div>
+  <ul>
+    <li>Обновляются vynel, Xray и nginx; пользователи, ключи, настройки, логин и пароль сохраняются.</li>
+    <li>Перед обновлением панели — бэкап базы в <code>/var/lib/vynel/backups/pre-update-&lt;дата&gt;.tar.gz</code>.</li>
+    <li>Новая версия не запустилась — возвращается прежняя сама. Лог: <code>/var/log/vynel-update.log</code>.</li>
+    <li>GitHub с сервера тормозит — зеркало: <code>bash &lt;(curl …/install.sh) --mode update --gh-proxy https://ghfast.top/</code>.</li>
+  </ul>
+  <div class="note tip"><b>Переход с Caddy на nginx</b> идёт при обычном обновлении, база не теряется — <a href="https://github.com/vyto4ka/vynel/blob/main/docs/MIGRATION_NGINX.md">MIGRATION_NGINX.md</a>.</div>
+</section>
+
+<section id="u-bot">
+  <h2><span class="sn">09</span> Telegram-бот</h2>
+  <p>Встроен в панель и отвечает только админам; чужим не отвечает вовсе. Входящие порты не нужны.</p>
+  <div class="step"><span class="num">1</span><div class="step-body"><p><a href="https://t.me/BotFather">@BotFather</a> → <code>/newbot</code> → имя и username → скопировать токен <code>123456789:AA…</code>.</p></div></div>
+  <div class="step"><span class="num">2</span><div class="step-body">
+    <p>Токен — в панели «Telegram» → «Сохранить», или:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin bot token 123456789:AA…
+vynel admin bot code           <span class="c"># код привязки: боту /start КОД (15 минут)</span></code></pre></div>
+    <p>Или в панели «Привязать аккаунт» → «Открыть бота» → «Start». Админов может быть несколько.</p>
+  </div></div>
+  <div class="table-scroll"><table>
+    <thead><tr><th>Команда</th><th class="wrap">Что делает</th></tr></thead>
+    <tbody>
+      <tr><td><code>/menu</code></td><td class="wrap">Сводка и кнопки разделов</td></tr>
+      <tr><td><code>/users</code></td><td class="wrap">Пользователи. Любой текст боту — поиск; карточка с продлением, лимитами, QR, новой ссылкой</td></tr>
+      <tr><td><code>/new имя</code></td><td class="wrap">Новый пользователь и сразу ссылка для отправки</td></tr>
+      <tr><td><code>/nodes</code></td><td class="wrap">Ноды: связь, онлайн, CPU, RAM, трафик</td></tr>
+      <tr><td><code>/login</code></td><td class="wrap">Ссылка входа в панель без пароля (60 секунд, один раз)</td></tr>
+      <tr><td>Кнопка «Панель»</td><td class="wrap">Панель прямо в Telegram (Mini App)</td></tr>
+      <tr><td><code>/sessions</code></td><td class="wrap">Где выполнен вход; завершить</td></tr>
+      <tr><td><code>/summary</code></td><td class="wrap">Сводка за сутки (сама приходит в 10:00)</td></tr>
+      <tr><td><code>/firewall</code></td><td class="wrap">Заблокированные сканеры, «Разблокировать всех», выключить</td></tr>
+      <tr><td><code>/backup</code></td><td class="wrap">Бэкап файлом (сам приходит каждый вечер в 23:00 МСК)</td></tr>
+    </tbody>
+  </table></div>
+  <p>Сам пишет: вход в панель, нода недоступна дольше минуты (одно сообщение, обновляется, потом «🟢 снова в строю»), нода не применила конфигурацию — с текстом ошибки.</p>
+  <div class="note tip"><b>Telegram API недоступен с сервера?</b> Свой Bot API-сервер или прокси: <code>Environment=VYNEL_TELEGRAM_API=https://…</code> в <code>/etc/systemd/system/vynel.service</code>.</div>
+</section>
+
+<section id="u-backup">
+  <h2><span class="sn">10</span> Бэкапы и переезд</h2>
+  <p>Бэкап — <code>.tar.gz</code> со снимком базы (пользователи, ноды, профили, ключи, настройки, логин) и внутренним CA. С ним новая панель поднимается со всеми пользователями, а ноды подключаются без новых токенов. В нём приватные ключи — храните как пароль.</p>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin backup -o /root/vynel-backup.tar.gz      <span class="c"># сейчас</span>
+ls /var/lib/vynel/backups/                           <span class="c"># последние 7 ночных и перед обновлениями</span></code></pre></div>
+  <p><b>Переезд на новый сервер:</b> направьте домен на новый IP, скопируйте бэкап и запустите установщик с ним — логин и пароль останутся прежними:</p>
+  <div class="code"><div class="code-bar"><span class="code-name">на новом сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh) \
+  --mode aio --domain {{DOMAIN}} --restore /root/vynel-backup.tar.gz</code></pre></div>
+  <p>Если сменился IP панели, на каждой отдельной ноде: <code>vynel node set-panel НОВЫЙ_IP:9443</code>.</p>
+</section>
+
+<section id="u-fw">
+  <h2><span class="sn">11</span> Файрвол и защита</h2>
+  <p>Открыто только то, что сервер реально обслуживает: SSH, 80/443, порты инбаундов (vynel берёт их из конфига сам), 9443 — только адресам нод. Остальное молчит. Адрес, который за минуту стучится в 20+ закрытых портов, блокируется на сутки. Свои (вход по SSH, сессия панели, подключение своим ключом) не блокируются никогда.</p>
+  <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel firewall status                <span class="c"># что открыто, сколько заблокировано</span>
+vynel firewall allow 8080 5000/udp   <span class="c"># свои порты; deny — закрыть</span>
+vynel firewall unblock all           <span class="c"># снять блокировки</span>
+vynel firewall off                   <span class="c"># выключить и снять правила</span></code></pre></div>
+  <p>SSH по ключу и другой порт включаются потом через установщик: пункт «Защитить сервер» (<code>--mode harden</code>).</p>
+</section>
+
+<section id="u-cli">
+  <h2><span class="sn">12</span> Справочник команд</h2>
+  <div class="code"><div class="code-bar"><span class="code-name">vynel admin</span></div>
+<pre>setup                     настройка all-in-one (повторный запуск безопасен)
+stats                     сводка
+audit [-n N]              журнал изменений
+setting KEY [VALUE]       настройки
+web [password | mode]     адрес панели и логин; новый пароль; режим входа
+login-link                одноразовая ссылка входа (1 минута)
+bot [token | code | unbind]   Telegram-бот
+backup [-o файл]          бэкап
+user      add | list | show | extend | disable | enable | reset | groups | reissue | links | devices | link | rm
+group     add | list | grant | revoke
+template  add | list
+node      add | list | addr | token | rm
+profile   templates | add | list | set
+inbound   attach | list | show | set | host | detach</pre></div>
+  <div class="code"><div class="code-bar"><span class="code-name">остальное</span></div>
+<pre>vynel update [--check | --foreground]   обновление
+vynel firewall status | on | off | allow | deny | unblock | gateway open|nodes
+vynel net list | add-ip IP | rm-ip IP     адреса сервера (add-ip с откатом)
+vynel node diag                          отчёт ноды для диагностики
+vynel node set-panel HOST:PORT           панель переехала
+vynel restore файл.tar.gz [--yes]        восстановление (при остановленной панели)
+vynel version</pre></div>
+  <details class="more"><summary>Полезные настройки (<code>vynel admin setting</code>)</summary><div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Ключ</th><th class="wrap">Что</th></tr></thead>
+      <tbody>
+        <tr><td><code>web.path</code></td><td class="wrap">Секретный путь панели</td></tr>
+        <tr><td><code>sub.decoy</code></td><td class="wrap">Сайт-заглушка: cloud, studio, docs, coffee, journal</td></tr>
+        <tr><td><code>hwid.default_limit</code></td><td class="wrap">Устройств на пользователя по умолчанию</td></tr>
+        <tr><td><code>hwid.allow_missing</code></td><td class="wrap">Пускать приложения без HWID</td></tr>
+        <tr><td><code>caddy.email</code></td><td class="wrap">Почта для Let's Encrypt (имя ключа прежнее)</td></tr>
+        <tr><td><code>node.xray_log</code></td><td class="wrap">Уровень лога Xray: <code>warning</code>, <code>debug</code> (только на время поиска проблемы)</td></tr>
+      </tbody>
+    </table></div>
+    <p>Все ключи — <a href="https://github.com/vyto4ka/vynel/blob/main/docs/USER_GUIDE.md">USER_GUIDE.md §11</a>.</p>
+  </div></details>
+</section>
+
+<section id="u-diag">
+  <h2><span class="sn">13</span> Если не подключается</h2>
+  <div class="step"><span class="num">1</span><div class="step-body"><p><code>vynel admin node list</code> — нода <code>in sync</code>, проблем нет. Ошибка применения видна и в карточке ноды; пока она есть, нода работает на прежнем конфиге.</p></div></div>
+  <div class="step"><span class="num">2</span><div class="step-body"><p>Версии панели и ноды совпадают: <code>vynel version</code> на обеих.</p></div></div>
+  <div class="step"><span class="num">3</span><div class="step-body">
+    <p>Подробный лог Xray на время проверки:</p>
+    <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
+<pre><code>vynel admin setting node.xray_log debug
+journalctl -u vynel -f            <span class="c"># подключитесь клиентом и смотрите (отдельная нода: -u vynel-node)</span>
+vynel admin setting node.xray_log warning</code></pre></div>
+  </div></div>
+  <div class="table-scroll"><table>
+    <thead><tr><th>В логе</th><th class="wrap">Причина</th></tr></thead>
+    <tbody>
+      <tr><td><code>REALITY: processed invalid connection</code></td><td class="wrap">Подписка устарела (ключ, shortId, SNI) — обновить; или часы расходятся больше чем на минуту</td></tr>
+      <tr><td><code>failed to dial to target</code></td><td class="wrap">Сайт nginx на 127.0.0.1:8443 не отвечает: см. ошибку в карточке ноды</td></tr>
+      <tr><td>Hysteria: ошибка сертификата</td><td class="wrap">Настоящий сертификат ещё не получен (порт 80, A-запись)</td></tr>
+      <tr><td>Hysteria: таймаут</td><td class="wrap">Закрыт UDP 443 у хостера</td></tr>
+    </tbody>
+  </table></div>
+  <p>Всё подробно — <a href="https://github.com/vyto4ka/vynel/blob/main/docs/USER_GUIDE.md">USER_GUIDE.md</a>.</p>
+</section>
+</div>
+
+</main>
+
+<footer>
+  <span>vynel · <a href="https://github.com/vyto4ka/vynel">github.com/vyto4ka/vynel</a></span>
+  <span>Markdown-версии: <a href="https://github.com/vyto4ka/vynel/blob/main/docs/INSTALL_GUIDE.md">установка</a> · <a href="https://github.com/vyto4ka/vynel/blob/main/docs/USER_GUIDE.md">руководство</a></span>
+</footer>
+</div>
+
+<script>
+(function () {
+  // [key, label, placeholder, hint, default]
+  var VARS = [
+    ["DOMAIN",      "Домен сервера",       "nl.example.com", "A-запись на IP сервера"],
+    ["SERVER_IP",   "IP сервера",          "203.0.113.10",   "публичный IPv4"],
+    ["LE_EMAIL",    "Почта Let's Encrypt", "admin@домен",    "пусто — admin@домен", function () { return val("DOMAIN") ? "admin@" + val("DOMAIN") : ""; }],
+    ["ADMIN_LOGIN", "Логин панели",        "admin",          "по умолчанию admin", "admin"],
+    ["USERNAME",    "Первый пользователь", "vasya",          "для примеров команд", "vasya"],
+    ["NODE_CODE",   "Код ноды",            "NL",             "страна сервера, видно в «Нодах»", "NL"]
+  ];
+  var KEY = "vynel-guide-vars";
+  var vals = {};
+  try { vals = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { vals = {}; }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(vals)); } catch (e) {} }
+  function own(k) { return (vals[k] || "").trim(); }
+  function val(k) {
+    var v = own(k);
+    if (v) return k === "NODE_CODE" ? v.toUpperCase() : v;
+    for (var i = 0; i < VARS.length; i++) {
+      if (VARS[i][0] !== k) continue;
+      var d = VARS[i][4];
+      return typeof d === "function" ? d() : (d || "");
+    }
+    return "";
+  }
+
+  var guide = document.getElementById("guide");
+  guide.innerHTML = guide.innerHTML.replace(/\{\{(\w+)\}\}/g, '<span class="v" data-v="$1"></span>');
+
+  var grid = document.getElementById("vars-grid");
+  VARS.forEach(function (r) {
+    var id = "in-" + r[0];
+    var f = document.createElement("div");
+    f.className = "field";
+    f.innerHTML = '<label for="' + id + '">' + r[1] + '</label>' +
+      '<input id="' + id + '" type="text" spellcheck="false" autocomplete="off" placeholder="' + r[2] + '">' +
+      '<span class="hint">' + r[3] + '</span>';
+    var input = f.querySelector("input");
+    input.value = vals[r[0]] || "";
+    input.addEventListener("input", function () { vals[r[0]] = input.value; save(); apply(); });
+    grid.appendChild(f);
+  });
+
+  function apply() {
+    var filled = 0;
+    VARS.forEach(function (r) { if (own(r[0])) filled++; });
+    document.querySelectorAll(".v").forEach(function (s) {
+      var k = s.getAttribute("data-v"), v = val(k);
+      s.textContent = v || k;
+      s.classList.toggle("empty", !v);
+    });
+    document.getElementById("progress").textContent = "заполнено " + filled + " из " + VARS.length;
+  }
+  apply();
+
+  document.getElementById("reset").addEventListener("click", function () {
+    vals = {}; save();
+    grid.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+    apply();
+  });
+
+  // Copy: the command as shown, with the values filled in and without the comments.
+  document.querySelectorAll(".copy").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var pre = b.closest(".code").querySelector("pre");
+      var clone = pre.cloneNode(true);
+      clone.querySelectorAll(".c").forEach(function (c) { c.remove(); });
+      var text = clone.textContent.split("\n").map(function (l) { return l.replace(/\s+$/, ""); }).join("\n").trim();
+      var done = function () {
+        b.textContent = "Скопировано"; b.classList.add("done");
+        setTimeout(function () { b.textContent = "Копировать"; b.classList.remove("done"); }, 1400);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+      } else { fallback(text); done(); }
+    });
+  });
+  function fallback(text) {
+    var t = document.createElement("textarea");
+    t.value = text; t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t); t.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    t.remove();
+  }
+
+  // Tabs: #install / #usage, or any anchor inside a tab opens that tab.
+  var tabs = { install: document.getElementById("tab-install"), usage: document.getElementById("tab-usage") };
+  function show(name, scroll) {
+    Object.keys(tabs).forEach(function (k) {
+      var on = k === name;
+      tabs[k].setAttribute("aria-selected", on ? "true" : "false");
+      tabs[k].tabIndex = on ? 0 : -1;
+      document.getElementById(k).hidden = !on;
+    });
+    if (scroll) window.scrollTo({ top: document.querySelector(".tabs-bar").offsetTop, behavior: "smooth" });
+  }
+  Object.keys(tabs).forEach(function (k) {
+    tabs[k].addEventListener("click", function () { show(k, true); history.replaceState(null, "", "#" + k); });
+    tabs[k].addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        var next = k === "install" ? "usage" : "install";
+        show(next, false); tabs[next].focus(); history.replaceState(null, "", "#" + next);
+      }
+    });
+  });
+  function route() {
+    var id = decodeURIComponent(location.hash.slice(1));
+    if (!id) { show("install", false); return; }
+    var el = document.getElementById(id);
+    if (!el) { show("install", false); return; }
+    var panel = el.closest(".panel");
+    show(panel ? panel.id : "install", false);
+    if (el.classList.contains("panel")) return;
+    requestAnimationFrame(function () { el.scrollIntoView(); });
+  }
+  window.addEventListener("hashchange", route);
+  route();
+})();
+</script>
+</body>
+</html>

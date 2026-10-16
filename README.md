@@ -16,7 +16,7 @@ VLESS Reality · XHTTP · Hysteria2 · один бинарь · один дом�
 [![Platform](https://img.shields.io/badge/Ubuntu%20%7C%20Debian-amd64%20%7C%20arm64-ff5fa2?logo=linux&logoColor=white)](#-требования)
 [![Telegram bot](https://img.shields.io/badge/Telegram-бот%20в%20комплекте-26A5E4?logo=telegram&logoColor=white)](#-telegram-бот-и-бэкапы)
 
-**[⚡ Установка](#-установка)** · [Почему vynel](#-почему-vynel) · [Скриншоты](#-скриншоты) · [Возможности](#-возможности) · [Документация](#-документация)
+**[⚡ Установка](#-установка)** · **[📖 Гайд](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html)** · [Почему vynel](#-почему-vynel) · [Скриншоты](#-скриншоты) · [Возможности](#-возможности) · [Документация](#-документация)
 
 </div>
 
@@ -39,6 +39,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/i
 
 Дальше в панели: «Пользователи» → «+ Пользователь» → скопировать ссылку → открыть на телефоне → **KeqDroid** добавит подписку одной кнопкой.
 
+> 📖 **[Наглядный гайд](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html)**: подготовка домена, проверка DNS, установка, проверки после, а затем работа с панелью — пользователи, профили, обновления, команды, Telegram-бот. Впишите свой домен, и он подставится во все команды.
+>
 > Пошагово, с отдельной панелью, нодами и решением проблем — **[INSTALL_GUIDE.md](docs/INSTALL_GUIDE.md)**.
 
 ---
@@ -194,6 +196,7 @@ vynel firewall status                      # что открыто, скольк
 
 | Документ | О чём |
 |----------|-------|
+| **[Гайд](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html)** ([исходник](docs/guide.html)) | Страница с двумя вкладками: установка на один сервер с проверкой домена и работа с панелью |
 | [INSTALL_GUIDE.md](docs/INSTALL_GUIDE.md) | Установка: всё на одном сервере, отдельная панель, ноды; обновление, удаление, частые проблемы |
 | [USER_GUIDE.md](docs/USER_GUIDE.md) | Веб-панель, пользователи, группы, подписки, HWID, статистика, ноды, Telegram, бэкапы, диагностика |
 | [PROFILES.md](docs/PROFILES.md) | Шаблоны профилей: Reality self-steal, XHTTP через CDN, XHTTP + REALITY, Hysteria2 |
