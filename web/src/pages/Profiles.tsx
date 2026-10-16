@@ -557,7 +557,7 @@ function TemplateHelp({ r }: { r?: Reference['reference'] }) {
         <li><code>nginx</code> — что поднять в nginx на ноде: <code>role</code> (ниже), <code>domain</code> (на него получается сертификат), <code>local_port</code> или <code>upstream</code>, <code>path</code>, <code>decoy</code>.
           <code>server_names</code> — ещё имена этого сайта без своего сертификата (домен CDN, который тот пересылает в Host).
           <code>location: |</code> — свои директивы внутри <code>location</code> пути вместо стандартного прокси (для роли reverse_proxy_xhttp), <code>server: |</code> — директивы уровня <code>server</code>.
-          Переменные nginx пишутся как обычно (<code>$host</code>), а <code>{'${ИМЯ}'}</code> — это переменные шаблона. Нельзя: <code>include</code>, <code>load_module</code>, сертификаты и пути вне сайта. Шаблон проверяется настоящим <code>nginx -t</code>.
+          Переменные nginx пишутся как обычно (<code>$host</code>), а <code>{'${ИМЯ}'}</code> — это переменные шаблона. Нельзя то, что трогает файлы ноды или подгружает код: <code>include</code>, <code>load_module</code>, <code>root</code>, <code>alias</code>, логи, сертификаты, директивы на <code>…_file</code>, сокеты <code>unix:</code>. Шаблон проверяется настоящим <code>nginx -t</code>.
           Старое имя раздела <code>caddy</code> тоже работает.</li>
         <li><code>node_requirements</code> — порты, DNS-записи и sysctl; попадают в чек-лист ноды.</li>
         <li><code>lint</code> — дополнительные проверки готового инбаунда (ниже).</li>

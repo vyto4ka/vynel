@@ -65,9 +65,28 @@ func TestNamesAndConflicts(t *testing.T) {
 }
 
 func TestSnippets(t *testing.T) {
-	for _, bad := range []string{"include /etc/passwd;", "proxy_pass http://x;\n}", "location / {", "add_header X \"y;", "load_module x.so;"} {
+	for _, bad := range []string{"include /etc/passwd;", "proxy_pass http://x;\n}", "location / {", "add_header X \"y;", "load_module x.so;",
+		// Every directive counts, not only the first on a line.
+		"return 404; include /dev/null;", "add_header A b; error_log /etc/ld.so.preload;", "if ($x) { include y; }",
+		"\"include\" /etc/passwd;", "INCLUDE /etc/passwd;",
+		// Serving or writing the node's own files.
+		"root /etc;", "alias /etc/;", "access_log /etc/cron.d/x;", "auth_basic_user_file /etc/shadow;",
+		"client_body_temp_path /etc;", "proxy_store on;", "ssl_trusted_certificate /etc/x.pem;", "js_import x.js;",
+		// Local unix sockets (the Docker API and the like).
+		"proxy_pass http://unix:/var/run/docker.sock:/;", "grpc_pass unix:/run/x.sock;"} {
 		if checkSnippet(bad) == nil {
 			t.Fatalf("accepted %q", bad)
+		}
+	}
+	// What real templates write passes.
+	for _, good := range []string{
+		"proxy_pass http://127.0.0.1:8085;\nproxy_http_version 1.1;\nproxy_request_buffering off;\nproxy_buffering off;\nclient_max_body_size 0;\nproxy_read_timeout 3600s;\nproxy_set_header Host $host;\nproxy_set_header Connection \"\";",
+		"large_client_header_buffers 16 64k;\nclient_header_buffer_size 4k;",
+		"if ($request_method !~ ^(GET|HEAD)$) { return 405; }",
+		"add_header X-Test 'a; b' always;",
+	} {
+		if err := checkSnippet(good); err != nil {
+			t.Fatalf("rejected %q: %v", good, err)
 		}
 	}
 	if err := checkSnippet("proxy_pass http://127.0.0.1:8085; # comment with { brace\nif ($request_method = POST) { return 405; }\nadd_header X \"a } b\";"); err != nil {

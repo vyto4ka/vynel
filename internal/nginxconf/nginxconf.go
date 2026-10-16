@@ -14,6 +14,7 @@
 package nginxconf
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"regexp"
@@ -510,38 +511,115 @@ func checkAddr(a string) error {
 	return nil
 }
 
-// forbidden are directives a template may not use: they would load code or files from
-// outside the generated config.
-var forbidden = regexp.MustCompile(`(?m)^\s*(include|load_module|perl\w*|lua\w*|js_\w+|ssl_certificate\w*|pid|user|error_log)\b`)
+// forbiddenNames are directives a template may not use: they load code, read or write files
+// outside the generated config, or serve the server's own files.
+var forbiddenNames = map[string]bool{
+	"include": true, "load_module": true, "pid": true, "user": true, "daemon": true, "env": true,
+	"error_log": true, "access_log": true, "root": true, "alias": true, "ssl_engine": true,
+	"ssl_dhparam": true, "ssl_crl": true, "ssl_session_ticket_key": true,
+	"proxy_store": true, "fastcgi_store": true, "uwsgi_store": true, "scgi_store": true,
+}
+
+var (
+	forbiddenPrefix = []string{"perl", "lua", "js_", "njs"}
+	// …_file, …_temp_path, …_certificate(_key), …_crl: they name files on the node.
+	forbiddenSuffix = []string{"_file", "_temp_path", "_cache_path", "_certificate", "_certificate_key", "_crl"}
+)
+
+// forbiddenDirective tells why a directive may not appear in a template ("" = it may).
+func forbiddenDirective(name string, args []string) string {
+	n := strings.ToLower(name)
+	if forbiddenNames[n] {
+		return fmt.Sprintf("directive %q is not allowed in a template", name)
+	}
+	for _, p := range forbiddenPrefix {
+		if strings.HasPrefix(n, p) {
+			return fmt.Sprintf("directive %q is not allowed in a template", name)
+		}
+	}
+	for _, x := range forbiddenSuffix {
+		if strings.HasSuffix(n, x) {
+			return fmt.Sprintf("directive %q is not allowed in a template", name)
+		}
+	}
+	for _, a := range args {
+		if strings.Contains(strings.ToLower(a), "unix:") {
+			return fmt.Sprintf("%s: unix sockets are not allowed in a template", name)
+		}
+	}
+	return ""
+}
 
 // checkSnippet accepts directives written in a template: balanced braces, no quotes left
-// open, nothing that loads code or reads files outside the config.
+// open, nothing that loads code or touches files outside the config. Every directive is
+// checked, wherever it stands: "return 404; include x;" on one line is two directives.
 func checkSnippet(s string) error {
 	depth := 0
 	inQuote := byte(0)
+	var words []string
+	var word strings.Builder
+	inWord := false
+	endWord := func() {
+		if inWord {
+			words = append(words, word.String())
+			word.Reset()
+			inWord = false
+		}
+	}
+	endDirective := func() error {
+		endWord()
+		if len(words) > 0 {
+			if why := forbiddenDirective(words[0], words[1:]); why != "" {
+				return errors.New(why)
+			}
+		}
+		words = words[:0]
+		return nil
+	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case inQuote != 0:
 			switch c {
 			case '\\':
-				i++
+				if i+1 < len(s) {
+					i++
+					word.WriteByte(s[i])
+				}
 			case inQuote:
 				inQuote = 0
+			default:
+				word.WriteByte(c)
 			}
 		case c == '"' || c == '\'':
-			inQuote = c
+			inQuote, inWord = c, true
 		case c == '#':
 			for i < len(s) && s[i] != '\n' {
 				i++
 			}
+			endWord()
 		case c == '{':
+			if err := endDirective(); err != nil {
+				return err
+			}
 			depth++
 		case c == '}':
+			if err := endDirective(); err != nil {
+				return err
+			}
 			depth--
 			if depth < 0 {
 				return fmt.Errorf("unbalanced }")
 			}
+		case c == ';':
+			if err := endDirective(); err != nil {
+				return err
+			}
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			endWord()
+		default:
+			word.WriteByte(c)
+			inWord = true
 		}
 	}
 	if inQuote != 0 {
@@ -550,10 +628,8 @@ func checkSnippet(s string) error {
 	if depth != 0 {
 		return fmt.Errorf("unbalanced {")
 	}
-	if m := forbidden.FindString(s); m != "" {
-		return fmt.Errorf("directive %q is not allowed in a template", strings.TrimSpace(m))
-	}
-	return nil
+	// A last directive without its ';' is nginx's error to report, but it is still checked.
+	return endDirective()
 }
 
 func oneLine(s string) string { return strings.NewReplacer("\n", " ", "\r", " ").Replace(s) }
