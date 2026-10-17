@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -134,7 +135,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 		if err != nil {
 			return caddyconf.Spec{}, nil, err
 		}
-		sites = append(sites, panelSites...)
+		sites = withPanelSites(sites, panelSites, slices.Clone)
 	}
 
 	// Place public sites: behind a Reality front on the same (IP, port), or directly.
@@ -236,7 +237,8 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 		webRoute = &caddyconf.Route{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: path}
 		if s.SessionPaths(ctx) {
 			// Every login link opens its own random path: the panel gets the whole domain and
-			// shows the decoy itself for paths it does not know.
+			// shows the decoy itself for paths it does not know. The decoy route stays for the
+			// error pages (the panel restarting), behind the panel's catch-all.
 			webRoute.PathPrefix = ""
 		}
 	}
@@ -253,19 +255,28 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 		if webRoute != nil && shared {
 			site.Routes = append(site.Routes, *webRoute)
 		}
-		if webRoute == nil || !shared || webRoute.PathPrefix != "" {
-			site.Routes = append(site.Routes, decoyRoute)
-		}
+		site.Routes = append(site.Routes, decoyRoute)
 		sites = append(sites, site)
 	}
 	if webRoute != nil && !shared {
-		routes := []caddyconf.Route{*webRoute}
-		if webRoute.PathPrefix != "" {
-			routes = append(routes, webDecoyRoute)
-		}
-		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: webBind, Port: webPort, Routes: routes})
+		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: webBind, Port: webPort, Routes: []caddyconf.Route{*webRoute, webDecoyRoute}})
 	}
 	return sites, nil
+}
+
+// withPanelSites adds the panel's sites to a node's. A site where the panel takes the whole
+// domain (session paths) goes first: on a domain it shares with a self-steal site (one domain
+// for everything), the first catch-all wins, and it must be the panel's, not the decoy's.
+func withPanelSites[S any](sites []S, panel []caddyconf.Site, conv func([]caddyconf.Site) []S) []S {
+	var first, last []caddyconf.Site
+	for _, p := range panel {
+		if slices.ContainsFunc(p.Routes, func(r caddyconf.Route) bool { return r.Kind == caddyconf.KindProxy && r.PathPrefix == "" }) {
+			first = append(first, p)
+		} else {
+			last = append(last, p)
+		}
+	}
+	return append(append(conv(first), sites...), conv(last)...)
 }
 
 // PanelCaddyConfig is the Caddy config for a panel server without a local node.

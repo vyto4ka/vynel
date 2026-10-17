@@ -432,18 +432,20 @@ func locations(w func(int, string, ...any), rs []Route) error {
 		if p == "/" {
 			p = ""
 		}
+		if r.Kind == KindDecoy && r.Decoy == "" {
+			return fmt.Errorf("decoy route without a site")
+		}
+		if r.Kind == KindDecoy && decoy == "" {
+			// The error pages, also when another route took the decoy's path (the web panel
+			// on the whole domain).
+			decoy = r.Decoy
+		}
 		if seen[p] {
 			continue // the first route for a path wins, like the order of Caddy routes did
 		}
 		seen[p] = true
 		switch r.Kind {
 		case KindDecoy:
-			if r.Decoy == "" {
-				return fmt.Errorf("decoy route without a site")
-			}
-			if decoy == "" {
-				decoy = r.Decoy
-			}
 			decoyLocation(w, 2, p, r.Decoy)
 		case KindProxy:
 			if err := checkAddr(r.Upstream); err != nil {

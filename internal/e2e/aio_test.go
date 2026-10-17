@@ -204,6 +204,69 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 		t.Fatalf("web api through caddy: %d %s", resp.StatusCode, b)
 	}
 
+	// A random path per session: the login link opens its own path on the same domain. The
+	// self-steal decoy's catch-all used to come first, so the panel had no route at all.
+	must(t, svc.SetLoginMode(ctx, actor, service.ModeLink))
+	must(t, svc.SetSessionPaths(ctx, actor, true))
+	xraytest.Eventually(t, wait, "node takes the panel's whole-domain route", inSync(ctx, svc, node.Code))
+	link, _, err := svc.LoginLink(ctx, actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lu, _ := url.Parse(link)
+	own := base + lu.Path
+	if own == webURL {
+		t.Fatalf("the link opens the fixed path: %s", link)
+	}
+	for _, page := range []string{own, webURL} { // its own path; the fixed one (the Mini App)
+		xraytest.Eventually(t, wait, "panel at "+page, func() error {
+			resp, err := web.Get(page + "api/login/options")
+			if err != nil {
+				return err
+			}
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != 200 || !strings.Contains(string(b), `"mode":"link"`) {
+				return fmt.Errorf("status %d body %.80q", resp.StatusCode, b)
+			}
+			return nil
+		})
+	}
+	magic, _ := http.NewRequest(http.MethodPost, own+"api/login/magic", strings.NewReader(`{"token":"`+strings.TrimPrefix(lu.Fragment, "/magic/")+`"}`))
+	magic.Header.Set("X-Vynel", "1")
+	resp, err = web.Do(magic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	session = nil
+	for _, c := range resp.Cookies() {
+		session = c
+	}
+	if resp.StatusCode != 200 || session == nil || session.Path != lu.Path {
+		t.Fatalf("link login on its own path: %d cookie %+v", resp.StatusCode, session)
+	}
+	me, _ = http.NewRequest(http.MethodGet, own+"api/users", nil)
+	me.AddCookie(session)
+	resp, err = web.Do(me)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(b), `"alice"`) {
+		t.Fatalf("web api on the session path: %d %s", resp.StatusCode, b)
+	}
+	resp, err = web.Get(base + "/AbCdEfGhJkMnPqRs/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 404 || !strings.Contains(string(b), `class="brand"`) {
+		t.Fatalf("an unknown path must be the decoy: %d %.80q", resp.StatusCode, b)
+	}
+
 	// And the VPN itself works: Reality's target is the real Caddy now.
 	xraytest.Eventually(t, wait, "alice is on the node", inSync(ctx, svc, node.Code))
 	socks := xraytest.StartRealityClient(t, bin, xraytest.RealityClient{

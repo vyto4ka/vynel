@@ -154,7 +154,7 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 		if err != nil {
 			return nginxconf.Spec{}, nil, err
 		}
-		sites = append(sites, nginxSites(ps)...)
+		sites = withPanelSites(sites, ps, nginxSites)
 	}
 
 	localPorts := map[int]bool{}

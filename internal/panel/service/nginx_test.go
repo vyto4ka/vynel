@@ -265,11 +265,48 @@ func TestNginxTemplateCheck(t *testing.T) {
 	}
 }
 
-// Session paths: nginx sends the whole panel domain to the panel, which shows the decoy itself.
+// Session paths: nginx sends the whole panel domain to the panel, which shows the decoy itself
+// (nginx keeps the decoy for its error pages: the panel restarting).
 func TestNginxSessionPathsRoute(t *testing.T) {
+	for _, domain := range []string{"sub.example.com", "nl.example.com"} { // own domain; one domain for everything
+		t.Run(domain, func(t *testing.T) {
+			f := newFixture(t)
+			n, _ := f.aio(t, domain)
+			f.nginxNode(t, n)
+			if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.s.SetLoginMode(f.ctx, ActorCLI, ModeLink); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.s.SetSessionPaths(f.ctx, ActorCLI, true); err != nil {
+				t.Fatal(err)
+			}
+			ds := must(f.s.DesiredState(f.ctx, n.ID))
+			if len(ds.Problems) > 0 {
+				t.Fatal(ds.Problems)
+			}
+			i := strings.Index(ds.Nginx, "server_name "+domain+";")
+			if i < 0 {
+				t.Fatal(ds.Nginx)
+			}
+			site := ds.Nginx[i:]
+			site = site[:strings.Index(site, "\n    }\n")]
+			// On the self-steal domain the decoy's "location /" used to win and the panel had
+			// no route at all.
+			contains(t, site, "location ^~ /s/ {", "location / {\n            proxy_pass http://127.0.0.1:2097;",
+				"location = /404.html { root @@DECOY@@/")
+			if strings.Count(site, "location / {") != 1 || strings.Contains(site, "try_files") {
+				t.Fatalf("the decoy must come from the panel now:\n%s", site)
+			}
+		})
+	}
+}
+
+// The same with Caddy: the panel's catch-all comes before the self-steal decoy's.
+func TestCaddySessionPathsOneDomain(t *testing.T) {
 	f := newFixture(t)
-	n, _ := f.aio(t, "sub.example.com")
-	f.nginxNode(t, n)
+	n, _ := f.aio(t, "nl.example.com")
 	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -280,14 +317,11 @@ func TestNginxSessionPathsRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	ds := must(f.s.DesiredState(f.ctx, n.ID))
-	i := strings.Index(ds.Nginx, "server_name sub.example.com;")
-	if i < 0 {
-		t.Fatal(ds.Nginx)
-	}
-	site := ds.Nginx[i:]
-	site = site[:strings.Index(site, "\n    }\n")]
-	contains(t, site, "location ^~ /s/ {", "location / {", "proxy_pass http://127.0.0.1:2097;")
-	if strings.Contains(site, "@@DECOY@@") {
-		t.Fatalf("the decoy must come from the panel now:\n%s", site)
+	cfg := string(ds.Caddy)
+	cfg = cfg[strings.Index(cfg, `"handler":"subroute"`):] // the site's routes, not its error pages
+	panel := strings.Index(cfg, `"dial":"127.0.0.1:2097"`)
+	decoy := strings.Index(cfg, `"handler":"file_server","root":"{env.VYNEL_DECOY_DIR}`)
+	if panel < 0 || decoy < 0 || panel > decoy {
+		t.Fatalf("the panel's catch-all must come first (panel %d, decoy %d):\n%s", panel, decoy, cfg)
 	}
 }
