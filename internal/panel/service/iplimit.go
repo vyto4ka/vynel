@@ -143,6 +143,15 @@ func (t *IPTracker) SetIgnored(ips []string) {
 	t.mu.Unlock()
 }
 
+// Ours reports whether ip is an address of one of our nodes: apps fetching through the tunnel
+// come from there, all of them at once.
+func (t *IPTracker) Ours(ip string) bool {
+	k, _ := AddrKey(ip)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return k != "" && t.ignore[k]
+}
+
 func (t *IPTracker) limitOf(userID int64) int {
 	if l, ok := t.limits[userID]; ok {
 		return l

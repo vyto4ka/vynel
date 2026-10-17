@@ -282,9 +282,39 @@ func TestUnknownTokenLooksLikeAWebsite(t *testing.T) {
 			t.Fatalf("%s: %d %s", p, rec.Code, rec.Body.String())
 		}
 	}
-	// After too many misses the IP is banned even with a valid token.
-	if rec := e.get(e.path(), "Happ/3", "hw-1"); rec.Code != 404 {
-		t.Fatalf("banned IP got %d", rec.Code)
+	// After too many misses the IP is banned for short own links, which could be guessed.
+	short, err := e.svc.SetSubToken(context.Background(), actor, e.user.ID, "vasya-phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.get(service.DefaultSubPrefix+short.SubToken, "Happ/3", "hw-1"); rec.Code != 404 {
+		t.Fatalf("banned IP got %d for a short link", rec.Code)
+	}
+	// A random link cannot be guessed: it works from a banned address (a NAT of many people).
+	long, err := e.svc.SetSubToken(context.Background(), actor, e.user.ID, strings.Repeat("Ab3", 14))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.get(service.DefaultSubPrefix+long.SubToken, "Happ/3", "hw-1"); rec.Code != 200 {
+		t.Fatalf("banned IP got %d for a long link", rec.Code)
+	}
+}
+
+// Apps updating through the tunnel all come from our node's address: their old links never get
+// it banned (that took every subscription fetched through the tunnel down).
+func TestNodeAddressNeverBanned(t *testing.T) {
+	e := newEnv(t)
+	e.h.MaxMisses = 3
+	e.svc.IPs().SetIgnored([]string{"192.0.2.1"}) // httptest's client address
+	for i := 0; i < 10; i++ {
+		e.get("/s/old-link-"+strconv.Itoa(i), "KeqDroid/1.0", "")
+	}
+	short, err := e.svc.SetSubToken(context.Background(), actor, e.user.ID, "vasya-phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.get(service.DefaultSubPrefix+short.SubToken, "Happ/3", "hw-1"); rec.Code != 200 {
+		t.Fatalf("our node's address got %d", rec.Code)
 	}
 }
 

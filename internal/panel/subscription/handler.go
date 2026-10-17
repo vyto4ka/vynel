@@ -108,10 +108,6 @@ func (h *Handler) Serve(ctx context.Context, addr string) error {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := clientIP(r)
-	if h.banned(ip) {
-		h.notFound(ctx, w)
-		return
-	}
 	prefix := h.svc.SubPrefix(ctx)
 	if r.Method != http.MethodGet && r.Method != http.MethodHead || !strings.HasPrefix(r.URL.Path, prefix) {
 		h.miss(ip)
@@ -119,6 +115,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token, explicit, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, prefix), "/")
+	// The ban stops guessing short own links. A long token cannot be guessed, so it works from a
+	// banned address too: one address may be many people (a mobile operator's NAT).
+	if len(token) < unguessable && h.banned(ip) {
+		h.notFound(ctx, w)
+		return
+	}
 	u, err := h.svc.UserBySubToken(ctx, token)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -260,10 +262,15 @@ func (h *Handler) banned(ip string) bool {
 	return c != nil && time.Now().Before(c.bannedUntil)
 }
 
+// unguessable is the token length from which guessing is hopeless (random links have 43).
+const unguessable = 32
+
 func (h *Handler) miss(ip string) {
 	// Without the client's address (an old Reality front without PROXY, a local proxy) every
-	// visitor looks like 127.0.0.1: banning it would take subscriptions down for everyone.
-	if p := net.ParseIP(ip); p == nil || p.IsLoopback() {
+	// visitor looks like 127.0.0.1: banning it would take subscriptions down for everyone. The
+	// same goes for our nodes' addresses: every app updating through the tunnel comes from there,
+	// and old links of all of them add up.
+	if p := net.ParseIP(ip); p == nil || p.IsLoopback() || h.svc != nil && h.svc.IPs().Ours(ip) {
 		return
 	}
 	h.mu.Lock()

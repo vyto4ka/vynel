@@ -266,6 +266,18 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	if resp.StatusCode != 404 || !strings.Contains(string(b), `class="brand"`) {
 		t.Fatalf("an unknown path must be the decoy: %d %.80q", resp.StatusCode, b)
 	}
+	req, _ = http.NewRequest(http.MethodGet, subURL, nil)
+	req.Header.Set("User-Agent", "Happ/3")
+	req.Header.Set("x-hwid", "phone-1")
+	resp, err = web.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || len(decodeLinks(t, b)) != 1 {
+		t.Fatalf("the subscription next to a whole-domain panel: %d %.80q", resp.StatusCode, b)
+	}
 
 	// And the VPN itself works: Reality's target is the real Caddy now.
 	xraytest.Eventually(t, wait, "alice is on the node", inSync(ctx, svc, node.Code))
