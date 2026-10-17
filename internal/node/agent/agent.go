@@ -98,6 +98,7 @@ type Agent struct {
 	warnings []string
 	metrics  metrics.Collector
 	statsCh  chan struct{} // a batch was queued
+	certKick chan struct{} // a new web config may need certificates: issue now, not at the next tick
 	certs    *certBridge
 	certDoms []string // domains whose certificates the running Xray config uses
 	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
@@ -164,7 +165,7 @@ func New(cfg Config) (*Agent, error) {
 		caddy: &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")},
 		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, Log: cfg.Log.With("component", "nginx"),
 			CaddyStorage: filepath.Join(web, "caddy", "caddy")},
-		statsCh: make(chan struct{}, 1)}
+		statsCh: make(chan struct{}, 1), certKick: make(chan struct{}, 1)}
 	if err := a.nginx.Init(); err != nil {
 		st.Close()
 		return nil, err
@@ -584,6 +585,11 @@ func (a *Agent) applyWebLocked(ctx context.Context, caddyCfg []byte, nginxCfg st
 			return fmt.Errorf("nginx: %w", err)
 		}
 		a.caddyCfg, a.nginxCfg = nil, nginxCfg
+		// A new site waits for its certificate: ask for it now (the periodic check is a minute).
+		select {
+		case a.certKick <- struct{}{}:
+		default:
+		}
 		return nil
 	}
 	wasNginx := a.nginxCfg
@@ -816,14 +822,15 @@ func (a *Agent) certLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			// May take minutes (Let's Encrypt): outside the agent lock. Renewals call OnCerts.
-			if err := a.nginx.RenewCerts(ctx); err != nil {
-				a.log.Warn("certificates", "err", err)
-			}
-			a.mu.Lock()
-			a.syncCertsLocked(ctx)
-			a.mu.Unlock()
+		case <-a.certKick:
 		}
+		// May take minutes (Let's Encrypt): outside the agent lock. Renewals call OnCerts.
+		if err := a.nginx.RenewCerts(ctx); err != nil {
+			a.log.Warn("certificates", "err", err)
+		}
+		a.mu.Lock()
+		a.syncCertsLocked(ctx)
+		a.mu.Unlock()
 	}
 }
 

@@ -1208,15 +1208,35 @@ start_unit() {
 
 # wait_cert DOMAIN -> sets CERT_OK
 CERT_OK=0
+# While waiting it shows how long it has been and the node's last step from the journal
+# ("certificate: asking Let's Encrypt", "waiting for Let's Encrypt to check http://…", errors).
 wait_cert() {
   info "waiting for the certificate of $1"
-  local code
-  for _ in $(seq 1 45); do
+  local code start now line msg err last="" beat=0
+  start="$(date +%s)"
+  while :; do
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$1:443:${2:-$PUBLIC_IP}" "https://$1/" || true)"
-    if [[ "$code" == "200" ]]; then CERT_OK=1; return 0; fi
+    now="$(date +%s)"
+    if [[ "$code" == "200" ]]; then
+      green "  certificate ready in $((now - start))s"
+      CERT_OK=1
+      return 0
+    fi
+    line="$(journalctl -u vynel --since "@$start" -o cat --no-pager 2>/dev/null | grep -F "domain=$1" | grep -F 'msg="certificate:' | tail -1 || true)"
+    msg="$(sed -n 's/.*msg="certificate: \([^"]*\)".*/\1/p' <<<"$line")"
+    err="$(sed -n 's/.* err=\(.*\)$/\1/p' <<<"$line")"
+    if [[ -n "$msg" && "$msg$err" != "$last" ]]; then
+      echo "  [$((now - start))s] $msg${err:+: $err}"
+      last="$msg$err"
+      beat=$now
+    elif ((now - beat >= 15)); then
+      echo "  [$((now - start))s] still waiting${msg:+ ($msg)}"
+      beat=$now
+    fi
+    if ((now - start >= 300)); then break; fi
     sleep 2
   done
-  red "https://$1/ does not answer yet (DNS or port 80 not reachable?). The certificate is retried by itself; see journalctl -u vynel"
+  red "https://$1/ does not answer yet (DNS or port 80 not reachable?). The certificate is retried by itself; see journalctl -u vynel | grep certificate"
 }
 
 # set_paths: the subscription link path and the panel's secret path, when given.

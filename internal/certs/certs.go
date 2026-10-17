@@ -144,9 +144,11 @@ func (m *Manager) Renew(ctx context.Context, domains []string, email, issuer str
 			continue
 		}
 		var err error
+		start := time.Now()
 		if issuer == "internal" {
 			err = m.issueInternal(d)
 		} else {
+			m.log().Info("certificate: asking Let's Encrypt", "domain", d)
 			err = m.issueACME(ctx, d, email)
 		}
 		m.mu.Lock()
@@ -161,7 +163,9 @@ func (m *Manager) Renew(ctx context.Context, domains []string, email, issuer str
 			}
 			m.retry[d] = now.Add(wait)
 			errs = append(errs, fmt.Errorf("%s: %w", d, err))
+			m.log().Warn("certificate: failed", "domain", d, "after", time.Since(start).Round(time.Second), "next_try_in", wait, "err", err)
 		} else {
+			m.log().Info("certificate: issued", "domain", d, "took", time.Since(start).Round(time.Second))
 			delete(m.retry, d)
 			delete(m.fails, d)
 			done = append(done, d)
@@ -200,6 +204,7 @@ func (m *Manager) issueACME(ctx context.Context, domain, email string) error {
 	if err != nil {
 		return fmt.Errorf("order: %w", err)
 	}
+	m.log().Info("certificate: order created", "domain", domain)
 	for _, u := range order.AuthzURLs {
 		z, err := client.GetAuthorization(ctx, u)
 		if err != nil {
@@ -228,6 +233,7 @@ func (m *Manager) issueACME(ctx context.Context, domain, email string) error {
 		if err := os.WriteFile(file, []byte(body), 0o644); err != nil { //nolint:gosec // nginx workers must read it
 			return err
 		}
+		m.log().Info("certificate: waiting for Let's Encrypt to check http://"+domain+"/.well-known/acme-challenge/ (port 80)", "domain", domain)
 		_, err = client.Accept(ctx, chal)
 		if err == nil {
 			_, err = client.WaitAuthorization(ctx, z.URI)
@@ -237,6 +243,7 @@ func (m *Manager) issueACME(ctx context.Context, domain, email string) error {
 			return fmt.Errorf("http-01 for %s (is port 80 reachable and the A record right?): %w", domain, err)
 		}
 	}
+	m.log().Info("certificate: domain confirmed, waiting for the certificate", "domain", domain)
 	if order, err = client.WaitOrder(ctx, order.URI); err != nil {
 		return fmt.Errorf("order: %w", err)
 	}
@@ -253,11 +260,7 @@ func (m *Manager) issueACME(ctx context.Context, domain, email string) error {
 	if err != nil {
 		return fmt.Errorf("finalize: %w", err)
 	}
-	if err := m.store(domain, chain, key, false); err != nil {
-		return err
-	}
-	m.log().Info("certificate issued", "domain", domain)
-	return nil
+	return m.store(domain, chain, key, false)
 }
 
 // account loads or creates the ACME account key for a directory and registers it.

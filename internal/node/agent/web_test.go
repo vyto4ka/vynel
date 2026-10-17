@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -128,4 +129,54 @@ func TestWebServerSwitch(t *testing.T) {
 	if s := server(); s != "caddy" || a.nginxCfg != "" {
 		t.Fatalf("caddy expected after the old panel's snapshot, got %s", s)
 	}
+}
+
+// A new site gets its certificate right after its config is applied, not at the next periodic
+// check (a minute in production: the installer sat silent waiting for it).
+func TestCertificateRightAfterConfig(t *testing.T) {
+	nginxBin := os.Getenv("NGINX_BIN")
+	if nginxBin == "" {
+		nginxBin = "/usr/sbin/nginx"
+	}
+	if _, err := os.Stat(nginxBin); err != nil {
+		t.Skip("needs nginx")
+	}
+	dir := t.TempDir()
+	_ = os.Chmod(dir, 0o755)
+	user := ""
+	if os.Getuid() == 0 {
+		user = "root"
+	}
+	a, err := New(Config{DataDir: dir, NginxBin: nginxBin, NginxUser: user, CertInterval: time.Hour,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.certLoop(ctx)
+	httpsPort, httpPort := xraytest.FreePort(t), xraytest.FreePort(t)
+	cfg, err := nginxconf.Build(nginxconf.Spec{Issuer: "internal", HTTPPort: httpPort, HTTPBinds: []string{"127.0.0.1"},
+		Sites: []nginxconf.Site{{Domain: "node.example.com", Bind: "127.0.0.1", Port: httpsPort,
+			Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "cloud"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	err = a.applyWebLocked(ctx, nil, cfg)
+	a.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	xraytest.Eventually(t, 10*time.Second, "certificate issued", func() error {
+		st, err := a.nginx.Certs.Status("node.example.com")
+		if err != nil {
+			return err
+		}
+		if st.Placeholder {
+			return errors.New("still the placeholder")
+		}
+		return nil
+	})
 }
