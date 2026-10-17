@@ -139,3 +139,54 @@ func TestIPBlocksOnXray(t *testing.T) {
 		t.Fatalf("phone after restart: %v", err)
 	}
 }
+
+// A node whose base config has no routing section: the panel's config still lets the agent add
+// block rules (Xray's stub router refused them, and blocks silently did nothing).
+func TestIPBlocksWithoutBaseRouting(t *testing.T) {
+	bin := xraytest.Binary(t)
+	ctx := context.Background()
+	origin := xraytest.Origin(t)
+	port, apiPort := xraytest.FreePort(t), xraytest.FreePort(t)
+	const uuid = "11111111-2222-4333-8444-555555555555"
+	base, _ := xrayconf.ParseBase(`{"outbounds":[{"tag":"DIRECT","protocol":"freedom"}]}`)
+	cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: base, APIAddr: "127.0.0.1:" + strconv.Itoa(apiPort)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg["inbounds"] = []any{map[string]any{"tag": "IN", "listen": "0.0.0.0", "port": port, "protocol": "vless",
+		"settings": map[string]any{"clients": []any{}, "decryption": "none"}, "streamSettings": map[string]any{"network": "raw"}}}
+	raw, _ := json.Marshal(cfg)
+	a, err := New(Config{DataDir: t.TempDir(), Xray: bin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	st := &state.State{Config: raw, Inbounds: []state.Inbound{{Tag: "IN", Protocol: "vless", Users: []state.User{{Email: "7", ID: uuid}}}}}
+	a.mu.Lock()
+	a.cur = st
+	err = a.restartLocked(ctx, st)
+	a.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	socks := xraytest.FreePort(t)
+	c, _ := json.Marshal(map[string]any{
+		"inbounds": []any{map[string]any{"listen": "127.0.0.1", "port": socks, "protocol": "socks", "settings": map[string]any{"udp": false}}},
+		"outbounds": []any{map[string]any{"protocol": "vless", "sendThrough": "127.0.0.3",
+			"settings": map[string]any{"vnext": []any{map[string]any{"address": "127.0.0.1", "port": port,
+				"users": []any{map[string]any{"id": uuid, "encryption": "none"}}}}}}},
+	})
+	xraytest.StartClient(t, bin, c, socks)
+	laptop := keepAlive(socks)
+	if err := get(laptop, origin); err != nil {
+		t.Fatal(err)
+	}
+	a.SetIPBlocks(ctx, []*nodev1.IPBlock{{UserId: 7, Ips: []string{"127.0.0.3"}}})
+	if !a.blocksApplied {
+		t.Fatal("the blocks were not applied")
+	}
+	laptop.CloseIdleConnections()
+	if err := get(laptop, origin); err == nil {
+		t.Fatal("the blocked address still gets through")
+	}
+}

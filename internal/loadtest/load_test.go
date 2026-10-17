@@ -7,6 +7,7 @@ package loadtest
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -53,8 +54,14 @@ type world struct {
 // seed builds 3 nodes with Reality and Hysteria2 (6 inbounds) and n users in the main group.
 func seed(t *testing.T, n int) *world {
 	t.Helper()
+	return seedAt(t, filepath.Join(t.TempDir(), "panel.db"), n)
+}
+
+// seedAt is seed into a given database file; tokens are "tok<i>".
+func seedAt(t *testing.T, path string, n int) *world {
+	t.Helper()
 	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "panel.db"))
+	st, err := store.Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +91,7 @@ func seed(t *testing.T, n int) *world {
 	must(t, st.Tx(ctx, func(q store.DBTX) error {
 		for i := 0; i < n; i++ {
 			uuid, _ := xrayconf.NewUUID()
-			u := &store.User{Username: "u" + strconv.Itoa(i), UUID: uuid, SubToken: "tok" + strconv.Itoa(i) + "-" + uuid[:8], Status: store.StatusActive,
+			u := &store.User{Username: "u" + strconv.Itoa(i), UUID: uuid, SubToken: "tok" + strconv.Itoa(i), Status: store.StatusActive,
 				ResetStrategy: "no", ClientType: "auto", CreatedBy: "load"}
 			if err := store.CreateUser(ctx, q, u); err != nil {
 				return err
@@ -341,4 +348,53 @@ func TestDesiredProfile(t *testing.T) {
 		}
 	}
 	t.Logf("DesiredStates x5: %v", time.Since(start).Round(time.Millisecond))
+}
+
+// TestSeedPanel fills LOAD_DB (a panel's panel.db) with LOAD_USERS users, to run the real binary
+// on it: vynel panel --data-dir <dir of LOAD_DB>. Subscriptions listen on LOAD_SUB_LISTEN.
+func TestSeedPanel(t *testing.T) {
+	path := os.Getenv("LOAD_DB")
+	if path == "" {
+		t.Skip("LOAD_DB not set")
+	}
+	w := seedAt(t, path, sizes()[0])
+	ctx := context.Background()
+	for k, v := range map[string]string{service.SettingSubListen: os.Getenv("LOAD_SUB_LISTEN"), service.SettingWebListen: os.Getenv("LOAD_WEB_LISTEN")} {
+		if v != "" {
+			must(t, w.svc.SetSetting(ctx, actor, k, v))
+		}
+	}
+}
+
+// TestHTTPHammer fetches subscriptions of a running panel over HTTP: LOAD_URL is the prefix
+// (http://127.0.0.1:2096/s/), tokens tok0..tok<LOAD_USERS-1>, LOAD_SECONDS long.
+func TestHTTPHammer(t *testing.T) {
+	base := os.Getenv("LOAD_URL")
+	if base == "" {
+		t.Skip("LOAD_URL not set")
+	}
+	n := sizes()[0]
+	secs, _ := strconv.Atoi(os.Getenv("LOAD_SECONDS"))
+	if secs == 0 {
+		secs = 20
+	}
+	hc := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{MaxIdleConnsPerHost: 64, Proxy: nil}}
+	for _, ua := range []string{"v2rayNG/1.9", "keqdroid/0.25"} {
+		t.Logf("%s x32 over HTTP: %v", ua, hammer(32, time.Duration(secs)*time.Second/2, func(r *rand.Rand) error {
+			i := r.IntN(n)
+			req, _ := http.NewRequest(http.MethodGet, base+"tok"+strconv.Itoa(i), nil)
+			req.Header.Set("User-Agent", ua)
+			req.Header.Set("x-hwid", "hw-"+strconv.Itoa(i))
+			resp, err := hc.Do(req)
+			if err != nil {
+				return err
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("status %d", resp.StatusCode)
+			}
+			return nil
+		}))
+	}
 }

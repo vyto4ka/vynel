@@ -429,3 +429,24 @@ func TestXHTTPRealityCompat(t *testing.T) {
 		t.Fatal("unknown obfuscation accepted")
 	}
 }
+
+// A base config without routing still gets a routing section: otherwise Xray runs a stub router
+// that refuses the rules the agent adds through the API (blocks of addresses over the limit).
+func TestBuildConfigAlwaysHasRouting(t *testing.T) {
+	base, err := ParseBase(`{"outbounds":[{"tag":"DIRECT","protocol":"freedom"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := BuildConfig(NodeConfig{Base: base, APIAddr: "127.0.0.1:10085"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := cfg["routing"].(map[string]any)
+	if !ok || r["rules"] == nil {
+		t.Fatalf("routing %v", cfg["routing"])
+	}
+	services := cfg["api"].(map[string]any)["services"].([]any)
+	if services[len(services)-1] != "RoutingService" {
+		t.Fatalf("api services %v", services)
+	}
+}

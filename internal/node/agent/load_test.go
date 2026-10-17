@@ -9,7 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -53,6 +56,17 @@ func vlessDial(from string, port, i int, target *net.TCPAddr) (net.Conn, error) 
 	return c, nil
 }
 
+// selfRSS is this process's resident memory (the agent; the test's client sockets are small).
+func selfRSS() string {
+	st, _ := os.ReadFile("/proc/self/status")
+	for _, l := range strings.Split(string(st), "\n") {
+		if strings.HasPrefix(l, "VmRSS:") {
+			return strings.TrimSpace(strings.TrimPrefix(l, "VmRSS:"))
+		}
+	}
+	return "?"
+}
+
 func xrayRSS(t *testing.T, a *Agent) string {
 	t.Helper()
 	ents, _ := os.ReadDir("/proc")
@@ -84,8 +98,9 @@ func TestNodeLoad(t *testing.T) {
 	if onlineN == 0 {
 		onlineN = 2000
 	}
-	origin := xraytest.Origin(t)
-	ou, _ := net.ResolveTCPAddr("tcp", strings.TrimSuffix(strings.TrimPrefix(origin, "http://"), "/"))
+	// The site users reach runs in its own process: it keeps a connection per online user, and
+	// in this process it would count as the agent's memory.
+	ou := originProcess(t)
 	port, apiPort := xraytest.FreePort(t), xraytest.FreePort(t)
 	base, _ := xrayconf.ParseBase(`{"outbounds":[{"tag":"DIRECT","protocol":"freedom"}]}`)
 	cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: base, APIAddr: "127.0.0.1:" + strconv.Itoa(apiPort)})
@@ -114,7 +129,8 @@ func TestNodeLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("start Xray with %d users: %v, Xray RSS %s", users, time.Since(start).Round(time.Millisecond), xrayRSS(t, a))
+	runtime.GC()
+	t.Logf("start Xray with %d users: %v, Xray RSS %s, agent RSS %s", users, time.Since(start).Round(time.Millisecond), xrayRSS(t, a), selfRSS())
 
 	// Users added and removed through the API (a delta), e.g. a group given a new profile.
 	const delta = 5000
@@ -144,6 +160,7 @@ func TestNodeLoad(t *testing.T) {
 			c.Close()
 		}
 	}()
+	time.Sleep(2 * time.Second)
 	t.Logf("%d users online in %v, Xray RSS %s", onlineN, time.Since(start).Round(time.Millisecond), xrayRSS(t, a))
 	var msg *nodev1.OnlineIPs
 	for try := 0; try < 3; try++ {
@@ -151,6 +168,7 @@ func TestNodeLoad(t *testing.T) {
 		msg = a.onlineIPs(ctx)
 		t.Logf("online addresses read: %d users in %v", len(msg.GetUsers()), time.Since(start).Round(time.Millisecond))
 	}
+	t.Logf("agent RSS with %d online (after reading them): %s", onlineN, selfRSS())
 	start = time.Now()
 	a.mu.Lock()
 	a.collectLocked(ctx)
@@ -193,4 +211,38 @@ func TestNodeLoad(t *testing.T) {
 		time.Sleep(90 * time.Second)
 	}
 	_ = syscall.Getpid
+}
+
+// originProcess runs the target site in a child process (this test binary again) and returns
+// its address.
+func originProcess(t *testing.T) *net.TCPAddr {
+	t.Helper()
+	port := xraytest.FreePort(t)
+	cmd := exec.Command(os.Args[0], "-test.run", "^TestOriginChild$")
+	cmd.Env = append(os.Environ(), "LOAD_ORIGIN_PORT="+strconv.Itoa(port))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}
+	for i := 0; i < 100; i++ {
+		if c, err := net.Dial("tcp", addr.String()); err == nil {
+			c.Close()
+			return addr
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("origin did not start")
+	return nil
+}
+
+// TestOriginChild is the target site of originProcess (runs only in the child).
+func TestOriginChild(t *testing.T) {
+	port := os.Getenv("LOAD_ORIGIN_PORT")
+	if port == "" {
+		t.Skip("child only")
+	}
+	_ = http.ListenAndServe("127.0.0.1:"+port, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
 }
