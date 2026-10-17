@@ -18,6 +18,9 @@ on:
       - "**/testdata/**"
       - ".github/workflows/ci.yml"
       - ".claude/**"
+      - "scripts/code-version.sh"
+      - "scripts/release-key.sh"
+      - "scripts/load-memory.sh"
   workflow_dispatch:
 
 permissions:

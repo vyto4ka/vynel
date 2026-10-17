@@ -14,6 +14,9 @@ not_code=(
   ':(exclude)*/testdata'
   ':(exclude).github/workflows/ci.yml'
   ':(exclude).claude'
+  ':(exclude)scripts/code-version.sh'
+  ':(exclude)scripts/release-key.sh'
+  ':(exclude)scripts/load-memory.sh'
 )
 
 v="$(git log -1 --format=%h --abbrev=7 -- . "${not_code[@]}")"
