@@ -4,6 +4,8 @@ import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
 import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
 
+const pageSize = 200
+
 const filters: [string, string][] = [['', 'Все'], ['active', 'Активные'], ['expired', 'Истёкшие'], ['limited', 'Без трафика'], ['disabled', 'Отключённые']]
 
 function openId(): number | null {
@@ -16,7 +18,13 @@ export function Users() {
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
   const [open, setOpen] = useState<number | null>(openId)
-  const users = useLoad(() => get<User[]>(`users?status=${status}&search=${encodeURIComponent(search)}`), [status, search], 20000)
+  const [page, setPage] = useState(0)
+  useEffect(() => setPage(0), [status, search])
+  // Страницами: с десятками тысяч пользователей весь список разом тормозил и панель, и браузер.
+  const list = useLoad(() => get<{ users: User[]; total: number }>(`users?status=${status}&search=${encodeURIComponent(search)}&limit=${pageSize}&offset=${page * pageSize}`),
+    [status, search, page], 20000)
+  const users = { ...list, data: list.data?.users }
+  const total = list.data?.total ?? 0
   const groups = useLoad(() => get<Group[]>('groups'))
   const groupName = useMemo(() => new Map((groups.data || []).map((g) => [g.id, g.name])), [groups.data])
 
@@ -81,6 +89,15 @@ export function Users() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {total > pageSize && (
+          <div className="row between card-pad small text-2">
+            <span>{page * pageSize + 1}–{Math.min(total, (page + 1) * pageSize)} из {total}</span>
+            <div className="row" style={{ gap: 6 }}>
+              <button className="btn sm ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>← Назад</button>
+              <button className="btn sm ghost" disabled={(page + 1) * pageSize >= total} onClick={() => setPage(page + 1)}>Дальше →</button>
+            </div>
           </div>
         )}
       </div>

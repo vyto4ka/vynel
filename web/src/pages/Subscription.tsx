@@ -31,7 +31,8 @@ function encodeDraft(v: unknown): string {
 
 export function Subscription() {
   const cfg = useLoad(() => get<SubConfig>('subscription'))
-  const users = useLoad(() => get<User[]>('users'))
+  const userPage = useLoad(() => get<{ users: User[] }>('users?limit=200'))
+  const users = { ...userPage, data: userPage.data?.users }
   const [tab, setTab] = useState('basics')
   const [basics, setBasics] = useState<SubBasics | null>(null)
   const [page, setPage] = useState<SubPage | null>(null)

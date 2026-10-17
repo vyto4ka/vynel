@@ -310,6 +310,25 @@ func UpdateUser(ctx context.Context, q DBTX, u *User) error {
 		nullInt(u.IPLimit), u.ID)
 }
 
+// ActiveUUIDs returns id → UUID of every active user.
+func ActiveUUIDs(ctx context.Context, q DBTX) (map[int64]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id, uuid FROM users WHERE status='active'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var uuid string
+		if err := rows.Scan(&id, &uuid); err != nil {
+			return nil, err
+		}
+		out[id] = uuid
+	}
+	return out, rows.Err()
+}
+
 // UserIPLimits returns the users with their own limit of addresses.
 func UserIPLimits(ctx context.Context, q DBTX) (map[int64]int, error) {
 	rows, err := q.QueryContext(ctx, `SELECT id, ip_limit FROM users WHERE ip_limit IS NOT NULL`)
@@ -362,8 +381,7 @@ type UserFilter struct {
 	Offset int
 }
 
-// ListUsers returns users matching the filter.
-func ListUsers(ctx context.Context, q DBTX, f UserFilter) ([]*User, error) {
+func (f UserFilter) where() (string, []any) {
 	where, args := []string{"1=1"}, []any{}
 	if f.Status != "" {
 		where, args = append(where, "status=?"), append(args, f.Status)
@@ -373,12 +391,53 @@ func ListUsers(ctx context.Context, q DBTX, f UserFilter) ([]*User, error) {
 		like := "%" + f.Search + "%"
 		args = append(args, like, like)
 	}
+	return strings.Join(where, " AND "), args
+}
+
+// CountUsers counts users matching the filter (Limit and Offset ignored).
+func CountUsers(ctx context.Context, q DBTX, f UserFilter) (int, error) {
+	where, args := f.where()
+	var n int
+	err := q.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE `+where, args...).Scan(&n)
+	return n, err
+}
+
+// UsersGroups returns user id → its groups for the given users (one query).
+func UsersGroups(ctx context.Context, q DBTX, ids []int64) (map[int64][]int64, error) {
+	out := map[int64][]int64{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ids))
+	marks := make([]string, len(ids))
+	for i, id := range ids {
+		args[i], marks[i] = id, "?"
+	}
+	rows, err := q.QueryContext(ctx, `SELECT user_id, group_id FROM user_groups WHERE user_id IN (`+strings.Join(marks, ",")+`)
+		ORDER BY user_id, group_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u, g int64
+		if err := rows.Scan(&u, &g); err != nil {
+			return nil, err
+		}
+		out[u] = append(out[u], g)
+	}
+	return out, rows.Err()
+}
+
+// ListUsers returns users matching the filter.
+func ListUsers(ctx context.Context, q DBTX, f UserFilter) ([]*User, error) {
+	whereSQL, args := f.where()
 	limit := f.Limit
 	if limit <= 0 {
 		limit = -1
 	}
 	args = append(args, limit, f.Offset)
-	rows, err := q.QueryContext(ctx, `SELECT `+userCols+` FROM users WHERE `+strings.Join(where, " AND ")+` ORDER BY id LIMIT ? OFFSET ?`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT `+userCols+` FROM users WHERE `+whereSQL+` ORDER BY id LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -357,19 +357,27 @@ func userGrants(grants []*store.Grant, users []int64, groupsOf map[int64][]int64
 
 // UserGrants is what one user has (active or ended).
 func (s *Service) UserGrants(ctx context.Context, userID int64) ([]UserGrant, error) {
-	grants, err := store.ListGrants(ctx, s.st.DB)
-	if err != nil {
-		return nil, err
-	}
 	groups, err := store.UserGroupIDs(ctx, s.st.DB, userID)
 	if err != nil {
 		return nil, err
 	}
-	ug := userGrants(grants, []int64{userID}, map[int64][]int64{userID: groups}, s.now().Unix())[userID]
+	snap, err := s.snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.grantsOf(snap, userID, groups), nil
+}
+
+func (s *Service) grantsOf(snap *configSnapshot, userID int64, groups []int64) []UserGrant {
+	relevant := append([]*store.Grant(nil), snap.userGrants[userID]...)
+	for _, g := range groups {
+		relevant = append(relevant, snap.groupGrants[g]...)
+	}
+	ug := userGrants(relevant, []int64{userID}, map[int64][]int64{userID: groups}, s.now().Unix())[userID]
 	if ug == nil {
 		ug = []UserGrant{}
 	}
-	return ug, nil
+	return ug
 }
 
 // grantsExpiredSince reports whether a grant ended in (since, now]: the desired state changes.
@@ -389,14 +397,17 @@ type cascadePlan struct {
 	problems  map[int64][]string          // by node id
 }
 
-// planCascades works out the cascade users, outbounds and rules. active are the active users
-// (id → UUID).
-func (s *Service) planCascades(ctx context.Context, q store.DBTX, active map[int64]string, groupsOf map[int64][]int64,
+// planCascades works out the cascade users, outbounds and rules.
+func (s *Service) planCascades(ctx context.Context, q store.DBTX, groupsOf map[int64][]int64,
 	inbounds map[int64]*store.NodeInbound, nodeOn map[int64]bool) (*cascadePlan, error) {
 	p := &cascadePlan{clients: map[int64][]xrayconf.Client{}, outbounds: map[int64][]any{}, rules: map[int64][]any{}, problems: map[int64][]string{}}
 	cascades, err := store.ListCascades(ctx, q)
 	if err != nil || len(cascades) == 0 {
 		return p, err
+	}
+	active, err := store.ActiveUUIDs(ctx, q)
+	if err != nil {
+		return nil, err
 	}
 	grants, err := store.ListGrants(ctx, q)
 	if err != nil {
@@ -436,12 +447,11 @@ func (s *Service) planCascades(ctx context.Context, q store.DBTX, active map[int
 }
 
 // extraHosts are a user's cascades and servers from other subscriptions, after the own ones.
-func (s *Service) extraHosts(ctx context.Context, u *store.User, own []Host, withExternal bool) ([]Host, error) {
-	grants, err := s.UserGrants(ctx, u.ID)
-	if err != nil || len(grants) == 0 {
-		return nil, err
+func (s *Service) extraHosts(snap *configSnapshot, u *store.User, groups []int64, own []Host, withExternal bool) []Host {
+	grants := s.grantsOf(snap, u.ID, groups)
+	if len(grants) == 0 {
+		return nil
 	}
-	q := s.st.DB
 	seen := map[string]bool{}
 	for _, h := range own {
 		seen[hostKey(h, u.UUID)] = true
@@ -459,38 +469,24 @@ func (s *Service) extraHosts(ctx context.Context, u *store.User, own []Host, wit
 		if !g.Active || g.Kind != store.GrantCascade {
 			continue
 		}
-		c, err := store.GetCascade(ctx, q, g.RefID)
-		if err != nil || !c.Enabled {
+		cs := snap.cascades[g.RefID]
+		if cs == nil || !cs.ok {
 			continue
 		}
-		entry, err := store.GetNodeInbound(ctx, q, c.EntryInboundID)
-		if err != nil || !entry.Enabled {
-			continue
-		}
-		if n, err := store.GetNode(ctx, q, entry.NodeID); err != nil || !n.Enabled {
-			continue
-		}
-		h, err := s.HostFor(ctx, entry)
-		if err != nil {
-			continue
-		}
-		h.Tag, h.Remark, h.UUID, h.Hidden = "cascade-"+strconv.FormatInt(c.ID, 10), s.CascadeRemark(ctx, q, c), CascadeUUID(u.UUID, c.ID), false
+		h := cs.entry
+		h.Tag, h.Remark, h.UUID, h.Hidden = "cascade-"+strconv.FormatInt(cs.c.ID, 10), cs.c.Remark, CascadeUUID(u.UUID, cs.c.ID), false
 		add(h)
 	}
 	for _, g := range grants {
 		if !withExternal || !g.Active || g.Kind != store.GrantExternal {
 			continue
 		}
-		e, err := store.GetExternalSub(ctx, q, g.RefID)
-		if err != nil || !e.Enabled {
-			continue
-		}
-		for _, h := range ParseLinks(e.Links) {
-			h.Tag = "external-" + strconv.FormatInt(e.ID, 10)
+		for _, h := range snap.external[g.RefID] {
+			h.Tag = "external-" + strconv.FormatInt(g.RefID, 10)
 			add(h)
 		}
 	}
-	return out, nil
+	return out
 }
 
 // hostKey identifies a server for dedup: the same server with the same secret is listed once.

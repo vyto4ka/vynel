@@ -446,6 +446,30 @@ func (s *Service) Users(ctx context.Context, f store.UserFilter) ([]*store.User,
 	return store.ListUsers(ctx, s.st.DB, f)
 }
 
+// CountUsers counts users matching a filter.
+func (s *Service) CountUsers(ctx context.Context, f store.UserFilter) (int, error) {
+	return store.CountUsers(ctx, s.st.DB, f)
+}
+
+// UsersGroups returns the groups of many users in one go.
+func (s *Service) UsersGroups(ctx context.Context, users []*store.User) (map[int64][]int64, error) {
+	out := map[int64][]int64{}
+	for i := 0; i < len(users); i += 500 {
+		ids := make([]int64, 0, 500)
+		for _, u := range users[i:min(i+500, len(users))] {
+			ids = append(ids, u.ID)
+		}
+		m, err := store.UsersGroups(ctx, s.st.DB, ids)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
 // UserGroupIDs lists a user's groups.
 func (s *Service) UserGroupIDs(ctx context.Context, id int64) ([]int64, error) {
 	return store.UserGroupIDs(ctx, s.st.DB, id)

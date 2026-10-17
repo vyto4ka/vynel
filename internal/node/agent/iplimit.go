@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os/exec"
 	"slices"
 	"sort"
@@ -47,6 +48,31 @@ func (a *Agent) onlineIPs(ctx context.Context) *nodev1.OnlineIPs {
 	return msg
 }
 
+// onlineLoop reads who is online every OnlineInterval, outside the agent lock (with many users
+// online it takes a while), and keeps the result for the panel, the stats and the firewall.
+func (a *Agent) onlineLoop(ctx context.Context) {
+	t := time.NewTicker(a.cfg.OnlineInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		msg := a.onlineIPs(ctx)
+		a.mu.Lock()
+		a.online, a.onlineAt = msg, time.Now()
+		if msg != nil {
+			var ips []string
+			for _, u := range msg.Users {
+				ips = append(ips, u.IpList...)
+			}
+			a.vpnIPs = ips
+		}
+		a.mu.Unlock()
+	}
+}
+
 // SetIPBlocks takes the panel's full list of blocked addresses and applies it.
 func (a *Agent) SetIPBlocks(ctx context.Context, blocks []*nodev1.IPBlock) {
 	a.mu.Lock()
@@ -82,26 +108,92 @@ func (a *Agent) blockedIPs() map[string]bool {
 
 // blockRules are the routing rules of the blocks: a user's emails ("<id>", "<id>.…") from the
 // listed addresses go to the blackhole.
-func blockRules(blocks []*nodev1.IPBlock) []any {
-	var rules []any
+//
+// Xray builds an address matcher per rule, and that is slow (about 15 ms each on a busy node):
+// a rule per user made a few hundred blocks take seconds and a thousand time out. So the blocks
+// go in one rule, every blocked user × every blocked address. That would also block a blocked
+// user on another user's blocked address, so a user who is online from such an address right
+// now (a shared NAT) gets an exact rule of its own instead.
+func blockRules(blocks []*nodev1.IPBlock, online *nodev1.OnlineIPs) []any {
+	blocked := map[string]map[string]bool{} // user id → its blocked addresses
+	all := map[string]bool{}
+	var ids []string
 	for _, b := range blocks {
 		if len(b.Ips) == 0 {
 			continue
 		}
 		id := strconv.FormatInt(b.UserId, 10)
-		rules = append(rules, map[string]any{
-			"ruleTag": "vynel-ipblock-" + id, "user": []string{"regexp:^" + id + `(\..*)?$`},
-			"source": b.Ips, "outboundTag": xrayconf.IPBlockTag,
-		})
+		if blocked[id] == nil {
+			blocked[id] = map[string]bool{}
+			ids = append(ids, id)
+		}
+		for _, ip := range b.Ips {
+			blocked[id][ip] = true
+			all[ip] = true
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	exact := map[string]bool{}
+	for _, u := range online.GetUsers() {
+		head, _, _ := strings.Cut(u.Email, ".")
+		if blocked[head] == nil {
+			continue
+		}
+		for _, ip := range u.IpList {
+			if all[ip] && !blocked[head][ip] && !blockedPrefix(blocked[head], ip) {
+				exact[head] = true
+			}
+		}
+	}
+	rule := func(tag string, users []string, ips map[string]bool) map[string]any {
+		src := make([]string, 0, len(ips))
+		for ip := range ips {
+			src = append(src, ip)
+		}
+		sort.Strings(src)
+		return map[string]any{"ruleTag": tag, "user": []string{"regexp:^(" + strings.Join(users, "|") + `)(\..*)?$`},
+			"source": src, "outboundTag": xrayconf.IPBlockTag}
+	}
+	var rules []any
+	var shared []string
+	sharedIPs := map[string]bool{}
+	for _, id := range ids {
+		if exact[id] {
+			rules = append(rules, rule("vynel-ipblock-"+id, []string{id}, blocked[id]))
+			continue
+		}
+		shared = append(shared, id)
+		for ip := range blocked[id] {
+			sharedIPs[ip] = true
+		}
+	}
+	if len(shared) > 0 {
+		rules = append(rules, rule("vynel-ipblock", shared, sharedIPs))
 	}
 	return rules
+}
+
+// blockedPrefix reports whether ip falls into one of the user's blocked IPv6 /64 networks.
+func blockedPrefix(nets map[string]bool, ip string) bool {
+	p := net.ParseIP(ip)
+	if p == nil || p.To4() != nil {
+		return false
+	}
+	for n := range nets {
+		if _, cidr, err := net.ParseCIDR(n); err == nil && cidr.Contains(p) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyBlocksLocked puts the block rules in front of the config's own routing rules in the
 // running Xray. Rules added through the API can only go last, behind the config's catch-all
 // rule, so the whole list is replaced: blocks first, then the config's rules as they are.
 func (a *Agent) applyBlocksLocked(ctx context.Context, st *state.State) error {
-	rules := blockRules(a.ipBlocks)
+	rules := blockRules(a.ipBlocks, a.online)
 	if len(rules) == 0 && !a.blocksApplied {
 		return nil // nothing blocked, nothing to undo
 	}
@@ -152,13 +244,23 @@ func (a *Agent) dropConnections(ctx context.Context, addrs []string) {
 	for _, p := range ports {
 		sport = append(sport, "sport = :"+strconv.Itoa(p))
 	}
-	for _, ip := range addrs {
-		args := []string{"-K", "-t", "-n", "dst", ip, "(", strings.Join(sport, " or "), ")"}
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// One ss per hundred addresses: a process per address took seconds for a few hundred.
+	for len(addrs) > 0 {
+		chunk := addrs[:min(100, len(addrs))]
+		addrs = addrs[len(chunk):]
+		args := []string{"-K", "-t", "-n", "("}
+		for i, ip := range chunk {
+			if i > 0 {
+				args = append(args, "or")
+			}
+			args = append(args, "dst", ip)
+		}
+		args = append(args, ")", "and", "(", strings.Join(sport, " or "), ")")
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		out, err := exec.CommandContext(cctx, "ss", args...).CombinedOutput()
 		cancel()
 		if err != nil {
-			a.log.Warn("cannot close connections of a blocked address", "addr", ip, "err", err, "out", strings.TrimSpace(string(out)))
+			a.log.Warn("cannot close connections of blocked addresses", "addrs", chunk, "err", err, "out", strings.TrimSpace(string(out)))
 		}
 	}
 }

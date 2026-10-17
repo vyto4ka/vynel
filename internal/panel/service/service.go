@@ -63,6 +63,8 @@ type Service struct {
 	ipOnce     sync.Once
 	ips        *IPTracker
 	grantCheck int64 // when Maintenance last looked for ended grants
+	cache      confCache
+	snapMu     sync.Mutex // one snapshot builder at a time
 }
 
 // New creates a service over a store.
@@ -120,6 +122,9 @@ func (s *Service) mutate(ctx context.Context, c change, fn func(q store.DBTX) er
 		}
 		return nil
 	})
+	if err == nil {
+		s.Invalidate()
+	}
 	if err == nil && s.OnChange != nil {
 		s.OnChange()
 	}
@@ -137,11 +142,14 @@ const (
 
 // Setting returns a setting or its default.
 func (s *Service) Setting(ctx context.Context, key, def string) (string, error) {
-	v, ok, err := store.GetSetting(ctx, s.st.DB, key)
-	if err != nil || !ok {
+	m, err := s.settingsMap(ctx)
+	if err != nil {
 		return def, err
 	}
-	return v, nil
+	if v, ok := m[key]; ok {
+		return v, nil
+	}
+	return def, nil
 }
 
 // SetSetting stores a setting.

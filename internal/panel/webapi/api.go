@@ -343,22 +343,37 @@ func (s *Server) audit(r *http.Request) (any, error) {
 
 // ---- users ----
 
+// users lists users. With ?limit= it answers a page: {"users": […], "total": N} (the panel asks
+// for pages: tens of thousands of users at once were seconds of work every 20 s).
 func (s *Server) users(r *http.Request) (any, error) {
 	ctx := r.Context()
 	q := r.URL.Query()
-	us, err := s.svc.Users(ctx, store.UserFilter{Status: q.Get("status"), Search: q.Get("search")})
+	f := store.UserFilter{Status: q.Get("status"), Search: q.Get("search")}
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit > 0 {
+		f.Limit = min(limit, 1000)
+		f.Offset, _ = strconv.Atoi(q.Get("offset"))
+	}
+	us, err := s.svc.Users(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := s.svc.UsersGroups(ctx, us)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]User, 0, len(us))
 	for _, u := range us {
-		g, err := s.svc.UserGroupIDs(ctx, u.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, userDTO(u, g))
+		out = append(out, userDTO(u, groups[u.ID]))
 	}
-	return out, nil
+	if limit <= 0 {
+		return out, nil
+	}
+	total, err := s.svc.CountUsers(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"users": out, "total": total}, nil
 }
 
 func (s *Server) createUser(r *http.Request) (any, error) {

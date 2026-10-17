@@ -28,23 +28,26 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 		if ts <= 0 {
 			ts = s.now().Unix()
 		}
-		touched := map[int64]bool{}
+		tw, err := store.NewTrafficWriter(ctx, q)
+		if err != nil {
+			return err
+		}
+		defer tw.Close()
+		touched := false
 		for _, u := range b.Users {
 			id := EmailUser(u.Email) // "<id>", or "<id>.c<n>" through a cascade
 			if id == 0 {
 				continue // not one of ours (a cascade's service user)
 			}
-			ok, err := store.AddUserTraffic(ctx, q, id, nodeID, ts, u.Up, u.Down)
+			ok, err := tw.Add(ctx, id, nodeID, ts, u.Up, u.Down)
 			if err != nil {
 				return err
 			}
-			if ok {
-				touched[id] = true
-			}
+			touched = touched || ok
 		}
 		for _, o := range b.Online {
 			if id := EmailUser(o.Email); id > 0 {
-				if err := store.MarkOnline(ctx, q, id, ts); err != nil {
+				if err := tw.Online(ctx, id, ts); err != nil {
 					return err
 				}
 			}
@@ -62,8 +65,15 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 				return err
 			}
 		}
+		// Traffic only adds up: the users it can change are the active ones now over their limit.
+		var over []int64
+		if touched {
+			if over, err = store.ActiveOverLimit(ctx, q); err != nil {
+				return err
+			}
+		}
 		now := s.now()
-		for id := range touched {
+		for _, id := range over {
 			u, err := store.GetUser(ctx, q, id)
 			if err != nil {
 				return err

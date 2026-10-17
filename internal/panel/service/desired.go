@@ -86,14 +86,6 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 
 	// Cascades: their users on entry inbounds, outbounds and rules on entry nodes, the entry
 	// nodes' own users on exit inbounds.
-	activeUsers, err := store.ListUsers(ctx, q, store.UserFilter{Status: store.StatusActive})
-	if err != nil {
-		return nil, err
-	}
-	active := make(map[int64]string, len(activeUsers))
-	for _, u := range activeUsers {
-		active[u.ID] = u.UUID
-	}
 	groupsOf := map[int64][]int64{}
 	for _, m := range members {
 		groupsOf[m.UserID] = append(groupsOf[m.UserID], m.GroupID)
@@ -106,7 +98,7 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 	for _, n := range nodes {
 		nodeOn[n.ID] = n.Enabled
 	}
-	casc, err := s.planCascades(ctx, q, active, groupsOf, byID, nodeOn)
+	casc, err := s.planCascades(ctx, q, groupsOf, byID, nodeOn)
 	if err != nil {
 		return nil, err
 	}
@@ -257,6 +249,7 @@ func hashState(ds *DesiredState) string {
 
 // EnsureDefaults creates the default base config, group and user template on a fresh database.
 func (s *Service) EnsureDefaults(ctx context.Context) error {
+	defer s.Invalidate()
 	return s.st.Tx(ctx, func(q store.DBTX) error {
 		if _, err := store.GetBaseConfig(ctx, q, nil); errors.Is(err, store.ErrNotFound) {
 			if err := store.UpsertBaseConfig(ctx, q, &store.BaseConfig{Name: "default", JSON: xrayconf.DefaultBaseJSON, IsDefault: true}); err != nil {

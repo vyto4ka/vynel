@@ -77,10 +77,17 @@ func AddEvent(ctx context.Context, q DBTX, typ string, entityID int64, payload a
 }
 
 // LastEventID returns the newest outbox id (0 when empty).
+//
+// Events that never change what nodes run (a device registered, an address over the limit) do
+// not count: every new phone would make the panel recompute every node.
 func LastEventID(ctx context.Context, q DBTX) (int64, error) {
-	var id sql.NullInt64
-	err := q.QueryRowContext(ctx, `SELECT max(id) FROM events_outbox`).Scan(&id)
-	return id.Int64, err
+	var id int64
+	err := q.QueryRowContext(ctx, `SELECT id FROM events_outbox WHERE type NOT LIKE 'device.%' AND type <> 'user.ip_limit'
+		ORDER BY id DESC LIMIT 1`).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
 }
 
 // ListEventsAfter returns events with id > after.
@@ -103,6 +110,24 @@ func ListEventsAfter(ctx context.Context, q DBTX, after int64, limit int) ([]Eve
 
 // ListSettings returns all stored settings.
 func ListSettings(ctx context.Context, q DBTX) (map[string]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT key, value FROM settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+// AllSettings returns every setting.
+func AllSettings(ctx context.Context, q DBTX) (map[string]string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT key, value FROM settings`)
 	if err != nil {
 		return nil, err

@@ -47,6 +47,102 @@ func AddUserTraffic(ctx context.Context, q DBTX, userID, nodeID, ts, up, down in
 	return true, nil
 }
 
+// TrafficWriter writes the traffic of many users in one transaction. Its statements are
+// prepared once: a node's batch has a row per active user, and parsing the same SQL for each
+// of tens of thousands of rows was most of the time.
+type TrafficWriter struct {
+	user, hourly, daily, nodeDaily, online *sql.Stmt
+}
+
+type preparer interface {
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+}
+
+// NewTrafficWriter prepares the statements on q (a transaction or the database).
+func NewTrafficWriter(ctx context.Context, q DBTX) (*TrafficWriter, error) {
+	p, ok := q.(preparer)
+	if !ok {
+		return nil, errors.New("traffic writer: cannot prepare statements")
+	}
+	w := &TrafficWriter{}
+	for _, s := range []struct {
+		dst **sql.Stmt
+		sql string
+	}{
+		{&w.user, `UPDATE users SET traffic_used_bytes = traffic_used_bytes + ?1, lifetime_used_bytes = lifetime_used_bytes + ?1 WHERE id=?2`},
+		{&w.hourly, `INSERT INTO user_traffic_hourly (user_id, hour, up, down) VALUES (?, ?, ?, ?)
+			ON CONFLICT (user_id, hour) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`},
+		{&w.daily, `INSERT INTO user_traffic_daily (user_id, day, up, down) VALUES (?, ?, ?, ?)
+			ON CONFLICT (user_id, day) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`},
+		{&w.nodeDaily, `INSERT INTO user_node_daily (user_id, node_id, day, up, down) VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT (user_id, node_id, day) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`},
+		{&w.online, `UPDATE users SET online_at=? WHERE id=?`},
+	} {
+		st, err := p.PrepareContext(ctx, s.sql)
+		if err != nil {
+			w.Close()
+			return nil, err
+		}
+		*s.dst = st
+	}
+	return w, nil
+}
+
+// Close releases the statements.
+func (w *TrafficWriter) Close() {
+	for _, s := range []*sql.Stmt{w.user, w.hourly, w.daily, w.nodeDaily, w.online} {
+		if s != nil {
+			_ = s.Close()
+		}
+	}
+}
+
+// Add is AddUserTraffic with the prepared statements.
+func (w *TrafficWriter) Add(ctx context.Context, userID, nodeID, ts, up, down int64) (bool, error) {
+	res, err := w.user.ExecContext(ctx, up+down, userID)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, nil
+	}
+	if _, err := w.hourly.ExecContext(ctx, userID, Hour(ts), up, down); err != nil {
+		return false, err
+	}
+	if _, err := w.daily.ExecContext(ctx, userID, Day(ts), up, down); err != nil {
+		return false, err
+	}
+	if _, err := w.nodeDaily.ExecContext(ctx, userID, nodeID, Day(ts), up, down); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Online is MarkOnline with the prepared statement.
+func (w *TrafficWriter) Online(ctx context.Context, userID, ts int64) error {
+	_, err := w.online.ExecContext(ctx, ts, userID)
+	return err
+}
+
+// ActiveOverLimit lists active users whose traffic reached their limit (they become limited).
+func ActiveOverLimit(ctx context.Context, q DBTX) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id FROM users WHERE status='active' AND traffic_limit_bytes IS NOT NULL
+		AND traffic_used_bytes >= traffic_limit_bytes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // AddNodeTraffic adds to a node's hourly traffic.
 func AddNodeTraffic(ctx context.Context, q DBTX, nodeID, ts, up, down int64) error {
 	_, err := q.ExecContext(ctx, `INSERT INTO node_traffic_hourly (node_id, hour, up, down) VALUES (?, ?, ?, ?)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	handler "github.com/xtls/xray-core/app/proxyman/command"
@@ -172,27 +173,44 @@ type OnlineUser struct {
 	IPList []string // the addresses themselves (they also let the firewall trust VPN users)
 }
 
+// onlineWorkers is how many address lists are asked for at once: Xray has no call for all of
+// them, and one call per online user in a row took ~0.2 ms each (seconds with many users).
+const onlineWorkers = 16
+
 // OnlineUsers lists users with live connections (needs policy statsUserOnline).
 func (a *API) OnlineUsers(ctx context.Context) ([]OnlineUser, error) {
 	resp, err := a.stats.GetAllOnlineUsers(ctx, &stats.GetAllOnlineUsersRequest{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]OnlineUser, 0, len(resp.Users))
-	for _, name := range resp.Users {
-		email := name
-		if parts := strings.Split(name, ">>>"); len(parts) >= 2 && parts[0] == "user" {
-			email = parts[1]
-		}
-		ou := OnlineUser{Email: email}
-		if ips, err := a.stats.GetStatsOnlineIpList(ctx, &stats.GetStatsRequest{Name: "user>>>" + email + ">>>online"}); err == nil {
-			ou.IPs = len(ips.Ips)
-			for ip := range ips.Ips {
-				ou.IPList = append(ou.IPList, ip)
+	out := make([]OnlineUser, len(resp.Users))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < min(onlineWorkers, len(out)); w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				email := resp.Users[i]
+				if parts := strings.Split(email, ">>>"); len(parts) >= 2 && parts[0] == "user" {
+					email = parts[1]
+				}
+				ou := OnlineUser{Email: email}
+				if ips, err := a.stats.GetStatsOnlineIpList(ctx, &stats.GetStatsRequest{Name: "user>>>" + email + ">>>online"}); err == nil {
+					ou.IPs = len(ips.Ips)
+					for ip := range ips.Ips {
+						ou.IPList = append(ou.IPList, ip)
+					}
+				}
+				out[i] = ou
 			}
-		}
-		out = append(out, ou)
+		}()
 	}
+	for i := range out {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
 	return out, nil
 }
 

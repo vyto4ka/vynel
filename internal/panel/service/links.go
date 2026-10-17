@@ -71,59 +71,29 @@ type Host struct {
 
 // UserInbounds returns the enabled node inbounds (on enabled nodes) a user can use.
 func (s *Service) UserInbounds(ctx context.Context, userID int64) ([]*store.NodeInbound, error) {
-	q := s.st.DB
-	groups, err := store.UserGroupIDs(ctx, q, userID)
+	groups, err := store.UserGroupIDs(ctx, s.st.DB, userID)
 	if err != nil {
 		return nil, err
 	}
-	inbounds, err := store.ListNodeInbounds(ctx, q, 0, 0)
+	snap, err := s.snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rules, err := store.ListAccessRules(ctx, q, 0)
-	if err != nil {
-		return nil, err
-	}
-	nodes, err := store.ListNodes(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	enabled := map[int64]bool{}
-	for _, n := range nodes {
-		enabled[n.ID] = n.Enabled
-	}
-	access := ResolveAccess(rules, inbounds)
-	var out []*store.NodeInbound
-	for _, ni := range inbounds {
-		if !ni.Enabled || !enabled[ni.NodeID] {
-			continue
-		}
-		for _, g := range groups {
-			if access[g][ni.ID] {
-				out = append(out, ni)
-				break
-			}
-		}
-	}
-	return out, nil
+	return snap.userInbounds(groups), nil
 }
 
 // UserHosts builds the connection points of a user, ordered by node and inbound.
 // Inbounds that fail to render are skipped (the panel log and `node list` show why).
 func (s *Service) UserHosts(ctx context.Context, userID int64) ([]Host, error) {
-	inbounds, err := s.UserInbounds(ctx, userID)
+	groups, err := store.UserGroupIDs(ctx, s.st.DB, userID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Host, 0, len(inbounds))
-	for _, ni := range inbounds {
-		h, err := s.HostFor(ctx, ni)
-		if err != nil {
-			continue
-		}
-		out = append(out, h)
+	snap, err := s.snapshot(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return snap.userHosts(groups), nil
 }
 
 // HostFor builds the connection point of one node inbound.
@@ -303,6 +273,9 @@ func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) 
 		return DeviceVerdict{NoHWID: true, Limit: limit,
 			Reason: "Приложение не передаёт HWID: включите его в настройках профиля (Karing: X-HWID) или используйте Happ, v2RayTun, KeqDroid"}, nil
 	}
+	if count, ok := s.knownDevice(u.ID, d.HWID); ok {
+		return DeviceVerdict{OK: true, Limit: limit, Count: count}, nil // seen a moment ago: nothing to write
+	}
 	v := DeviceVerdict{Limit: limit}
 	err := s.st.Tx(ctx, func(q store.DBTX) error {
 		now := s.now().Unix()
@@ -329,6 +302,9 @@ func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) 
 		v.OK, v.Count = true, v.Count+1
 		return store.AddEvent(ctx, q, "device.added", u.ID, map[string]string{"hwid": d.HWID, "model": d.Model})
 	})
+	if err == nil && v.OK {
+		s.rememberDevice(u.ID, d.HWID, v.Count)
+	}
 	return v, err
 }
 
@@ -344,8 +320,14 @@ func (s *Service) DeleteDevice(ctx context.Context, actor Actor, userID, deviceI
 }
 
 // TouchSubscription records a subscription fetch.
+// A fetch less than a minute after the last recorded one is not written again: apps refresh
+// often, and the panel only shows "last updated".
 func (s *Service) TouchSubscription(ctx context.Context, userID int64, ua string) error {
-	return store.TouchSubscription(ctx, s.st.DB, userID, s.now().Unix(), ua)
+	now := s.now()
+	if s.subscriptionTouched(userID, now) {
+		return nil
+	}
+	return store.TouchSubscription(ctx, s.st.DB, userID, now.Unix(), ua)
 }
 
 // UserBySubToken loads a user by subscription token.

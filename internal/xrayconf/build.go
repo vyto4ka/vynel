@@ -132,6 +132,12 @@ func BuildConfig(nc NodeConfig) (map[string]any, error) {
 		cfg["outbounds"] = append(obs, map[string]any{"tag": IPBlockTag, "protocol": "blackhole"})
 	}
 
+	// Without a routing section Xray runs a stub router that refuses rules added through the API
+	// (the blocks of addresses over the limit): there is always one.
+	if _, ok := cfg["routing"].(map[string]any); !ok {
+		cfg["routing"] = map[string]any{"rules": []any{}}
+	}
+
 	cfg["api"] = map[string]any{
 		"tag":      "api",
 		"listen":   nc.APIAddr,

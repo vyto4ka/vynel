@@ -123,6 +123,8 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			if err != nil || id == lastEvent {
 				continue
 			}
+			// Possibly a change made by another process (the CLI): drop the cached configuration.
+			r.svc.Invalidate()
 		case <-ipTick.C:
 			if blocks, changed := r.svc.IPs().Evaluate(); changed {
 				r.setBlocks(blocks)

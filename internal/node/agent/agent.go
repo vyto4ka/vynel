@@ -103,6 +103,10 @@ type Agent struct {
 	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
 	nginxCfg string   // the config nginx runs now; only one of the two web servers runs
 	vpnIPs   []string // addresses of connected VPN users, trusted by the firewall
+	// online is the last reading of who is connected from where (onlineLoop): the panel's
+	// limit of addresses and the stats batches both use it, so Xray is asked once.
+	online   *nodev1.OnlineIPs
+	onlineAt time.Time
 	// ipBlocks are the panel's addresses over users' limits; blocksApplied: the running Xray
 	// has block rules in front of its own.
 	ipBlocks      []*nodev1.IPBlock
@@ -227,6 +231,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	a.mu.Unlock()
 	go a.collectLoop(ctx)
+	go a.onlineLoop(ctx)
 	go a.certLoop(ctx)
 	if a.cfg.Firewall != nil {
 		go a.cfg.Firewall.Loop(ctx, 15*time.Second, a.FirewallPorts)
@@ -349,7 +354,9 @@ func (a *Agent) session(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-onlineTick.C:
-			msg := a.onlineIPs(ctx)
+			a.mu.Lock()
+			msg := a.online
+			a.mu.Unlock()
 			if msg == nil || (lastOnline != nil && proto.Equal(msg, lastOnline) && time.Since(lastOnlineAt) < 30*time.Second) {
 				continue
 			}
@@ -872,17 +879,11 @@ func (a *Agent) collectLocked(ctx context.Context) {
 		if b.NodeUp, b.NodeDown, err = a.api.InboundTrafficDeltas(cctx); err != nil {
 			a.log.Warn("cannot read inbound stats", "err", err)
 		}
-		online, err := a.api.OnlineUsers(cctx)
-		if err != nil {
-			a.log.Debug("cannot read online users", "err", err)
-		}
-		var ips []string
-		for _, o := range online {
-			b.Online = append(b.Online, &nodev1.OnlineUser{Email: o.Email, Ips: int32(o.IPs)})
-			ips = append(ips, o.IPList...)
-		}
-		if err == nil {
-			a.vpnIPs = ips
+		// Who is online comes from onlineLoop's last reading (not asked again under the lock).
+		if a.online != nil && time.Since(a.onlineAt) < 3*a.cfg.OnlineInterval+5*time.Second {
+			for _, o := range a.online.Users {
+				b.Online = append(b.Online, &nodev1.OnlineUser{Email: o.Email, Ips: o.Ips})
+			}
 		}
 	}
 	if err := a.st.Enqueue(b); err != nil {

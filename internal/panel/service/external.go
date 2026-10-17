@@ -51,6 +51,7 @@ func (s *Service) RefreshExternalSub(ctx context.Context, id int64) error {
 	if err := store.SetExternalFetch(ctx, s.st.DB, id, links, msg); err != nil {
 		return err
 	}
+	s.Invalidate()
 	if s.OnChange != nil {
 		s.OnChange()
 	}
@@ -291,13 +292,14 @@ func parseLink(l string) (Host, bool) {
 // SubscriptionHosts is everything a user's subscription lists: the own servers, then cascades
 // and servers from merged subscriptions (withExternal), each server once.
 func (s *Service) SubscriptionHosts(ctx context.Context, u *store.User, withExternal bool) ([]Host, error) {
-	own, err := s.UserHosts(ctx, u.ID)
+	groups, err := store.UserGroupIDs(ctx, s.st.DB, u.ID)
 	if err != nil {
 		return nil, err
 	}
-	extra, err := s.extraHosts(ctx, u, own, withExternal)
+	snap, err := s.snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return append(own, extra...), nil
+	own := snap.userHosts(groups)
+	return append(own, s.extraHosts(snap, u, groups, own, withExternal)...), nil
 }
