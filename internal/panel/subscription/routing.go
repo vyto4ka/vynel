@@ -12,11 +12,12 @@ import (
 // punycode, so .рф is xn--p1ai.
 var ruDomains = []string{"geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai"}
 
-// split sorts list entries into domain and IP matchers (Xray syntax).
+// split sorts list entries into domain and IP matchers (Xray syntax); apps are left out.
 func split(entries []string) (domains, ips []string) {
 	for _, e := range entries {
 		r := service.ParseRuleEntry(e)
 		switch r.Kind {
+		case "process":
 		case "ip", "geoip":
 			ips = append(ips, xrayEntry(r))
 		default:
@@ -24,6 +25,17 @@ func split(entries []string) (domains, ips []string) {
 		}
 	}
 	return domains, ips
+}
+
+// processes are the apps of a list (process: entries).
+func processes(entries []string) []string {
+	var out []string
+	for _, e := range entries {
+		if r := service.ParseRuleEntry(e); r.Kind == "process" {
+			out = append(out, r.Value)
+		}
+	}
+	return out
 }
 
 func xrayEntry(r service.RuleEntry) string {
@@ -88,30 +100,34 @@ func xrayRules(r service.ClientRouting) []any {
 	if len(dnsIPs) > 0 {
 		rules = append(rules, field("direct", "ip", dnsIPs, "port", "53"))
 	}
-	add := func(out string, domains, ips []string) {
+	add := func(out string, domains, ips []string, apps ...string) {
 		if len(domains) > 0 {
 			rules = append(rules, field(out, "domain", domains))
 		}
 		if len(ips) > 0 {
 			rules = append(rules, field(out, "ip", ips))
 		}
+		if len(apps) > 0 {
+			// Xray 26.1.23 and newer; an older core refuses the whole config.
+			rules = append(rules, field(out, "process", apps))
+		}
 	}
 	bd, bi := split(r.Block)
 	if r.BlockAds {
 		bd = append([]string{"geosite:category-ads-all"}, bd...)
 	}
-	add("block", bd, bi)
+	add("block", bd, bi, processes(r.Block)...)
 	if r.Torrent == "direct" || r.Torrent == "block" {
 		rules = append(rules, field(r.Torrent, "protocol", []string{"bittorrent"}))
 	}
 	pd, pi := split(r.Proxy)
-	add("proxy", pd, pi)
+	add("proxy", pd, pi, processes(r.Proxy)...)
 	rules = append(rules, field("direct", "ip", []string{"geoip:private"}))
 	if r.RUDirect {
 		add("direct", ruDomains, []string{"geoip:ru"})
 	}
 	dd, di := split(r.Direct)
-	add("direct", dd, di)
+	add("direct", dd, di, processes(r.Direct)...)
 	return append(rules, field("proxy", "network", "tcp,udp"))
 }
 
@@ -196,6 +212,8 @@ func mihomoEntry(e string) string {
 		return "GEOSITE," + r.Value
 	case "geoip":
 		return "GEOIP," + r.Value
+	case "process":
+		return "PROCESS-NAME," + r.Value
 	}
 	cidr := r.Value
 	if !strings.Contains(cidr, "/") {
@@ -343,6 +361,8 @@ func (s *singRoute) match(entries []string) []map[string]any {
 			put("domain_regex", r.Value)
 		case "geosite", "geoip":
 			put("rule_set", s.set(r.Kind, r.Value))
+		case "process":
+			put("process_name", r.Value)
 		case "ip":
 			v := r.Value
 			if !strings.Contains(v, "/") {

@@ -26,7 +26,8 @@ type ClientRouting struct {
 	Torrent  string `json:"torrent"`
 	BlockAds bool   `json:"blockAds"` // geosite:category-ads-all
 	// Own lists, in Xray syntax: domain:, full:, keyword:, regexp:, geosite:, geoip:, an IP or a
-	// CIDR; a bare name means the domain and its subdomains.
+	// CIDR; a bare name means the domain and its subdomains. process: is an app by its file
+	// name (FortniteClient-Win64-Shipping.exe) or Android package (com.example.app).
 	Direct []string `json:"direct"`
 	Proxy  []string `json:"proxy"` // through the tunnel even when RU or the direct list would match
 	Block  []string `json:"block"`
@@ -70,6 +71,9 @@ func (s *Service) SetClientRouting(ctx context.Context, actor Actor, r *ClientRo
 }
 
 var ruleWordRe = regexp.MustCompile(`^[a-z0-9!@._-]+$`)
+
+// processRe is an app's file or package name: no paths, nothing that breaks a Mihomo rule.
+var processRe = regexp.MustCompile(`^[\p{L}\p{N}_.+()-][\p{L}\p{N}_.+() -]{0,127}$`)
 
 // CheckClientRouting validates and tidies a routing (empty lines dropped).
 func CheckClientRouting(r *ClientRouting) error {
@@ -131,7 +135,7 @@ func cleanDNS(in []string, direct bool) ([]string, error) {
 
 // RuleEntry is one parsed list entry.
 type RuleEntry struct {
-	Kind  string // domain, full, keyword, regexp, geosite, geoip, ip
+	Kind  string // domain, full, keyword, regexp, geosite, geoip, ip, process
 	Value string
 }
 
@@ -145,7 +149,7 @@ func ParseRuleEntry(e string) RuleEntry {
 	}
 	if k, v, ok := strings.Cut(e, ":"); ok {
 		switch k {
-		case "domain", "full", "keyword", "regexp", "geosite", "geoip":
+		case "domain", "full", "keyword", "regexp", "geosite", "geoip", "process":
 			return RuleEntry{k, v}
 		}
 	}
@@ -162,9 +166,14 @@ func checkRuleEntry(e string) error {
 			return invalid("%q: not a valid regexp: %v", e, err)
 		}
 		return nil
+	case "process":
+		if !processRe.MatchString(strings.TrimSpace(r.Value)) {
+			return invalid("%q: an app's file name (game.exe) or Android package (com.example.app), no path", e)
+		}
+		return nil
 	}
 	if r.Value == "" || !ruleWordRe.MatchString(strings.ToLower(r.Value)) {
-		return invalid("%q: use domain:, full:, keyword:, regexp:, geosite:, geoip:, an IP or a CIDR", e)
+		return invalid("%q: use domain:, full:, keyword:, regexp:, geosite:, geoip:, process:, an IP or a CIDR", e)
 	}
 	return nil
 }

@@ -220,9 +220,25 @@ vynel admin template add Год --months 12 --group Основная --default  
 | **DNS через туннель** | DoH `1.1.1.1`, `8.8.8.8` | Чем разрешать всё остальное; запросы идут через сервер |
 | **Торренты** | напрямую | Напрямую, блок или через туннель (Mihomo торренты не распознаёт) |
 | **Реклама** | выкл. | `geosite:category-ads-all` в блок |
-| **Свои списки** | пусто | «Всегда напрямую», «Всегда через туннель» (важнее RU), «Блокировать»: `domain:`, `full:`, `keyword:`, `regexp:`, `geosite:`, `geoip:`, IP или подсеть |
+| **Свои списки** | пусто | «Всегда напрямую», «Всегда через туннель» (важнее RU), «Блокировать»: `domain:`, `full:`, `keyword:`, `regexp:`, `geosite:`, `geoip:`, `process:`, IP или подсеть |
 
 Локальные адреса (`geoip:private`) всегда идут напрямую. Последнее правило отправляет всё остальное в туннель.
+
+**Приложения целиком (`process:`).** Запись `process:имя` направляет весь трафик приложения, в том числе соединения без имени сайта: например, матчи онлайн-игр идут прямо на IP серверов, и правила по доменам их не ловят. Имя — файл программы на ПК (`process:FortniteClient-Win64-Shipping.exe`) или пакет на Android (`process:com.example.app`), без пути; регистр как в диспетчере задач. В подписке это `PROCESS-NAME` в Mihomo, `process_name` в sing-box и `process` в Xray JSON. Приложение должно работать в режиме TUN (системный прокси видит не все программы). Xray понимает `process` с версии 26.1.23: более старое ядро не примет конфиг целиком, поэтому проверьте версию ядра в KeqDroid. В ссылках (base64) маршрутов нет.
+
+Пример: Epic Games и Fortnite напрямую, на ПК.
+```
+geosite:epicgames
+process:FortniteClient-Win64-Shipping.exe
+process:FortniteClient-Win64-Shipping_EAC.exe
+process:FortniteClient-Win64-Shipping_BE.exe
+process:FortniteLauncher.exe
+process:EasyAntiCheat_EOS.exe
+process:EpicGamesLauncher.exe
+process:EpicWebHelper.exe
+process:UnrealCEFSubProcess.exe
+process:EOSOverlayRenderer-Win64-Shipping.exe
+```
 
 **Кастомный профиль клиента.** У профиля («Профили» → «Изменить» → вкладка «Клиент») можно включить свой клиентский конфиг для его серверов:
 - **Настройки** — те же поля, что во вкладке «Маршруты», но только для этого профиля;

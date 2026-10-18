@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xray/xraytest"
 )
 
 func rulesOf(t *testing.T, cfg map[string]any) []map[string]any {
@@ -194,6 +196,9 @@ func TestCheckClientRouting(t *testing.T) {
 		{DNSDirect: []string{"dns.example"}},
 		{Direct: []string{"regexp:("}},
 		{Block: []string{"geosite:"}},
+		{Direct: []string{`process:C:\\Games\\game.exe`}},
+		{Direct: []string{"process:a,DIRECT"}},
+		{Direct: []string{"process:"}},
 	} {
 		if err := service.CheckClientRouting(&bad); err == nil {
 			t.Fatalf("accepted %+v", bad)
@@ -234,7 +239,8 @@ func TestKeqDroidRuleMigration(t *testing.T) {
 func TestRoutingAcceptedByApps(t *testing.T) {
 	e := newEnv(t)
 	r := service.DefaultClientRouting()
-	r.BlockAds, r.Direct, r.Proxy, r.Block = true, []string{"geoip:by", "full:a.example.com", "keyword:yandex", "10.1.0.0/16"},
+	r.BlockAds, r.Direct, r.Proxy, r.Block = true, []string{"geoip:by", "full:a.example.com", "keyword:yandex", "10.1.0.0/16",
+		"process:FortniteClient-Win64-Shipping.exe", "process:com.epicgames.fortnite"},
 		[]string{"geosite:telegram", "regexp:^x\\.example\\.com$"}, []string{"1.2.3.4"}
 	if err := e.svc.SetClientRouting(e.ctx, actor, &r); err != nil {
 		t.Fatal(err)
@@ -251,6 +257,72 @@ func TestRoutingAcceptedByApps(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(dir, "config.yaml"), e.get(e.path(), "clash-verge/v2.0 mihomo", "hw-1").Body.Bytes(), 0o600)
 		if out, err := exec.Command(bin, "-t", "-d", dir).CombinedOutput(); err != nil {
 			t.Fatalf("mihomo -t: %v\n%s", err, out)
+		}
+	}
+}
+
+// Apps by name (process:): matches games and other traffic without a site name in every format
+// with routing, and never leaks into the DNS split or the domain lists.
+func TestProcessEntries(t *testing.T) {
+	e := newEnv(t)
+	r := service.DefaultClientRouting()
+	r.Direct = []string{"geosite:epicgames", "process:FortniteClient-Win64-Shipping.exe", "process:Epic Games Launcher.exe"}
+	r.Block = []string{"process:spy.exe"}
+	if err := e.svc.SetClientRouting(e.ctx, actor, &r); err != nil {
+		t.Fatal(err)
+	}
+
+	var doc struct {
+		Rules []string       `yaml:"rules"`
+		DNS   map[string]any `yaml:"dns"`
+	}
+	if err := yaml.Unmarshal(e.get(e.path(), "FlClashX/0.9 clash-verge", "hw-1").Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"PROCESS-NAME,FortniteClient-Win64-Shipping.exe,DIRECT", "PROCESS-NAME,Epic Games Launcher.exe,DIRECT",
+		"PROCESS-NAME,spy.exe,REJECT", "GEOSITE,epicgames,DIRECT"} {
+		if !slices.Contains(doc.Rules, want) {
+			t.Fatalf("mihomo rules lack %s: %v", want, doc.Rules)
+		}
+	}
+	policy, _ := doc.DNS["nameserver-policy"].(map[string]any)
+	for k := range policy {
+		if strings.Contains(k, "process") || strings.Contains(k, ".exe") {
+			t.Fatalf("an app in the mihomo dns policy: %v", policy)
+		}
+	}
+	if policy["geosite:epicgames"] == nil {
+		t.Fatalf("mihomo dns policy %v", policy)
+	}
+
+	var sb map[string]any
+	if err := json.Unmarshal(e.get(e.path(), "SFA/1.12.0 (sing-box 1.12.0)", "hw-1").Body.Bytes(), &sb); err != nil {
+		t.Fatal(err)
+	}
+	route, _ := json.Marshal(sb["route"])
+	dns, _ := json.Marshal(sb["dns"])
+	if !strings.Contains(string(route), `{"outbound":"direct","process_name":["FortniteClient-Win64-Shipping.exe","Epic Games Launcher.exe"]}`) ||
+		!strings.Contains(string(route), `{"action":"reject","process_name":["spy.exe"]}`) || strings.Contains(string(dns), "process") {
+		t.Fatalf("sing-box route %s\ndns %s", route, dns)
+	}
+
+	var configs []map[string]any
+	if err := json.Unmarshal(e.get(e.path()+"/json", "x", "hw-1").Body.Bytes(), &configs); err != nil {
+		t.Fatal(err)
+	}
+	rules, _ := json.Marshal(rulesOf(t, configs[0]))
+	xdns, _ := json.Marshal(configs[0]["dns"])
+	if !strings.Contains(string(rules), `{"outboundTag":"direct","process":["FortniteClient-Win64-Shipping.exe","Epic Games Launcher.exe"],"type":"field"}`) ||
+		!strings.Contains(string(rules), `{"outboundTag":"block","process":["spy.exe"],"type":"field"}`) ||
+		strings.Contains(string(xdns), "process") || strings.Contains(string(rules), `"process:`) {
+		t.Fatalf("xray rules %s\ndns %s", rules, xdns)
+	}
+	if os.Getenv("XRAY_BIN") != "" {
+		for _, c := range configs {
+			raw, _ := json.Marshal(c)
+			if err := xraytest.Binary(t).Test(context.Background(), raw); err != nil {
+				t.Fatalf("xray rejects process rules: %v", err)
+			}
 		}
 	}
 }

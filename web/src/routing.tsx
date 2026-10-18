@@ -56,7 +56,8 @@ export function RoutingForm({ r, set }: { r: ClientRouting; set: (r: ClientRouti
       <div className="small text-2">
         Списки — по одной записи в строке, как в Xray: <span className="mono">domain:</span> (домен с поддоменами, можно без префикса), <span className="mono">full:</span>,{' '}
         <span className="mono">keyword:</span>, <span className="mono">regexp:</span>, <span className="mono">geosite:</span>, <span className="mono">geoip:</span>, IP или подсеть.
-        Кириллические домены — в punycode (.рф → xn--p1ai).
+        Кириллические домены — в punycode (.рф → xn--p1ai). Приложение целиком — <span className="mono">process:</span> и имя файла
+        (<span className="mono">process:FortniteClient-Win64-Shipping.exe</span>) или пакета Android: так идёт и трафик без имени сайта, например матчи игр.
       </div>
     </>
   )
