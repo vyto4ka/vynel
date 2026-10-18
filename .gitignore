@@ -1,0 +1,11 @@
+/bin/
+/dist/
+/.cache/
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+coverage.out
+web/tsconfig.tsbuildinfo

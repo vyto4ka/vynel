@@ -1,0 +1,319 @@
+package service
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"strconv"
+
+	"github.com/vyto4ka/vynel/internal/caddyconf"
+	"github.com/vyto4ka/vynel/internal/nginxconf"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
+)
+
+// DefaultXrayAPIPort is the Xray API port on nodes (127.0.0.1 only).
+const DefaultXrayAPIPort = 10085
+
+// DesiredInbound describes one inbound in the desired state.
+type DesiredInbound struct {
+	Tag      string `json:"tag"`
+	Protocol string `json:"protocol"`
+	Flow     string `json:"flow,omitempty"`
+}
+
+// DesiredState is what a node should run (docs/ARCHITECTURE.md §6.2 "desired state").
+// Config holds the structure without clients; users are listed separately so that user
+// changes become hot API operations while structural changes restart Xray.
+type DesiredState struct {
+	NodeID   int64
+	Config   []byte
+	Caddy    []byte // Caddy JSON config for agents without nginx; nil = Caddy not needed
+	Nginx    string // nginx config for agents with the "nginx" capability; "" = no web server
+	Inbounds []DesiredInbound
+	Users    map[string][]xrayconf.Client // by inbound tag, sorted by email
+	Hash     string
+	Problems []string // inbounds skipped because they failed to render
+}
+
+// UserEmail is the stable Xray "email" of a user: its id. Stats are keyed by it.
+func UserEmail(userID int64) string { return strconv.FormatInt(userID, 10) }
+
+// DesiredStates computes the desired state of every node in one pass.
+func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, error) {
+	if err := s.syncTemplates(ctx); err != nil {
+		return nil, err
+	}
+	q := s.st.DB
+	nodes, err := store.ListNodes(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	inbounds, err := store.ListNodeInbounds(ctx, q, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	rules, err := store.ListAccessRules(ctx, q, 0)
+	if err != nil {
+		return nil, err
+	}
+	members, err := store.ListActiveMembers(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	apiPort, err := s.Setting(ctx, SettingXrayAPIPort, strconv.Itoa(DefaultXrayAPIPort))
+	if err != nil {
+		return nil, err
+	}
+
+	access := ResolveAccess(rules, inbounds)
+	// inbound id -> set of users (dedup when a user is in several groups granting the same inbound)
+	usersByInbound := map[int64]map[int64]string{}
+	for _, m := range members {
+		for niID := range access[m.GroupID] {
+			set := usersByInbound[niID]
+			if set == nil {
+				set = map[int64]string{}
+				usersByInbound[niID] = set
+			}
+			set[m.UserID] = m.UUID
+		}
+	}
+
+	// Cascades: their users on entry inbounds, outbounds and rules on entry nodes, the entry
+	// nodes' own users on exit inbounds.
+	groupsOf := map[int64][]int64{}
+	for _, m := range members {
+		groupsOf[m.UserID] = append(groupsOf[m.UserID], m.GroupID)
+	}
+	byID := make(map[int64]*store.NodeInbound, len(inbounds))
+	for _, ni := range inbounds {
+		byID[ni.ID] = ni
+	}
+	nodeOn := make(map[int64]bool, len(nodes))
+	for _, n := range nodes {
+		nodeOn[n.ID] = n.Enabled
+	}
+	casc, err := s.planCascades(ctx, q, groupsOf, byID, nodeOn)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[int64]*DesiredState, len(nodes))
+	for _, n := range nodes {
+		ds := &DesiredState{NodeID: n.ID, Users: map[string][]xrayconf.Client{}}
+		// Per-node override exists for several nodes sharing one host (tests, unusual setups).
+		nodePort, err := s.Setting(ctx, SettingXrayAPIPort+"."+n.Code, apiPort)
+		if err != nil {
+			return nil, err
+		}
+		apiAddr := "127.0.0.1:" + nodePort
+		base, err := store.GetBaseConfig(ctx, q, n.BaseConfigID)
+		if errors.Is(err, store.ErrNotFound) {
+			base = &store.BaseConfig{JSON: xrayconf.DefaultBaseJSON}
+		} else if err != nil {
+			return nil, err
+		}
+		baseMap, err := xrayconf.ParseBase(base.JSON)
+		if err != nil {
+			return nil, fmt.Errorf("node %s: %w", n.Code, err)
+		}
+		logLevel, err := s.nodeSetting(ctx, SettingXrayLog, n.Code, DefaultXrayLog)
+		if err != nil {
+			return nil, err
+		}
+		baseMap["log"] = XrayLog(logLevel)
+		var rendered []*xrayconf.RenderedInbound
+		if n.Enabled {
+			for _, ni := range inbounds {
+				if ni.NodeID != n.ID || !ni.Enabled {
+					continue
+				}
+				r, err := s.renderNodeInbound(ctx, q, ni)
+				if err != nil {
+					ds.Problems = append(ds.Problems, fmt.Sprintf("%s: %v", ni.Tag, err))
+					continue
+				}
+				rendered = append(rendered, r)
+				ds.Inbounds = append(ds.Inbounds, DesiredInbound{Tag: r.Tag, Protocol: r.Protocol, Flow: r.Flow})
+				clients := make([]xrayconf.Client, 0, len(usersByInbound[ni.ID])+len(casc.clients[ni.ID]))
+				for uid, uuid := range usersByInbound[ni.ID] {
+					clients = append(clients, xrayconf.Client{Email: UserEmail(uid), ID: uuid})
+				}
+				clients = append(clients, casc.clients[ni.ID]...)
+				sort.Slice(clients, func(i, j int) bool { return clients[i].Email < clients[j].Email })
+				ds.Users[r.Tag] = clients
+			}
+		}
+		// The web server first: it changes Reality inbounds that front it or sit behind its SNI
+		// router. Agents that can run nginx get nginx; older ones keep getting Caddy.
+		var caddySpec caddyconf.Spec
+		var nginxSpec nginxconf.Spec
+		var problems []string
+		useNginx := n.Can(CapNginx)
+		if useNginx {
+			nginxSpec, problems, err = s.nginxSpec(ctx, n, rendered)
+		} else {
+			caddySpec, problems, err = s.caddySpec(ctx, n, rendered)
+		}
+		if err != nil {
+			return nil, err
+		}
+		ds.Problems = append(ds.Problems, casc.problems[n.ID]...)
+		cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: baseMap, Inbounds: rendered, APIAddr: apiAddr,
+			Outbounds: casc.outbounds[n.ID], FrontRules: casc.rules[n.ID]})
+		if err != nil {
+			// A structural conflict (e.g. two inbounds on one port) blocks the whole node config.
+			ds.Problems = append(ds.Problems, err.Error())
+			cfg, err = xrayconf.BuildConfig(xrayconf.NodeConfig{Base: baseMap, APIAddr: apiAddr})
+			if err != nil {
+				return nil, err
+			}
+			ds.Inbounds, ds.Users = nil, map[string][]xrayconf.Client{}
+		}
+		if ds.Config, err = json.Marshal(cfg); err != nil {
+			return nil, err
+		}
+		ds.Problems = append(ds.Problems, problems...)
+		if useNginx {
+			if ds.Nginx, err = nginxconf.Build(nginxSpec); err != nil {
+				ds.Problems = append(ds.Problems, "nginx: "+err.Error())
+				ds.Nginx = ""
+			}
+		} else if ds.Caddy, err = caddyconf.Build(caddySpec); err != nil {
+			ds.Problems = append(ds.Problems, "caddy: "+err.Error())
+			ds.Caddy = nil
+		}
+		ds.Hash = hashState(ds)
+		out[n.ID] = ds
+	}
+	return out, nil
+}
+
+// Xray log on nodes: the agent passes Xray's output to the journal (journalctl -u vynel-node).
+const (
+	SettingXrayLog = "node.xray_log" // none | warning | info | debug; per node: node.xray_log.CODE
+	DefaultXrayLog = "warning"
+)
+
+// XrayLog is the "log" section for a level. Only debug adds the access log (one line per
+// connection with the user's email): it is for troubleshooting, not for everyday use.
+func XrayLog(level string) map[string]any {
+	switch level {
+	case "none", "warning", "info":
+		return map[string]any{"loglevel": level, "access": "none", "dnsLog": false}
+	case "debug":
+		return map[string]any{"loglevel": "debug", "access": "", "dnsLog": false}
+	}
+	return map[string]any{"loglevel": DefaultXrayLog, "access": "none", "dnsLog": false}
+}
+
+// DesiredState computes one node's desired state.
+func (s *Service) DesiredState(ctx context.Context, nodeID int64) (*DesiredState, error) {
+	all, err := s.DesiredStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ds, ok := all[nodeID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return ds, nil
+}
+
+func hashState(ds *DesiredState) string {
+	h := sha256.New()
+	h.Write(ds.Config)
+	h.Write([]byte("\x00caddy"))
+	h.Write(ds.Caddy)
+	if ds.Nginx != "" {
+		h.Write([]byte("\x00nginx" + ds.Nginx))
+	}
+	tags := make([]string, 0, len(ds.Users))
+	for t := range ds.Users {
+		tags = append(tags, t)
+	}
+	sort.Strings(tags)
+	for _, t := range tags {
+		h.Write([]byte("\x00" + t))
+		for _, c := range ds.Users[t] {
+			h.Write([]byte("\x01" + c.Email + "\x02" + c.ID))
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// EnsureDefaults creates the default base config, group and user template on a fresh database.
+func (s *Service) EnsureDefaults(ctx context.Context) error {
+	defer s.Invalidate()
+	return s.st.Tx(ctx, func(q store.DBTX) error {
+		if _, err := store.GetBaseConfig(ctx, q, nil); errors.Is(err, store.ErrNotFound) {
+			if err := store.UpsertBaseConfig(ctx, q, &store.BaseConfig{Name: "default", JSON: xrayconf.DefaultBaseJSON, IsDefault: true}); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		groups, err := store.ListGroups(ctx, q)
+		if err != nil {
+			return err
+		}
+		var groupIDs []int64
+		if len(groups) == 0 {
+			g := &store.Group{Name: "Основная", Description: "Группа по умолчанию"}
+			if err := store.CreateGroup(ctx, q, g); err != nil {
+				return err
+			}
+			groupIDs = []int64{g.ID}
+		}
+		if err := adoptRetiredTemplates(ctx, q); err != nil {
+			return err
+		}
+		if err := migrateKeqDroidRule(ctx, q); err != nil {
+			return err
+		}
+		tpls, err := store.ListUserTemplates(ctx, q)
+		if err != nil {
+			return err
+		}
+		if len(tpls) == 0 {
+			return store.CreateUserTemplate(ctx, q, &store.UserTemplate{
+				Name: "Стандарт", IsDefault: true, ExpireMonths: 3, ResetStrategy: "month", ClientType: "auto", GroupIDs: groupIDs,
+			})
+		}
+		return nil
+	})
+}
+
+// adoptRetiredTemplates stores a template that is no longer built in as a custom one when
+// profiles still use it, so they keep rendering and it shows up (editable) in the panel.
+func adoptRetiredTemplates(ctx context.Context, q store.DBTX) error {
+	profiles, err := store.ListProfiles(ctx, q)
+	if err != nil {
+		return err
+	}
+	custom, err := store.ListProfileTemplates(ctx, q)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, t := range custom {
+		have[t.ID] = true
+	}
+	for _, p := range profiles {
+		if have[p.TemplateID] || xrayconf.IsBuiltin(p.TemplateID) {
+			continue
+		}
+		if src, ok := xrayconf.RetiredTemplate(p.TemplateID); ok {
+			if err := store.SaveProfileTemplate(ctx, q, p.TemplateID, src); err != nil {
+				return err
+			}
+			have[p.TemplateID] = true
+		}
+	}
+	return nil
+}

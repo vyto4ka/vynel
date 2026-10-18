@@ -1,0 +1,40 @@
+{
+  "tag": "VLESS_XHTTP_STREAM_REALITY",
+  "listen": "0.0.0.0",
+  "port": 443,
+  "protocol": "vless",
+  "settings": { "clients": [], "decryption": "none" },
+  "streamSettings": {
+    "network": "xhttp",
+    "security": "reality",
+    "realitySettings": {
+      "target": "127.0.0.1:8443",
+      "serverNames": ["node.example.com"],
+      "privateKey": "SG1wpwXVHo3KVNFGjW-qT9Qh3k0p9_sWoJ88nyRvt30",
+      "shortIds": ["0123456789abcdef"],
+      "xver": 0
+    },
+    "xhttpSettings": {
+      "path": "/assets/sync",
+      "mode": "stream-up",
+      "extra": {
+        "sessionIDPlacement": "cookie",
+        "sessionIDKey": "media_sid",
+        "sessionPlacement": "cookie",
+        "sessionKey": "media_sid",
+        "seqPlacement": "query",
+        "seqKey": "offset",
+        "xPaddingObfsMode": true,
+        "xPaddingPlacement": "query",
+        "xPaddingKey": "cb",
+        "xPaddingMethod": "repeat-x",
+        "xPaddingBytes": "100-1000",
+        "noSSEHeader": true,
+        "uplinkDataPlacement": "auto",
+        "uplinkDataKey": "pb",
+        "scMaxEachPostBytes": "262144",
+        "serverMaxHeaderBytes": 32768
+      }
+    }
+  }
+}

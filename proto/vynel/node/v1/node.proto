@@ -1,0 +1,224 @@
+syntax = "proto3";
+
+// Panel <-> node protocol (docs/ARCHITECTURE.md §14).
+// The node dials the panel; the panel pushes desired state, the node acknowledges.
+package vynel.node.v1;
+
+option go_package = "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1;nodev1";
+
+service NodeGateway {
+  // One-time registration with an install token (server-auth TLS with a pinned CA, no client cert).
+  rpc Join(JoinRequest) returns (JoinResponse);
+  // Main channel (mTLS with the certificate obtained from Join).
+  rpc Connect(stream NodeMessage) returns (stream PanelMessage);
+}
+
+message JoinRequest {
+  string token = 1;
+  bytes csr_der = 2;
+  // ISO alpha-2 country of the node's public IP as the installer found it; empty if unknown.
+  // The panel fills the node's flag, name and code from it when the admin left them out.
+  string country = 3;
+}
+
+message JoinResponse {
+  bytes cert_der = 1;
+  bytes ca_der = 2;
+  int64 node_id = 3;
+  string node_code = 4;
+}
+
+message NodeMessage {
+  oneof msg {
+    Hello hello = 1;
+    Ack ack = 2;
+    Addresses addresses = 3;
+    StatsBatch stats = 4;
+    CommandResult result = 5;
+    UpdateStatus update = 6;
+    OnlineIPs online_ips = 7;
+  }
+}
+
+// OnlineIPs is who is connected right now and from where, sent every few seconds by agents
+// with the "iplimit" capability (not queued: only the latest list matters). The panel adds the
+// lists of all nodes up to enforce each user's limit of addresses at once.
+message OnlineIPs {
+  repeated OnlineUser users = 1;
+}
+
+// UpdateStatus is how the node's update (`vynel update`) is going: sent every few seconds while it
+// runs, once more when it ends, and once on every connect so the panel knows the last outcome.
+message UpdateStatus {
+  bool running = 1;
+  bool ok = 2;           // finished without errors (meaningful when not running)
+  int64 started_at = 3;  // unix seconds
+  int64 finished_at = 4; // 0 while running
+  string version = 5;    // vynel version after the update
+  string log = 6;        // the last lines of /var/log/vynel-update.log
+}
+
+message Hello {
+  string agent_version = 1;
+  string xray_version = 2;
+  string applied_hash = 3;
+  string os = 4;
+  string arch = 5;
+  repeated Address addresses = 6;
+  string caddy_version = 7;
+  // Host problems the panel should show: missing BBR, clock skew, no nginx binary...
+  repeated string warnings = 8;
+  string nginx_version = 9;
+  // What this agent understands beyond the original protocol, e.g. "nginx" (Snapshot.nginx_config).
+  // The panel sends old agents only what they know.
+  repeated string capabilities = 10;
+}
+
+message Address {
+  string ip = 1;
+  string interface = 2;
+  bool primary = 3;
+}
+
+message Addresses {
+  repeated Address addresses = 1;
+}
+
+// Ack confirms (or rejects) a snapshot or delta.
+message Ack {
+  int64 revision = 1;
+  string hash = 2;
+  string error = 3;
+}
+
+message PanelMessage {
+  oneof msg {
+    Snapshot snapshot = 1;
+    Delta delta = 2;
+    StatsAck stats_ack = 3;
+    Command command = 4;
+    IPBlocks ip_blocks = 5;
+  }
+}
+
+// IPBlocks is the full list of addresses users connect from above their limit (agents with
+// "iplimit"). The agent routes their new connections to a blackhole and drops the open ones; a
+// user missing from the list is no longer blocked anywhere.
+message IPBlocks {
+  repeated IPBlock blocks = 1;
+}
+
+message IPBlock {
+  int64 user_id = 1;        // matches the user's emails: "<id>" and "<id>.<anything>"
+  repeated string ips = 2;  // IPv4 addresses and IPv6 /64 networks
+}
+
+// Command is an admin action on the node (panel: «Ноды» → «Действия»).
+message Command {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_RESTART_XRAY = 1;  // restart Xray with the applied config
+    ACTION_RESTART_CADDY = 2; // restart Caddy with the applied config
+    ACTION_RESTART_AGENT = 3; // restart the vynel service (systemd starts it again)
+    ACTION_REBOOT = 4;        // reboot the server
+    ACTION_UPDATE = 5;        // update vynel, Xray and nginx (`vynel update`, in the background)
+  }
+  string id = 1;
+  Action action = 2;
+}
+
+// CommandResult answers a Command. For a service restart or reboot it is sent before acting.
+message CommandResult {
+  string id = 1;
+  string error = 2; // empty = done
+  string detail = 3;
+}
+
+// StatsBatch carries counters collected since the previous batch. Batches are queued on the
+// node and resent until acknowledged; (epoch, seq) makes ingestion idempotent.
+message StatsBatch {
+  string epoch = 1; // random id of the node's queue; changes when the node state is reset
+  uint64 seq = 2;
+  int64 ts = 3;
+  repeated UserTraffic users = 4;
+  int64 node_up = 5;
+  int64 node_down = 6;
+  repeated OnlineUser online = 7;
+  Metrics metrics = 8;
+}
+
+message UserTraffic {
+  string email = 1;
+  int64 up = 2;
+  int64 down = 3;
+}
+
+message OnlineUser {
+  string email = 1;
+  int32 ips = 2;
+  repeated string ip_list = 3; // in OnlineIPs only
+}
+
+message Metrics {
+  double cpu = 1; // percent of all cores
+  uint64 mem_used = 2;
+  uint64 mem_total = 3;
+  double load1 = 4;
+  uint64 rx_bps = 5;
+  uint64 tx_bps = 6;
+  uint64 uptime = 7; // seconds
+}
+
+message StatsAck {
+  string epoch = 1;
+  uint64 seq = 2;
+}
+
+// Snapshot is the full desired state: Xray config without clients plus users per inbound.
+message Snapshot {
+  int64 revision = 1;
+  string hash = 2;
+  bytes xray_config = 3;
+  repeated InboundUsers inbounds = 4;
+  bytes caddy_config = 5; // Caddy JSON config for agents without "nginx"; empty = Caddy not needed
+  // nginx.conf built by the panel (package nginxconf) for agents with "nginx"; empty = no web server.
+  string nginx_config = 6;
+  // A large snapshot goes in parts to agents with the "chunks" capability (one gRPC message has
+  // a size limit). parts = 0: the whole snapshot. Otherwise part 0 carries the configs, every
+  // part carries some of the users (an inbound may continue in the next part), and the agent
+  // applies the snapshot once the last part (parts-1) of the same revision and hash is in.
+  int32 part = 7;
+  int32 parts = 8;
+}
+
+message InboundUsers {
+  string tag = 1;
+  string protocol = 2;
+  string flow = 3;
+  repeated User users = 4;
+}
+
+message User {
+  string email = 1;
+  string id = 2;
+}
+
+// Delta changes users only; it applies on top of the state with hash base_hash.
+message Delta {
+  int64 revision = 1;
+  string base_hash = 2;
+  string hash = 3;
+  repeated UserOp ops = 4;
+}
+
+message UserOp {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_UPSERT = 1;
+    KIND_REMOVE = 2;
+  }
+  Kind kind = 1;
+  string tag = 2;
+  User user = 3;
+  string flow = 4;
+}

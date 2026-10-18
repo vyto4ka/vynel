@@ -1,0 +1,102 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+
+	"github.com/spf13/cobra"
+
+	"github.com/vyto4ka/vynel/internal/buildinfo"
+	"github.com/vyto4ka/vynel/internal/node/agent"
+	"github.com/vyto4ka/vynel/internal/node/firewall"
+	"github.com/vyto4ka/vynel/internal/xray"
+)
+
+// DefaultNodeDataDir holds the node credentials and state.
+const DefaultNodeDataDir = "/var/lib/vynel-node"
+
+func nodeCmd() *cobra.Command {
+	var dataDir string
+	c := &cobra.Command{Use: "node", Short: "Node agent"}
+	c.PersistentFlags().StringVar(&dataDir, "data-dir", DefaultNodeDataDir, "node data directory")
+
+	var country string
+	join := &cobra.Command{
+		Use: "join TOKEN", Short: "Register this node with the panel using a join token", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			code, err := agent.Join(cmd.Context(), dataDir, args[0], country)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "joined as node %s; now run `vynel node run`\n", code)
+			return nil
+		},
+	}
+
+	join.Flags().StringVar(&country, "country", "", "2-letter country of this server; the panel names the node by it if the admin did not")
+
+	var token, caddyBin, nginxBin, wwwDir string
+	var tune, fw bool
+	var bin xray.Binary
+	run := &cobra.Command{
+		Use: "run", Short: "Run the node agent",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !agent.Joined(dataDir) {
+				if token == "" {
+					return errors.New("node is not joined: pass --token or run `vynel node join TOKEN`")
+				}
+				code, err := agent.Join(cmd.Context(), dataDir, token, "")
+				if err != nil {
+					return err
+				}
+				slog.Info("joined the panel", "node", code)
+			}
+			dial, closeFn, err := agent.GRPCDialer(dataDir)
+			if err != nil {
+				return err
+			}
+			defer closeFn()
+			var fwm *firewall.Manager
+			if fw {
+				fwm = &firewall.Manager{Log: slog.Default().With("component", "firewall")}
+			}
+			a, err := agent.New(agent.Config{DataDir: dataDir, Xray: bin, Version: buildinfo.Version, Dial: dial, Log: slog.Default(),
+				CaddyBin: caddyBin, NginxBin: nginxBin, WWWDir: wwwDir, TuneSysctl: tune, Firewall: fwm})
+			if err != nil {
+				return err
+			}
+			defer a.Close()
+			if fwm != nil {
+				fwm.Trusted = a.TrustedIPs
+			}
+			return a.Run(cmd.Context())
+		},
+	}
+	run.Flags().StringVar(&token, "token", "", "join token, used only if the node is not joined yet")
+	addXrayFlags(run, &bin)
+	run.Flags().StringVar(&caddyBin, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary (only for a panel that still sends Caddy configs)")
+	run.Flags().StringVar(&nginxBin, "nginx-bin", "/usr/sbin/nginx", "path to the nginx binary")
+	run.Flags().StringVar(&wwwDir, "www-dir", "/var/www/vynel-node", "decoy sites, ACME webroot and temp files of nginx")
+	run.Flags().BoolVar(&tune, "tune-sysctl", true, "apply BBR/fq/TCP Fast Open (needs root)")
+	run.Flags().BoolVar(&fw, "firewall", true, "keep the nftables firewall in step with what the node serves once `vynel firewall on`")
+
+	setPanel := &cobra.Command{
+		Use: "set-panel HOST:PORT", Short: "Point the node to a moved panel (same CA)", Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error { return agent.SetPanelAddr(dataDir, args[0]) },
+	}
+	var diagBin xray.Binary
+	var diagCaddy, diagNginx string
+	diag := &cobra.Command{
+		Use: "diag", Short: "Print a troubleshooting report (no keys or user ids): `vynel node diag > diag.txt`",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			agent.Diagnose(cmd.Context(), cmd.OutOrStdout(), dataDir, buildinfo.Version, diagBin, diagCaddy, diagNginx)
+			return nil
+		},
+	}
+	addXrayFlags(diag, &diagBin)
+	diag.Flags().StringVar(&diagCaddy, "caddy-bin", "/usr/local/bin/caddy", "path to the caddy binary")
+	diag.Flags().StringVar(&diagNginx, "nginx-bin", "/usr/sbin/nginx", "path to the nginx binary")
+	c.AddCommand(join, run, setPanel, diag)
+	return c
+}

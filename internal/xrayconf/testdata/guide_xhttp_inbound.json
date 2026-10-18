@@ -1,0 +1,33 @@
+{
+  "tag": "CDN_NL",
+  "port": 8085,
+  "listen": "127.0.0.1",
+  "protocol": "vless",
+  "settings": { "clients": [], "decryption": "none" },
+  "streamSettings": {
+    "network": "xhttp",
+    "sockopt": { "tcpNoDelay": true },
+    "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/upload",
+      "extra": {
+        "seqKey": "offset",
+        "seqPlacement": "query",
+        "sessionKey": "media_sid",
+        "sessionIDKey": "media_sid",
+        "sessionPlacement": "cookie",
+        "sessionIDPlacement": "cookie",
+        "uplinkHTTPMethod": "GET",
+        "uplinkDataPlacement": "cookie",
+        "uplinkDataKey": "pb",
+        "xPaddingObfsMode": true,
+        "xPaddingPlacement": "query",
+        "xPaddingKey": "cb",
+        "noSSEHeader": true,
+        "scMaxEachPostBytes": "4096-8192",
+        "scMinPostsIntervalMs": "5-10",
+        "serverMaxHeaderBytes": 131072
+      }
+    }
+  }
+}

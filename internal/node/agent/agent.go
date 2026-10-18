@@ -1,0 +1,904 @@
+// Package agent is the node side: it keeps a session with the panel, applies snapshots and
+// deltas to Xray and survives panel outages on its saved state (docs/ARCHITECTURE.md §4.2).
+package agent
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sync"
+	"syscall"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/vyto4ka/vynel/internal/node/caddy"
+	"github.com/vyto4ka/vynel/internal/node/firewall"
+	"github.com/vyto4ka/vynel/internal/node/metrics"
+	"github.com/vyto4ka/vynel/internal/node/nginx"
+	"github.com/vyto4ka/vynel/internal/node/state"
+	"github.com/vyto4ka/vynel/internal/node/sysctl"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/update"
+	"github.com/vyto4ka/vynel/internal/xray"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
+)
+
+// Conn is the node side of a panel connection (gRPC client stream or in-memory pipe).
+type Conn interface {
+	Send(*nodev1.NodeMessage) error
+	Recv() (*nodev1.PanelMessage, error)
+}
+
+// Dialer opens a new connection to the panel.
+type Dialer func(ctx context.Context) (Conn, error)
+
+// Config configures an agent.
+type Config struct {
+	DataDir       string // state.db and xray config live here
+	Xray          xray.Binary
+	Version       string
+	Dial          Dialer
+	Log           *slog.Logger
+	Addresses     func() []*nodev1.Address // defaults to the host's interfaces
+	MaxBackoff    time.Duration            // reconnect backoff cap, default 30s
+	StatsInterval time.Duration            // how often counters are collected, default 10s
+	// OnlineInterval is how often the addresses of online users are sent, default 5s (only
+	// changes; the same list again every 30s).
+	OnlineInterval time.Duration
+	CaddyBin       string        // path to caddy ("" = not installed); only for panels that still send Caddy configs
+	NginxBin       string        // path to nginx ("" = /usr/sbin/nginx)
+	WWWDir         string        // decoys, ACME webroot and temp files nginx workers use; "" = <DataDir>/web/www
+	NginxUser      string        // nginx worker user; "" = www-data (tests use root)
+	TuneSysctl     bool          // apply BBR/fq/TFO on start (needs root)
+	CertInterval   time.Duration // how often certificates are renewed and copied for Xray, default 1m
+	// Firewall keeps nftables in step with what this node serves (when `vynel firewall on`);
+	// nil = never touch the firewall (tests).
+	Firewall   *firewall.Manager
+	ExtraPorts func() []firewall.Port // also let in (the panel's node gateway on an all-in-one server)
+	// Restart restarts the whole service (admin action). Default: SIGTERM to this process, and
+	// systemd (Restart=always) starts it again.
+	Restart func()
+	// Reboot reboots the server (admin action). Default: systemctl reboot.
+	Reboot func() error
+	// Update starts updating vynel, Xray and nginx in the background (admin action).
+	// Default: update.Start.
+	Update func(context.Context) error
+	// UpdateStatus reports how the last update went. Default: update.LocalStatus.
+	UpdateStatus func() *update.Status
+	// UpdateEvery is how often a running update is reported, default 2s.
+	UpdateEvery time.Duration
+}
+
+// Agent applies the panel's desired state to Xray.
+type Agent struct {
+	cfg   Config
+	log   *slog.Logger
+	st    *state.Store
+	proc  *xray.Process
+	caddy *caddy.Manager
+	nginx *nginx.Manager
+
+	mu       sync.Mutex
+	cur      *state.State
+	api      *xray.API
+	apiAddr  string
+	xrayVer  string
+	caddyVer string
+	nginxVer string
+	warnings []string
+	metrics  metrics.Collector
+	statsCh  chan struct{} // a batch was queued
+	certKick chan struct{} // a new web config may need certificates: issue now, not at the next tick
+	certs    *certBridge
+	certDoms []string // domains whose certificates the running Xray config uses
+	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
+	nginxCfg string   // the config nginx runs now; only one of the two web servers runs
+	vpnIPs   []string // addresses of connected VPN users, trusted by the firewall
+	// online is the last reading of who is connected from where (onlineLoop): the panel's
+	// limit of addresses and the stats batches both use it, so Xray is asked once.
+	online   *nodev1.OnlineIPs
+	onlineAt time.Time
+	// ipBlocks are the panel's addresses over users' limits; blocksApplied: the running Xray
+	// has block rules in front of its own.
+	ipBlocks      []*nodev1.IPBlock
+	blocksApplied bool
+}
+
+// New opens the agent's state. Call Run to start.
+func New(cfg Config) (*Agent, error) {
+	if cfg.Log == nil {
+		cfg.Log = slog.Default()
+	}
+	if cfg.Addresses == nil {
+		cfg.Addresses = LocalAddresses
+	}
+	if cfg.MaxBackoff == 0 {
+		cfg.MaxBackoff = 30 * time.Second
+	}
+	if cfg.StatsInterval == 0 {
+		cfg.StatsInterval = 10 * time.Second
+	}
+	if cfg.OnlineInterval == 0 {
+		cfg.OnlineInterval = 5 * time.Second
+	}
+	if cfg.CertInterval == 0 {
+		cfg.CertInterval = time.Minute
+	}
+	if cfg.Restart == nil {
+		cfg.Restart = func() { _ = syscall.Kill(os.Getpid(), syscall.SIGTERM) }
+	}
+	if cfg.Update == nil {
+		cfg.Update = update.Start
+	}
+	if cfg.UpdateStatus == nil {
+		cfg.UpdateStatus = update.LocalStatus
+	}
+	if cfg.UpdateEvery == 0 {
+		cfg.UpdateEvery = 2 * time.Second
+	}
+	if cfg.Reboot == nil {
+		cfg.Reboot = func() error { return exec.Command("systemctl", "reboot").Run() }
+	}
+	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+		return nil, err
+	}
+	st, err := state.Open(filepath.Join(cfg.DataDir, "state.db"))
+	if err != nil {
+		return nil, err
+	}
+	web := filepath.Join(cfg.DataDir, "web")
+	www := cfg.WWWDir
+	if www == "" {
+		www = filepath.Join(web, "www")
+	}
+	a := &Agent{cfg: cfg, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
+		caddy: &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")},
+		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, Log: cfg.Log.With("component", "nginx"),
+			CaddyStorage: filepath.Join(web, "caddy", "caddy")},
+		statsCh: make(chan struct{}, 1), certKick: make(chan struct{}, 1)}
+	if err := a.nginx.Init(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	a.certs = newCertBridge(cfg.DataDir, a.nginx.Certs.Dir, a.nginx.DecoyDir())
+	a.nginx.OnCerts = func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.syncCertsLocked(context.Background())
+	}
+	if a.cur, err = st.Load(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	return a, nil
+}
+
+// Close stops Xray and closes the state.
+func (a *Agent) Close() {
+	a.proc.Close()
+	a.caddy.Close()
+	a.nginx.Close()
+	a.mu.Lock()
+	if a.api != nil {
+		a.api.Close()
+	}
+	a.mu.Unlock()
+	a.st.Close()
+}
+
+// AppliedHash returns the hash of the applied state ("" if none).
+func (a *Agent) AppliedHash() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cur == nil {
+		return ""
+	}
+	return a.cur.Hash
+}
+
+// Run starts Xray from the saved state and keeps a session with the panel until ctx ends.
+func (a *Agent) Run(ctx context.Context) error {
+	if v, err := a.cfg.Xray.Version(ctx); err == nil {
+		a.xrayVer = v
+	} else {
+		a.log.Warn("cannot get xray version", "err", err)
+	}
+	a.warnings = sysctl.Tune(a.cfg.TuneSysctl)
+	a.caddyVer = a.caddy.Version(ctx)
+	a.nginxVer = a.nginx.Version(ctx)
+	if a.nginxVer == "" {
+		a.warnings = append(a.warnings, "nginx is not installed: apt install nginx libnginx-mod-stream")
+	}
+	a.mu.Lock()
+	if a.cur != nil {
+		if err := a.applyWebLocked(ctx, a.cur.Caddy, a.cur.Nginx); err != nil {
+			a.log.Error("cannot start the web server from saved state", "err", err)
+		}
+		if err := a.restartLocked(ctx, a.cur); err != nil {
+			a.log.Error("cannot start xray from saved state", "err", err)
+		} else {
+			a.log.Info("xray started from saved state", "revision", a.cur.Revision)
+		}
+	}
+	a.mu.Unlock()
+	go a.collectLoop(ctx)
+	go a.onlineLoop(ctx)
+	go a.certLoop(ctx)
+	if a.cfg.Firewall != nil {
+		go a.cfg.Firewall.Loop(ctx, 15*time.Second, a.FirewallPorts)
+	}
+
+	backoff := min(time.Second, a.cfg.MaxBackoff)
+	for ctx.Err() == nil {
+		started := time.Now()
+		err := a.session(ctx)
+		if ctx.Err() != nil {
+			break
+		}
+		if time.Since(started) > time.Minute {
+			backoff = min(time.Second, a.cfg.MaxBackoff)
+		}
+		if status.Code(err) == codes.PermissionDenied {
+			// Revoked or deleted on the panel: retrying fast is pointless.
+			backoff = a.cfg.MaxBackoff
+			a.log.Error("the panel rejected this node; get a new token and run `vynel node join TOKEN`", "err", err)
+		} else {
+			a.log.Warn("panel session ended, reconnecting", "err", err, "in", backoff)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, a.cfg.MaxBackoff)
+	}
+	return ctx.Err()
+}
+
+func (a *Agent) session(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	conn, err := a.cfg.Dial(ctx)
+	if err != nil {
+		return err
+	}
+	hello := &nodev1.Hello{
+		AgentVersion: a.cfg.Version, XrayVersion: a.xrayVer, AppliedHash: a.AppliedHash(),
+		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: a.cfg.Addresses(),
+		CaddyVersion: a.caddyVer, Warnings: a.warnings, NginxVersion: a.nginxVer,
+	}
+	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit)
+	if a.nginxVer != "" {
+		hello.Capabilities = append(hello.Capabilities, CapNginx)
+	}
+	if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Hello{Hello: hello}}); err != nil {
+		return err
+	}
+	a.log.Info("connected to panel", "applied", short(hello.AppliedHash))
+
+	msgs := make(chan *nodev1.PanelMessage)
+	errs := make(chan error, 1)
+	go func() {
+		for {
+			m, err := conn.Recv()
+			if err != nil {
+				errs <- err
+				return
+			}
+			select {
+			case msgs <- m:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	addrTick := time.NewTicker(5 * time.Minute)
+	defer addrTick.Stop()
+	resendTick := time.NewTicker(time.Minute)
+	defer resendTick.Stop()
+	var sentUpTo uint64       // highest seq sent in this session
+	parts := &snapshotParts{} // a snapshot sent in parts, while they come in
+	sendStats := func() error {
+		batches, err := a.st.Pending(sentUpTo, 50)
+		if err != nil {
+			return err
+		}
+		for _, b := range batches {
+			if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Stats{Stats: b}}); err != nil {
+				return err
+			}
+			sentUpTo = b.Seq
+		}
+		return nil
+	}
+	if err := sendStats(); err != nil {
+		return err
+	}
+	// The last update's outcome on every connect (a node restarted by its own update reports how
+	// it ended), then every few seconds while one runs.
+	var lastUpd *nodev1.UpdateStatus
+	var watchUntil time.Time // right after an update command its "running" record may not be there yet
+	watching := false
+	sendUpdate := func() error {
+		st := a.cfg.UpdateStatus()
+		watching = (st != nil && st.Running) || time.Now().Before(watchUntil)
+		if st == nil {
+			return nil
+		}
+		msg := &nodev1.UpdateStatus{Running: st.Running, Ok: st.OK, StartedAt: st.StartedAt, FinishedAt: st.FinishedAt, Version: st.Version, Log: st.Log}
+		if lastUpd != nil && proto.Equal(lastUpd, msg) {
+			return nil
+		}
+		lastUpd = msg
+		return conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Update{Update: msg}})
+	}
+	if err := sendUpdate(); err != nil {
+		return err
+	}
+	updTick := time.NewTicker(a.cfg.UpdateEvery)
+	defer updTick.Stop()
+	onlineTick := time.NewTicker(a.cfg.OnlineInterval)
+	defer onlineTick.Stop()
+	var lastOnline *nodev1.OnlineIPs
+	var lastOnlineAt time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-onlineTick.C:
+			a.mu.Lock()
+			msg := a.online
+			a.mu.Unlock()
+			if msg == nil || (lastOnline != nil && proto.Equal(msg, lastOnline) && time.Since(lastOnlineAt) < 30*time.Second) {
+				continue
+			}
+			if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_OnlineIps{OnlineIps: msg}}); err != nil {
+				return err
+			}
+			lastOnline, lastOnlineAt = msg, time.Now()
+		case <-updTick.C:
+			if watching {
+				if err := sendUpdate(); err != nil {
+					return err
+				}
+			}
+		case err := <-errs:
+			return err
+		case <-a.statsCh:
+			if err := sendStats(); err != nil {
+				return err
+			}
+		case <-resendTick.C:
+			// Anything still queued after a minute was lost or rejected: send it again.
+			sentUpTo = 0
+			if err := sendStats(); err != nil {
+				return err
+			}
+		case <-addrTick.C:
+			msg := &nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Addresses{Addresses: &nodev1.Addresses{Addresses: a.cfg.Addresses()}}}
+			if err := conn.Send(msg); err != nil {
+				return err
+			}
+		case m := <-msgs:
+			if c, ok := m.Msg.(*nodev1.PanelMessage_Command); ok {
+				res, after := a.command(ctx, c.Command)
+				if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Result{Result: res}}); err != nil {
+					return err
+				}
+				if c.Command.Action == nodev1.Command_ACTION_UPDATE && res.Error == "" {
+					watching, watchUntil = true, time.Now().Add(30*time.Second)
+				}
+				if after != nil {
+					// The answer reaches the panel first; then the service goes down.
+					time.AfterFunc(time.Second, after)
+				}
+				continue
+			}
+			if b, ok := m.Msg.(*nodev1.PanelMessage_IpBlocks); ok {
+				a.SetIPBlocks(ctx, b.IpBlocks.Blocks)
+				continue
+			}
+			if sa, ok := m.Msg.(*nodev1.PanelMessage_StatsAck); ok {
+				if err := a.st.AckStats(sa.StatsAck.Epoch, sa.StatsAck.Seq); err != nil {
+					return err
+				}
+				if err := sendStats(); err != nil {
+					return err
+				}
+				continue
+			}
+			ack := a.handle(ctx, m, parts)
+			if ack == nil {
+				continue
+			}
+			if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Ack{Ack: ack}}); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (a *Agent) handle(ctx context.Context, m *nodev1.PanelMessage, parts *snapshotParts) *nodev1.Ack {
+	switch msg := m.Msg.(type) {
+	case *nodev1.PanelMessage_Snapshot:
+		s, err := parts.add(msg.Snapshot)
+		if err != nil {
+			a.log.Warn("snapshot part dropped", "err", err)
+			return &nodev1.Ack{Revision: msg.Snapshot.Revision, Hash: msg.Snapshot.Hash, Error: err.Error()}
+		}
+		if s == nil {
+			return nil // more parts to come; the snapshot is acknowledged as a whole
+		}
+		ack := &nodev1.Ack{Revision: s.Revision, Hash: s.Hash}
+		if err := a.ApplySnapshot(ctx, s); err != nil {
+			a.log.Error("apply snapshot failed", "revision", s.Revision, "err", err)
+			ack.Error = err.Error()
+		} else {
+			a.log.Info("snapshot applied", "revision", s.Revision, "inbounds", len(s.Inbounds))
+		}
+		return ack
+	case *nodev1.PanelMessage_Delta:
+		d := msg.Delta
+		ack := &nodev1.Ack{Revision: d.Revision, Hash: d.Hash}
+		if err := a.ApplyDelta(ctx, d); err != nil {
+			a.log.Error("apply delta failed", "revision", d.Revision, "err", err)
+			ack.Error = err.Error()
+		} else {
+			a.log.Info("delta applied", "revision", d.Revision, "ops", len(d.Ops))
+		}
+		return ack
+	}
+	return nil
+}
+
+// command runs an admin action. Restarting the service or rebooting answers first and acts in
+// after, once the answer is sent.
+func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.CommandResult, after func()) {
+	res = &nodev1.CommandResult{Id: c.Id}
+	var err error
+	switch c.Action {
+	case nodev1.Command_ACTION_RESTART_XRAY:
+		a.mu.Lock()
+		if a.cur == nil {
+			err = errors.New("no config applied yet")
+		} else {
+			err = a.restartLocked(ctx, a.cur)
+		}
+		a.mu.Unlock()
+	case nodev1.Command_ACTION_RESTART_CADDY: // the web server: nginx, or Caddy for an old panel
+		if a.nginx.Running() {
+			err = a.nginx.Restart()
+		} else {
+			err = a.caddy.Restart()
+		}
+	case nodev1.Command_ACTION_RESTART_AGENT:
+		res.Detail = "the service restarts now"
+		after = a.cfg.Restart
+	case nodev1.Command_ACTION_UPDATE:
+		if err = a.cfg.Update(ctx); err == nil {
+			res.Detail = "the update is running"
+		}
+	case nodev1.Command_ACTION_REBOOT:
+		res.Detail = "the server reboots now"
+		after = func() {
+			if err := a.cfg.Reboot(); err != nil {
+				a.log.Error("reboot failed", "err", err)
+			}
+		}
+	default:
+		err = fmt.Errorf("unknown action %v", c.Action)
+	}
+	a.log.Info("admin action", "action", c.Action.String(), "err", err)
+	if err != nil {
+		res.Error = err.Error()
+	}
+	return res, after
+}
+
+// ApplySnapshot makes the node run the snapshot. Same structure: users are changed through the
+// Xray API without a restart. Different structure (or API failure): full config and restart.
+func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
+	next := &state.State{Revision: s.Revision, Hash: s.Hash, Config: s.XrayConfig, Caddy: s.CaddyConfig, Nginx: s.NginxConfig}
+	for _, in := range s.Inbounds {
+		si := state.Inbound{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
+		for _, u := range in.Users {
+			si.Users = append(si.Users, state.User{Email: u.Email, ID: u.Id})
+		}
+		next.Inbounds = append(next.Inbounds, si)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// The web server first: the Reality target must exist before clients arrive. A failure does
+	// not stop the VPN config from applying, but the state is saved as "not fully applied" so the
+	// panel keeps retrying and shows the error.
+	webErr := a.applyWebLocked(ctx, next.Caddy, next.Nginx)
+	if webErr == nil {
+		a.syncFirewall(ctx) // e.g. port 80 for certificates, even if Xray then fails
+	}
+	commit := func() error {
+		defer a.syncFirewall(ctx)
+		if webErr != nil {
+			partial := next.Clone()
+			partial.Hash = ""
+			if err := a.commitLocked(partial); err != nil {
+				return err
+			}
+			return webErr
+		}
+		return a.commitLocked(next)
+	}
+	if a.cur != nil && bytes.Equal(a.cur.Config, next.Config) && a.proc.Running() && a.api != nil {
+		err := a.syncUsersLocked(ctx, a.cur, next)
+		if err == nil {
+			return commit()
+		}
+		a.log.Warn("hot user sync failed, restarting xray with the full config", "err", err)
+	}
+	if err := a.restartLocked(ctx, next); err != nil {
+		return errors.Join(err, webErr)
+	}
+	return commit()
+}
+
+// FirewallPorts is what this node serves: public Xray inbounds, nginx (or Caddy) sites and the extras.
+func (a *Agent) FirewallPorts() []firewall.Port {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var ports []firewall.Port
+	if a.cfg.ExtraPorts != nil {
+		ports = append(ports, a.cfg.ExtraPorts()...)
+	}
+	if a.cur != nil {
+		ports = append(ports, firewall.XrayPorts(a.cur.Config)...)
+	}
+	ports = append(ports, firewall.CaddyPorts(a.caddyCfg)...)
+	return append(ports, firewall.NginxPorts(a.nginxCfg)...)
+}
+
+// CapNginx is the capability of agents that run Snapshot.nginx_config.
+const CapNginx = "nginx"
+
+// applyWebLocked runs the web server a snapshot asks for: nginx when the panel sent an nginx
+// config, Caddy when an older panel sent a Caddy one. Only one runs (both want :80 and :443).
+// When the new one fails to start, the old one comes back: Reality needs its target.
+func (a *Agent) applyWebLocked(ctx context.Context, caddyCfg []byte, nginxCfg string) error {
+	if nginxCfg != "" {
+		if a.caddyCfg != nil {
+			_ = a.caddy.Apply(ctx, nil)
+		}
+		if err := a.nginx.Apply(ctx, nginxCfg); err != nil {
+			if a.caddyCfg != nil {
+				if rerr := a.caddy.Apply(ctx, a.caddyCfg); rerr != nil {
+					a.log.Error("cannot bring caddy back", "err", rerr)
+					a.caddyCfg = nil
+				}
+			}
+			return fmt.Errorf("nginx: %w", err)
+		}
+		a.caddyCfg, a.nginxCfg = nil, nginxCfg
+		// A new site waits for its certificate: ask for it now (the periodic check is a minute).
+		select {
+		case a.certKick <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	wasNginx := a.nginxCfg
+	if wasNginx != "" {
+		_ = a.nginx.Apply(ctx, "")
+		a.nginxCfg = ""
+	}
+	if err := a.caddy.Apply(ctx, caddyCfg); err != nil {
+		a.caddyCfg = nil
+		if wasNginx != "" {
+			if rerr := a.nginx.Apply(ctx, wasNginx); rerr == nil {
+				a.nginxCfg = wasNginx
+			}
+		}
+		return fmt.Errorf("caddy: %w", err)
+	}
+	a.caddyCfg = caddyCfg
+	return nil
+}
+
+// TrustedIPs are the addresses of connected VPN users: they proved who they are with their key,
+// so the scanner trap never bans them (docs/INSTALL_GUIDE.md §10).
+func (a *Agent) TrustedIPs() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.vpnIPs...)
+}
+
+// syncFirewall opens new ports right after a config change instead of at the next tick.
+func (a *Agent) syncFirewall(ctx context.Context) {
+	if a.cfg.Firewall != nil {
+		go func() { _ = a.cfg.Firewall.Sync(context.WithoutCancel(ctx), a.FirewallPorts()) }()
+	}
+}
+
+// ApplyDelta applies user operations on top of the current state.
+func (a *Agent) ApplyDelta(ctx context.Context, d *nodev1.Delta) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cur == nil || a.cur.Hash != d.BaseHash {
+		return errors.New("delta base mismatch, need a snapshot")
+	}
+	if a.api == nil || !a.proc.Running() {
+		return errors.New("xray is not running")
+	}
+	next := a.cur.Clone()
+	for _, op := range d.Ops {
+		in := next.Inbound(op.Tag)
+		if in == nil {
+			return fmt.Errorf("unknown inbound %s", op.Tag)
+		}
+		switch op.Kind {
+		case nodev1.UserOp_KIND_UPSERT:
+			u := state.User{Email: op.User.Email, ID: op.User.Id}
+			if i := findUser(in.Users, u.Email); i >= 0 {
+				if err := a.api.RemoveUser(ctx, in.Tag, u.Email); err != nil {
+					return err
+				}
+				in.Users = append(in.Users[:i], in.Users[i+1:]...)
+			}
+			if err := a.addUser(ctx, in, u); err != nil {
+				return err
+			}
+			in.Users = append(in.Users, u)
+		case nodev1.UserOp_KIND_REMOVE:
+			if err := a.api.RemoveUser(ctx, in.Tag, op.User.Email); err != nil {
+				return err
+			}
+			if i := findUser(in.Users, op.User.Email); i >= 0 {
+				in.Users = append(in.Users[:i], in.Users[i+1:]...)
+			}
+		default:
+			return fmt.Errorf("unknown op %v", op.Kind)
+		}
+	}
+	next.Revision, next.Hash = d.Revision, d.Hash
+	return a.commitLocked(next)
+}
+
+func (a *Agent) syncUsersLocked(ctx context.Context, cur, next *state.State) error {
+	for _, in := range next.Inbounds {
+		old := map[string]string{}
+		if ci := cur.Inbound(in.Tag); ci != nil {
+			for _, u := range ci.Users {
+				old[u.Email] = u.ID
+			}
+		}
+		want := map[string]bool{}
+		for _, u := range in.Users {
+			want[u.Email] = true
+			id, ok := old[u.Email]
+			if ok && id == u.ID {
+				continue
+			}
+			if ok {
+				if err := a.api.RemoveUser(ctx, in.Tag, u.Email); err != nil {
+					return err
+				}
+			}
+			if err := a.addUser(ctx, &in, u); err != nil {
+				return err
+			}
+		}
+		for email := range old {
+			if !want[email] {
+				if err := a.api.RemoveUser(ctx, in.Tag, email); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (a *Agent) addUser(ctx context.Context, in *state.Inbound, u state.User) error {
+	switch in.Protocol {
+	case "vless":
+		return a.api.AddVLESSUser(ctx, in.Tag, u.Email, u.ID, in.Flow)
+	case "hysteria":
+		return a.api.AddHysteriaUser(ctx, in.Tag, u.Email, u.ID)
+	}
+	return fmt.Errorf("protocol %s is not supported for hot user changes", in.Protocol)
+}
+
+// restartLocked writes the full config (structure + clients) and restarts Xray.
+func (a *Agent) restartLocked(ctx context.Context, st *state.State) error {
+	full, apiAddr, err := FullConfig(st)
+	if err != nil {
+		return err
+	}
+	full, doms, err := a.certs.resolve(full)
+	if err != nil {
+		return err
+	}
+	a.certDoms = doms
+	if a.api != nil && a.proc.Running() {
+		// Xray counters live in memory: collect them before the restart drops them.
+		a.collectLocked(ctx)
+	}
+	if err := a.proc.Apply(ctx, full); err != nil {
+		return err
+	}
+	if a.api == nil || a.apiAddr != apiAddr {
+		if a.api != nil {
+			a.api.Close()
+		}
+		if a.api, err = xray.DialAPI(apiAddr); err != nil {
+			return err
+		}
+		a.apiAddr = apiAddr
+	}
+	wctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := a.api.WaitReady(wctx); err != nil {
+		return fmt.Errorf("%w; xray output: %v", err, a.proc.Tail())
+	}
+	// A new Xray runs the config's rules only: the blocks go in front again.
+	a.blocksApplied = false
+	if err := a.applyBlocksLocked(ctx, st); err != nil {
+		a.log.Error("cannot apply address blocks after the restart", "err", err)
+	}
+	return nil
+}
+
+func (a *Agent) commitLocked(next *state.State) error {
+	if err := a.st.Save(next); err != nil {
+		return err
+	}
+	a.cur = next
+	return nil
+}
+
+// FullConfig injects clients into the structural config and returns it with the API address.
+func FullConfig(st *state.State) ([]byte, string, error) {
+	var cfg map[string]any
+	if err := json.Unmarshal(st.Config, &cfg); err != nil {
+		return nil, "", fmt.Errorf("config: %w", err)
+	}
+	api, _ := cfg["api"].(map[string]any)
+	apiAddr, _ := api["listen"].(string)
+	if apiAddr == "" {
+		return nil, "", errors.New("config has no api.listen")
+	}
+	inbounds, _ := cfg["inbounds"].([]any)
+	for _, raw := range inbounds {
+		in, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		tag, _ := in["tag"].(string)
+		si := st.Inbound(tag)
+		settings, ok := in["settings"].(map[string]any)
+		if si == nil || !ok {
+			continue
+		}
+		clients := make([]any, 0, len(si.Users))
+		for _, u := range si.Users {
+			clients = append(clients, xrayconf.ClientJSON(xrayconf.Client{Email: u.Email, ID: u.ID}, si.Protocol, si.Flow))
+		}
+		settings["clients"] = clients
+	}
+	out, err := json.Marshal(cfg)
+	return out, apiAddr, err
+}
+
+func findUser(us []state.User, email string) int {
+	for i, u := range us {
+		if u.Email == email {
+			return i
+		}
+	}
+	return -1
+}
+
+func short(h string) string {
+	if len(h) > 12 {
+		return h[:12]
+	}
+	return h
+}
+
+// certLoop renews nginx's certificates and copies them for Xray, which re-reads its certificate
+// files every hour by itself. When a domain gets its first real certificate (it ran on a
+// self-signed placeholder until then), Xray is restarted at once instead of an hour later.
+func (a *Agent) certLoop(ctx context.Context) {
+	t := time.NewTicker(a.cfg.CertInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-a.certKick:
+		}
+		// May take minutes (Let's Encrypt): outside the agent lock. Renewals call OnCerts.
+		if err := a.nginx.RenewCerts(ctx); err != nil {
+			a.log.Warn("certificates", "err", err)
+		}
+		a.mu.Lock()
+		a.syncCertsLocked(ctx)
+		a.mu.Unlock()
+	}
+}
+
+func (a *Agent) syncCertsLocked(ctx context.Context) {
+	restart := false
+	for _, d := range a.certDoms {
+		was := a.certs.pending(d)
+		changed, err := a.certs.sync(d)
+		if err != nil {
+			a.log.Warn("cannot sync certificate", "domain", d, "err", err)
+			continue
+		}
+		if changed && was && !a.certs.pending(d) {
+			a.log.Info("certificate issued, restarting xray", "domain", d)
+			restart = true
+		}
+	}
+	if restart && a.cur != nil {
+		if err := a.restartLocked(ctx, a.cur); err != nil {
+			a.log.Error("cannot restart xray with the new certificate", "err", err)
+		}
+	}
+}
+
+func (a *Agent) collectLoop(ctx context.Context) {
+	t := time.NewTicker(a.cfg.StatsInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.mu.Lock()
+			a.collectLocked(ctx)
+			a.mu.Unlock()
+		}
+	}
+}
+
+// collectLocked reads and resets Xray counters, samples host metrics and queues a batch.
+func (a *Agent) collectLocked(ctx context.Context) {
+	b := &nodev1.StatsBatch{Ts: time.Now().Unix(), Metrics: a.metrics.Sample()}
+	if a.api != nil && a.proc.Running() {
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		users, err := a.api.UserTrafficDeltas(cctx)
+		if err != nil {
+			a.log.Warn("cannot read user stats", "err", err)
+		}
+		for _, u := range users {
+			b.Users = append(b.Users, &nodev1.UserTraffic{Email: u.Email, Up: u.Uplink, Down: u.Downlink})
+		}
+		if b.NodeUp, b.NodeDown, err = a.api.InboundTrafficDeltas(cctx); err != nil {
+			a.log.Warn("cannot read inbound stats", "err", err)
+		}
+		// Who is online comes from onlineLoop's last reading (not asked again under the lock).
+		if a.online != nil && time.Since(a.onlineAt) < 3*a.cfg.OnlineInterval+5*time.Second {
+			for _, o := range a.online.Users {
+				b.Online = append(b.Online, &nodev1.OnlineUser{Email: o.Email, Ips: o.Ips})
+			}
+		}
+	}
+	if err := a.st.Enqueue(b); err != nil {
+		a.log.Error("cannot queue stats", "err", err)
+		return
+	}
+	select {
+	case a.statsCh <- struct{}{}:
+	default:
+	}
+}

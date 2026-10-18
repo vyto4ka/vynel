@@ -1,0 +1,43 @@
+{
+  "log": { "loglevel": "none" },
+  "inbounds": [
+    {
+      "tag": "VLESS_NL",
+      "port": 443,
+      "listen": "0.0.0.0",
+      "protocol": "vless",
+      "settings": { "clients": [], "decryption": "none" },
+      "sniffing": { "enabled": true, "routeOnly": true, "destOverride": ["http", "tls", "quic"] },
+      "streamSettings": {
+        "network": "raw",
+        "sockopt": {
+          "tcpFastOpen": true,
+          "tcpcongestion": "bbr",
+          "tcpKeepAliveIdle": 45,
+          "tcpKeepAliveInterval": 45
+        },
+        "security": "reality",
+        "realitySettings": {
+          "xver": 0,
+          "target": "127.0.0.1:8443",
+          "shortIds": ["a1b2c3d4e5f60718"],
+          "privateKey": "SG1wpwXVHo3KVNFGjW-qT9Qh3k0p9_sWoJ88nyRvt30",
+          "serverNames": ["nl2.vyto4ka.ru"],
+          "minClientVer": "1.0.0"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "tag": "DIRECT", "protocol": "freedom", "settings": { "domainStrategy": "UseIPv4" } },
+    { "tag": "BLOCK", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "rules": [
+      { "ip": ["geoip:private"], "outboundTag": "BLOCK" },
+      { "domain": ["geosite:private"], "outboundTag": "BLOCK" },
+      { "protocol": ["bittorrent"], "outboundTag": "BLOCK" },
+      { "network": "tcp,udp", "outboundTag": "DIRECT" }
+    ]
+  }
+}
