@@ -141,13 +141,18 @@ func TestHysteria2NextToReality(t *testing.T) {
 	})
 
 	// Without a password, HTTP/3 on the Hysteria port is the decoy site, with the same certificate.
-	h3 := &http.Client{Timeout: 5 * time.Second, Transport: &http3.Transport{
-		TLSClientConfig: &tls.Config{ServerName: domain, InsecureSkipVerify: true, NextProtos: []string{"h3"}},
-		Dial: func(ctx context.Context, _ string, tc *tls.Config, qc *quic.Config) (*quic.Conn, error) {
-			return quic.DialAddrEarly(ctx, "127.0.0.1:"+strconv.Itoa(port), tc, qc)
-		},
-	}}
+	// Every attempt dials anew: the agent writes the certificate file and then restarts Xray, so
+	// an attempt in between reaches the old process, which then dies without closing the QUIC
+	// connection. A pooled connection would hang on it until the 30 s idle timeout.
 	xraytest.Eventually(t, wait, "decoy over HTTP/3", func() error {
+		tr := &http3.Transport{
+			TLSClientConfig: &tls.Config{ServerName: domain, InsecureSkipVerify: true, NextProtos: []string{"h3"}},
+			Dial: func(ctx context.Context, _ string, tc *tls.Config, qc *quic.Config) (*quic.Conn, error) {
+				return quic.DialAddrEarly(ctx, "127.0.0.1:"+strconv.Itoa(port), tc, qc)
+			},
+		}
+		defer func() { _ = tr.Close() }()
+		h3 := &http.Client{Timeout: 5 * time.Second, Transport: tr}
 		resp, err := h3.Get(fmt.Sprintf("https://%s:%d/", domain, port))
 		if err != nil {
 			return err
