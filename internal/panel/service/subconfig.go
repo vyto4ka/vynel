@@ -92,13 +92,13 @@ func CheckSubRules(rs []SubRule) error {
 		r := &rs[i]
 		r.Pattern = strings.TrimSpace(r.Pattern)
 		if r.Pattern == "" {
-			return invalid("rule %d: the pattern is empty", i+1)
+			return invalid("строка %d: пустой User-Agent", i+1)
 		}
 		if _, err := regexp.Compile(r.Pattern); err != nil {
-			return invalid("rule %d: not a valid regexp: %v", i+1, err)
+			return invalid("строка %d, User-Agent %q — неверное регулярное выражение: %v", i+1, r.Pattern, err)
 		}
 		if !slices.Contains(SubFormats, r.Format) {
-			return invalid("rule %d: unknown format %q", i+1, r.Format)
+			return invalid("строка %d: неизвестный формат %q", i+1, r.Format)
 		}
 	}
 	return nil
@@ -356,30 +356,38 @@ func (s *Service) SetSubHeaders(ctx context.Context, actor Actor, hs []SubHeader
 	if hs == nil {
 		return s.SetSetting(ctx, actor, SettingSubHeaders, "")
 	}
+	if err := CheckSubHeaders(hs); err != nil {
+		return err
+	}
+	b, _ := json.Marshal(hs)
+	return s.SetSetting(ctx, actor, SettingSubHeaders, string(b))
+}
+
+// CheckSubHeaders validates and tidies headers; errors name the line of the table.
+func CheckSubHeaders(hs []SubHeader) error {
 	seen := map[string]bool{}
 	for i := range hs {
 		h := &hs[i]
 		h.Name = strings.TrimSpace(h.Name)
 		if !headerNameRe.MatchString(h.Name) {
-			return invalid("header %q: the name may contain latin letters, digits and - only", h.Name)
+			return invalid("строка %d, «Имя заголовка» %q: только латиница, цифры и -", i+1, h.Name)
 		}
 		if reservedHeaders[strings.ToLower(h.Name)] {
-			return invalid("header %s is set by the server itself", h.Name)
+			return invalid("строка %d: заголовок %s сервер ставит сам", i+1, h.Name)
 		}
 		key := strings.ToLower(h.Name) + "|" + h.Clients
 		if h.Enabled && seen[key] {
-			return invalid("header %s is listed twice for the same clients", h.Name)
+			return invalid("строка %d: заголовок %s уже есть для тех же приложений", i+1, h.Name)
 		}
 		seen[key] = h.Enabled || seen[key]
 		h.Value = strings.NewReplacer("\r", "", "\n", " ").Replace(h.Value)
 		if h.Clients != "" {
 			if _, err := regexp.Compile(h.Clients); err != nil {
-				return invalid("header %s: clients is not a valid regexp: %v", h.Name, err)
+				return invalid("строка %d (%s), «Каким приложениям» — неверное регулярное выражение: %v", i+1, h.Name, err)
 			}
 		}
 	}
-	b, _ := json.Marshal(hs)
-	return s.SetSetting(ctx, actor, SettingSubHeaders, string(b))
+	return nil
 }
 
 // SubPage returns the page config (the default until changed). Apps added to the catalog
@@ -427,20 +435,20 @@ func CheckSubPage(p *SubPage) error {
 		p.Theme = "dark"
 	case "auto", "dark", "light":
 	default:
-		return invalid("theme must be auto, dark or light")
+		return invalid("«Страница», «Тема»: авто, тёмная или светлая")
 	}
 	if p.Accent == "" {
 		p.Accent = "#39c5bb"
 	}
 	if !accentRe.MatchString(p.Accent) {
-		return invalid("accent must be a color like #39c5bb")
+		return invalid("«Страница», «Акцентный цвет» %q: нужен цвет вида #39c5bb", p.Accent)
 	}
 	ids := map[string]bool{}
 	for i := range p.Apps {
 		a := &p.Apps[i]
 		a.Name = strings.TrimSpace(a.Name)
 		if a.Name == "" {
-			return invalid("an app without a name")
+			return invalid("«Приложения», строка %d: пустое «Название»", i+1)
 		}
 		if a.ID == "" {
 			a.ID = strings.ToLower(regexp.MustCompile(`[^A-Za-z0-9]+`).ReplaceAllString(a.Name, "-"))
@@ -451,10 +459,10 @@ func CheckSubPage(p *SubPage) error {
 		ids[a.ID] = true
 		link := strings.ToLower(strings.TrimSpace(a.Link))
 		if strings.HasPrefix(link, "javascript:") || strings.HasPrefix(link, "data:") {
-			return invalid("app %s: this kind of link is not allowed", a.Name)
+			return invalid("«Приложения», строка %d (%s), «Ссылка «Добавить»»: такие ссылки запрещены", i+1, a.Name)
 		}
 		if d := strings.ToLower(a.Download); d != "" && !strings.HasPrefix(d, "https://") && !strings.HasPrefix(d, "http://") {
-			return invalid("app %s: the download link must start with https://", a.Name)
+			return invalid("«Приложения», строка %d (%s), «Где скачать»: ссылка должна начинаться с https://", i+1, a.Name)
 		}
 	}
 	return nil
@@ -475,8 +483,8 @@ func (s *Service) SubBasicsGet(ctx context.Context) SubBasics {
 
 // SetSubBasics stores the plain subscription settings (only the changed ones).
 func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) error {
-	if b.UpdateHours < 0 || b.UpdateHours > 24*30 {
-		return invalid("update interval must be 0–720 hours")
+	if err := CheckSubBasics(b); err != nil {
+		return err
 	}
 	cur := s.SubBasicsGet(ctx)
 	set := func(key, old, val string) error {
@@ -496,6 +504,14 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 		if err := set(x.key, x.old, x.val); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// CheckSubBasics validates the plain subscription settings.
+func CheckSubBasics(b SubBasics) error {
+	if b.UpdateHours < 0 || b.UpdateHours > 24*30 {
+		return invalid("«Обновлять, часов»: от 0 до 720")
 	}
 	return nil
 }

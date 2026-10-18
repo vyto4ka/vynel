@@ -193,7 +193,7 @@ func (s *Service) applyProfile(ctx context.Context, q store.DBTX, id int64, in P
 	}
 	if in.Client != nil {
 		if err := CheckProfileClient(in.Client); err != nil {
-			return nil, err
+			return nil, InField("«Клиент»", err)
 		}
 		p.Client = ""
 		if in.Client.Custom {

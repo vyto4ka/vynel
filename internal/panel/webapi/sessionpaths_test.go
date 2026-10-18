@@ -85,6 +85,17 @@ func TestSessionPaths(t *testing.T) {
 	if w := own.do("GET", "/", "", false); w.Code != 404 {
 		t.Fatalf("ended session's path: %d", w.Code)
 	}
+	// Its page still calling the API learns why it has to sign in again; anyone else (no
+	// X-Vynel header) and unknown paths still get the decoy.
+	if w := own.do("PUT", "/api/subscription", "{}", true); w.Code != 401 || !strings.Contains(w.Body.String(), "Сессия завершена") {
+		t.Fatalf("API of an ended session: %d %.80q", w.Code, w.Body.String())
+	}
+	if w := own.do("GET", "/api/users", "", false); w.Code != 404 || !strings.Contains(w.Body.String(), `class="brand"`) {
+		t.Fatalf("API of an ended session without the header: %d", w.Code)
+	}
+	if w := stranger.do("GET", "/api/users", "", true); w.Code != 404 {
+		t.Fatalf("API on an unknown path: %d", w.Code)
+	}
 
 	// Mini App only: no links at all.
 	bindAdmin(t, svc, 77)

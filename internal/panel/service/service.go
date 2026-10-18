@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,19 @@ var ErrInvalid = errors.New("invalid input")
 
 func invalid(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+}
+
+// InField says where an input error is, as the panel names it ("«Маршруты»", "«Всегда
+// напрямую», строка 3"): the admin sees which field and line to fix. Other errors pass as they are.
+func InField(where string, err error) error {
+	if err == nil || !errors.Is(err, ErrInvalid) {
+		return err
+	}
+	msg := strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
+	if strings.HasPrefix(msg, "«") || strings.HasPrefix(msg, "строка ") {
+		return invalid("%s, %s", where, msg) // the message starts with a place inside this one
+	}
+	return invalid("%s: %s", where, msg)
 }
 
 // Re-exported store errors so transports do not import store.

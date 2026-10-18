@@ -168,6 +168,20 @@ func TestSubscriptionAPI(t *testing.T) {
 	if w := c.do("PUT", "/api/subscription", `{"headers":[{"name":"Content-Type","value":"x","enabled":true}]}`, true); w.Code != 400 {
 		t.Fatalf("reserved header accepted: %d", w.Code)
 	}
+	// An error names the tab, the field and the line; nothing of the draft is saved then.
+	bad := `{"basics":{"title":"Другое","updateHours":5},"routing":{"ruDirect":true,"dnsDirect":["localhost"],"dnsProxy":[],"torrent":"direct",` +
+		`"direct":["geosite:epicgames","","process:C:\\Games\\x.exe"],"proxy":[],"block":[]}}`
+	w = c.do("PUT", "/api/subscription", bad, true)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), `«Маршруты», «Всегда напрямую», строка 3: \"process:C:\\\\Games\\\\x.exe\" — после process:`) {
+		t.Fatalf("routing error: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("GET", "/api/subscription", "", false); !strings.Contains(w.Body.String(), `"title":"Мику"`) {
+		t.Fatalf("a failed save changed another tab: %.300s", w.Body.String())
+	}
+	w = c.do("PUT", "/api/subscription", `{"rules":[{"pattern":"happ","format":"base64","enabled":true},{"pattern":"(x","format":"xray","enabled":true}]}`, true)
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "«Форматы», строка 2, User-Agent") {
+		t.Fatalf("rules error: %d %s", w.Code, w.Body.String())
+	}
 	w = c.do("GET", "/api/subscription/preview", "", false)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
 		t.Fatalf("preview: %d %q %.100s", w.Code, w.Header().Get("X-Frame-Options"), w.Body.String())

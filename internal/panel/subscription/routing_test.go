@@ -204,6 +204,20 @@ func TestCheckClientRouting(t *testing.T) {
 			t.Fatalf("accepted %+v", bad)
 		}
 	}
+	// Errors name the field and the line as the panel shows them.
+	for in, want := range map[*service.ClientRouting]string{
+		{Proxy: []string{"youtube.com", "", "regexp:("}}:               "«Всегда через туннель», строка 3: \"regexp:(\" — неверное регулярное выражение",
+		{DNSProxy: []string{"https://1.1.1.1/dns-query", "localhost"}}: "«DNS через туннель», строка 2: localhost",
+		{Block: []string{"a b"}}:                                       "«Блокировать», строка 1: \"a b\" — непонятная запись",
+	} {
+		if err := service.CheckClientRouting(in); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %v, want %q", err, want)
+		}
+	}
+	if _, err := service.ParseClientConfig("{\n  \"outbounds\": [\n    {\"tag\": \"proxy\",}\n  ]\n}"); err == nil ||
+		!strings.Contains(err.Error(), "«Конфиг JSON», строка 3:") {
+		t.Fatalf("json error %v", err)
+	}
 	r := service.ClientRouting{Direct: []string{"", " example.ru ", "10.0.0.0/8"}, DNSDirect: []string{"https://dns.yandex.ru/dns-query"}}
 	if err := service.CheckClientRouting(&r); err != nil || len(r.Direct) != 2 || r.Torrent != "proxy" {
 		t.Fatalf("%v %+v", err, r)

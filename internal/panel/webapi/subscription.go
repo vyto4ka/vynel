@@ -62,6 +62,11 @@ func (s *Server) subSave(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx, a := r.Context(), actor(r)
+	// Everything is checked before anything is saved: an error on one tab leaves the others as
+	// they were. Errors name the tab, the field and the line.
+	if err := checkDraft(&in); err != nil {
+		return nil, err
+	}
 	if in.Basics != nil {
 		if err := s.svc.SetSubBasics(ctx, a, *in.Basics); err != nil {
 			return nil, err
@@ -183,7 +188,7 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	if in.Rules != nil {
 		rules = *in.Rules
 		if err := service.CheckSubRules(rules); err != nil {
-			return nil, err
+			return nil, service.InField("«Форматы»", err)
 		}
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
@@ -247,4 +252,34 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Frame-Options", "SAMEORIGIN")
 	h.Set("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self'")
 	_, _ = w.Write(buf.Bytes())
+}
+
+// checkDraft validates every tab of a subscription draft, naming the tab of an error.
+func checkDraft(in *subDraft) error {
+	if in.Basics != nil {
+		if err := service.CheckSubBasics(*in.Basics); err != nil {
+			return service.InField("«Основное»", err)
+		}
+	}
+	if in.Headers != nil {
+		if err := service.CheckSubHeaders(*in.Headers); err != nil {
+			return service.InField("«Заголовки»", err)
+		}
+	}
+	if in.Page != nil {
+		if err := service.CheckSubPage(in.Page); err != nil {
+			return err // names «Страница» or «Приложения» itself
+		}
+	}
+	if in.Rules != nil {
+		if err := service.CheckSubRules(*in.Rules); err != nil {
+			return service.InField("«Форматы»", err)
+		}
+	}
+	if in.Routing != nil {
+		if err := service.CheckClientRouting(in.Routing); err != nil {
+			return service.InField("«Маршруты»", err)
+		}
+	}
+	return nil
 }

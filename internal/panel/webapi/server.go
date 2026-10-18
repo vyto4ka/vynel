@@ -108,6 +108,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if p := firstSegment(r.URL.Path); p != "" && s.svc.WebPathKnown(ctx, p) {
 			base, own = p, p
 		} else {
+			// The page of a session that has ended still calls its API: it is told to sign in
+			// again (the decoy's 404 would read as a bare "Error"). Only the panel's own requests
+			// (with the X-Vynel header) on a path a session used today get this.
+			rest := strings.TrimPrefix(r.URL.Path, p)
+			if p != "" && strings.HasPrefix(rest, "api/") && r.Header.Get(csrfHeader) == "1" {
+				if why := s.svc.WebPathEnded(ctx, p); why != "" {
+					writeError(w, &httpError{http.StatusUnauthorized, why})
+					return
+				}
+			}
 			s.notFound(w, r)
 			return
 		}

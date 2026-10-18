@@ -28,9 +28,17 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   }
   if (!res.ok) {
     if (res.status === 401 && path !== 'login') onUnauthorized((data && data.error) || '')
-    throw new ApiError(res.status, (data && data.error) || res.statusText)
+    throw new ApiError(res.status, (data && data.error) || plainError(res))
   }
   return data as T
+}
+
+// plainError explains an answer that did not come from the panel's API (no JSON error).
+function plainError(res: Response): string {
+  const code = `HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''}`
+  if (res.status === 404) return `Панель не ответила (${code}): адрес сессии больше не работает — обновите страницу или войдите заново`
+  if (res.status >= 502 && res.status <= 504) return `Панель недоступна (${code}): она перезапускается или остановлена — попробуйте через минуту`
+  return `Ошибка сервера: ${code}`
 }
 
 export const get = <T = any>(p: string) => api<T>('GET', p)

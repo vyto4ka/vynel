@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
@@ -83,6 +84,23 @@ func (s *Service) WebPathKnown(ctx context.Context, path string) bool {
 	}
 	ok, err := store.WebPathInUse(ctx, s.st.DB, path, now)
 	return err == nil && ok
+}
+
+// WebPathEnded explains why the session that lived under a path is over ("" = no session lived
+// there lately). The page of that session learns it has to sign in again instead of meeting the
+// decoy.
+func (s *Service) WebPathEnded(ctx context.Context, path string) string {
+	if !sessionPathRe.MatchString(path) {
+		return ""
+	}
+	w, err := store.LastWebSessionOn(ctx, s.st.DB, path, s.now().Add(-24*time.Hour).Unix())
+	if err != nil {
+		return ""
+	}
+	if w.EndReason == "" && w.RevokedAt == nil && w.ExpiresAt <= s.now().Unix() {
+		return "Сессия завершена: истёк срок"
+	}
+	return EndReasonText(w.EndReason, s.WebIdleMinutes(ctx))
 }
 
 // WebSessionPath returns the path a session lives under ("" = the fixed one).

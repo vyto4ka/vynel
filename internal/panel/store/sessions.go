@@ -166,3 +166,9 @@ func WebPathInUse(ctx context.Context, q DBTX, path string, now int64) (bool, er
 		path, now).Scan(&n)
 	return n > 0, err
 }
+
+// LastWebSessionOn is the latest session that lived under a path, started after since.
+func LastWebSessionOn(ctx context.Context, q DBTX, path string, since int64) (*WebSession, error) {
+	return scanWebSession(q.QueryRowContext(ctx, `SELECT `+webSessionCols+` FROM web_sessions WHERE path=? AND created_at >= ?
+		ORDER BY created_at DESC LIMIT 1`, path, since))
+}

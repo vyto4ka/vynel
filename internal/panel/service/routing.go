@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"regexp"
@@ -75,58 +77,64 @@ var ruleWordRe = regexp.MustCompile(`^[a-z0-9!@._-]+$`)
 // processRe is an app's file or package name: no paths, nothing that breaks a Mihomo rule.
 var processRe = regexp.MustCompile(`^[\p{L}\p{N}_.+()-][\p{L}\p{N}_.+() -]{0,127}$`)
 
-// CheckClientRouting validates and tidies a routing (empty lines dropped).
+// CheckClientRouting validates and tidies a routing (empty lines dropped). Errors name the
+// field and the line as the panel shows them.
 func CheckClientRouting(r *ClientRouting) error {
 	switch r.Torrent {
 	case "":
 		r.Torrent = "proxy"
 	case "proxy", "direct", "block":
 	default:
-		return invalid("torrents: proxy, direct or block")
+		return invalid("«Торренты»: напрямую, через туннель или блок")
 	}
 	var err error
-	if r.DNSDirect, err = cleanDNS(r.DNSDirect, true); err != nil {
+	if r.DNSDirect, err = cleanDNS(r.DNSDirect, true, "DNS для прямых сайтов"); err != nil {
 		return err
 	}
-	if r.DNSProxy, err = cleanDNS(r.DNSProxy, false); err != nil {
+	if r.DNSProxy, err = cleanDNS(r.DNSProxy, false, "DNS через туннель"); err != nil {
 		return err
 	}
-	for _, l := range []*[]string{&r.Direct, &r.Proxy, &r.Block} {
+	for _, x := range []struct {
+		name string
+		l    *[]string
+	}{{"Всегда напрямую", &r.Direct}, {"Всегда через туннель", &r.Proxy}, {"Блокировать", &r.Block}} {
 		out := []string{}
-		for _, e := range *l {
+		for i, e := range *x.l {
 			e = strings.TrimSpace(e)
 			if e == "" {
 				continue
 			}
 			if err := checkRuleEntry(e); err != nil {
-				return err
+				return InField(fmt.Sprintf("«%s», строка %d", x.name, i+1), err)
 			}
 			out = append(out, e)
 		}
-		*l = out
+		*x.l = out
 	}
 	return nil
 }
 
-func cleanDNS(in []string, direct bool) ([]string, error) {
+// cleanDNS checks a DNS list (field is its name in the panel; lines count from 1).
+func cleanDNS(in []string, direct bool, field string) ([]string, error) {
 	out := []string{}
-	for _, d := range in {
+	for i, d := range in {
 		d = strings.TrimSpace(d)
+		where := fmt.Sprintf("«%s», строка %d", field, i+1)
 		switch {
 		case d == "":
 			continue
 		case d == "localhost":
 			if !direct {
-				return nil, invalid("DNS through the tunnel cannot be the device's own resolver (localhost)")
+				return nil, invalid("%s: localhost (DNS устройства) не ходит через туннель — укажите IP или DoH", where)
 			}
 		case net.ParseIP(d) != nil:
 		case strings.HasPrefix(d, "https://"):
 			u, err := url.Parse(d)
 			if err != nil || u.Host == "" {
-				return nil, invalid("DNS %q is not a valid DoH link", d)
+				return nil, invalid("%s: %q — неверная ссылка DoH", where, d)
 			}
 		default:
-			return nil, invalid("DNS %q: an IP address, a DoH link (https://…/dns-query) or localhost", d)
+			return nil, invalid("%s: %q — нужен IP, ссылка DoH (https://…/dns-query) или localhost", where, d)
 		}
 		out = append(out, d)
 	}
@@ -163,17 +171,17 @@ func checkRuleEntry(e string) error {
 		return nil
 	case "regexp":
 		if _, err := regexp.Compile(r.Value); err != nil {
-			return invalid("%q: not a valid regexp: %v", e, err)
+			return invalid("%q — неверное регулярное выражение: %v", e, err)
 		}
 		return nil
 	case "process":
 		if !processRe.MatchString(strings.TrimSpace(r.Value)) {
-			return invalid("%q: an app's file name (game.exe) or Android package (com.example.app), no path", e)
+			return invalid("%q — после process: имя файла программы (game.exe) или пакета Android (com.example.app), без пути", e)
 		}
 		return nil
 	}
 	if r.Value == "" || !ruleWordRe.MatchString(strings.ToLower(r.Value)) {
-		return invalid("%q: use domain:, full:, keyword:, regexp:, geosite:, geoip:, process:, an IP or a CIDR", e)
+		return invalid("%q — непонятная запись: можно domain:, full:, keyword:, regexp:, geosite:, geoip:, process:, IP или подсеть", e)
 	}
 	return nil
 }
@@ -210,32 +218,36 @@ func CheckProfileClient(c *ProfileClient) error {
 		}
 		return nil
 	}
-	return invalid("client config mode: routing or json")
+	return invalid("«Клиент»: режим — настройки или конфиг JSON")
 }
 
 // ParseClientConfig reads a custom Xray client config: an object, or an array of one.
 func ParseClientConfig(src string) (map[string]any, error) {
 	var v any
 	if err := json.Unmarshal([]byte(src), &v); err != nil {
-		return nil, invalid("client config is not valid JSON: %v", err)
+		var se *json.SyntaxError
+		if errors.As(err, &se) {
+			return nil, invalid("«Конфиг JSON», строка %d: ошибка JSON: %v", strings.Count(src[:min(int(se.Offset), len(src))], "\n")+1, err)
+		}
+		return nil, invalid("«Конфиг JSON»: ошибка JSON: %v", err)
 	}
 	if l, ok := v.([]any); ok {
 		if len(l) != 1 {
-			return nil, invalid("client config: one config object, not a list of %d", len(l))
+			return nil, invalid("«Конфиг JSON»: нужен один объект конфига, а не список из %d", len(l))
 		}
 		v = l[0]
 	}
 	m, ok := v.(map[string]any)
 	if !ok {
-		return nil, invalid("client config must be a JSON object")
+		return nil, invalid("«Конфиг JSON»: нужен объект {…}")
 	}
 	if o, ok := m["outbounds"]; ok {
 		if _, ok := o.([]any); !ok {
-			return nil, invalid("client config: outbounds must be a list")
+			return nil, invalid("«Конфиг JSON»: outbounds должен быть списком")
 		}
 	}
 	if _, ok := m["routing"].(map[string]any); !ok && m["routing"] != nil {
-		return nil, invalid("client config: routing must be an object")
+		return nil, invalid("«Конфиг JSON»: routing должен быть объектом")
 	}
 	return m, nil
 }
