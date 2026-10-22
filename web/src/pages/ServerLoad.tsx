@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { get } from '../api'
-import { Legend, Segmented, TimeChart } from '../charts'
+import { Legend, Segmented, SERIES, TimeChart } from '../charts'
 import { GiB } from '../format'
 import { Empty, Loading, useLoad } from '../ui'
 
@@ -58,6 +58,7 @@ export function ServerLoad() {
       </div>
       {!data || data.range !== range ? <Loading error={error} /> : data.nodes.length === 0 ? <div className="card"><Empty>Нод пока нет</Empty></div> : (
         <div className="cards">
+          {data.nodes.length > 1 && <AllNodesCard d={data} />}
           {data.nodes.map((n) => <NodeLoadCard key={n.id} n={n} d={data} />)}
         </div>
       )}
@@ -65,10 +66,52 @@ export function ServerLoad() {
   )
 }
 
-function NodeLoadCard({ n, d }: { n: LoadT['nodes'][number]; d: LoadT }) {
-  // Ровная ось времени: где нода молчала, на графике пропуск, а не линия через провал.
+// Ровная ось времени периода: где нода молчала, на графике пропуск, а не линия через провал.
+function axis(d: LoadT): number[] {
   const times: number[] = []
   for (let t = d.from; t < d.to; t += d.bucket) times.push(t)
+  return times
+}
+
+// AllNodesCard — все ноды на одних графиках, каждая своим цветом: видно, какая нагружена сильнее.
+function AllNodesCard({ d }: { d: LoadT }) {
+  const times = axis(d)
+  const nodes = [...d.nodes].sort((a, b) => a.id - b.id)
+  const color = (i: number) => SERIES[i % SERIES.length]
+  const series = (f: (p: Point) => number) => nodes.map((n, i) => {
+    const at = new Map(n.points.map((p) => [p[0], p]))
+    return { key: String(n.id), label: `${n.flag} ${n.name}`, color: color(i), values: times.map((t) => { const p = at.get(t); return p ? f(p) : null }) }
+  })
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div><h3>Все ноды</h3><div className="card-sub">наложены друг на друга</div></div>
+        <Legend items={nodes.map((n, i) => ({ label: `${n.flag} ${n.code}`, color: color(i) }))} />
+      </div>
+      <div className="card-pad small-multiples load-grid">
+        <div>
+          <div className="sm-title">Процессор, в среднем</div>
+          <TimeChart times={times} bucket={d.bucket} kind="line" max={100} format={pct} height={170} series={series((p) => p[1])} />
+        </div>
+        <div>
+          <div className="sm-title">Steal</div>
+          <TimeChart times={times} bucket={d.bucket} kind="line" format={pct1} height={170} series={series((p) => p[3])} />
+        </div>
+        <div>
+          <div className="sm-title">Оперативная память</div>
+          <TimeChart times={times} bucket={d.bucket} kind="line" unit="bytes" format={gb} height={170} series={series((p) => p[4])} />
+        </div>
+        <div>
+          <div className="sm-title">Канал, входящий + исходящий</div>
+          <TimeChart times={times} bucket={d.bucket} kind="line" format={bits} height={170} series={series((p) => p[5] + p[6])} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function NodeLoadCard({ n, d }: { n: LoadT['nodes'][number]; d: LoadT }) {
+  const times = axis(d)
   const at = new Map(n.points.map((p) => [p[0], p]))
   const col = (i: number, k = 1) => times.map((t) => { const p = at.get(t); return p ? p[i] * k : null })
   const last = n.points[n.points.length - 1]

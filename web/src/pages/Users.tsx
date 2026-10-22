@@ -184,7 +184,7 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
             {templates.data?.filter((t) => !t.isDefault).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
-        <div className="grid2">
+        <div className="grid2 keep2">
           <Field label={<>Срок, месяцев {months === '' && !never && fromTpl}</>}>
             <input className="input" inputMode="numeric" disabled={never} value={months} onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))}
               placeholder={tplExpiry ? String(tpl!.expireMonths) : '—'} />
@@ -197,7 +197,7 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
         <label className="check" style={{ marginTop: -6, marginBottom: 12 }}>
           <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} /> бессрочно
         </label>
-        <div className="grid2">
+        <div className="grid2 keep2">
           <Field label={<>Трафик, ГБ {traffic === '' && fromTpl}</>} help="0 — без лимита">
             <input className="input" inputMode="decimal" value={traffic} onChange={(e) => setTraffic(e.target.value.replace(/[^\d.,]/g, ''))}
               placeholder={tpl?.trafficLimit ? String(+(tpl.trafficLimit / GiB).toFixed(2)) : 'без лимита'} />
@@ -476,7 +476,7 @@ function EditUser({ u, hwidDefault, ipDefault, groups, onClose, onSaved }: { u: 
     <Modal title={`Изменить ${u.username}`} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="edit-user">Сохранить</button></>}>
       <form id="edit-user" onSubmit={save}>
-        <div className="grid2">
+        <div className="grid2 keep2">
           <Field label="Действует до" help="Пусто — бессрочно">
             <input className="input" type="date" value={expire} onChange={(e) => setExpire(e.target.value)} />
           </Field>
