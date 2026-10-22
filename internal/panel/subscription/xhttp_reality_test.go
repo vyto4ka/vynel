@@ -188,6 +188,7 @@ func TestXHTTPRealityTrafficOnXray(t *testing.T) {
 				}
 				rt["rules"] = keep
 			}
+			xraytest.OpenFreedom(scfg)
 			if os.Getenv("XHTTP_DEBUG") != "" {
 				scfg["log"] = map[string]any{"loglevel": "debug"}
 			}

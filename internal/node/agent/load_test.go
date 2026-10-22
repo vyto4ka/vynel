@@ -102,7 +102,7 @@ func TestNodeLoad(t *testing.T) {
 	// in this process it would count as the agent's memory.
 	ou := originProcess(t)
 	port, apiPort := xraytest.FreePort(t), xraytest.FreePort(t)
-	base, _ := xrayconf.ParseBase(`{"outbounds":[{"tag":"DIRECT","protocol":"freedom"}]}`)
+	base, _ := xrayconf.ParseBase(`{"outbounds":[` + xraytest.DirectJSON + `]}`)
 	cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: base, APIAddr: "127.0.0.1:" + strconv.Itoa(apiPort)})
 	if err != nil {
 		t.Fatal(err)

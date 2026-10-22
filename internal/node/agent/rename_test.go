@@ -24,7 +24,7 @@ func TestRenamedUserKeepsWorking(t *testing.T) {
 		"log": map[string]any{"loglevel": "warning"},
 		"inbounds": []any{map[string]any{"tag": "IN", "listen": "127.0.0.1", "port": port, "protocol": "vless",
 			"settings": map[string]any{"clients": []any{}, "decryption": "none"}, "streamSettings": map[string]any{"network": "raw"}}},
-		"outbounds": []any{map[string]any{"tag": "DIRECT", "protocol": "freedom"}},
+		"outbounds": []any{xraytest.Direct()},
 		"api":       map[string]any{"tag": "api", "listen": "127.0.0.1:" + strconv.Itoa(apiPort), "services": []any{"HandlerService", "StatsService"}},
 		"stats":     map[string]any{},
 	}

@@ -52,7 +52,7 @@ func TestIPBlocksOnXray(t *testing.T) {
 		"log": map[string]any{"loglevel": "warning"},
 		"inbounds": []any{map[string]any{"tag": "IN", "listen": "0.0.0.0", "port": port, "protocol": "vless",
 			"settings": map[string]any{"clients": []any{}, "decryption": "none"}, "streamSettings": map[string]any{"network": "raw"}}},
-		"outbounds": []any{map[string]any{"tag": "DIRECT", "protocol": "freedom"}, map[string]any{"tag": xrayconf.IPBlockTag, "protocol": "blackhole"}},
+		"outbounds": []any{xraytest.Direct(), map[string]any{"tag": xrayconf.IPBlockTag, "protocol": "blackhole"}},
 		"routing":   map[string]any{"rules": []any{map[string]any{"network": "tcp,udp", "outboundTag": "DIRECT"}}},
 		"api":       map[string]any{"tag": "api", "listen": "127.0.0.1:" + strconv.Itoa(apiPort), "services": []any{"HandlerService", "StatsService", "RoutingService"}},
 		"stats":     map[string]any{},
@@ -148,7 +148,7 @@ func TestIPBlocksWithoutBaseRouting(t *testing.T) {
 	origin := xraytest.Origin(t)
 	port, apiPort := xraytest.FreePort(t), xraytest.FreePort(t)
 	const uuid = "11111111-2222-4333-8444-555555555555"
-	base, _ := xrayconf.ParseBase(`{"outbounds":[{"tag":"DIRECT","protocol":"freedom"}]}`)
+	base, _ := xrayconf.ParseBase(`{"outbounds":[` + xraytest.DirectJSON + `]}`)
 	cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: base, APIAddr: "127.0.0.1:" + strconv.Itoa(apiPort)})
 	if err != nil {
 		t.Fatal(err)
