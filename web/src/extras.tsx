@@ -16,7 +16,8 @@ export function CascadeList() {
       <div className="card card-pad small text-2" style={{ marginBottom: 14 }}>
         Каскад: приложение подключается к ноде входа, а трафик выходит в интернет через ноду выхода. Для пользователя это отдельный сервер
         в подписке («🇳🇱 Нидерланды → 🇩🇪 Германия»). Новых портов не нужно: на входе у пользователя свой ключ того же инбаунда, по нему
-        нода входа отправляет трафик на выход. Кому выдать — в «Группах» или в карточке пользователя (там можно поставить свой срок).
+        нода входа отправляет трафик на выход. Группа с доступом «всё» (по умолчанию «Основная») получает каждый каскад сразу; другим —
+        в «Группах» или в карточке пользователя (там можно поставить свой срок).
       </div>
       <div className="toolbar">
         <div className="grow" />
@@ -26,16 +27,19 @@ export function CascadeList() {
         <div className="card">
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th /><th>Каскад</th><th>Вход</th><th>Выход</th><th /></tr></thead>
+              <thead><tr><th /><th>Каскад</th><th className="hide-sm">Вход</th><th className="hide-sm">Выход</th><th /></tr></thead>
               <tbody>
                 {cascades.data.map((c) => (
                   <tr key={c.id}>
                     <td style={{ width: 50 }}>
                       <Switch checked={c.enabled} onChange={(v) => act(() => patch(`cascades/${c.id}`, { ...c, enabled: v }), v ? 'Каскад включён' : 'Каскад выключен').then(() => cascades.reload())} />
                     </td>
-                    <td><div>{c.name}</div><div className="muted small">{c.title}</div></td>
-                    <td className="small">{c.entry}</td>
-                    <td className="small">{c.exit}</td>
+                    <td>
+                      <div>{c.name}</div><div className="muted small">{c.title}</div>
+                      {c.problem && <div className={'small ' + (c.enabled ? 'pink-text' : 'muted')}>⚠ {c.problem}</div>}
+                    </td>
+                    <td className="small hide-sm">{c.entry}</td>
+                    <td className="small hide-sm">{c.exit}</td>
                     <td className="nowrap" style={{ width: 90 }}>
                       <button className="btn ghost icon sm" title="Изменить" onClick={() => setEdit(c)}><Icon name="edit" /></button>
                       <button className="btn ghost icon sm" title="Удалить" onClick={async () => {
@@ -63,19 +67,20 @@ function CascadeForm({ c, nodes, onClose, onSaved }: { c: Cascade | null; nodes:
   const act = useAction()
   const inbounds = nodes.flatMap((n) => n.inbounds.map((i) => ({ id: i.id, nodeId: n.id, label: `${n.flag} ${n.name} · ${i.tag}` })))
   const entryNode = inbounds.find((i) => i.id === entry)?.nodeId
+  const exitNode = inbounds.find((i) => i.id === exit)?.nodeId
+  const nodeName = (id?: number) => nodes.find((n) => n.id === id)?.name || ''
+  // Название по умолчанию — из выбранных нод: «Нидерланды → Германия».
+  const auto = entryNode && exitNode ? `${nodeName(entryNode)} → ${nodeName(exitNode)}` : ''
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const body = { name, entryInboundId: entry, exitInboundId: exit, remark, enabled: c ? c.enabled : true }
+    const body = { name: name.trim() || auto, entryInboundId: entry, exitInboundId: exit, remark, enabled: c ? c.enabled : true }
     const r = await act(() => (c ? patch(`cascades/${c.id}`, body) : post('cascades', body)), 'Сохранено — ноды получат изменения за несколько секунд')
     if (r !== undefined) onSaved()
   }
   return (
     <Modal title={c ? 'Каскад' : 'Новый каскад'} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="cascade-form" disabled={!name.trim() || !entry || !exit}>Сохранить</button></>}>
+      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="cascade-form" disabled={!(name.trim() || auto) || !entry || !exit}>Сохранить</button></>}>
       <form id="cascade-form" onSubmit={submit}>
-        <Field label="Название" help="Для панели: «NL → DE»">
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
         <Field label="Вход (нода 1)" help="Куда подключается приложение: его адрес и ключи Reality уйдут в подписку">
           <select className="input" value={entry} onChange={(e) => setEntry(Number(e.target.value))}>
             <option value={0}>— выберите инбаунд —</option>
@@ -87,6 +92,9 @@ function CascadeForm({ c, nodes, onClose, onSaved }: { c: Cascade | null; nodes:
             <option value={0}>— выберите инбаунд —</option>
             {inbounds.filter((i) => i.nodeId !== entryNode).map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
           </select>
+        </Field>
+        <Field label="Название в панели" help="Пусто — из нод входа и выхода">
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={auto || 'Нидерланды → Германия'} />
         </Field>
         <Field label="Название сервера в приложениях" help="Пусто — «флаг вход → флаг выход»">
           <input className="input" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="🇳🇱 Нидерланды → 🇩🇪 Германия" />
@@ -240,6 +248,7 @@ export function UserExtras({ userId, grants, groups, onChanged }: { userId: numb
           <div key={g.kind + g.refId} className="row between" style={{ marginBottom: 8 }}>
             <div>
               <span className="muted small">{kindText[g.kind]}</span> {name(g.kind, g.refId)}{' '}
+              {g.problem && <div className="pink-text small">⚠ {g.problem}</div>}
               {!g.active ? <Badge color="pink">закончился {date(g.expireAt)}</Badge> : g.expireAt ? <Badge>до {date(g.expireAt)}</Badge> : null}
               {g.groups.length > 0 && <span className="muted small"> · через {g.groups.map((id) => groups.find((x) => x.id === id)?.name || id).join(', ')}</span>}
             </div>

@@ -47,7 +47,7 @@ func (s *Server) cascades(r *http.Request) (any, error) {
 	for _, c := range cs {
 		out = append(out, map[string]any{"id": c.ID, "name": c.Name, "entryInboundId": c.EntryInboundID, "exitInboundId": c.ExitInboundID,
 			"entry": label[c.EntryInboundID], "exit": label[c.ExitInboundID], "remark": c.Remark, "enabled": c.Enabled,
-			"title": s.svc.CascadeRemark(ctx, s.svc.Store().DB, c)})
+			"title": s.svc.CascadeRemark(ctx, s.svc.Store().DB, c), "problem": s.svc.CascadeProblem(ctx, c.ID)})
 	}
 	return out, nil
 }

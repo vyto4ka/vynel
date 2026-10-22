@@ -52,6 +52,8 @@ func (s *Service) GrantAccess(ctx context.Context, actor Actor, groupID int64, k
 				_, err = store.GetProfile(ctx, q, refID)
 			case store.AccessNode:
 				_, err = store.GetNode(ctx, q, refID)
+			case store.AccessAll:
+				refID = 0
 			default:
 				return invalid("unknown access kind %q", kind)
 			}
@@ -96,11 +98,29 @@ func ResolveAccess(rules []*store.AccessRule, inbounds []*store.NodeInbound) map
 		}
 		for _, ni := range inbounds {
 			switch {
-			case r.Kind == store.AccessNodeInbound && ni.ID == r.RefID,
+			case r.Kind == store.AccessAll,
+				r.Kind == store.AccessNodeInbound && ni.ID == r.RefID,
 				r.Kind == store.AccessProfile && ni.ProfileID == r.RefID,
 				r.Kind == store.AccessNode && ni.NodeID == r.RefID:
 				set[ni.ID] = true
 			}
+		}
+	}
+	return out
+}
+
+// withAllGrants adds what groups with access to everything get on top of their grants: every
+// cascade, without an end date. The subscriptions and the nodes both read grants through it, so
+// they always agree.
+func withAllGrants(grants []*store.Grant, rules []*store.AccessRule, cascades []*store.Cascade) []*store.Grant {
+	out := grants
+	for _, r := range rules {
+		if r.Kind != store.AccessAll {
+			continue
+		}
+		for _, c := range cascades {
+			g := r.GroupID
+			out = append(out, &store.Grant{GroupID: &g, Kind: store.GrantCascade, RefID: c.ID})
 		}
 	}
 	return out

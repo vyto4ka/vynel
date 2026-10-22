@@ -3,7 +3,7 @@ import { del, get, GrantRow, Group, Node, patch, post, Profile } from '../api'
 import { GroupExtras } from '../extras'
 import { Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 
-const kindLabel: Record<string, string> = { profile: 'профиль', node: 'нода', node_inbound: 'инбаунд' }
+const kindLabel: Record<string, string> = { profile: 'профиль', node: 'нода', node_inbound: 'инбаунд', all: 'всё' }
 
 export function Groups() {
   const groups = useLoad(() => get<Group[]>('groups'))
@@ -15,6 +15,7 @@ export function Groups() {
   const confirm = useConfirm()
 
   const options: { kind: string; refId: number; label: string }[] = [
+    { kind: 'all', refId: 0, label: 'Всё на серверах — все серверы и каскады, и добавленные потом' },
     ...(profiles.data || []).map((p) => ({ kind: 'profile', refId: p.id, label: `Профиль «${p.name}» — на всех нодах` })),
     ...(nodes.data || []).map((n) => ({ kind: 'node', refId: n.id, label: `Нода ${n.flag} ${n.name} (${n.code}) — все её инбаунды` })),
     ...(nodes.data || []).flatMap((n) => n.inbounds.map((i) => ({ kind: 'node_inbound', refId: i.id, label: `Инбаунд ${i.tag}` }))),
@@ -49,6 +50,7 @@ export function Groups() {
                 <div className="label" style={{ marginBottom: 8 }}>Доступ</div>
                 <div className="row" style={{ gap: 6 }}>
                   {g.rules.length === 0 && <span className="pink-text small">ничего — у участников не будет серверов</span>}
+                  {g.rules.some((r) => r.kind === 'all') && g.rules.length > 1 && <span className="muted small">«всё» уже включает остальное</span>}
                   {g.rules.map((r) => (
                     <span key={r.kind + r.refId} className="chip">
                       <span className="muted">{kindLabel[r.kind] || r.kind}</span> {r.label}

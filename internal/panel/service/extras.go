@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -289,6 +290,7 @@ type UserGrant struct {
 	GrantID  int64   `json:"grantId"`  // the user's own grant (0 = only through groups)
 	Groups   []int64 `json:"groups"`   // groups that give it
 	Active   bool    `json:"active"`
+	Problem  string  `json:"problem,omitempty"` // why a cascade is not (fully) in the subscription
 }
 
 type grantKey struct {
@@ -333,7 +335,9 @@ func userGrants(grants []*store.Grant, users []int64, groupsOf map[int64][]int64
 				ug.ExpireAt = later(ug.ExpireAt, g.ExpireAt)
 			}
 			if group != 0 {
-				ug.Groups = append(ug.Groups, group)
+				if !slices.Contains(ug.Groups, group) { // a grant and the group's access to everything
+					ug.Groups = append(ug.Groups, group)
+				}
 			} else {
 				ug.GrantID = g.ID
 			}
@@ -377,7 +381,24 @@ func (s *Service) grantsOf(snap *configSnapshot, userID int64, groups []int64) [
 	if ug == nil {
 		ug = []UserGrant{}
 	}
+	for i := range ug {
+		if cs := snap.cascades[ug[i].RefID]; ug[i].Kind == store.GrantCascade && cs != nil {
+			ug[i].Problem = cs.problem
+		}
+	}
 	return ug
+}
+
+// CascadeProblem says why a cascade is not (fully) in subscriptions ("" = it is).
+func (s *Service) CascadeProblem(ctx context.Context, id int64) string {
+	snap, err := s.snapshot(ctx)
+	if err != nil {
+		return ""
+	}
+	if cs := snap.cascades[id]; cs != nil {
+		return cs.problem
+	}
+	return ""
 }
 
 // grantsExpiredSince reports whether a grant ended in (since, now]: the desired state changes.
@@ -413,6 +434,11 @@ func (s *Service) planCascades(ctx context.Context, q store.DBTX, groupsOf map[i
 	if err != nil {
 		return nil, err
 	}
+	rules, err := store.ListAccessRules(ctx, q, 0)
+	if err != nil {
+		return nil, err
+	}
+	grants = withAllGrants(grants, rules, cascades)
 	users := make([]int64, 0, len(active))
 	for u := range active {
 		users = append(users, u)

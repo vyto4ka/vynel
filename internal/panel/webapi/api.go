@@ -656,7 +656,7 @@ func (s *Server) groups(r *http.Request) (any, error) {
 // refLabels names access rule targets: profile names, node codes, inbound tags.
 func (s *Server) refLabels(r *http.Request) (map[string]string, error) {
 	ctx := r.Context()
-	out := map[string]string{}
+	out := map[string]string{store.AccessAll + ":0": "все серверы и каскады, и новые тоже"}
 	ps, err := s.svc.Profiles(ctx)
 	if err != nil {
 		return nil, err

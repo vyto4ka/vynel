@@ -21,6 +21,7 @@ const (
 	AccessNodeInbound = "node_inbound"
 	AccessProfile     = "profile"
 	AccessNode        = "node"
+	AccessAll         = "all" // every inbound and every cascade, those added later too (ref 0)
 )
 
 // AccessRule grants a group access to inbounds.

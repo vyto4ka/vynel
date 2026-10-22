@@ -462,6 +462,7 @@ export interface Cascade {
   remark: string
   title: string
   enabled: boolean
+  problem?: string // почему его нет в подписках (или есть не везде)
 }
 
 // Чужая подписка, чьи серверы добавляются в наши.
@@ -492,4 +493,5 @@ export interface UserGrant {
   grantId: number
   groups: number[]
   active: boolean
+  problem?: string
 }
