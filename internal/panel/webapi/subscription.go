@@ -18,6 +18,7 @@ func (s *Server) subscriptionRoutes() {
 	s.handle("PUT /api/subscription", s.subSave)
 	s.handle("POST /api/subscription/reset", s.subReset)
 	s.handle("POST /api/subscription/test", s.subTest)
+	s.handle("POST /api/subscription/template", s.subTemplate)
 	s.api.HandleFunc("GET /api/subscription/preview", s.subPreview)
 }
 
@@ -193,12 +194,37 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	req.Header.Set("User-Agent", in.UserAgent)
-	format := subscription.Detect(req, "", u.ClientType, rules)
+	format, rule := subscription.Pick(req, "", u.ClientType, rules)
 	headers := subscription.RenderHeaders(hs, subscription.UserVars(u, s.subURLFor(r, u), b, time.Now()), in.UserAgent)
 	if headers == nil {
 		headers = []subscription.HeaderValue{}
 	}
-	return map[string]any{"user": u.Username, "format": format, "headers": headers}, nil
+	client := ""
+	ownTemplate := false
+	if rule != nil {
+		client = rule.Note
+		if client == "" {
+			client = rule.Pattern
+		}
+		ownTemplate = rule.Template != "" && rule.Format == string(format)
+	}
+	return map[string]any{"user": u.Username, "format": format, "headers": headers, "client": client, "ownTemplate": ownTemplate}, nil
+}
+
+// subTemplate reads a pasted client template: what is in it and the routing it carries.
+func (s *Server) subTemplate(r *http.Request) (any, error) {
+	var in struct {
+		Format string `json:"format"`
+		Text   string `json:"text"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	info, err := subscription.ReadTemplate(in.Format, in.Text)
+	if err != nil {
+		return nil, service.InField("«Свой шаблон»", err)
+	}
+	return info, nil
 }
 
 // subPreview renders the subscription page inside the panel (an iframe). A draft page config

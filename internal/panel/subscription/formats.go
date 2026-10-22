@@ -98,6 +98,21 @@ func uniqueNames(hosts []service.Host) []string {
 
 // Mihomo renders a Clash Meta / Mihomo profile.
 func Mihomo(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte, error) {
+	proxies, names := mihomoProxies(hosts, uuid)
+	doc := map[string]any{
+		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": false,
+		"proxies":      proxies,
+		"proxy-groups": []map[string]any{{"name": "VPN", "type": "select", "proxies": names}},
+		"rules":        mihomoRules(r, "VPN"),
+	}
+	if dns := mihomoDNS(r, "VPN"); dns != nil {
+		doc["dns"] = dns
+	}
+	return yaml.Marshal(doc)
+}
+
+// mihomoProxies renders the hosts as Mihomo proxies, with their (unique) names.
+func mihomoProxies(hosts []service.Host, uuid string) ([]map[string]any, []string) {
 	names := uniqueNames(hosts)
 	proxies := make([]map[string]any, 0, len(hosts))
 	for i, h := range hosts {
@@ -146,16 +161,7 @@ func Mihomo(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte,
 		}
 		proxies = append(proxies, p)
 	}
-	doc := map[string]any{
-		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": false,
-		"proxies":      proxies,
-		"proxy-groups": []map[string]any{{"name": "VPN", "type": "select", "proxies": names}},
-		"rules":        mihomoRules(r, "VPN"),
-	}
-	if dns := mihomoDNS(r, "VPN"); dns != nil {
-		doc["dns"] = dns
-	}
-	return yaml.Marshal(doc)
+	return proxies, names
 }
 
 // mihomoFingerprint maps uTLS names Mihomo does not know ("randomized") to its closest one.
@@ -237,8 +243,26 @@ func mihomoValue(v any, asString bool) any {
 
 // SingBox renders a sing-box (1.12+) profile with a TUN inbound.
 func SingBox(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte, error) {
+	servers, names := singBoxOutbounds(hosts, uuid)
+	outbounds := append([]map[string]any{{"type": "selector", "tag": "proxy", "outbounds": names}}, servers...)
+	outbounds = append(outbounds, map[string]any{"type": "direct", "tag": "direct"})
+	route, dns := singBoxRouting(r)
+	doc := map[string]any{
+		"log":       map[string]any{"level": "warn"},
+		"inbounds":  []map[string]any{{"type": "tun", "tag": "tun-in", "address": []string{"172.19.0.1/30"}, "auto_route": true, "strict_route": true}},
+		"outbounds": outbounds,
+		"route":     route,
+	}
+	if dns != nil {
+		doc["dns"] = dns
+	}
+	return json.MarshalIndent(doc, "", "  ")
+}
+
+// singBoxOutbounds renders the hosts as sing-box outbounds, with their (unique) tags.
+func singBoxOutbounds(hosts []service.Host, uuid string) ([]map[string]any, []string) {
 	names := uniqueNames(hosts)
-	outbounds := []map[string]any{{"type": "selector", "tag": "proxy", "outbounds": names}}
+	var outbounds []map[string]any
 	for i, h := range hosts {
 		uuid := cred(h, uuid)
 		if h.Protocol == "hysteria" {
@@ -263,18 +287,7 @@ func SingBox(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte
 		}
 		outbounds = append(outbounds, o)
 	}
-	outbounds = append(outbounds, map[string]any{"type": "direct", "tag": "direct"})
-	route, dns := singBoxRouting(r)
-	doc := map[string]any{
-		"log":       map[string]any{"level": "warn"},
-		"inbounds":  []map[string]any{{"type": "tun", "tag": "tun-in", "address": []string{"172.19.0.1/30"}, "auto_route": true, "strict_route": true}},
-		"outbounds": outbounds,
-		"route":     route,
-	}
-	if dns != nil {
-		doc["dns"] = dns
-	}
-	return json.MarshalIndent(doc, "", "  ")
+	return outbounds, names
 }
 
 // XrayOutbound renders the proxy outbound of a host.

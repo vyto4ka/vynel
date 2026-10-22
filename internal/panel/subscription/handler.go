@@ -39,27 +39,51 @@ func ruleRe(p string) *regexp.Regexp {
 // Detect picks the format: explicit URL suffix, then the user's client type, then the
 // User-Agent rules (first enabled match), then HTML for browsers, else base64.
 func Detect(r *http.Request, explicit, clientType string, rules []service.SubRule) Format {
-	if f, ok := ParseFormat(explicit); ok {
-		return f
-	}
-	if f, ok := ParseFormat(clientType); ok {
-		return f
-	}
+	f, _ := Pick(r, explicit, clientType, rules)
+	return f
+}
+
+// Pick is Detect that also says which client rule matched (nil = none): its own template, if
+// any, is what the servers go into when the format is the rule's.
+func Pick(r *http.Request, explicit, clientType string, rules []service.SubRule) (Format, *service.SubRule) {
 	ua := r.UserAgent()
-	for _, rule := range rules {
-		if !rule.Enabled {
+	var matched *service.SubRule
+	for i := range rules {
+		if !rules[i].Enabled {
 			continue
 		}
-		if re := ruleRe(rule.Pattern); re != nil && re.MatchString(ua) {
-			if f, ok := ParseFormat(rule.Format); ok {
-				return f
+		if re := ruleRe(rules[i].Pattern); re != nil && re.MatchString(ua) {
+			if _, ok := ParseFormat(rules[i].Format); ok {
+				matched = &rules[i]
+				break
 			}
 		}
 	}
-	if strings.Contains(r.Header.Get("Accept"), "text/html") && strings.Contains(ua, "Mozilla") {
-		return FormatHTML
+	if f, ok := ParseFormat(explicit); ok {
+		return f, matched
 	}
-	return FormatBase64
+	if f, ok := ParseFormat(clientType); ok {
+		return f, matched
+	}
+	if matched != nil {
+		f, _ := ParseFormat(matched.Format)
+		return f, matched
+	}
+	if strings.Contains(r.Header.Get("Accept"), "text/html") && strings.Contains(ua, "Mozilla") {
+		return FormatHTML, nil
+	}
+	return FormatBase64, nil
+}
+
+// templateFor is the client's own template for the format ("" = none).
+func templateFor(f Format, rule *service.SubRule) string {
+	if rule == nil || rule.Template == "" {
+		return ""
+	}
+	if rf, _ := ParseFormat(rule.Format); rf != f {
+		return ""
+	}
+	return rule.Template
 }
 
 // Handler serves subscriptions. Everything that is not a valid token gets the decoy site's
@@ -134,7 +158,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.log.Warn("subscription rules", "err", err)
 	}
-	format := Detect(r, explicit, u.ClientType, rules)
+	format, rule := Pick(r, explicit, u.ClientType, rules)
+	tpl := templateFor(format, rule)
 	if format == FormatHTML {
 		if on, _ := h.svc.Setting(ctx, service.SettingSubPageEnabled, "true"); on == "false" {
 			// Without the page a browser cannot tell the link from any other missing page.
@@ -165,14 +190,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("subscription routing", "err", err)
 	}
 	var body []byte
-	switch format {
-	case FormatMihomo:
+	switch {
+	case format == FormatMihomo && tpl != "":
+		body, err = MihomoFromTemplate(hosts, uuid, tpl)
+		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	case format == FormatMihomo:
 		body, err = Mihomo(hosts, uuid, routing)
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	case FormatSingBox:
+	case format == FormatSingBox && tpl != "":
+		body, err = SingBoxFromTemplate(hosts, uuid, tpl)
+		w.Header().Set("Content-Type", "application/json")
+	case format == FormatSingBox:
 		body, err = SingBox(hosts, uuid, routing)
 		w.Header().Set("Content-Type", "application/json")
-	case FormatXray:
+	case format == FormatXray && tpl != "":
+		body, err = XrayJSONFromTemplate(hosts, uuid, tpl)
+		w.Header().Set("Content-Type", "application/json")
+	case format == FormatXray:
 		body, err = XrayJSON(hosts, uuid, routing)
 		w.Header().Set("Content-Type", "application/json")
 	default:

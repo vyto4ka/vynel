@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, User } from '../api'
+import { ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
 import { ExternalList } from '../extras'
 import { RoutingForm } from '../routing'
 import { Badge, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
@@ -9,7 +9,7 @@ const tabs: [string, string][] = [
   ['page', 'Страница'],
   ['apps', 'Приложения'],
   ['headers', 'Заголовки'],
-  ['rules', 'Форматы'],
+  ['rules', 'Клиенты'],
   ['routing', 'Маршруты'],
   ['externals', 'Внешние'],
   ['test', 'Проверка'],
@@ -102,7 +102,7 @@ export function Subscription() {
           {tab === 'page' && <PageTab p={page} set={setPage} onReset={() => reset('page')} />}
           {tab === 'apps' && <AppsTab p={page} set={setPage} catalog={c.appCatalog} />}
           {tab === 'headers' && <HeadersTab hs={headers} set={setHeaders} cfg={c} onReset={() => reset('headers')} />}
-          {tab === 'rules' && <RulesTab rules={rules} set={setRules} formats={c.formats} onReset={() => reset('rules')} />}
+          {tab === 'rules' && <ClientsTab rules={rules} set={setRules} routing={routing} setRouting={setRouting} onReset={() => reset('rules')} />}
           {tab === 'externals' && <ExternalList />}
           {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} />}
           {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
@@ -430,7 +430,7 @@ function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[
   const uas = ['keqdroid/0.25.1', 'Happ/4.1.0', 'v2RayTun/5.25.82', 'Hiddify/4.1.1 (android)', 'INCY/3.6.5', 'clash-verge/v2.2.3', 'FlClashX/0.4.2', 'SFA/1.14.0', 'Streisand/1.6.76', 'v2rayNG/2.2.6']
   const [ua, setUa] = useState(uas[0])
   const [userId, setUserId] = useState(0)
-  const { data, error } = useLoad(() => post<{ user: string; format: string; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules }),
+  const { data, error } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules }),
     [ua, userId, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules)])
   return (
     <>
@@ -455,7 +455,10 @@ function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[
         </div>
       </div>
       <div className="card">
-        <div className="card-head"><h3>Ответ</h3>{data && <Badge color="green">{formatNames[data.format] || data.format}</Badge>}</div>
+        <div className="card-head">
+          <div><h3>Ответ</h3>{data && <div className="card-sub">{data.client ? `клиент: ${data.client}` : 'клиент не узнан'}{data.ownTemplate ? ' · свой шаблон' : ''}</div>}</div>
+          {data && <Badge color="green">{formatNames[data.format] || data.format}</Badge>}
+        </div>
         {!data ? <div className="card-pad"><Loading error={error} /></div> : (
           <pre className="code" style={{ border: 0, borderRadius: 0, maxHeight: 'none' }}>
             {data.headers.length === 0 ? '(заголовков нет)' : data.headers.map((h) => `${h.name}: ${h.value}`).join('\n')}
@@ -471,7 +474,7 @@ function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[
             <li>Иначе по User-Agent, первое совпадение (меняется на вкладке «Форматы»):</li>
           </ol>
           <div className="kv mono" style={{ gridTemplateColumns: '1fr 180px', marginTop: 8 }}>
-            {rules.filter((r) => r.enabled).map((r, i) => <Fragment key={i}><div>{r.pattern}</div><div className="miku-text">{formatNames[r.format] || r.format}</div></Fragment>)}
+            {rules.filter((r) => r.enabled).map((r, i) => <Fragment key={i}><div>{r.note || r.pattern}</div><div className="miku-text">{formatNames[r.format] || r.format}{r.template ? ' ✦' : ''}</div></Fragment>)}
           </div>
           <div style={{ marginTop: 8 }}>Браузер получает страницу, всё остальное — ссылки vless:// в base64.</div>
         </div>
@@ -480,14 +483,33 @@ function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[
   )
 }
 
-function RulesTab({ rules, set, formats, onReset }: { rules: SubRule[]; set: (r: SubRule[]) => void; formats: string[]; onReset: () => void }) {
-  const update = (i: number, r: SubRule) => set(rules.map((x, j) => (j === i ? r : x)))
-  const move = (i: number, d: number) => {
+// Что можно отдавать клиенту: ссылки — галочка «просто ссылками» для любого приложения.
+const clientFormats: [string, string, string][] = [
+  ['base64', 'Ссылки', 'vless://, hysteria2:// — понимает любое приложение'],
+  ['xray', 'Xray JSON', 'полный конфиг с маршрутами и DNS (KeqDroid, Happ, v2RayTun)'],
+  ['mihomo', 'Mihomo', 'Clash Meta YAML (FlClashX, Clash Verge, Koala)'],
+  ['singbox', 'sing-box', 'JSON для sing-box и его приложений'],
+  ['html', 'Страница', 'страница с QR и кнопками'],
+]
+const templateFormats = ['mihomo', 'singbox', 'xray']
+
+// ClientsTab — приложения по User-Agent: что каждому отдавать и, при желании, свой шаблон конфига.
+function ClientsTab({ rules, set, routing, setRouting, onReset }: {
+  rules: SubRule[]; set: (r: SubRule[]) => void; routing: ClientRouting; setRouting: (r: ClientRouting) => void; onReset: () => void
+}) {
+  const [cur, setCur] = useState(0)
+  const [info, setInfo] = useState<TemplateInfo | null>(null)
+  const act = useAction()
+  const i = Math.min(cur, rules.length - 1)
+  const r = rules[i]
+  const update = (x: SubRule) => set(rules.map((y, j) => (j === i ? x : y)))
+  const move = (d: number) => {
     const j = i + d
     if (j < 0 || j >= rules.length) return
     const next = [...rules]
     ;[next[i], next[j]] = [next[j], next[i]]
     set(next)
+    setCur(j)
   }
   const bad = (p: string) => {
     try {
@@ -497,49 +519,116 @@ function RulesTab({ rules, set, formats, onReset }: { rules: SubRule[]; set: (r:
       return true
     }
   }
+  const read = async () => {
+    if (!r?.template?.trim()) return
+    const x = await act(() => post<TemplateInfo>('subscription/template', { format: r.format, text: r.template }))
+    if (x) setInfo(x)
+  }
+  // Перенос маршрутов шаблона в вкладку «Маршруты»: списки дополняются, DNS — если найден.
+  const takeRouting = (t: ClientRouting) => {
+    const merge = (a: string[], b: string[]) => [...a, ...b.filter((x) => !a.includes(x))]
+    setRouting({
+      ...routing, ruDirect: routing.ruDirect || t.ruDirect, blockAds: routing.blockAds || t.blockAds,
+      dnsDirect: t.dnsDirect.length ? t.dnsDirect : routing.dnsDirect, dnsProxy: t.dnsProxy.length ? t.dnsProxy : routing.dnsProxy,
+      direct: merge(routing.direct, t.direct), proxy: merge(routing.proxy, t.proxy), block: merge(routing.block, t.block),
+    })
+  }
   return (
     <>
-      <div className="card">
-        <div className="card-head">
-          <div><h3>Формат по приложению</h3><div className="card-sub">правила проверяются сверху вниз, срабатывает первое совпадение User-Agent</div></div>
-          <button className="btn sm" onClick={() => set([...rules, { pattern: '(?i)', format: 'base64', enabled: true }])}><Icon name="plus" /> Правило</button>
+      <div className="card card-pad">
+        <div className="row between" style={{ marginBottom: 10 }}>
+          <div className="small text-2">Приложение узнаётся по User-Agent: сверху вниз, первое совпадение</div>
+          <button className="btn sm" onClick={() => { set([...rules, { pattern: '(?i)', format: 'base64', enabled: true, note: 'Новое приложение' }]); setCur(rules.length); setInfo(null) }}>
+            <Icon name="plus" /> Клиент
+          </button>
         </div>
-        <div className="table-wrap">
-          <table className="table">
-            <thead><tr><th /><th>User-Agent (регулярное выражение)</th><th>Формат</th><th>Заметка</th><th /></tr></thead>
-            <tbody>
-              {rules.length === 0 && <tr><td colSpan={5} className="muted">Правил нет — приложения получат ссылки, браузер — страницу</td></tr>}
-              {rules.map((r, i) => (
-                <tr key={i}>
-                  <td style={{ width: 50 }}><Switch checked={r.enabled} onChange={(v) => update(i, { ...r, enabled: v })} /></td>
-                  <td>
-                    <input className="input mono" value={r.pattern} onChange={(e) => update(i, { ...r, pattern: e.target.value })} />
-                    {bad(r.pattern) && <div className="small pink-text">выражение с ошибкой</div>}
-                  </td>
-                  <td style={{ width: 260 }}>
-                    <select className="input" value={r.format} onChange={(e) => update(i, { ...r, format: e.target.value })}>
-                      {formats.map((f) => <option key={f} value={f}>{formatNames[f] || f}</option>)}
-                    </select>
-                  </td>
-                  <td><input className="input" value={r.note || ''} onChange={(e) => update(i, { ...r, note: e.target.value })} placeholder="для кого" /></td>
-                  <td className="nowrap" style={{ width: 110 }}>
-                    <button className="btn ghost icon sm" title="Выше" disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
-                    <button className="btn ghost icon sm" title="Ниже" disabled={i === rules.length - 1} onClick={() => move(i, 1)}>↓</button>
-                    <button className="btn ghost icon sm" title="Убрать" onClick={() => set(rules.filter((_, j) => j !== i))}><Icon name="trash" /></button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="chips-scroll">
+          {rules.map((x, j) => (
+            <button key={j} className={'chip-btn' + (j === i ? ' on' : '') + (x.enabled ? '' : ' off')} onClick={() => { setCur(j); setInfo(null) }}>
+              {x.note || x.pattern}{x.template ? ' ✦' : ''}
+            </button>
+          ))}
+          {rules.length === 0 && <span className="muted small">Клиентов нет — приложения получат ссылки, браузер — страницу</span>}
         </div>
       </div>
+
+      {r && (
+        <div className="card">
+          <div className="card-head">
+            <div className="row" style={{ gap: 10 }}>
+              <Switch checked={r.enabled} onChange={(v) => update({ ...r, enabled: v })} />
+              <h3>{r.note || r.pattern}</h3>
+            </div>
+            <div className="row" style={{ gap: 2 }}>
+              <button className="btn ghost icon sm" title="Выше (проверяется раньше)" disabled={i === 0} onClick={() => move(-1)}>↑</button>
+              <button className="btn ghost icon sm" title="Ниже" disabled={i === rules.length - 1} onClick={() => move(1)}>↓</button>
+              <button className="btn ghost icon sm" title="Убрать" onClick={() => { set(rules.filter((_, j) => j !== i)); setCur(Math.max(0, i - 1)) }}><Icon name="trash" /></button>
+            </div>
+          </div>
+          <div className="card-pad">
+            <div className="grid2">
+              <Field label="Название"><input className="input" value={r.note || ''} onChange={(e) => update({ ...r, note: e.target.value })} placeholder="FlClashX" /></Field>
+              <Field label="User-Agent" help={bad(r.pattern) ? <span className="pink-text">выражение с ошибкой</span> : 'регулярное выражение, (?i) — без учёта регистра'}>
+                <input className="input mono" value={r.pattern} onChange={(e) => update({ ...r, pattern: e.target.value })} />
+              </Field>
+            </div>
+            <div className="label" style={{ marginBottom: 8 }}>Что отдавать</div>
+            <div className="format-pick">
+              {clientFormats.map(([f, label, hint]) => (
+                <label key={f} className={'format-opt' + (r.format === f ? ' on' : '')}>
+                  <input type="radio" name={'fmt' + i} checked={r.format === f} onChange={() => { update({ ...r, format: f }); setInfo(null) }} />
+                  <b>{label}</b><span className="small muted">{hint}</span>
+                </label>
+              ))}
+            </div>
+            {templateFormats.includes(r.format) && (
+              <div style={{ marginTop: 16 }}>
+                <Field label="Свой шаблон" help={<>Пусто — панель собирает конфиг сама, с маршрутами из вкладки «Маршруты». Вставьте готовый конфиг
+                  ({r.format === 'mihomo' ? 'Mihomo YAML' : r.format === 'singbox' ? 'sing-box JSON' : 'Xray JSON'}) — например, шаблон из Remnawave:
+                  серверы подписки встанут в него сами {r.format === 'mihomo' ? '(в proxies и во все группы, кроме remnawave: include-proxies: false)' :
+                  r.format === 'singbox' ? '(в outbounds, их получат selector и urltest)' : '(вместо outbound с тегом proxy)'}.</>}>
+                  <textarea className="input mono" rows={10} spellCheck={false} value={r.template || ''} onChange={(e) => { update({ ...r, template: e.target.value }); setInfo(null) }}
+                    onBlur={read} placeholder={r.format === 'mihomo' ? 'proxy-groups:\n  - name: Proxy\n    type: select\nrules:\n  - MATCH,Proxy' : '{ "outbounds": [ … ] }'} />
+                </Field>
+                {r.template?.trim() && (
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className="btn sm" onClick={read}>Разобрать шаблон</button>
+                    <button className="btn sm ghost" onClick={() => { update({ ...r, template: '' }); setInfo(null) }}>Убрать шаблон</button>
+                  </div>
+                )}
+                {info && (
+                  <div className="template-info">
+                    <ul>{info.summary.map((x, k) => <li key={k}>{x}</li>)}</ul>
+                    {info.routing && (
+                      <>
+                        <div className="small">В полях «Маршрутов» это: напрямую — {info.routing.direct.length}, через туннель — {info.routing.proxy.length},
+                          блок — {info.routing.block.length}{info.routing.ruDirect ? ', RU напрямую' : ''}{info.routing.blockAds ? ', блок рекламы' : ''}
+                          {info.routing.dnsProxy.length ? `, DNS: ${info.routing.dnsProxy.join(', ')}` : ''}.</div>
+                        <button className="btn sm primary" style={{ marginTop: 8 }} onClick={() => takeRouting(info.routing!)}>Перенести во вкладку «Маршруты»</button>
+                        <div className="small muted" style={{ marginTop: 4 }}>Маршруты из вкладки получают остальные приложения; этому клиенту и так отдаётся его шаблон.</div>
+                      </>
+                    )}
+                    {info.skipped.length > 0 && (
+                      <details className="small" style={{ marginTop: 8 }}>
+                        <summary>Правил без поля во вкладке «Маршруты»: {info.skipped.length} (в шаблоне они работают)</summary>
+                        <div className="mono small">{info.skipped.slice(0, 50).map((x, k) => <div key={k}>{x}</div>)}</div>
+                      </details>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="card card-pad small text-2">
         <p style={{ marginTop: 0 }}>
-          Правила нужны, только если приложение не указывает формат само. Формат в конце ссылки (<span className="mono">/s/токен/mihomo</span>) и формат, выбранный у пользователя, важнее правил.
-          Если ни одно правило не подошло, браузер получает страницу, остальные — ссылки vless:// в base64.
+          Формат в конце ссылки (<span className="mono">/s/токен/mihomo</span>) и формат, выбранный у пользователя, важнее этого списка.
+          Если ни один клиент не подошёл, браузер получает страницу, остальные — ссылки. Свой шаблон отдаётся, когда формат совпадает с выбранным у клиента.
         </p>
-        <p>Проверить, что получит конкретное приложение, можно на вкладке «Проверка» — она учитывает несохранённые правила.</p>
-        <button className="btn ghost sm" onClick={onReset}>Вернуть правила по умолчанию</button>
+        <p>Проверить, что получит конкретное приложение, можно на вкладке «Проверка» — она учитывает несохранённые изменения.</p>
+        <button className="btn ghost sm" onClick={onReset}>Вернуть клиентов по умолчанию</button>
       </div>
     </>
   )
