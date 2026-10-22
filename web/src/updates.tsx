@@ -135,16 +135,29 @@ export function UpdateLog({ id, name, onClose }: { id: number; name: string; onC
 }
 
 // Баннер на дашборде: новая версия, «Обновить всё», ход обновлений.
+// Закрытый баннер не возвращается, пока не случится что-то новое: другое обновление или новая версия.
+function dismissedKey(): string {
+  try { return localStorage.getItem('vynel.update.dismissed') || '' } catch { return '' }
+}
+function dismiss(key: string) {
+  try { localStorage.setItem('vynel.update.dismissed', key) } catch { /* приватный режим */ }
+}
+
 export function UpdateBanner() {
   const { data, reload } = useUpdates()
   const confirm = useConfirm()
   const { waiting, run } = useRunUpdate(data, reload)
   const [logOf, setLogOf] = useState<UpdateNode | null>(null)
+  const [closed, setClosed] = useState(dismissedKey)
   if (!data) return null
   const all = [data.panel, ...data.nodes]
   const busy = all.filter((n) => n.updating)
   const recent = all.filter((n) => n.state === 'done' || n.state === 'failed')
   const log = logOf && <UpdateLog id={logOf.id} name={logOf.name} onClose={() => setLogOf(null)} />
+  // Что именно показано: итог этих обновлений или эта новая версия.
+  const key = recent.length > 0 ? 'done:' + recent.map((n) => `${n.id}.${n.state}.${n.finishedAt || 0}`).join(',') : 'new:' + data.latest
+  const close = <button className="btn ghost icon sm" title="Скрыть" onClick={() => { dismiss(key); setClosed(key) }}><Icon name="close" /></button>
+  if (closed === key && !waiting && busy.length === 0) return null
 
   if (waiting || busy.length > 0 || recent.length > 0) {
     const failed = recent.filter((n) => n.state === 'failed')
@@ -162,6 +175,7 @@ export function UpdateBanner() {
             {(waiting || data.panel.updating) && <div className="small text-2">Панель перезапустится, и страница обновится сама.</div>}
           </div>
           {busy.length === 0 && data.count > 0 && <button className="btn sm" onClick={() => run('all')}>Обновить остальное</button>}
+          {busy.length === 0 && !waiting && close}
         </div>
         {log}
       </>
@@ -183,6 +197,7 @@ export function UpdateBanner() {
         if (await confirm(<>Обновить {what} сейчас? Всё обновляется <b>одновременно</b>: около минуты подключения не будут работать, затем всё поднимется само. Если новая версия не запустится, вернётся прежняя.</>, 'Обновить всё', false))
           run('all')
       }}>Обновить всё</button>
+      {close}
     </div>
   )
 }
