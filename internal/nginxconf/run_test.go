@@ -23,6 +23,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vyto4ka/vynel/internal/xray/xraytest"
 )
 
 // nginxBin returns the nginx binary for tests: NGINX_BIN or the system one; skips without.
@@ -54,14 +56,7 @@ func streamModules(t *testing.T, bin string) []string {
 	return []string{filepath.Join(dir, "ngx_stream_module.so")}
 }
 
-func freePort(t *testing.T) int {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
+func freePort(t *testing.T) int { return xraytest.FreePort(t) }
 
 func selfSigned(t *testing.T, dir, domain string) {
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
