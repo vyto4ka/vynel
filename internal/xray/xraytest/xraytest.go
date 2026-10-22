@@ -16,12 +16,14 @@ import (
 	"io"
 	"log"
 	"math/big"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,16 +46,41 @@ func Binary(t testing.TB) xray.Binary {
 	return xray.Binary{Path: path, AssetDir: assets}
 }
 
-// FreePort returns a free TCP port on 127.0.0.1.
+// FreePort returns a TCP and UDP port free on all addresses. It is picked below the kernel's
+// range for outgoing connections (32768 and up on Linux) and never twice in a test binary: a
+// port the kernel hands out itself could go to another test's outgoing connection between this
+// check and the moment the test's server binds it.
 func FreePort(t testing.TB) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	portMu.Lock()
+	defer portMu.Unlock()
+	for range 2000 {
+		p := 20000 + mrand.IntN(12000)
+		if portsGiven[p] {
+			continue
+		}
+		addr := ":" + strconv.Itoa(p)
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			continue
+		}
+		u, err := net.ListenPacket("udp", addr)
+		_ = l.Close()
+		if err != nil {
+			continue
+		}
+		_ = u.Close()
+		portsGiven[p] = true
+		return p
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("no free port in 20000-32000")
+	return 0
 }
+
+var (
+	portMu     sync.Mutex
+	portsGiven = map[int]bool{}
+)
 
 // TLSTarget starts a TLS 1.3 site for name: the self-steal Caddy stand-in behind Reality.
 func TLSTarget(t testing.TB, name string) int {

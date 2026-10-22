@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vyto4ka/vynel/internal/xray/xraytest"
 )
 
 func TestPlaceholderInternalImport(t *testing.T) {
@@ -119,14 +121,7 @@ func dnsStub(t *testing.T) string {
 	return pc.LocalAddr().String()
 }
 
-func freePort(t *testing.T) int {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
-}
+func freePort(t *testing.T) int { return xraytest.FreePort(t) }
 
 // TestACMEWithPebble issues a certificate from Pebble (Let's Encrypt's test server), which
 // really fetches the HTTP-01 token from the webroot over HTTP.
