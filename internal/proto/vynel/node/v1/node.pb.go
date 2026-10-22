@@ -1414,6 +1414,7 @@ type Metrics struct {
 	RxBps         uint64                 `protobuf:"varint,5,opt,name=rx_bps,json=rxBps,proto3" json:"rx_bps,omitempty"`
 	TxBps         uint64                 `protobuf:"varint,6,opt,name=tx_bps,json=txBps,proto3" json:"tx_bps,omitempty"`
 	Uptime        uint64                 `protobuf:"varint,7,opt,name=uptime,proto3" json:"uptime,omitempty"` // seconds
+	Steal         float64                `protobuf:"fixed64,8,opt,name=steal,proto3" json:"steal,omitempty"`  // percent of CPU time the hypervisor gave to other guests (a crowded host)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1493,6 +1494,13 @@ func (x *Metrics) GetTxBps() uint64 {
 func (x *Metrics) GetUptime() uint64 {
 	if x != nil {
 		return x.Uptime
+	}
+	return 0
+}
+
+func (x *Metrics) GetSteal() float64 {
+	if x != nil {
+		return x.Steal
 	}
 	return 0
 }
@@ -2013,7 +2021,7 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"OnlineUser\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x10\n" +
 	"\x03ips\x18\x02 \x01(\x05R\x03ips\x12\x17\n" +
-	"\aip_list\x18\x03 \x03(\tR\x06ipList\"\xaf\x01\n" +
+	"\aip_list\x18\x03 \x03(\tR\x06ipList\"\xc5\x01\n" +
 	"\aMetrics\x12\x10\n" +
 	"\x03cpu\x18\x01 \x01(\x01R\x03cpu\x12\x19\n" +
 	"\bmem_used\x18\x02 \x01(\x04R\amemUsed\x12\x1b\n" +
@@ -2021,7 +2029,8 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\x05load1\x18\x04 \x01(\x01R\x05load1\x12\x15\n" +
 	"\x06rx_bps\x18\x05 \x01(\x04R\x05rxBps\x12\x15\n" +
 	"\x06tx_bps\x18\x06 \x01(\x04R\x05txBps\x12\x16\n" +
-	"\x06uptime\x18\a \x01(\x04R\x06uptime\"2\n" +
+	"\x06uptime\x18\a \x01(\x04R\x06uptime\x12\x14\n" +
+	"\x05steal\x18\b \x01(\x01R\x05steal\"2\n" +
 	"\bStatsAck\x12\x14\n" +
 	"\x05epoch\x18\x01 \x01(\tR\x05epoch\x12\x10\n" +
 	"\x03seq\x18\x02 \x01(\x04R\x03seq\"\x84\x02\n" +

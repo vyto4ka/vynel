@@ -1,10 +1,12 @@
 package webapi
 
 import (
+	"math"
 	"net/http"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // stats serves the statistics page: GET /api/stats?range=24h|7d|30d|90d.
@@ -61,3 +63,29 @@ func countsDTO(cs []store.Count) []map[string]any {
 	}
 	return out
 }
+
+// serverLoad serves the dashboard's «Серверы»: GET /api/stats/load?range=24h|7d|30d|90d. Each
+// point is [t, cpu %, cpu max %, steal %, memory bytes, rx B/s, tx B/s, rx max, tx max].
+func (s *Server) serverLoad(r *http.Request) (any, error) {
+	key := r.URL.Query().Get("range")
+	if key == "" {
+		key = "24h"
+	}
+	l, err := s.svc.ServerLoad(r.Context(), key)
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]map[string]any, 0, len(l.Nodes))
+	for _, n := range l.Nodes {
+		pts := make([][9]float64, 0, len(n.Points))
+		for _, p := range n.Points {
+			pts = append(pts, [9]float64{float64(p.T), round1(p.CPU), round1(p.CPUMax), round1(p.Steal), float64(p.MemUsed),
+				float64(p.RxBps), float64(p.TxBps), float64(p.RxMax), float64(p.TxMax)})
+		}
+		nodes = append(nodes, map[string]any{"id": n.ID, "code": n.Code, "name": n.Name, "flag": xrayconf.CountryFlag(n.Country),
+			"memTotal": n.MemTotal, "points": pts})
+	}
+	return map[string]any{"range": l.Range, "bucket": l.Bucket, "from": l.From, "to": l.To, "nodes": nodes}, nil
+}
+
+func round1(v float64) float64 { return math.Round(v*10) / 10 }

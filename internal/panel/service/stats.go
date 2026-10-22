@@ -60,7 +60,7 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 		if m := b.Metrics; m != nil {
 			if err := store.AddMetrics(ctx, q, store.Metrics{
 				NodeID: nodeID, TS: ts, CPU: m.Cpu, MemUsed: int64(m.MemUsed), MemTotal: int64(m.MemTotal), Load1: m.Load1,
-				RxBps: int64(m.RxBps), TxBps: int64(m.TxBps), Uptime: int64(m.Uptime), Online: int64(len(b.Online)),
+				RxBps: int64(m.RxBps), TxBps: int64(m.TxBps), Uptime: int64(m.Uptime), Online: int64(len(b.Online)), Steal: m.Steal,
 			}); err != nil {
 				return err
 			}
@@ -170,6 +170,11 @@ func (s *Service) Maintenance(ctx context.Context, prune bool) error {
 	}
 	s.grantCheck = now
 	s.refreshDueExternals(ctx)
+	// Node load for the dashboard: the last hour's finished 5 minutes, again each run (cheap, and
+	// late samples from a node that was offline land too).
+	if err := store.RollupMetrics(ctx, s.st.DB, now-now%300-3600, now-now%300); err != nil {
+		return err
+	}
 	if prune {
 		return store.PruneStats(ctx, s.st.DB, s.now().Unix())
 	}
