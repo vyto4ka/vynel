@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { del, get, post, put } from '../api'
 import { ago } from '../format'
-import { Badge, CopyField, Field, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, CopyField, Field, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 interface WebSession { id: string; method: string; actor: string; ip: string; userAgent: string; createdAt: number; lastSeenAt: number; current: boolean }
 
@@ -75,10 +75,7 @@ function Sessions() {
         {data.loginMode === 'link' && (
           <div className="row between" style={{ flexWrap: 'nowrap', marginTop: 14 }}>
             <div>
-              <div>Случайный адрес на каждую сессию</div>
-              <div className="help muted small">
-                У панели не будет постоянного адреса: каждая ссылка открывает свой случайный путь, и сессия работает только на нём. Всё остальное на домене — сайт-заглушка.
-              </div>
+              <div>Случайный адрес на каждую сессию <Info>У панели не будет постоянного адреса: каждая ссылка открывает свой случайный путь, и сессия работает только на нём. Всё остальное на домене — сайт-заглушка.</Info></div>
             </div>
             <Switch checked={data.sessionPaths} onChange={(on) => act(() => put('account/login-mode', { mode: 'link', sessionPaths: on }), on ? 'Случайные адреса включены' : 'Случайные адреса выключены').then(reload)} />
           </div>

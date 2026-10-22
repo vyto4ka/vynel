@@ -1195,7 +1195,7 @@ func (s *Server) settings(r *http.Request) (any, error) {
 				opts = append([]string{v}, opts...)
 			}
 		}
-		out = append(out, map[string]any{"key": d.Key, "section": d.Section, "title": d.Title, "help": d.Help, "type": d.Type,
+		out = append(out, map[string]any{"key": d.Key, "section": d.Section, "title": d.Title, "hint": d.Hint, "help": d.Help, "type": d.Type,
 			"options": opts, "default": d.Default, "value": v, "set": set, "movesPanel": movesPanel[d.Key]})
 	}
 	var extra []string

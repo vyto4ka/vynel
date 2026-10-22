@@ -4,7 +4,7 @@ import { CascadeList } from '../extras'
 import { RoutingForm } from '../routing'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { templateStarter } from '../templateStarter'
-import { Badge, Empty, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 const sourceLabel: Record<string, string> = {
   input: 'вводится', const: 'константа', generate: 'генерируется', derived: 'вычисляется',
@@ -21,12 +21,12 @@ export function Profiles() {
           <button className={tab === 'templates' ? 'on' : ''} onClick={() => setTab('templates')}>Шаблоны профилей</button>
           <button className={tab === 'cascades' ? 'on' : ''} onClick={() => setTab('cascades')}>Каскады</button>
         </div>
-        <div className="text-2 grow small">
+        <PageInfo>
           {tab === 'profiles'
             ? 'Профиль — общие настройки VLESS-инбаунда по шаблону. На каждой ноде из профиля получается свой инбаунд со своими ключами.'
             : tab === 'cascades' ? 'Каскад — сервер, где трафик входит на одной ноде и выходит через другую.'
             : 'Шаблон — заготовка профиля: JSON инбаунда Xray с переменными, точка подключения для подписки и роль nginx. Свой шаблон — кнопка «Новый шаблон» (заготовка с пояснениями) или копия встроенного.'}
-        </div>
+        </PageInfo>
       </div>
       {tab === 'profiles' ? <ProfileList /> : tab === 'cascades' ? <CascadeList /> : <TemplateList />}
     </>
@@ -128,17 +128,17 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
       footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="new-profile" disabled={!name.trim() || !templateId}>Создать</button></>}>
       <form id="new-profile" onSubmit={submit}>
         <Field label="Название"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Reality" /></Field>
-        <Field label="Шаблон" help={t?.summary}>
+        <Field label="Шаблон" info={t?.summary || undefined}>
           <select className="input" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
             {usable.map((x) => <option key={x.id} value={x.id}>{x.title}{x.custom ? ' (свой)' : ''}</option>)}
           </select>
         </Field>
         {required.map((v) => (
-          <Field key={v.name} label={<span className="mono">{v.name}</span>} help={v.description}>
+          <Field key={v.name} label={<span className="mono">{v.name}</span>} info={v.description || undefined}>
             <input className="input" value={values[v.name] || ''} onChange={(e) => setValues({ ...values, [v.name]: e.target.value })} />
           </Field>
         ))}
-        <Field label="Дать доступ группам" help="Пользователи этих групп получат профиль на всех нодах, где он стоит">
+        <Field label="Дать доступ группам" info="Пользователи этих групп получат профиль на всех нодах, где он стоит.">
           <div className="row">
             {(groups.data || []).map((g) => (
               <label key={g.id} className="check">
@@ -343,7 +343,7 @@ function ClientEditor({ c, set, base, error }: { c: ProfileClient; set: (c: Prof
         <Switch checked={c.custom} onChange={(v) => set({ ...c, custom: v, mode: c.mode || 'routing', routing: c.routing ?? base })} />
         <span>
           <b>Кастомный профиль клиента</b>
-          <div className="small text-2">Свои маршруты и DNS для серверов этого профиля вместо общих (Подписка → Маршруты). Действует в формате Xray JSON: KeqDroid, Happ, v2RayTun</div>
+          <div className="small text-2">только Xray JSON: KeqDroid, Happ, v2RayTun <Info>Свои маршруты и DNS для серверов этого профиля вместо общих (Подписка → Маршруты). Mihomo и sing-box получают один файл на все серверы, поэтому берут общие.</Info></div>
         </span>
       </label>
       {c.custom && <>
@@ -354,7 +354,7 @@ function ClientEditor({ c, set, base, error }: { c: ProfileClient; set: (c: Prof
         {mode === 'routing' && c.routing && <RoutingForm r={c.routing} set={(r) => set({ ...c, routing: r })} />}
         {mode === 'json' && <>
           <div className="small text-2" style={{ marginBottom: 8 }}>
-            Полный конфиг клиента Xray. Outbound с тегом <span className="mono">proxy</span> заменится сервером (если его нет — сервер встанет первым), «remarks» — его названием.
+            Полный конфиг клиента Xray <Info>Outbound с тегом <span className="mono">proxy</span> заменится сервером (если его нет — сервер встанет первым), «remarks» — его названием.</Info>
           </div>
           <CodeEditor lang="json" value={c.config || ''} onChange={(v) => set({ ...c, config: v })} height="calc(100vh - 380px)" />
           {error && <div className="small pink-text">{error}</div>}
@@ -404,7 +404,7 @@ export function VariableTable({ vars, values, onChange, empty }: { vars: Variabl
         return (
           <div key={v.name} className="var-row">
             <div>
-              <div className="mono small"><b>{v.name}</b></div>
+              <div className="mono small"><b>{v.name}</b>{v.description && <Info>{v.description}</Info>}</div>
               <div className="small muted">{sourceLabel[v.source] || v.source}{v.validate ? ` · ${v.validate}` : ''}{v.optional ? ' · необязательная' : ''}</div>
             </div>
             <div>
@@ -418,7 +418,7 @@ export function VariableTable({ vars, values, onChange, empty }: { vars: Variabl
                   onChange={(e) => onChange({ ...values, [v.name]: e.target.value })}
                   placeholder={v.default != null ? `по умолчанию ${v.default}` : v.default_from ? `из ${v.default_from}` : v.source === 'generate' ? 'сгенерируется' : ''} />
               )}
-              {v.description && <div className="small muted" style={{ marginTop: 3 }}>{v.description}{secret && ' Значение скрыто.'}</div>}
+              {secret && <div className="small muted" style={{ marginTop: 3 }}>Значение скрыто</div>}
             </div>
           </div>
         )

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { get } from '../api'
 import { Legend, Segmented, SERIES, TimeChart } from '../charts'
 import { GiB } from '../format'
-import { Empty, Loading, useLoad } from '../ui'
+import { Empty, Info, Loading, useLoad } from '../ui'
 
 // Точка: t, CPU %, CPU max %, steal %, память (байты), rx, tx, rx max, tx max (байт/с).
 type Point = [number, number, number, number, number, number, number, number, number]
@@ -53,7 +53,7 @@ export function ServerLoad() {
   return (
     <>
       <div className="stats-head">
-        <div className="muted small">{data ? <>Средние за {bucketWord[data.bucket] || `${data.bucket / 60} мин`}; обновляется раз в 5 минут, хранится 90 дней</> : ' '}</div>
+        <div className="muted small">{data ? <>Средние за {bucketWord[data.bucket] || `${data.bucket / 60} мин`} <Info>Нода присылает замеры каждые 10 секунд; панель сворачивает их в средние за 5 минут и хранит 90 дней. Вкладка обновляется раз в 5 минут; текущее состояние — в разделе «Ноды».</Info></> : ' '}</div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
       {!data || data.range !== range ? <Loading error={error} /> : data.nodes.length === 0 ? <div className="card"><Empty>Нод пока нет</Empty></div> : (
@@ -94,7 +94,7 @@ function AllNodesCard({ d }: { d: LoadT }) {
           <TimeChart times={times} bucket={d.bucket} kind="line" max={100} format={pct} height={170} series={series((p) => p[1])} />
         </div>
         <div>
-          <div className="sm-title">Steal</div>
+          <div className="sm-title">Steal<Info>Время процессора, которое хостер отдал другим виртуальным машинам на том же железе.</Info></div>
           <TimeChart times={times} bucket={d.bucket} kind="line" format={pct1} height={170} series={series((p) => p[3])} />
         </div>
         <div>
@@ -143,7 +143,7 @@ function NodeLoadCard({ n, d }: { n: LoadT['nodes'][number]; d: LoadT }) {
               ]} />
           </div>
           <div>
-            <div className="sm-title">Steal <span className="muted small">— время, которое хостер отдал другим машинам</span></div>
+            <div className="sm-title">Steal<Info>Время процессора, которое хостер отдал другим виртуальным машинам на том же железе. Если steal постоянно выше нескольких процентов, сервер тормозит не из-за вас — повод сменить тариф или хостера.</Info></div>
             <TimeChart times={times} bucket={d.bucket} kind="line" format={pct1} height={160}
               series={[{ key: 'steal', label: 'steal', color: 'var(--s2)', values: col(3) }]} />
           </div>

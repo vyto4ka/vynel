@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { get, Network, NetRole, post, put, Setting } from '../api'
-import { Badge, Field, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Field, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 export function Settings() {
   const { data, error, reload } = useLoad(() => get<Setting[]>('settings'))
@@ -97,7 +97,7 @@ function NetworkCard() {
                   </span>
                 </div>
               ))}
-              <div className="muted small" style={{ marginTop: 6 }}>Домен за CDN (оранжевое облако Cloudflare, VK CDN) указывает на CDN — это нормально, если так задумано.</div>
+              <div className="muted small" style={{ marginTop: 6 }}>Домен за CDN <Info>Домен за CDN (оранжевое облако Cloudflare, VK CDN) указывает на адреса CDN — это нормально, если так задумано.</Info></div>
             </div>
           )}
           {data.nodes.map((n) => (
@@ -119,7 +119,7 @@ function NetworkCard() {
               )}
             </div>
           ))}
-          <div className="muted small">Панель и подписки выбирают IP ниже, в разделах «Доступ к панели» и «Подписки». Вход и выход инбаунда — в «Ноды» → «Настроить».</div>
+          <div className="muted small">Где выбираются адреса <Info>Панель и подписки выбирают IP ниже, в разделах «Доступ к панели» и «Подписки». Вход и выход инбаунда — в «Ноды» → «Настроить».</Info></div>
         </div>
       )}
     </div>
@@ -152,8 +152,8 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: () => void }) {
       <div className="field">
         <div className="row between" style={{ flexWrap: 'nowrap' }}>
           <div>
-            <div>{s.title}</div>
-            {s.help && <div className="help muted small">{s.help}</div>}
+            <div>{s.title}{s.help && <Info>{s.help}</Info>}</div>
+            {s.hint && <div className="help muted small">{s.hint}</div>}
           </div>
           <Switch checked={on} onChange={(v) => save(v ? 'true' : 'false')} />
         </div>
@@ -162,7 +162,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: () => void }) {
   }
   const defaultLabel = ip ? (s.key === 'web.address' ? 'как у подписок' : 'все адреса') : `по умолчанию${s.default ? ` (${s.default})` : ''}`
   return (
-    <Field label={<>{s.title} <span className="muted mono" style={{ fontWeight: 400 }}>{s.key}</span></>} help={s.help}>
+    <Field label={<>{s.title} <span className="muted mono" style={{ fontWeight: 400 }}>{s.key}</span></>} help={s.hint} info={s.help}>
       <div className="row" style={{ flexWrap: 'nowrap' }}>
         {s.type === 'select' ? (
           <select className="input" value={val} onChange={(e) => setValue(e.target.value)}>

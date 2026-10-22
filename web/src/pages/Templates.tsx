@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { del, get, Group, post, put, Template, TemplateGrant } from '../api'
 import { TemplateExtras } from '../extras'
 import { clientTypes, GiB, resetLabels } from '../format'
-import { Badge, Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Empty, Field, Icon, Loading, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
 import { templateSummary } from './Users'
 
 export function Templates() {
@@ -15,9 +15,7 @@ export function Templates() {
   return (
     <>
       <div className="toolbar">
-        <div className="text-2 grow small">
-          Шаблон — набор настроек для новых пользователей: срок, лимиты, группы. При создании достаточно ввести имя, остальное берётся из шаблона по умолчанию.
-        </div>
+        <PageInfo>Шаблон — набор настроек для новых пользователей: срок, лимиты, группы. При создании достаточно ввести имя, остальное берётся из шаблона по умолчанию.</PageInfo>
         <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" /> Шаблон</button>
       </div>
       <div className="card">
@@ -105,7 +103,7 @@ function TemplateForm({ t, groups, onClose, onSaved }: { t: Template | null; gro
             ))}
           </div>
         </Field>
-        <Field label="Каскады и подписки" help="Каждый новый пользователь получает их сам, без срока. Например, подписку друга — её серверы встанут под основными">
+        <Field label="Каскады и подписки" help="Без срока" info="Каждый новый пользователь получает их сам. Например, подписку друга — её серверы встанут под основными.">
           <TemplateExtras value={grants} onChange={setGrants} />
         </Field>
         <Field label="Заметка для новых пользователей"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>

@@ -285,7 +285,8 @@ export interface Setting {
   key: string
   section: string
   title: string
-  help?: string
+  hint?: string // short note under the field
+  help?: string // what the setting is, in a popover
   type: 'string' | 'int' | 'bool' | 'select'
   options?: string[]
   default?: string

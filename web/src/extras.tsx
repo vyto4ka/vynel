@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { Cascade, del, ExternalSub, get, GrantRow, Group, Node, patch, post, TemplateGrant, UserGrant } from './api'
 import { ago, date, fromDateInput } from './format'
-import { Badge, Empty, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from './ui'
+import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from './ui'
 
 // ================================================================ каскады
 
@@ -13,14 +13,14 @@ export function CascadeList() {
   const confirm = useConfirm()
   return (
     <>
-      <div className="card card-pad small text-2" style={{ marginBottom: 14 }}>
-        Каскад: приложение подключается к ноде входа, а трафик выходит в интернет через ноду выхода. Для пользователя это отдельный сервер
-        в подписке («🇳🇱 Нидерланды → 🇩🇪 Германия»). Новых портов не нужно: на входе у пользователя свой ключ того же инбаунда, по нему
-        нода входа отправляет трафик на выход. Группа с доступом «всё» (по умолчанию «Основная») получает каждый каскад сразу; другим —
-        в «Группах» или в карточке пользователя (там можно поставить свой срок).
-      </div>
       <div className="toolbar">
-        <div className="grow" />
+        <PageInfo>
+          <p>Каскад: приложение подключается к ноде входа, а трафик выходит в интернет через ноду выхода. Для пользователя это отдельный сервер
+          в подписке («🇳🇱 Нидерланды → 🇩🇪 Германия»). Новых портов не нужно: на входе у пользователя свой ключ того же инбаунда, по нему
+          нода входа отправляет трафик на выход.</p>
+          <p>Группа с доступом «всё» (по умолчанию «Основная») получает каждый каскад сразу; другим — в «Группах» или в карточке пользователя
+          (там можно поставить свой срок).</p>
+        </PageInfo>
         <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" /> Каскад</button>
       </div>
       {!cascades.data ? <Loading error={cascades.error} /> : cascades.data.length === 0 ? <div className="card"><Empty>Каскадов нет</Empty></div> : (
@@ -81,13 +81,13 @@ function CascadeForm({ c, nodes, onClose, onSaved }: { c: Cascade | null; nodes:
     <Modal title={c ? 'Каскад' : 'Новый каскад'} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="cascade-form" disabled={!(name.trim() || auto) || !entry || !exit}>Сохранить</button></>}>
       <form id="cascade-form" onSubmit={submit}>
-        <Field label="Вход (нода 1)" help="Куда подключается приложение: его адрес и ключи Reality уйдут в подписку">
+        <Field label="Вход (нода 1)" info="Куда подключается приложение: адрес и ключи Reality этого инбаунда уйдут в подписку.">
           <select className="input" value={entry} onChange={(e) => setEntry(Number(e.target.value))}>
             <option value={0}>— выберите инбаунд —</option>
             {inbounds.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
           </select>
         </Field>
-        <Field label="Выход (нода 2)" help="Через какой инбаунд другой ноды трафик выходит в интернет">
+        <Field label="Выход (нода 2)" info="Через какой инбаунд другой ноды трафик выходит в интернет.">
           <select className="input" value={exit} onChange={(e) => setExit(Number(e.target.value))}>
             <option value={0}>— выберите инбаунд —</option>
             {inbounds.filter((i) => i.nodeId !== entryNode).map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
@@ -113,16 +113,16 @@ export function ExternalList() {
   const confirm = useConfirm()
   return (
     <>
-      <div className="card card-pad small text-2">
-        Чужая подписка — например, подписка друга или другой панели: ссылкой https://… или сами ссылки серверов (vless://, hysteria2://…).
-        Её серверы встают в подписку под основными у тех, кому она выдана: в «Группах», в шаблоне пользователя или в карточке пользователя
-        (там — со своим сроком). Когда приложение обновляет подписку, панель скачивает внешнюю заново, если её копии больше минуты,
-        а вложенные в неё подписки другой панели vynel приходят тоже (до трёх уровней). Если источник недоступен, остаётся последняя
-        удачная копия. Ссылка на подписку этой же панели читается напрямую. Один и тот же сервер попадает в подписку один раз.
-      </div>
       <div className="card">
         <div className="card-head">
-          <h3>Внешние подписки</h3>
+          <h3>Внешние подписки <Info>
+            <p>Чужая подписка — например, подписка друга или другой панели: ссылкой https://… или сами ссылки серверов (vless://, hysteria2://…).
+            Её серверы встают в подписку под основными у тех, кому она выдана: в «Группах», в шаблоне пользователя или в карточке пользователя
+            (там — со своим сроком).</p>
+            <p>Когда приложение обновляет подписку, панель скачивает внешнюю заново, если её копии больше минуты, а вложенные в неё подписки
+            другой панели vynel приходят тоже (до трёх уровней). Если источник недоступен, остаётся последняя удачная копия. Один и тот же
+            сервер попадает в подписку один раз.</p>
+          </Info></h3>
           <button className="btn sm" onClick={() => setEdit('new')}><Icon name="plus" /> Подписка</button>
         </div>
         {!subs.data ? <Loading error={subs.error} /> : subs.data.length === 0 ? <Empty>Пока нет</Empty> : (

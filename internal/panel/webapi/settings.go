@@ -5,33 +5,34 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 )
 
-// settingDef describes a setting for the settings page.
+// settingDef describes a setting for the settings page: Hint is a short note under the field
+// ("empty — …"), Help what the setting is, shown on request.
 type settingDef struct {
-	Key, Section, Title, Help, Type, Default string
-	Options                                  []string
+	Key, Section, Title, Hint, Help, Type, Default string
+	Options                                        []string
 }
 
 var settingDefs = []settingDef{
 	{Key: service.SettingWebPath, Section: "Доступ к панели", Title: "Секретный путь панели", Type: "string",
 		Help: "Панель открывается только по этому пути, всё остальное — сайт-заглушка. После смены страница перезагрузится по новому адресу."},
 	{Key: service.SettingWebDomain, Section: "Доступ к панели", Title: "Отдельный домен панели", Type: "string",
-		Help: "Пусто — панель на домене подписок. Для отдельного домена нужна A-запись на этот сервер."},
+		Hint: "Пусто — на домене подписок", Help: "Для отдельного домена нужна A-запись на этот сервер."},
 	{Key: service.SettingWebPort, Section: "Доступ к панели", Title: "Порт панели", Type: "int",
-		Help: "Пусто — тот же порт, что у подписок (обычно 443). Высокий порт (20000–60000) прячет панель от сканеров 443. Если на сервере есть фаервол, откройте порт заранее. Вернуть, если что-то пошло не так: vynel admin setting web.port \"\" на сервере."},
+		Hint: "Пусто — как у подписок (обычно 443)", Help: "Высокий порт (20000–60000) прячет панель от сканеров 443. Если на сервере есть фаервол, откройте порт заранее. Вернуть, если что-то пошло не так: vynel admin setting web.port \"\" на сервере."},
 	{Key: service.SettingWebAddress, Section: "Доступ к панели", Title: "IP панели", Type: "select",
 		Help: "На каком адресе сервера слушает панель. По умолчанию — как у подписок."},
 	{Key: service.SettingWebDecoy, Section: "Доступ к панели", Title: "Сайт-заглушка панели", Type: "select", Options: decoy.Names(),
 		Help: "Что видно вне секретного пути, когда у панели свой домен или порт. По умолчанию — как у подписок; разные заглушки не дают связать два адреса."},
 
 	{Key: service.SettingWebIdleMinutes, Section: "Доступ к панели", Title: "Выход после бездействия, мин", Type: "int", Default: "5",
-		Help: "Сессия завершается, если столько минут в панели ничего не нажимали (открытая страница со статистикой не считается действием). 0 — не завершать."},
+		Hint: "0 — не завершать", Help: "Сессия завершается, если столько минут в панели ничего не нажимали (открытая страница со статистикой не считается действием)."},
 	{Key: service.SettingWebBindIP, Section: "Доступ к панели", Title: "Завершать сессию при смене IP", Type: "bool", Default: "true",
 		Help: "Запрос с другого адреса сразу завершает сессию: украденная cookie не сработает. Выключите, если IP часто меняется сам (мобильный интернет, IPv4/IPv6)."},
 
 	{Key: service.SettingSubDomain, Section: "Подписки", Title: "Домен подписок", Type: "string",
 		Help: "Ссылки подписок строятся на этом домене. A-запись должна вести на сервер панели."},
 	{Key: service.SettingSubPrefix, Section: "Подписки", Title: "Путь подписок", Type: "string", Default: service.DefaultSubPrefix,
-		Help: "Начало пути ссылки, например /s/. После смены старые ссылки перестанут работать."},
+		Hint: "После смены старые ссылки перестанут работать", Help: "Начало пути ссылки подписки, например /s/."},
 	{Key: service.SettingSubDecoy, Section: "Подписки", Title: "Сайт-заглушка домена подписок", Type: "select", Options: decoy.Names(),
 		Help: "Что видит человек, открывший домен в браузере."},
 	{Key: service.SettingSubPort, Section: "Подписки", Title: "Порт подписок", Type: "int", Default: "443"},
@@ -42,9 +43,9 @@ var settingDefs = []settingDef{
 
 	{Key: service.SettingHWIDEnabled, Section: "Устройства (HWID)", Title: "Учитывать устройства", Type: "bool", Default: "true"},
 	{Key: service.SettingHWIDLimit, Section: "Устройства (HWID)", Title: "Лимит устройств по умолчанию", Type: "int", Default: "0",
-		Help: "Для пользователей без своего лимита. 0 — без ограничения (одновременные подключения ограничивает лимит IP)."},
+		Hint: "0 — без ограничения", Help: "Для пользователей без своего лимита. Одновременные подключения ограничивает лимит IP."},
 	{Key: service.SettingIPLimit, Section: "Устройства (HWID)", Title: "Лимит IP одновременно", Type: "int", Default: "3",
-		Help: "Со скольких адресов пользователь может быть подключён сразу (все серверы вместе). Лишний адрес блокируется на нодах, а подписка с него показывает «лимит». 0 — без ограничения."},
+		Hint: "Все серверы вместе; 0 — без ограничения", Help: "Со скольких адресов пользователь может быть подключён сразу. Лишний адрес блокируется на нодах, а подписка с него показывает «лимит»."},
 	{Key: service.SettingHWIDAllowNone, Section: "Устройства (HWID)", Title: "Пускать приложения без HWID", Type: "bool", Default: "false",
 		Help: "Для всех пользователей. Для одного — переключатель «Проверять HWID» в его карточке. Иначе приложение без HWID получит сервер-заглушку с объяснением; Karing передаёт HWID, если включить X-HWID в настройках профиля."},
 
@@ -53,7 +54,7 @@ var settingDefs = []settingDef{
 		Help: "acme — Let's Encrypt (нужен настоящий домен), internal — самоподписанные (для тестов)."},
 
 	{Key: service.SettingGatewayAddr, Section: "Ноды", Title: "Адрес панели для нод", Type: "string",
-		Help: "IP:порт, к которому подключаются дополнительные ноды. Попадает в токены подключения."},
+		Hint: "IP:порт", Help: "Адрес, к которому подключаются дополнительные ноды. Попадает в токены подключения."},
 	{Key: service.SettingXrayLog, Section: "Ноды", Title: "Логи Xray на нодах", Type: "select", Default: service.DefaultXrayLog,
 		Options: []string{"none", "warning", "info", "debug"},
 		Help:    "Смотреть на ноде: journalctl -u vynel-node -f. debug — для поиска проблем: пишет каждое подключение, после включите обратно warning."},

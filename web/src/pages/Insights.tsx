@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { get } from '../api'
 import { BarList, fmtBytes, Legend, Segmented, SERIES, TimeChart } from '../charts'
 import { ago, bytes, dateTime } from '../format'
-import { Empty, Icon, Loading, useLoad } from '../ui'
+import { Empty, Icon, Info, Loading, useLoad } from '../ui'
 
 // Аналитика — куда уходит трафик (по профилям и каскадам, по каждому пользователю), все устройства
 // по HWID и все адреса, с которых подключались. Трафик и адреса хранятся 90 дней.
@@ -125,7 +125,10 @@ function ProfileTraffic({ user, setUser }: { user: number; setUser: (id: number)
 
           <div className="cols-2 section-gap">
             <div className="card">
-              <div className="card-head"><div><h3>Профили</h3><div className="card-sub">{rangeWord[range]}, все ноды профиля вместе</div></div></div>
+              <div className="card-head"><div><h3>Профили <Info>
+                  <p>Трафик профиля — всех его нод вместе; каскад считается отдельно.</p>
+                  <p>«До разбивки по профилям» — трафик, записанный до обновления панели, которое стало различать профили. «Удалённые профили» — трафик профилей и каскадов, которых уже нет.</p>
+                </Info></h3><div className="card-sub">{rangeWord[range]}, все ноды профиля вместе</div></div></div>
               <div className="card-pad">
                 <BarList format={fmtBytes} rows={data.profiles.map((p, i) => ({
                   key: p.key, label: p.label, value: p.total, color: i < groups.length && groups[i].key === p.key ? groups[i].color : SERIES[shown],
@@ -186,10 +189,6 @@ function ProfileTraffic({ user, setUser }: { user: number; setUser: (id: number)
               </div>
             )}
           </div>
-          <p className="muted small section-gap">
-            «До разбивки по профилям» — трафик, записанный до обновления панели, которое стало различать профили.
-            «Удалённые профили» — трафик профилей и каскадов, которых уже нет.
-          </p>
         </>
       )}
     </>

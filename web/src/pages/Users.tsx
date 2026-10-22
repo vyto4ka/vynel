@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { del, get, Group, patch, post, Template, User, UserDetails } from '../api'
 import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
-import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Info, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
 
 const pageSize = 200
 
@@ -178,7 +178,7 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
         <Field label="Имя" help="Латиница, цифры и _ . - @. Например vasya или ivan.petrov">
           <input className="input" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="vasya" />
         </Field>
-        <Field label="Шаблон" help="Серым — значения шаблона. Не трогайте поле, и оно возьмётся из шаблона; введите своё — будет своё">
+        <Field label="Шаблон" help="Серым — значения шаблона" info="Не трогайте поле — значение возьмётся из шаблона; введите своё — будет своё.">
           <select className="input" value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))}>
             <option value={0}>по умолчанию{templates.data?.find((t) => t.isDefault) ? ` (${templates.data.find((t) => t.isDefault)!.name})` : ''}</option>
             {templates.data?.filter((t) => !t.isDefault).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -308,7 +308,7 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
             </div>
             {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
             <div className="muted small" style={{ marginTop: 10 }}>
-              На телефоне ссылка открывает страницу с QR-кодом и кнопками приложений. Её же можно вставить в приложение как подписку.
+              Ссылку вставляют в приложение или открывают на телефоне <Info>На телефоне ссылка открывает страницу с QR-кодом и кнопками приложений. Её же можно вставить в приложение как подписку.</Info>
             </div>
           </>
         ) : <div className="alert amber">Ссылки нет: {data.subError}. Проверьте «Домен подписок» в настройках.</div>}
@@ -383,8 +383,8 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
             <h3>Устройства (HWID)</h3>
             <div className="card-sub">{u.hwidOff ? 'проверка выключена для этого пользователя' : `${data.devices.length} из ${(u.hwidLimit ?? data.hwidDefault) || '∞'}`}</div>
           </div>
-          <label className="row small text-2" style={{ gap: 8, flexWrap: 'nowrap' }} title="Выключите для приложений без HWID — подписка будет выдаваться без проверки устройств">
-            Проверять HWID
+          <label className="row small text-2" style={{ gap: 8, flexWrap: 'nowrap' }}>
+            <span>Проверять HWID<Info>Выключите для приложений без HWID — подписка будет выдаваться без проверки устройств.</Info></span>
             <Switch checked={!u.hwidOff} onChange={(v) => run(() => patch(`users/${id}`, { hwidOff: !v }), v ? 'Проверка HWID включена' : 'HWID для пользователя выключен')} />
           </label>
         </div>
@@ -496,7 +496,7 @@ function EditUser({ u, hwidDefault, ipDefault, groups, onClose, onSaved }: { u: 
             <input className="input" inputMode="numeric" value={ipLimit} onChange={(e) => setIPLimit(e.target.value.replace(/\D/g, ''))} placeholder={String(ipDefault)} />
           </Field>
         </div>
-        <Field label="Формат подписки" help="«Авто» определяет формат по приложению — обычно менять не нужно">
+        <Field label="Формат подписки" help="Обычно менять не нужно" info="«Авто» определяет формат по приложению, которое запрашивает подписку (вкладка «Клиенты» в разделе «Подписка»).">
           <select className="input" value={clientType} onChange={(e) => setClientType(e.target.value)}>
             {Object.entries(clientTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>

@@ -1,4 +1,5 @@
-import { createContext, ReactNode, useCallback, useContext, useEffect, useId, useRef, useState } from 'react'
+import { createContext, ReactNode, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Day } from './api'
 import { fmtBytes, TimeChart } from './charts'
 import { bytes } from './format'
@@ -243,10 +244,60 @@ export function Badge({ color, children, dot }: { color?: string; children: Reac
   return <span className={'badge ' + (color || '')}>{dot && <span className="dot" />}{children}</span>
 }
 
-export function Field({ label, help, children }: { label: ReactNode; help?: ReactNode; children: ReactNode }) {
+// Info — кнопка «i» с пояснением во всплывающем окне: что это такое и зачем. Короткие уточнения
+// («пусто — без лимита», «за сутки») остаются на виду, в подписи поля.
+export function Info({ children, label = 'Что это' }: { children: ReactNode; label?: string }) {
+  const [open, setOpen] = useState<'hover' | 'click' | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const pop = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null)
+  useLayoutEffect(() => {
+    if (!open || !btn.current) return setPos(null)
+    const r = btn.current.getBoundingClientRect()
+    const w = Math.min(320, window.innerWidth - 16)
+    const h = pop.current?.offsetHeight || 0
+    const up = r.bottom + 8 + h > window.innerHeight && r.top - 8 - h > 0
+    setPos({ left: Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8)), top: up ? r.top - 8 - h : r.bottom + 8, up })
+  }, [open])
+  useEffect(() => {
+    if (open !== 'click') return
+    const close = (e: Event) => {
+      if (!btn.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(null)
+    }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(null) }
+    document.addEventListener('pointerdown', close)
+    document.addEventListener('keydown', esc)
+    window.addEventListener('scroll', close as any, true)
+    return () => {
+      document.removeEventListener('pointerdown', close)
+      document.removeEventListener('keydown', esc)
+      window.removeEventListener('scroll', close as any, true)
+    }
+  }, [open])
+  return (
+    <>
+      <button type="button" ref={btn} className={'info-btn' + (open ? ' on' : '')} aria-label={label} aria-expanded={!!open}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(open === 'click' ? null : 'click') }}
+        onMouseEnter={() => { if (!open && matchMedia('(hover: hover)').matches) setOpen('hover') }}
+        onMouseLeave={() => { if (open === 'hover') setOpen(null) }}>i</button>
+      {open && createPortal(
+        <div ref={pop} className="info-pop" role="tooltip" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden', left: 0, top: 0 }}
+          onClick={(e) => e.stopPropagation()}>{children}</div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+// PageInfo — «О разделе» с пояснением во всплывающем окне, слева в панели инструментов.
+export function PageInfo({ children }: { children: ReactNode }) {
+  return <div className="grow page-info"><span className="muted small">О разделе</span><Info label="О разделе">{children}</Info></div>
+}
+
+export function Field({ label, help, info, children }: { label: ReactNode; help?: ReactNode; info?: ReactNode; children: ReactNode }) {
   return (
     <div className="field">
-      <label>{label}</label>
+      <label>{label}{info && <Info>{info}</Info>}</label>
       {children}
       {help && <div className="help">{help}</div>}
     </div>
