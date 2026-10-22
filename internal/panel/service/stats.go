@@ -35,7 +35,7 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 		defer tw.Close()
 		touched := false
 		for _, u := range b.Users {
-			id := EmailUser(u.Email) // "<id>", or "<id>.c<n>" through a cascade
+			id := EmailUser(u.Email) // "<id>.i<inbound>", or "<id>.c<n>" through a cascade
 			if id == 0 {
 				continue // not one of ours (a cascade's service user)
 			}
@@ -43,10 +43,17 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 			if err != nil {
 				return err
 			}
+			if ok {
+				if err := tw.Ref(ctx, id, EmailRef(u.Email), ts, u.Up, u.Down); err != nil {
+					return err
+				}
+			}
 			touched = touched || ok
 		}
+		online := map[int64]bool{} // a user is online once, however many inbounds it uses
 		for _, o := range b.Online {
-			if id := EmailUser(o.Email); id > 0 {
+			if id := EmailUser(o.Email); id > 0 && !online[id] {
+				online[id] = true
 				if err := tw.Online(ctx, id, ts); err != nil {
 					return err
 				}
@@ -60,7 +67,7 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 		if m := b.Metrics; m != nil {
 			if err := store.AddMetrics(ctx, q, store.Metrics{
 				NodeID: nodeID, TS: ts, CPU: m.Cpu, MemUsed: int64(m.MemUsed), MemTotal: int64(m.MemTotal), Load1: m.Load1,
-				RxBps: int64(m.RxBps), TxBps: int64(m.TxBps), Uptime: int64(m.Uptime), Online: int64(len(b.Online)), Steal: m.Steal,
+				RxBps: int64(m.RxBps), TxBps: int64(m.TxBps), Uptime: int64(m.Uptime), Online: int64(len(online)), Steal: m.Steal,
 			}); err != nil {
 				return err
 			}

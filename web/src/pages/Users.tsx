@@ -422,6 +422,7 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
               {data.trafficByNode.map((t) => <span key={t.code} className="chip static">{t.code}: {bytes(t.bytes)}</span>)}
             </div>
           )}
+          <a className="small" href={`#/insights/traffic/${id}`} style={{ display: 'inline-block', marginTop: 8 }}>Трафик по профилям →</a>
         </div>
       </div>
 

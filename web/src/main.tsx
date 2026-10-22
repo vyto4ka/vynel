@@ -5,6 +5,7 @@ import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
 import { ConfirmProvider, Icon, Logo, ToastProvider, useLoad } from './ui'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
+import { Insights } from './pages/Insights'
 import { Users } from './pages/Users'
 import { Groups } from './pages/Groups'
 import { Templates } from './pages/Templates'
@@ -22,6 +23,7 @@ type Page = { id: string; title: string; short?: string; icon: string; el: () =>
 const sections: { title: string; pages: Page[] }[] = [
   { title: 'Обзор', pages: [
     { id: 'overview', title: 'Дашборд', icon: 'dashboard', el: () => <Dashboard /> },
+    { id: 'insights', title: 'Аналитика', icon: 'chart', el: () => <Insights /> },
   ] },
   {
     title: 'Пользователи',

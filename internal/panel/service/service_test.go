@@ -235,19 +235,21 @@ func TestAccessRulesAndDesiredUsers(t *testing.T) {
 	}
 	bob := must(f.s.CreateUser(f.ctx, ActorCLI, CreateUserInput{Username: "bob", GroupIDs: []int64{test.ID}}))
 
+	nlIn := must(f.s.NodeInbounds(f.ctx, nl.ID))[0]
 	ds := must(f.s.DesiredStates(f.ctx))
-	if got := emails(ds[nl.ID].Users["VLESS_NL"]); got != UserEmail(alice.ID) {
+	if got := emails(ds[nl.ID].Users["VLESS_NL"]); got != InboundEmail(alice.ID, nlIn.ID) {
 		t.Fatalf("NL users: %s", got)
 	}
-	if got := emails(ds[de.ID].Users["VLESS_DE"]); got != UserEmail(alice.ID)+","+UserEmail(bob.ID) {
+	if got := emails(ds[de.ID].Users["VLESS_DE"]); got != InboundEmail(alice.ID, deIn.ID)+","+InboundEmail(bob.ID, deIn.ID) {
 		t.Fatalf("DE users: %s", got)
 	}
 
 	// "Whole profile" rules include nodes added later.
 	fi, _ := must2(f.s.CreateNode(f.ctx, ActorCLI, NodeInput{Name: "Финляндия", Country: "fi", Domain: "fi.example.com"}))
 	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: fi.ID, ProfileID: prof.ID}))
+	fiIn := must(f.s.NodeInbounds(f.ctx, fi.ID))[0]
 	ds = must(f.s.DesiredStates(f.ctx))
-	if got := emails(ds[fi.ID].Users["VLESS_FI"]); got != UserEmail(alice.ID) {
+	if got := emails(ds[fi.ID].Users["VLESS_FI"]); got != InboundEmail(alice.ID, fiIn.ID) {
 		t.Fatalf("new node must inherit profile-wide access: %q", got)
 	}
 
@@ -255,7 +257,7 @@ func TestAccessRulesAndDesiredUsers(t *testing.T) {
 	must(f.s.SetUserEnabled(f.ctx, ActorCLI, alice.ID, false))
 	must(f.s.UpdateNode(f.ctx, ActorCLI, fi.ID, NodeInput{Domain: "fi.example.com"}, false))
 	ds = must(f.s.DesiredStates(f.ctx))
-	if got := emails(ds[de.ID].Users["VLESS_DE"]); got != UserEmail(bob.ID) {
+	if got := emails(ds[de.ID].Users["VLESS_DE"]); got != InboundEmail(bob.ID, deIn.ID) {
 		t.Fatalf("after disable: %s", got)
 	}
 	if len(ds[fi.ID].Inbounds) != 0 {

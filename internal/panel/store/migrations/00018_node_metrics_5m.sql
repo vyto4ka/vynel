@@ -1,5 +1,5 @@
 -- Node load over time for the dashboard: CPU steal is kept apart, and the 10-second samples
--- (kept 7 days) are rolled up into 5-minute rows kept 90 days (docs/USER_GUIDE.md §10).
+-- (kept 7 days) are rolled up into 5-minute rows kept 90 days (docs/USER_GUIDE.md §7).
 
 -- +goose Up
 ALTER TABLE node_metrics ADD COLUMN steal REAL NOT NULL DEFAULT 0;
