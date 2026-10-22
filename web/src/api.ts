@@ -426,6 +426,13 @@ export interface SubRule {
   format: string
   enabled: boolean
   note?: string
+  template?: string // свой конфиг клиента (Mihomo YAML, sing-box или Xray JSON), как в Remnawave
+}
+
+export interface TemplateInfo {
+  summary: string[]
+  routing: ClientRouting | null
+  skipped: string[]
 }
 
 // ---- обновления ----

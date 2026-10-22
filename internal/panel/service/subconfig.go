@@ -3,10 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
@@ -28,6 +32,9 @@ type SubRule struct {
 	Format  string `json:"format"`  // base64 | mihomo | singbox | xray | html
 	Enabled bool   `json:"enabled"`
 	Note    string `json:"note,omitempty"`
+	// Template is the client's own config to put the servers into (Mihomo YAML, sing-box JSON
+	// or Xray JSON, as in Remnawave); "" = the panel's own, with the subscription routing.
+	Template string `json:"template,omitempty"`
 }
 
 // SubFormats are the formats a rule may pick.
@@ -36,11 +43,11 @@ var SubFormats = []string{"base64", "mihomo", "singbox", "xray", "html"}
 // DefaultSubRules are the built-in rules (docs/ARCHITECTURE.md §8.3).
 func DefaultSubRules() []SubRule {
 	return []SubRule{
-		{`(?i)keqdroid|keqdis`, "xray", true, keqdroidNote},
-		{`(?i)karing`, "base64", true, "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся"},
-		{`(?i)clash|mihomo|stash|flclash|koala`, "mihomo", true, "Clash-клиенты"},
-		{`(?i)sing-?box|\bSF[AIMT]\b`, "singbox", true, "sing-box и его приложения"},
-		{`(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, "base64", true, "Приложения на ядре Xray"},
+		{Pattern: `(?i)keqdroid|keqdis`, Format: "xray", Enabled: true, Note: keqdroidNote},
+		{Pattern: `(?i)karing`, Format: "base64", Enabled: true, Note: "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся"},
+		{Pattern: `(?i)clash|mihomo|stash|flclash|koala`, Format: "mihomo", Enabled: true, Note: "Clash-клиенты"},
+		{Pattern: `(?i)sing-?box|\bSF[AIMT]\b`, Format: "singbox", Enabled: true, Note: "sing-box и его приложения"},
+		{Pattern: `(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, Format: "base64", Enabled: true, Note: "Приложения на ядре Xray"},
 	}
 }
 
@@ -99,6 +106,11 @@ func CheckSubRules(rs []SubRule) error {
 		}
 		if !slices.Contains(SubFormats, r.Format) {
 			return invalid("строка %d: неизвестный формат %q", i+1, r.Format)
+		}
+		if strings.TrimSpace(r.Template) == "" {
+			r.Template = ""
+		} else if err := CheckClientTemplate(r.Format, r.Template); err != nil {
+			return InField(fmt.Sprintf("строка %d (%s), «Свой шаблон»", i+1, firstNonEmpty(r.Note, r.Pattern)), err)
 		}
 	}
 	return nil
@@ -512,6 +524,54 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 func CheckSubBasics(b SubBasics) error {
 	if b.UpdateHours < 0 || b.UpdateHours > 24*30 {
 		return invalid("«Обновлять, часов»: от 0 до 720")
+	}
+	return nil
+}
+
+// CheckClientTemplate checks a client's own config for its format; errors name the line.
+func CheckClientTemplate(format, text string) error {
+	switch format {
+	case "mihomo":
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
+			return invalid("YAML: %s", strings.TrimPrefix(err.Error(), "yaml: "))
+		}
+		if doc == nil {
+			return invalid("пустой YAML")
+		}
+		if g, ok := doc["proxy-groups"]; ok {
+			if _, ok := g.([]any); !ok {
+				return invalid("proxy-groups должен быть списком")
+			}
+		}
+		if p, ok := doc["proxies"]; ok && p != nil {
+			if _, ok := p.([]any); !ok {
+				return invalid("proxies должен быть списком")
+			}
+		}
+	case "singbox", "xray":
+		var doc any
+		if err := json.Unmarshal([]byte(text), &doc); err != nil {
+			var se *json.SyntaxError
+			if errors.As(err, &se) {
+				return invalid("строка %d: ошибка JSON: %v", strings.Count(text[:min(int(se.Offset), len(text))], "\n")+1, err)
+			}
+			return invalid("ошибка JSON: %v", err)
+		}
+		if l, ok := doc.([]any); ok && format == "xray" && len(l) == 1 {
+			doc = l[0] // a subscription of one config: its config is the template
+		}
+		m, ok := doc.(map[string]any)
+		if !ok {
+			return invalid("нужен объект {…}")
+		}
+		if o, ok := m["outbounds"]; ok {
+			if _, ok := o.([]any); !ok {
+				return invalid("outbounds должен быть списком")
+			}
+		}
+	default:
+		return invalid("свой шаблон бывает у Mihomo, sing-box и Xray JSON, у формата %q его нет", format)
 	}
 	return nil
 }
