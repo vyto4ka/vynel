@@ -89,6 +89,23 @@ func TestCreateUserByNameOnly(t *testing.T) {
 	}
 }
 
+// The create form overrides single template values; the others still come from the template.
+func TestCreateUserOverridesTemplate(t *testing.T) {
+	f := newFixture(t)
+	gb := int64(5 << 30)
+	exp := f.now.AddDate(0, 0, 10)
+	u := must(f.s.CreateUser(f.ctx, ActorCLI, CreateUserInput{Username: "petya", ExpireAt: &exp, TrafficLimitBytes: &gb, ResetStrategy: "week"}))
+	if *u.ExpireAt != exp.Unix() || u.TrafficLimitBytes == nil || *u.TrafficLimitBytes != gb || u.ResetStrategy != "week" {
+		t.Fatalf("overrides lost: %+v", u)
+	}
+	if groups := must(f.s.UserGroupIDs(f.ctx, u.ID)); len(groups) != 1 {
+		t.Fatalf("the template's groups lost: %v", groups)
+	}
+	if _, err := f.s.CreateUser(f.ctx, ActorCLI, CreateUserInput{Username: "kolya", ResetStrategy: "hourly"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad reset: %v", err)
+	}
+}
+
 func TestStatusMachineAndExtend(t *testing.T) {
 	f := newFixture(t)
 	u := must(f.s.CreateUser(f.ctx, ActorCLI, CreateUserInput{Username: "u1"}))

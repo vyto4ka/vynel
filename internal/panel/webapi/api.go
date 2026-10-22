@@ -213,7 +213,10 @@ func (s *Server) session(r *http.Request) (any, error) {
 	login, _ := s.svc.Setting(ctx, service.SettingWebLogin, "")
 	url, _ := s.svc.WebURL(ctx)
 	subBase, _ := s.svc.SubBase(ctx)
-	return map[string]any{"login": login, "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase}, nil
+	hwid, _ := s.svc.Setting(ctx, service.SettingHWIDLimit, "0")
+	hwidDefault, _ := strconv.Atoi(hwid)
+	return map[string]any{"login": login, "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase,
+		"ipDefault": s.svc.IPLimitOf(ctx, &store.User{}), "hwidDefault": hwidDefault}, nil
 }
 
 // sessionPing: the open page says it is alive every half a minute, and whether the admin did
@@ -348,7 +351,7 @@ func (s *Server) audit(r *http.Request) (any, error) {
 func (s *Server) users(r *http.Request) (any, error) {
 	ctx := r.Context()
 	q := r.URL.Query()
-	f := store.UserFilter{Status: q.Get("status"), Search: q.Get("search")}
+	f := store.UserFilter{Status: q.Get("status"), Search: q.Get("search"), Sort: q.Get("sort"), Desc: q.Get("dir") == "desc"}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit > 0 {
 		f.Limit = min(limit, 1000)
@@ -385,6 +388,7 @@ func (s *Server) createUser(r *http.Request) (any, error) {
 		ExpireAt     *int64  `json:"expireAt"`
 		NeverExpires bool    `json:"neverExpires"`
 		TrafficLimit *int64  `json:"trafficLimit"`
+		Reset        string  `json:"resetStrategy"`
 		HWIDLimit    *int64  `json:"hwidLimit"`
 		IPLimit      *int64  `json:"ipLimit"`
 		SubToken     string  `json:"subToken"`
@@ -393,7 +397,8 @@ func (s *Server) createUser(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ci := service.CreateUserInput{Username: in.Username, TemplateID: in.TemplateID, GroupIDs: in.GroupIDs, Note: in.Note,
-		NeverExpires: in.NeverExpires, TrafficLimitBytes: in.TrafficLimit, HWIDLimit: in.HWIDLimit, IPLimit: in.IPLimit, SubToken: in.SubToken}
+		NeverExpires: in.NeverExpires, TrafficLimitBytes: in.TrafficLimit, ResetStrategy: in.Reset, HWIDLimit: in.HWIDLimit, IPLimit: in.IPLimit,
+		SubToken: in.SubToken}
 	if in.ExpireAt != nil {
 		t := time.Unix(*in.ExpireAt, 0)
 		ci.ExpireAt = &t

@@ -182,6 +182,7 @@ type CreateUserInput struct {
 	ExpireAt          *time.Time
 	NeverExpires      bool
 	TrafficLimitBytes *int64
+	ResetStrategy     string // "" = the template's
 	HWIDLimit         *int64
 	IPLimit           *int64  // addresses at once; nil = the default, 0 = unlimited
 	GroupIDs          []int64 // nil = template's groups
@@ -247,6 +248,12 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 				u.ExpireAt = nil
 			}
 			u.TrafficLimitBytes, u.ResetStrategy, u.HWIDLimit = tpl.TrafficLimitBytes, tpl.ResetStrategy, tpl.HWIDLimit
+			if in.ResetStrategy != "" {
+				if err := checkReset(&in.ResetStrategy); err != nil {
+					return err
+				}
+				u.ResetStrategy = in.ResetStrategy
+			}
 			if in.TrafficLimitBytes != nil {
 				u.TrafficLimitBytes = nilIfNonPositive(in.TrafficLimitBytes)
 			}
