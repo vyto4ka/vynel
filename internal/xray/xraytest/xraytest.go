@@ -245,3 +245,31 @@ func Eventually(t testing.TB, timeout time.Duration, what string, cond func() er
 	}
 	t.Fatalf("%s: %v", what, err)
 }
+
+// DirectJSON is a freedom outbound tagged DIRECT that may reach private addresses. Since Xray
+// 26.10 freedom refuses them unless finalRules allow it, and test origins listen on 127.0.0.1;
+// older Xray ignores the field.
+const DirectJSON = `{"tag":"DIRECT","protocol":"freedom","settings":{"finalRules":[{"action":"allow"}]}}`
+
+// Direct is DirectJSON as a map, for configs built in code.
+func Direct() map[string]any {
+	return map[string]any{"tag": "DIRECT", "protocol": "freedom",
+		"settings": map[string]any{"finalRules": []any{map[string]any{"action": "allow"}}}}
+}
+
+// OpenFreedom lets every freedom outbound of a config reach private addresses (see DirectJSON).
+func OpenFreedom(cfg map[string]any) {
+	obs, _ := cfg["outbounds"].([]any)
+	for _, raw := range obs {
+		ob, ok := raw.(map[string]any)
+		if !ok || ob["protocol"] != "freedom" {
+			continue
+		}
+		settings, _ := ob["settings"].(map[string]any)
+		if settings == nil {
+			settings = map[string]any{}
+			ob["settings"] = settings
+		}
+		settings["finalRules"] = []any{map[string]any{"action": "allow"}}
+	}
+}

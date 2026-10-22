@@ -30,7 +30,7 @@ import (
 )
 
 // testBase lets traffic reach 127.0.0.1 (the default base blocks geoip:private).
-const testBase = `{"log":{"loglevel":"warning"},"outbounds":[{"tag":"DIRECT","protocol":"freedom"}]}`
+const testBase = `{"log":{"loglevel":"warning"},"outbounds":[` + xraytest.DirectJSON + `]}`
 
 const domain = "example.test"
 

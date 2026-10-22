@@ -117,7 +117,7 @@ func TestCertSwapRestartsXray(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, _ := xrayconf.ParseBase(`{"outbounds":[{"tag":"DIRECT","protocol":"freedom"}]}`)
+	base, _ := xrayconf.ParseBase(`{"outbounds":[` + xraytest.DirectJSON + `]}`)
 	cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: base, Inbounds: []*xrayconf.RenderedInbound{r}, APIAddr: "127.0.0.1:" + strconv.Itoa(apiPort)})
 	if err != nil {
 		t.Fatal(err)
