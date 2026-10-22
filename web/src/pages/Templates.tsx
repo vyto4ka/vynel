@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
-import { del, get, Group, post, put, Template } from '../api'
+import { del, get, Group, post, put, Template, TemplateGrant } from '../api'
+import { TemplateExtras } from '../extras'
 import { clientTypes, GiB, resetLabels } from '../format'
 import { Badge, Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 import { templateSummary } from './Users'
@@ -59,6 +60,7 @@ function TemplateForm({ t, groups, onClose, onSaved }: { t: Template | null; gro
   const [groupIds, setGroupIds] = useState<number[]>(t?.groupIds || groups.slice(0, 1).map((g) => g.id))
   const [isDefault, setIsDefault] = useState(t?.isDefault || false)
   const [note, setNote] = useState(t?.note || '')
+  const [grants, setGrants] = useState<TemplateGrant[]>(t?.grants || [])
   const act = useAction()
 
   const submit = async (e: FormEvent) => {
@@ -66,7 +68,7 @@ function TemplateForm({ t, groups, onClose, onSaved }: { t: Template | null; gro
     const body = {
       name, isDefault, expireMonths: Number(months) || 0, expireDays: Number(days) || 0,
       trafficLimit: limitGB ? Math.round(Number(limitGB) * GiB) : null, resetStrategy: reset,
-      hwidLimit: hwid === '' ? null : Number(hwid), clientType, groupIds, note,
+      hwidLimit: hwid === '' ? null : Number(hwid), clientType, groupIds, note, grants,
     }
     const r = await act(() => (t ? put(`templates/${t.id}`, body) : post('templates', body)), 'Шаблон сохранён')
     if (r !== undefined) onSaved()
@@ -102,6 +104,9 @@ function TemplateForm({ t, groups, onClose, onSaved }: { t: Template | null; gro
               </label>
             ))}
           </div>
+        </Field>
+        <Field label="Каскады и подписки" help="Каждый новый пользователь получает их сам, без срока. Например, подписку друга — её серверы встанут под основными">
+          <TemplateExtras value={grants} onChange={setGrants} />
         </Field>
         <Field label="Заметка для новых пользователей"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         <label className="check"><input type="checkbox" checked={isDefault} disabled={t?.isDefault} onChange={(e) => setIsDefault(e.target.checked)} /> Шаблон по умолчанию</label>

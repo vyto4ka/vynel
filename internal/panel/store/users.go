@@ -136,20 +136,32 @@ type UserTemplate struct {
 	ClientType        string
 	GroupIDs          []int64
 	Note              string
+	Grants            []TemplateGrant // cascades and merged subscriptions a new user gets
 	CreatedAt         int64
 }
 
-const userTemplateCols = `id, name, is_default, expire_months, expire_days, traffic_limit_bytes, reset_strategy, hwid_limit, client_type, group_ids, note, created_at`
+// TemplateGrant is a cascade or a merged subscription a template gives.
+type TemplateGrant struct {
+	Kind  string `json:"kind"` // GrantCascade or GrantExternal
+	RefID int64  `json:"refId"`
+}
+
+const userTemplateCols = `id, name, is_default, expire_months, expire_days, traffic_limit_bytes, reset_strategy, hwid_limit, client_type, group_ids, note, created_at, grants`
 
 func scanUserTemplate(sc interface{ Scan(...any) error }) (*UserTemplate, error) {
 	t := &UserTemplate{}
 	var limit, hwid sql.NullInt64
-	var groups string
-	if err := sc.Scan(&t.ID, &t.Name, &t.IsDefault, &t.ExpireMonths, &t.ExpireDays, &limit, &t.ResetStrategy, &hwid, &t.ClientType, &groups, &t.Note, &t.CreatedAt); err != nil {
+	var groups, grants string
+	if err := sc.Scan(&t.ID, &t.Name, &t.IsDefault, &t.ExpireMonths, &t.ExpireDays, &limit, &t.ResetStrategy, &hwid, &t.ClientType, &groups, &t.Note, &t.CreatedAt,
+		&grants); err != nil {
 		return nil, mapErr(err)
 	}
 	t.TrafficLimitBytes, t.HWIDLimit = ptrInt(limit), ptrInt(hwid)
 	_ = json.Unmarshal([]byte(groups), &t.GroupIDs)
+	_ = json.Unmarshal([]byte(grants), &t.Grants)
+	if t.Grants == nil {
+		t.Grants = []TemplateGrant{}
+	}
 	return t, nil
 }
 
@@ -167,9 +179,12 @@ func CreateUserTemplate(ctx context.Context, q DBTX, t *UserTemplate) error {
 	if t.GroupIDs == nil {
 		t.GroupIDs = []int64{}
 	}
-	res, err := q.ExecContext(ctx, `INSERT INTO user_templates (name, is_default, expire_months, expire_days, traffic_limit_bytes, reset_strategy, hwid_limit, client_type, group_ids, note, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, t.Name, t.IsDefault, t.ExpireMonths, t.ExpireDays, nullInt(t.TrafficLimitBytes), t.ResetStrategy,
-		nullInt(t.HWIDLimit), t.ClientType, toJSON(t.GroupIDs), t.Note, t.CreatedAt)
+	if t.Grants == nil {
+		t.Grants = []TemplateGrant{}
+	}
+	res, err := q.ExecContext(ctx, `INSERT INTO user_templates (name, is_default, expire_months, expire_days, traffic_limit_bytes, reset_strategy, hwid_limit, client_type, group_ids, note, created_at, grants)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, t.Name, t.IsDefault, t.ExpireMonths, t.ExpireDays, nullInt(t.TrafficLimitBytes), t.ResetStrategy,
+		nullInt(t.HWIDLimit), t.ClientType, toJSON(t.GroupIDs), t.Note, t.CreatedAt, toJSON(t.Grants))
 	if err != nil {
 		return mapErr(err)
 	}
@@ -184,9 +199,12 @@ func UpdateUserTemplate(ctx context.Context, q DBTX, t *UserTemplate) error {
 	if t.GroupIDs == nil {
 		t.GroupIDs = []int64{}
 	}
-	if err := execOne(ctx, q, `UPDATE user_templates SET name=?, is_default=?, expire_months=?, expire_days=?, traffic_limit_bytes=?, reset_strategy=?, hwid_limit=?, client_type=?, group_ids=?, note=?
-		WHERE id=?`, t.Name, t.IsDefault, t.ExpireMonths, t.ExpireDays, nullInt(t.TrafficLimitBytes), t.ResetStrategy, nullInt(t.HWIDLimit),
-		t.ClientType, toJSON(t.GroupIDs), t.Note, t.ID); err != nil {
+	if t.Grants == nil {
+		t.Grants = []TemplateGrant{}
+	}
+	if err := execOne(ctx, q, `UPDATE user_templates SET name=?, is_default=?, expire_months=?, expire_days=?, traffic_limit_bytes=?, reset_strategy=?, hwid_limit=?, client_type=?, group_ids=?, note=?,
+		grants=? WHERE id=?`, t.Name, t.IsDefault, t.ExpireMonths, t.ExpireDays, nullInt(t.TrafficLimitBytes), t.ResetStrategy, nullInt(t.HWIDLimit),
+		t.ClientType, toJSON(t.GroupIDs), t.Note, toJSON(t.Grants), t.ID); err != nil {
 		return err
 	}
 	return clearDefaultTemplate(ctx, q, t)

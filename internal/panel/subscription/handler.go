@@ -229,8 +229,8 @@ func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.R
 	if !v.OK {
 		return nil, v.Reason
 	}
-	// A panel merging this subscription into its own gets only our servers (see DepthHeader).
-	all, err := h.svc.SubscriptionHosts(ctx, u, r.Header.Get(service.DepthHeader) == "")
+	// A panel merging this subscription in says how deep it is (see DepthHeader).
+	all, err := h.svc.SubscriptionHosts(ctx, u, service.RequestDepth(r.Header.Get(service.DepthHeader)))
 	if err != nil {
 		h.log.Error("user hosts", "err", err)
 		return nil, "Временная ошибка, обновите подписку позже"
