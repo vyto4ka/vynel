@@ -377,8 +377,36 @@ func GetUserByUsername(ctx context.Context, q DBTX, username string) (*User, err
 type UserFilter struct {
 	Status string // '' = any
 	Search string // substring of username or note
+	Sort   string // a key of userSorts; '' = by id
+	Desc   bool
 	Limit  int
 	Offset int
+}
+
+// userSorts are the columns the users table sorts by. "Never" sorts last going up: no end date
+// after every date, never online before everyone.
+var userSorts = map[string][2]string{
+	"username": {"username COLLATE NOCASE", "username COLLATE NOCASE DESC"},
+	"status": {"CASE status WHEN 'active' THEN 0 WHEN 'limited' THEN 1 WHEN 'expired' THEN 2 ELSE 3 END",
+		"CASE status WHEN 'active' THEN 0 WHEN 'limited' THEN 1 WHEN 'expired' THEN 2 ELSE 3 END DESC"},
+	"traffic": {"traffic_used_bytes", "traffic_used_bytes DESC"},
+	"expire":  {"expire_at IS NULL, expire_at", "expire_at IS NULL DESC, expire_at DESC"},
+	"groups": {"(SELECT min(g.name) FROM user_groups ug JOIN groups g ON g.id = ug.group_id WHERE ug.user_id = users.id) IS NULL, " +
+		"(SELECT min(g.name) FROM user_groups ug JOIN groups g ON g.id = ug.group_id WHERE ug.user_id = users.id)",
+		"(SELECT min(g.name) FROM user_groups ug JOIN groups g ON g.id = ug.group_id WHERE ug.user_id = users.id) DESC"},
+	"online":  {"online_at IS NOT NULL, online_at", "online_at IS NULL, online_at DESC"},
+	"created": {"created_at", "created_at DESC"},
+}
+
+func (f UserFilter) order() string {
+	s, ok := userSorts[f.Sort]
+	if !ok {
+		return "id"
+	}
+	if f.Desc {
+		return s[1] + ", id DESC"
+	}
+	return s[0] + ", id"
 }
 
 func (f UserFilter) where() (string, []any) {
@@ -437,7 +465,7 @@ func ListUsers(ctx context.Context, q DBTX, f UserFilter) ([]*User, error) {
 		limit = -1
 	}
 	args = append(args, limit, f.Offset)
-	rows, err := q.QueryContext(ctx, `SELECT `+userCols+` FROM users WHERE `+whereSQL+` ORDER BY id LIMIT ? OFFSET ?`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT `+userCols+` FROM users WHERE `+whereSQL+` ORDER BY `+f.order()+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}
