@@ -4,7 +4,7 @@ import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
-import { Badge, Bar, CopyField, Empty, Field, Icon, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000)
@@ -35,7 +35,7 @@ export function Nodes() {
   return (
     <>
       <div className="toolbar">
-        <div className="text-2 grow small">Ноды — серверы с Xray. На каждой свой VLESS-инбаунд со своими ключами; общие настройки берутся из профиля.</div>
+        <PageInfo>Ноды — серверы с Xray. На каждой ноде из профиля получается свой инбаунд со своими ключами; общие настройки берутся из профиля.</PageInfo>
         {(updates.data?.count || 0) > 0 && <button className="btn" onClick={async () => {
           if (await confirm(<>Обновить все устаревшие серверы до {updates.data!.latest}? Они обновятся <b>одновременно</b>: около минуты подключения не будут работать, затем всё поднимется само. Панель — последней.</>, 'Обновить все', false))
             upd.run('all')
@@ -199,7 +199,7 @@ function AddNode({ profiles, onClose, onAdded }: { profiles: Profile[]; onClose:
       footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="add-node">Дальше: команда установки</button></>}>
       <WizardSteps at={0} />
       <form id="add-node" onSubmit={submit}>
-        <Field label="Домен ноды" help="A-запись на IP нового сервера (серое облако в Cloudflare). Нужен для Reality self-steal.">
+        <Field label="Домен ноды" help="A-запись на IP нового сервера, серое облако в Cloudflare" info="Reality self-steal выдаёт себя за сайт на этом домене: на ноде открывается настоящий сайт с сертификатом, а подключения прячутся за ним.">
           <input className="input" autoFocus value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="de.example.com" />
         </Field>
         <div className="grid2">
@@ -289,7 +289,7 @@ function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSav
           <Field label="Название"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label="Код страны"><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} /></Field>
         </div>
-        <Field label="Домен" help="Смена домена меняет SNI и сертификат — клиенты получат новые настройки с подпиской">
+        <Field label="Домен" info="Смена домена меняет SNI и сертификат. Клиенты получат новые настройки со следующим обновлением подписки.">
           <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} />
         </Field>
       </form>
@@ -322,7 +322,7 @@ function Attach({ node, profiles, onClose, onDone }: { node: Node; profiles: Pro
             </select>
           </Field>
           {inputs.map((v) => (
-            <Field key={v.name} label={<>{v.name}{v.optional ? '' : <span className="pink-text"> *</span>}</>} help={v.description}>
+            <Field key={v.name} label={<>{v.name}{v.optional ? '' : <span className="pink-text"> *</span>}</>} info={v.description || undefined}>
               <input className="input" value={values[v.name] || ''} onChange={(e) => setValues({ ...values, [v.name]: e.target.value })}
                 placeholder={v.default != null ? String(v.default) : v.default_from ? `по умолчанию из ${v.default_from}` : ''} />
             </Field>
@@ -356,7 +356,7 @@ function HostForm({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; on
     <Modal title={`Точка подключения ${i.tag}`} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="host-form">Сохранить</button></>}>
       <form id="host-form" onSubmit={submit}>
-        <p className="muted small" style={{ marginTop: 0 }}>Так сервер выглядит в подписке. Пустые поля заполняются автоматически (показаны серым).</p>
+        <p className="muted small" style={{ marginTop: 0 }}>Пустые поля заполняются автоматически (показаны серым) <Info>Точка подключения — то, как сервер выглядит в подписке: название, адрес, порт, SNI. Её можно поменять, например, чтобы приложения шли через другой домен или CDN.</Info></p>
         <Field label="Название в приложении"><input className="input" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder={h?.remark} /></Field>
         <div className="grid2">
           <Field label="Адрес"><input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={h?.address} /></Field>
@@ -445,7 +445,7 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
                 {d.addresses.map((a) => <option key={a.id} value={a.id}>{a.ip}{a.primary ? ' (основной)' : ''}</option>)}
               </select>
             </Field>
-            <Field label="Выходной IP" help="С какого адреса уходит трафик пользователей">
+            <Field label="Выходной IP" info="С какого адреса сервера трафик пользователей уходит в интернет. Сайты видят именно его.">
               <select className="input" value={egress} onChange={(e) => setEgress(Number(e.target.value))}>
                 <option value={0}>{listen ? 'как у входа' : 'по умолчанию'}</option>
                 {d.addresses.map((a) => <option key={a.id} value={a.id}>{a.ip}</option>)}
@@ -459,7 +459,7 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
               <input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} /> Сгенерировать ключи и прочие значения заново
             </label>
           )}
-          <Field label="Ручная правка JSON только для этой ноды" help="Накладывается поверх профиля. null удаляет поле. Пусто — без правок.">
+          <Field label="Ручная правка JSON только для этой ноды" help="null удаляет поле; пусто — без правок" info="JSON накладывается поверх инбаунда из профиля: так можно поменять любое поле только на этой ноде.">
             <CodeEditor lang="json" value={overrideText} onChange={setOverrideText} height={160} />
             {override.error && <div className="small pink-text" style={{ marginTop: 6 }}>{override.error}</div>}
           </Field>

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
 import { ExternalList } from '../extras'
 import { RoutingForm } from '../routing'
-import { Badge, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Field, Icon, Info, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 const tabs: [string, string][] = [
   ['basics', 'Основное'],
@@ -128,18 +128,13 @@ function RoutingTab({ r, set, onReset }: { r: ClientRouting; set: (r: ClientRout
   return (
     <>
       <div className="card card-pad">
-        <h3 style={{ marginTop: 0 }}>Маршруты в приложениях</h3>
-        <div className="card-sub" style={{ marginBottom: 14 }}>
-          Уходят вместе с серверами в форматах с маршрутизацией: Xray JSON (KeqDroid, Happ, v2RayTun), Clash / Mihomo и sing-box. Ссылкам vless:// маршруты не передаются.
-        </div>
+        <h3 style={{ marginTop: 0 }}>Маршруты в приложениях <Info>Маршруты уходят вместе с серверами в форматах с маршрутизацией: Xray JSON (KeqDroid, Happ, v2RayTun), Clash / Mihomo и sing-box. Ссылкам vless:// маршруты не передаются.</Info></h3>
+        <div className="card-sub" style={{ marginBottom: 14 }}>Xray JSON, Mihomo и sing-box; не для ссылок vless://</div>
         <RoutingForm r={r} set={set} />
       </div>
-      <div className="card card-pad small text-2">
-        <p style={{ marginTop: 0 }}>
-          У профиля можно включить «Кастомный профиль клиента» (Профили → профиль → «Клиент»): свои маршруты или целый JSON-конфиг Xray для его серверов.
-          Это действует в Xray JSON — там у каждого сервера свой конфиг. Mihomo и sing-box получают один файл на все серверы и берут маршруты отсюда.
-        </p>
+      <div className="card card-pad small text-2 row">
         <button className="btn ghost sm" onClick={onReset}>Вернуть маршруты по умолчанию</button>
+        <span>Свои маршруты профиля <Info>У профиля можно включить «Кастомный профиль клиента» (Профили → профиль → «Клиент»): свои маршруты или целый JSON-конфиг Xray для его серверов. Это действует в Xray JSON — там у каждого сервера свой конфиг. Mihomo и sing-box получают один файл на все серверы и берут маршруты отсюда.</Info></span>
       </div>
     </>
   )
@@ -150,24 +145,24 @@ function BasicsTab({ b, set }: { b: SubBasics; set: (b: SubBasics) => void }) {
     set({ ...b, [k]: k === 'updateHours' ? Number(e.target.value.replace(/\D/g, '')) || 0 : e.target.value })
   return (
     <div className="card card-pad">
-      <Field label="Название подписки" help="Так подписка называется в приложениях (заголовок profile-title) и на странице">
+      <Field label="Название подписки" info="Так подписка называется в приложениях (заголовок profile-title) и на странице подписки.">
         <input className="input" value={b.title} onChange={f('title')} placeholder="VPN" />
       </Field>
       <div className="grid2">
-        <Field label="Обновлять, часов" help="profile-update-interval: как часто приложение само обновляет подписку">
+        <Field label="Обновлять, часов" info="Заголовок profile-update-interval: как часто приложение само обновляет подписку.">
           <input className="input" inputMode="numeric" value={b.updateHours || ''} onChange={f('updateHours')} placeholder="12" />
         </Field>
-        <Field label="Поддержка" help="support-url: кнопка в приложениях и на странице">
+        <Field label="Поддержка" info="Заголовок support-url: кнопка поддержки в приложениях и на странице подписки.">
           <input className="input" value={b.supportUrl} onChange={f('supportUrl')} placeholder="https://t.me/your_support" />
         </Field>
       </div>
-      <Field label="Объявление" help="announce: строка вверху приложения (KeqDroid и другие) и плашка на странице. Пусто — не показывать">
+      <Field label="Объявление" help="Пусто — не показывать" info="Заголовок announce: строка вверху приложения (KeqDroid и другие) и плашка на странице подписки.">
         <textarea className="input" rows={2} value={b.announce} onChange={f('announce')} placeholder="Например: профилактика в субботу 03:00–04:00" />
       </Field>
-      <Field label="Ссылка объявления" help="announce-url: куда ведёт нажатие на объявление">
+      <Field label="Ссылка объявления" info="Заголовок announce-url: куда ведёт нажатие на объявление.">
         <input className="input" value={b.announceUrl} onChange={f('announceUrl')} placeholder="https://t.me/your_channel" />
       </Field>
-      <Field label="Страница «открыть в браузере»" help="profile-web-page-url. Пусто — страница этой подписки (с QR и кнопками)">
+      <Field label="Страница «открыть в браузере»" help="Пусто — страница этой подписки, с QR и кнопками" info="Заголовок profile-web-page-url: что открывает кнопка «в браузере» в приложении.">
         <input className="input" value={b.pageUrl} onChange={f('pageUrl')} placeholder="страница подписки" />
       </Field>
     </div>
@@ -180,7 +175,7 @@ function PageTab({ p, set, onReset }: { p: SubPage; set: (p: SubPage) => void; o
   return (
     <div className="card card-pad">
       <div className="muted small" style={{ marginBottom: 14 }}>
-        Эту страницу видит человек, открывший ссылку подписки в браузере: QR-код, кнопки приложений, трафик и срок. В тексте можно использовать переменные, например {'{username}'}, {'{expire_date}'}, {'{days_left}'}.
+        Переменные в тексте: {'{username}'}, {'{expire_date}'}, {'{days_left}'} <Info>Эту страницу видит человек, открывший ссылку подписки в браузере: QR-код, кнопки приложений, трафик и срок.</Info>
       </div>
       <Field label="Заголовок" help="Пусто — название подписки">
         <input className="input" value={p.heading} onChange={f('heading')} placeholder="как в «Основное»" />
@@ -238,7 +233,7 @@ function AppsTab({ p, set, catalog }: { p: SubPage; set: (p: SubPage) => void; c
       <div className="card-head">
         <div>
           <h3>Кнопки приложений</h3>
-          <div className="card-sub">Первая включённая — «рекомендуем». На телефоне сначала показываются приложения для его системы.</div>
+          <div className="card-sub">первая включённая — «рекомендуем» <Info>На телефоне сначала показываются приложения для его системы.</Info></div>
         </div>
         <button className="btn sm" onClick={() => { set({ ...p, apps: [...apps, { id: '', name: 'Новое приложение', link: 'app://import/{url}', download: '', platforms: ['android'], enabled: true }] }); setEdit(apps.length) }}>
           <Icon name="plus" /> Своё
@@ -312,7 +307,7 @@ function HeadersTab({ hs, set, cfg, onReset }: { hs: SubHeader[]; set: (h: SubHe
         <div className="card-head">
           <div>
             <h3>Заголовки ответа подписки</h3>
-            <div className="card-sub">Их читают приложения: название, трафик, объявления и настройки отдельных приложений. Пустое значение — заголовок не отправляется.</div>
+            <div className="card-sub">пустое значение — не отправляется <Info>HTTP-заголовки ответа читают приложения: название, трафик, объявления и настройки отдельных приложений.</Info></div>
           </div>
           <div className="row" style={{ gap: 6 }}>
             <button className="btn sm" onClick={() => setCatalogOpen(true)}><Icon name="plus" /> Из каталога</button>
@@ -368,7 +363,7 @@ function HeadersTab({ hs, set, cfg, onReset }: { hs: SubHeader[]; set: (h: SubHe
       )}
       {catalogOpen && (
         <Modal title="Каталог заголовков" wide onClose={() => setCatalogOpen(false)}>
-          <p className="muted small" style={{ marginTop: 0 }}>Известные заголовки популярных приложений. Часть из них работает только с ProviderID из кабинета разработчика приложения.</p>
+          <p className="muted small" style={{ marginTop: 0 }}>Часть работает только с ProviderID <Info>Известные заголовки популярных приложений. Часть из них работает только с ProviderID из кабинета разработчика приложения.</Info></p>
           <div className="table-wrap">
             <table className="table">
               <tbody>
@@ -413,9 +408,9 @@ function HeaderForm({ h, onClose, onSave }: { h: SubHeader; onClose: () => void;
       </Field>
       <label className="check" style={{ marginBottom: 14 }}>
         <input type="checkbox" checked={v.base64} onChange={(e) => setV({ ...v, base64: e.target.checked })} />
-        Отправлять как base64:… (для русского текста и эмодзи; так требует KeqDroid и большинство приложений)
+        Отправлять как base64:… <Info>Нужно для русского текста и эмодзи: так требует KeqDroid и большинство приложений.</Info>
       </label>
-      <Field label="Каким приложениям" help="Регулярное выражение по User-Agent. Пусто — всем">
+      <Field label="Каким приложениям" help="Пусто — всем" info="Регулярное выражение по User-Agent приложения; (?i) — без учёта регистра.">
         <select className="input" value={presets.some(([p]) => p === v.clients) ? v.clients : '__custom'} onChange={(e) => e.target.value !== '__custom' && setV({ ...v, clients: e.target.value })}>
           {presets.map(([p, n]) => <option key={p} value={p}>{n}</option>)}
           <option value="__custom">своё выражение…</option>
@@ -436,7 +431,7 @@ function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[
     <>
       <div className="card card-pad">
         <div className="muted small" style={{ marginBottom: 12 }}>
-          Что получит приложение: формат и заголовки. {dirty && <span className="pink-text">Показано с несохранёнными изменениями.</span>} Устройство при проверке не регистрируется.
+          {dirty ? <span className="pink-text">С несохранёнными изменениями</span> : 'Как сохранено'} <Info>Что получит приложение: формат и заголовки. Устройство при проверке не регистрируется.</Info>
         </div>
         <div className="grid2">
           <Field label="Приложение (User-Agent)">
@@ -583,7 +578,7 @@ function ClientsTab({ rules, set, routing, setRouting, onReset }: {
             </div>
             {templateFormats.includes(r.format) && (
               <div style={{ marginTop: 16 }}>
-                <Field label="Свой шаблон" help={<>Пусто — панель собирает конфиг сама, с маршрутами из вкладки «Маршруты». Вставьте готовый конфиг
+                <Field label="Свой шаблон" help="Пусто — панель собирает конфиг сама, с маршрутами из вкладки «Маршруты»" info={<>Вставьте готовый конфиг
                   ({r.format === 'mihomo' ? 'Mihomo YAML' : r.format === 'singbox' ? 'sing-box JSON' : 'Xray JSON'}) — например, шаблон из Remnawave:
                   серверы подписки встанут в него сами {r.format === 'mihomo' ? '(в proxies и во все группы, кроме remnawave: include-proxies: false)' :
                   r.format === 'singbox' ? '(в outbounds, их получат selector и urltest)' : '(вместо outbound с тегом proxy)'}.</>}>
@@ -604,8 +599,10 @@ function ClientsTab({ rules, set, routing, setRouting, onReset }: {
                         <div className="small">В полях «Маршрутов» это: напрямую — {info.routing.direct.length}, через туннель — {info.routing.proxy.length},
                           блок — {info.routing.block.length}{info.routing.ruDirect ? ', RU напрямую' : ''}{info.routing.blockAds ? ', блок рекламы' : ''}
                           {info.routing.dnsProxy.length ? `, DNS: ${info.routing.dnsProxy.join(', ')}` : ''}.</div>
-                        <button className="btn sm primary" style={{ marginTop: 8 }} onClick={() => takeRouting(info.routing!)}>Перенести во вкладку «Маршруты»</button>
-                        <div className="small muted" style={{ marginTop: 4 }}>Маршруты из вкладки получают остальные приложения; этому клиенту и так отдаётся его шаблон.</div>
+                        <div className="row" style={{ marginTop: 8, gap: 0 }}>
+                          <button className="btn sm primary" onClick={() => takeRouting(info.routing!)}>Перенести во вкладку «Маршруты»</button>
+                          <Info>Маршруты из вкладки получают остальные приложения; этому клиенту и так отдаётся его шаблон.</Info>
+                        </div>
                       </>
                     )}
                     {info.skipped.length > 0 && (
@@ -622,13 +619,13 @@ function ClientsTab({ rules, set, routing, setRouting, onReset }: {
         </div>
       )}
 
-      <div className="card card-pad small text-2">
-        <p style={{ marginTop: 0 }}>
-          Формат в конце ссылки (<span className="mono">/s/токен/mihomo</span>) и формат, выбранный у пользователя, важнее этого списка.
-          Если ни один клиент не подошёл, браузер получает страницу, остальные — ссылки. Свой шаблон отдаётся, когда формат совпадает с выбранным у клиента.
-        </p>
-        <p>Проверить, что получит конкретное приложение, можно на вкладке «Проверка» — она учитывает несохранённые изменения.</p>
+      <div className="card card-pad small text-2 row">
         <button className="btn ghost sm" onClick={onReset}>Вернуть клиентов по умолчанию</button>
+        <span>Как выбирается формат <Info>
+          <p>Формат в конце ссылки (<span className="mono">/s/токен/mihomo</span>) и формат, выбранный у пользователя, важнее этого списка.
+          Если ни один клиент не подошёл, браузер получает страницу, остальные — ссылки. Свой шаблон отдаётся, когда формат совпадает с выбранным у клиента.</p>
+          <p>Проверить, что получит конкретное приложение, можно на вкладке «Проверка» — она учитывает несохранённые изменения.</p>
+        </Info></span>
       </div>
     </>
   )

@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { del, get, GrantRow, Group, Node, patch, post, Profile } from '../api'
 import { GroupExtras } from '../extras'
-import { Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
+import { Empty, Field, Icon, Loading, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
 
 const kindLabel: Record<string, string> = { profile: 'профиль', node: 'нода', node_inbound: 'инбаунд', all: 'всё' }
 
@@ -24,9 +24,7 @@ export function Groups() {
   return (
     <>
       <div className="toolbar">
-        <div className="text-2 grow small">
-          Группа решает, какие серверы попадут в подписку. Пользователь видит всё, что доступно хотя бы одной его группе.
-        </div>
+        <PageInfo>Группа решает, какие серверы попадут в подписку. Пользователь видит всё, что доступно хотя бы одной его группе.</PageInfo>
         <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" /> Группа</button>
       </div>
       {!groups.data ? <Loading error={groups.error} /> : groups.data.length === 0 ? <div className="card"><Empty>Групп нет</Empty></div> : (

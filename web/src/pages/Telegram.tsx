@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { del, get, post, put } from '../api'
 import { dateTime } from '../format'
-import { Badge, CopyField, Field, Icon, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, CopyField, Field, Icon, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
 
 interface BotInfo {
   hasToken: boolean
@@ -40,8 +40,7 @@ export function Telegram() {
       <div className="card">
         <div className="card-head">
           <div>
-            <h3>Бот</h3>
-            <div className="card-sub">Управление пользователями, вход в панель без пароля, бэкапы и уведомления о нодах — в личном чате с ботом</div>
+            <h3>Бот <Info>Управление пользователями, вход в панель без пароля, бэкапы и уведомления о нодах — в личном чате с ботом.</Info></h3>
           </div>
           {!d.hasToken ? <Badge>не настроен</Badge> : st.running ? <Badge color="green" dot>@{st.username}</Badge> : st.error ? <Badge color="pink" dot>ошибка</Badge> : <Badge color="amber" dot>запускается</Badge>}
         </div>
@@ -112,26 +111,24 @@ export function Telegram() {
       </div>
 
       <div className="card">
-        <div className="card-head"><h3>Бэкапы</h3></div>
+        <div className="card-head"><div><h3>Бэкапы <Info>
+          Архив: база панели (пользователи, ноды, ключи, настройки, статистика) и внутренний CA, которому доверяют ноды. Из него поднимается новая панель —
+          установщик с <code>--restore файл</code> или <code>vynel restore файл</code>, ноды переподключаются сами.
+        </Info></h3><div className="card-sub">последние 7 ночных — ещё и на сервере, в <code>/var/lib/vynel/backups</code></div></div></div>
         <div className="card-pad">
-          <div className="muted small" style={{ marginBottom: 14 }}>
-            Архив: база панели (пользователи, ноды, ключи, настройки, статистика) и внутренний CA, которому доверяют ноды. Из него поднимается новая панель —
-            установщик с <code>--restore файл</code> или <code>vynel restore файл</code>, ноды переподключаются сами. Последние 7 ночных бэкапов лежат и на сервере в <code>/var/lib/vynel/backups</code>.
-          </div>
           <div className="grid2">
             <Field label="Каждый день в" help="Пусто — не присылать">
               <input className="input" type="time" defaultValue={d.backupTime === 'off' ? '' : d.backupTime}
                 onBlur={(e) => { if ((e.target.value || 'off') !== d.backupTime) save({ backupTime: e.target.value }) }} />
             </Field>
-            <Field label="Часовой пояс" help="Для расписания и времени в сообщениях">
+            <Field label="Часовой пояс" info="Для расписания и времени в сообщениях бота.">
               <select className="input" value={d.timezone} onChange={(e) => save({ timezone: e.target.value })}>
                 {(zones.includes(d.timezone) ? zones : [d.timezone, ...zones]).map((z) => <option key={z} value={z}>{z}</option>)}
               </select>
             </Field>
           </div>
-          <Field label="Шифровать бэкапы паролем" help={d.backupEncrypted
-            ? 'Включено: бэкапы (Telegram, скачивание, копии на сервере) — файлы .age. Восстановление спросит пароль; без него бэкап не открыть.'
-            : 'Необязательно: Telegram и так доверенное место. С паролем бэкап — файл .age, его открывает vynel restore или age -d.'}>
+          <Field label="Шифровать бэкапы паролем" help={d.backupEncrypted ? 'Включено: без пароля бэкап не открыть' : 'Необязательно'}
+            info="С паролем бэкапы (Telegram, скачивание, копии на сервере) — файлы .age; их открывает vynel restore (спросит пароль) или age -d. Telegram и так доверенное место, так что это по желанию.">
             <div className="row">
               <input className="input" type="password" autoComplete="new-password" placeholder={d.backupEncrypted ? 'новый пароль' : 'не короче 8 символов'}
                 value={backupPw} onChange={(e) => setBackupPw(e.target.value)} />
@@ -155,13 +152,15 @@ export function Telegram() {
       <div className="card">
         <div className="card-head"><h3>Сводка и вход</h3></div>
         <div className="card-pad">
-          <Field label="Сводка за сутки каждый день в" help="Трафик, активные пользователи, у кого заканчивается подписка, состояние нод. Пусто — не присылать. Сразу: /summary">
+          <Field label="Сводка за сутки каждый день в" help="Пусто — не присылать. Сразу: /summary" info="Трафик, активные пользователи, у кого заканчивается подписка, состояние нод.">
             <input className="input" style={{ maxWidth: 160 }} type="time" defaultValue={d.summaryTime === 'off' ? '' : d.summaryTime}
               onBlur={(e) => { if ((e.target.value || 'off') !== d.summaryTime) save({ summaryTime: e.target.value }) }} />
           </Field>
           <div className="muted small">
-            О каждом входе в веб-панель бот пишет сразу — с кнопкой «Завершить эту сессию». Все сессии: /sessions в боте или «Аккаунт» в панели.
-            Кнопка «Панель» у поля ввода в чате с ботом открывает панель прямо в Telegram — без пароля, только для привязанных админов.
+            Сообщения о входах и кнопка «Панель» <Info>
+              <p>О каждом входе в веб-панель бот пишет сразу — с кнопкой «Завершить эту сессию». Все сессии: /sessions в боте или «Аккаунт» в панели.</p>
+              <p>Кнопка «Панель» у поля ввода в чате с ботом открывает панель прямо в Telegram — без пароля, только для привязанных админов.</p>
+            </Info>
           </div>
         </div>
       </div>
@@ -172,13 +171,12 @@ export function Telegram() {
           <div className="field">
             <div className="row between" style={{ flexWrap: 'nowrap' }}>
               <div>
-                <div>Сообщать, если нода недоступна</div>
-                <div className="help muted small">Одно сообщение на сбой: оно обновляется (с какого времени, сколько уже, последняя проверка), а когда нода вернётся — превращается в «снова в строю». Об ошибке применения конфигурации бот пишет всегда.</div>
+                <div>Сообщать, если нода недоступна <Info>Одно сообщение на сбой: оно обновляется (с какого времени, сколько уже, последняя проверка), а когда нода вернётся — превращается в «снова в строю». Об ошибке применения конфигурации бот пишет всегда.</Info></div>
               </div>
               <Switch checked={d.alerts} onChange={(v) => save({ alerts: v })} />
             </div>
           </div>
-          <Field label="Через сколько секунд без связи сообщать" help="Короткие перезапуски нод не будут тревожить">
+          <Field label="Через сколько секунд без связи сообщать" info="Короткие перезапуски нод не будут тревожить.">
             <input className="input" style={{ maxWidth: 160 }} inputMode="numeric" defaultValue={d.alertDelay}
               onBlur={(e) => { if (e.target.value !== d.alertDelay) save({ alertDelay: Number(e.target.value) || 0 }) }} />
           </Field>

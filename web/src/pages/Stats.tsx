@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { get } from '../api'
 import { BarList, Delta, fmtBytes, Heatmap, Legend, Segmented, SERIES, ShareBar, Sparkline, TimeChart } from '../charts'
 import { bytes, plural } from '../format'
-import { Empty, Loading, useLoad } from '../ui'
+import { Empty, Info, Loading, useLoad } from '../ui'
 
 type Pt = [number, number | null]
 
@@ -57,7 +57,7 @@ export function Stats() {
   return (
     <>
       <div className="stats-head">
-        <div className="muted small">{data ? <>Время — {data.timeZone}. Онлайн хранится 7 дней, трафик — 90. Нагрузка серверов — на вкладке «Серверы».</> : ' '}</div>
+        <div className="muted small">{data ? <>Время — {data.timeZone} <Info>Онлайн хранится 7 дней, трафик — 90. Нагрузка серверов — на вкладке «Серверы».</Info></> : ' '}</div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
       {!data || data.range !== range ? <Loading error={error} /> : <StatsBody d={data} range={range} />}

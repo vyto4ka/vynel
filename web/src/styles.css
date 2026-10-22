@@ -274,6 +274,17 @@ input[type="color"] { border-radius: var(--shape-sm); cursor: pointer; }
 .field label, .label { font-size: 12.5px; color: var(--on-surface-variant); font-weight: 500; letter-spacing: .3px; }
 .field:focus-within > label { color: var(--primary); }
 .field .help { font-size: 12px; color: var(--muted); padding: 0 14px; letter-spacing: .3px; }
+
+.info-btn { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 6px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--outline); background: none; color: var(--muted); font: 600 10.5px/1 Georgia, serif; font-style: italic;
+  cursor: pointer; vertical-align: 1px; flex: none; transition: color .15s var(--ease), border-color .15s var(--ease); }
+.info-btn:hover, .info-btn.on { color: var(--primary); border-color: var(--primary); }
+.info-pop { position: fixed; z-index: 1000; width: min(320px, calc(100vw - 16px)); padding: 10px 12px; border-radius: var(--shape-sm);
+  background: var(--container-highest, #2e3b42); color: var(--on-surface); border: 1px solid var(--outline-variant);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); font-size: 12.5px; line-height: 1.5; font-weight: 400; letter-spacing: .1px; text-transform: none; white-space: normal; }
+.info-pop p { margin: 0 0 6px; }
+.page-info { display: flex; align-items: center; min-width: 0; }
+.info-pop p:last-child { margin-bottom: 0; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
 .grow { flex: 1; min-width: 0; }
