@@ -9,3 +9,7 @@ web/dist/*
 *.db-wal
 coverage.out
 web/tsconfig.tsbuildinfo
+
+# Notes for Claude Code live outside the repository
+CLAUDE.md
+CLAUDE.local.md
