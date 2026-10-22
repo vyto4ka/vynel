@@ -79,7 +79,7 @@ function TemplateForm({ t, groups, onClose, onSaved }: { t: Template | null; gro
       footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="tpl-form" disabled={!name.trim()}>Сохранить</button></>}>
       <form id="tpl-form" onSubmit={submit}>
         <Field label="Название"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Например, Месяц" /></Field>
-        <div className="grid2">
+        <div className="grid2 keep2">
           <Field label="Срок, месяцев"><input className="input" inputMode="numeric" value={months} onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))} /></Field>
           <Field label="и дней" help="0 и 0 — бессрочно"><input className="input" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value.replace(/\D/g, ''))} /></Field>
           <Field label="Лимит трафика, ГБ" help="Пусто — без лимита"><input className="input" inputMode="decimal" value={limitGB} onChange={(e) => setLimitGB(e.target.value.replace(',', '.'))} placeholder="∞" /></Field>
