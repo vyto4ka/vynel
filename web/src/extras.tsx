@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react'
-import { Cascade, del, ExternalSub, get, GrantRow, Group, Node, patch, post, UserGrant } from './api'
+import { Cascade, del, ExternalSub, get, GrantRow, Group, Node, patch, post, TemplateGrant, UserGrant } from './api'
 import { ago, date, fromDateInput } from './format'
 import { Badge, Empty, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useLoad } from './ui'
 
@@ -114,9 +114,11 @@ export function ExternalList() {
   return (
     <>
       <div className="card card-pad small text-2">
-        Чужая подписка по ссылке — например, подписка друга или другой панели. Её серверы добавляются в подписку тем, кому она выдана
-        (в «Группах» или в карточке пользователя — со своим сроком). Панель скачивает её сама раз в 30 минут; если источник недоступен,
-        остаётся последняя удачная копия. Ссылка на подписку этой же панели читается напрямую. Один и тот же сервер попадает в подписку один раз.
+        Чужая подписка — например, подписка друга или другой панели: ссылкой https://… или сами ссылки серверов (vless://, hysteria2://…).
+        Её серверы встают в подписку под основными у тех, кому она выдана: в «Группах», в шаблоне пользователя или в карточке пользователя
+        (там — со своим сроком). Когда приложение обновляет подписку, панель скачивает внешнюю заново, если её копии больше минуты,
+        а вложенные в неё подписки другой панели vynel приходят тоже (до трёх уровней). Если источник недоступен, остаётся последняя
+        удачная копия. Ссылка на подписку этой же панели читается напрямую. Один и тот же сервер попадает в подписку один раз.
       </div>
       <div className="card">
         <div className="card-head">
@@ -171,14 +173,74 @@ function ExternalForm({ x, onClose, onSaved }: { x: ExternalSub | null; onClose:
   }
   return (
     <Modal title={x ? 'Внешняя подписка' : 'Новая внешняя подписка'} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="external-form" disabled={!name.trim() || !url.trim()}>Сохранить</button></>}>
+      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="external-form" disabled={!url.trim()}>Сохранить</button></>}>
       <form id="external-form" onSubmit={submit}>
-        <Field label="Название"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Подписка Пети" /></Field>
-        <Field label="Ссылка подписки" help="https://… — как её добавляют в приложение. Понимаются ссылки vless://, hysteria2:// и другие (в base64 или текстом)">
-          <input className="input mono" value={url} onChange={(e) => setURL(e.target.value)} placeholder="https://sub.example.com/s/…" />
+        <Field label="Ссылка" help={sourceHelp}>
+          <textarea className="input mono" rows={3} autoFocus value={url} onChange={(e) => setURL(e.target.value)} placeholder={sourcePlaceholder} />
         </Field>
+        <Field label="Название" help="Пусто — по адресу или по первому серверу"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Подписка Пети" /></Field>
       </form>
     </Modal>
+  )
+}
+
+const sourceHelp = 'Ссылка на подписку (https://…, как её добавляют в приложение) или сами ссылки серверов — vless://, hysteria2:// и другие, по одной в строке'
+const sourcePlaceholder = 'https://sub.example.com/s/…\nили vless://…'
+
+// PasteExternal — вставить чужую подписку или ссылки серверов прямо на месте: она создаётся
+// в общем списке «Внешних» и сразу отдаётся тому, кто вызвал (пользователю или шаблону).
+function PasteExternal({ withDate, onAdded }: { withDate?: boolean; onAdded: (id: number, until: number | null) => Promise<unknown> }) {
+  const [url, setURL] = useState('')
+  const [until, setUntil] = useState('')
+  const [open, setOpen] = useState(false)
+  const act = useAction()
+  if (!open) return <button className="btn sm ghost" type="button" onClick={() => setOpen(true)}><Icon name="plus" /> Вставить подписку или ссылки</button>
+  const add = async () => {
+    const x = await act(() => post<ExternalSub>('externals', { name: '', url, enabled: true }))
+    if (!x) return
+    await onAdded(x.id, fromDateInput(until))
+    setURL(''); setUntil(''); setOpen(false)
+  }
+  return (
+    <div className="paste-external">
+      <textarea className="input mono" rows={3} autoFocus value={url} onChange={(e) => setURL(e.target.value)} placeholder={sourcePlaceholder} />
+      <div className="help">{sourceHelp}. Серверы встанут в подписку под основными; одинаковые — один раз.</div>
+      <div className="row" style={{ marginTop: 8 }}>
+        {withDate && <input className="input" type="date" style={{ flex: 1, minWidth: 140 }} value={until} onChange={(e) => setUntil(e.target.value)} title="До какого числа (пусто — пока действует подписка)" />}
+        <button className="btn sm ghost" type="button" onClick={() => setOpen(false)}>Отмена</button>
+        <button className="btn sm primary" type="button" disabled={!url.trim()} onClick={add}>Добавить</button>
+      </div>
+    </div>
+  )
+}
+
+// TemplateExtras — каскады и подписки, которые шаблон выдаёт каждому новому пользователю.
+export function TemplateExtras({ value, onChange }: { value: TemplateGrant[]; onChange: (v: TemplateGrant[]) => void }) {
+  const { name, options, reload } = useExtras()
+  const has = (k: string, id: number) => value.some((g) => g.kind === k && g.refId === id)
+  return (
+    <div>
+      <div className="row" style={{ gap: 6, marginBottom: value.length ? 8 : 0 }}>
+        {value.map((g) => (
+          <span key={g.kind + g.refId} className="chip">
+            <span className="muted">{kindText[g.kind]}</span> {name(g.kind, g.refId)}
+            <button type="button" title="Убрать" onClick={() => onChange(value.filter((x) => !(x.kind === g.kind && x.refId === g.refId)))}>×</button>
+          </span>
+        ))}
+      </div>
+      {options.some((o) => !has(o.kind, o.refId)) && (
+        <select className="input" value="" onChange={(e) => {
+          const o = options[Number(e.target.value)]
+          if (o) onChange([...value, { kind: o.kind, refId: o.refId }])
+        }}>
+          <option value="">+ каскад или подписка…</option>
+          {options.map((o, i) => has(o.kind, o.refId) ? null : <option key={i} value={i}>{o.label}</option>)}
+        </select>
+      )}
+      <div style={{ marginTop: 8 }}>
+        <PasteExternal onAdded={async (id) => { reload(); onChange([...value, { kind: 'external', refId: id }]) }} />
+      </div>
+    </div>
   )
 }
 
@@ -193,7 +255,7 @@ function useExtras() {
     ...(cascades.data || []).map((c) => ({ kind: 'cascade' as const, refId: c.id, label: `Каскад: ${c.title}` })),
     ...(externals.data || []).map((x) => ({ kind: 'external' as const, refId: x.id, label: `Подписка: ${x.name}` })),
   ]
-  return { name, options }
+  return { name, options, reload: externals.reload }
 }
 
 const kindText = { cascade: 'каскад', external: 'подписка' }
@@ -228,7 +290,7 @@ export function GroupExtras({ group, grants, onChanged }: { group: Group; grants
 
 // UserExtras — каскады и внешние подписки пользователя: свои (со своим сроком) и через группы.
 export function UserExtras({ userId, grants, groups, onChanged }: { userId: number; grants: UserGrant[]; groups: Group[]; onChanged: () => void }) {
-  const { name, options } = useExtras()
+  const { name, options, reload } = useExtras()
   const [adding, setAdding] = useState<number | ''>('')
   const [until, setUntil] = useState('')
   const act = useAction()
@@ -267,6 +329,13 @@ export function UserExtras({ userId, grants, groups, onChanged }: { userId: numb
             <button className="btn sm primary" disabled={adding === ''} onClick={add}>Выдать</button>
           </div>
         )}
+        <div style={{ marginTop: 10 }}>
+          <PasteExternal withDate onAdded={async (id, until) => {
+            const r = await act(() => post('grants', { userId, kind: 'external', refId: id, expireAt: until }), 'Подписка добавлена')
+            reload()
+            if (r !== undefined) onChanged()
+          }} />
+        </div>
       </div>
     </div>
   )

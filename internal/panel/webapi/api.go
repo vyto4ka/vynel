@@ -471,7 +471,7 @@ func (s *Server) user(r *http.Request) (any, error) {
 		return nil, err
 	}
 	out["daily"] = dailyDTO(daily)
-	hosts, err := s.svc.SubscriptionHosts(ctx, u, true)
+	hosts, err := s.svc.CurrentHosts(ctx, u)
 	if err != nil {
 		return nil, err
 	}
@@ -758,28 +758,29 @@ func (s *Server) templates(r *http.Request) (any, error) {
 		}
 		out = append(out, map[string]any{"id": t.ID, "name": t.Name, "isDefault": t.IsDefault, "expireMonths": t.ExpireMonths,
 			"expireDays": t.ExpireDays, "trafficLimit": t.TrafficLimitBytes, "resetStrategy": t.ResetStrategy, "hwidLimit": t.HWIDLimit,
-			"clientType": t.ClientType, "groupIds": g, "note": t.Note})
+			"clientType": t.ClientType, "groupIds": g, "note": t.Note, "grants": t.Grants})
 	}
 	return out, nil
 }
 
 func (s *Server) saveTemplate(r *http.Request) (any, error) {
 	var in struct {
-		Name          string  `json:"name"`
-		IsDefault     bool    `json:"isDefault"`
-		ExpireMonths  int     `json:"expireMonths"`
-		ExpireDays    int     `json:"expireDays"`
-		TrafficLimit  *int64  `json:"trafficLimit"`
-		ResetStrategy string  `json:"resetStrategy"`
-		HWIDLimit     *int64  `json:"hwidLimit"`
-		ClientType    string  `json:"clientType"`
-		GroupIDs      []int64 `json:"groupIds"`
-		Note          string  `json:"note"`
+		Name          string                `json:"name"`
+		IsDefault     bool                  `json:"isDefault"`
+		ExpireMonths  int                   `json:"expireMonths"`
+		ExpireDays    int                   `json:"expireDays"`
+		TrafficLimit  *int64                `json:"trafficLimit"`
+		ResetStrategy string                `json:"resetStrategy"`
+		HWIDLimit     *int64                `json:"hwidLimit"`
+		ClientType    string                `json:"clientType"`
+		GroupIDs      []int64               `json:"groupIds"`
+		Note          string                `json:"note"`
+		Grants        []store.TemplateGrant `json:"grants"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	ti := service.UserTemplateInput{Name: in.Name, IsDefault: in.IsDefault, ExpireMonths: in.ExpireMonths, ExpireDays: in.ExpireDays,
+	ti := service.UserTemplateInput{Grants: in.Grants, Name: in.Name, IsDefault: in.IsDefault, ExpireMonths: in.ExpireMonths, ExpireDays: in.ExpireDays,
 		TrafficLimitBytes: in.TrafficLimit, ResetStrategy: in.ResetStrategy, HWIDLimit: in.HWIDLimit, ClientType: in.ClientType,
 		GroupIDs: in.GroupIDs, Note: in.Note}
 	if r.PathValue("id") == "" {

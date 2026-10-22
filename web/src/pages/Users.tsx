@@ -255,6 +255,7 @@ export function templateSummary(t: Template, groups: Group[]): string {
   if (t.hwidLimit != null) parts.push(`устройств: ${t.hwidLimit || '∞'}`)
   const g = t.groupIds.map((id) => groups.find((x) => x.id === id)?.name).filter(Boolean)
   if (g.length) parts.push('группы: ' + g.join(', '))
+  if (t.grants?.length) parts.push(`каскадов и подписок: ${t.grants.length}`)
   return parts.join(' · ')
 }
 

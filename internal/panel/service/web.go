@@ -325,10 +325,13 @@ func (s *Service) UpdateUserTemplate(ctx context.Context, actor Actor, id int64,
 					return err
 				}
 			}
+			if err := checkTemplateGrants(ctx, q, in.Grants); err != nil {
+				return err
+			}
 			wasDefault := t.IsDefault
 			t.Name, t.IsDefault, t.ExpireMonths, t.ExpireDays = strings.TrimSpace(in.Name), in.IsDefault || wasDefault, in.ExpireMonths, in.ExpireDays
 			t.TrafficLimitBytes, t.ResetStrategy, t.HWIDLimit = nilIfNonPositive(in.TrafficLimitBytes), in.ResetStrategy, in.HWIDLimit
-			t.ClientType, t.GroupIDs, t.Note = firstNonEmpty(in.ClientType, "auto"), in.GroupIDs, in.Note
+			t.ClientType, t.GroupIDs, t.Note, t.Grants = firstNonEmpty(in.ClientType, "auto"), in.GroupIDs, in.Note, in.Grants
 			return store.UpdateUserTemplate(ctx, q, t)
 		})
 	return t, err

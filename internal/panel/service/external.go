@@ -20,18 +20,36 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
-// DepthHeader marks a subscription request made by a panel merging another subscription in.
-// A vynel panel answers it with its own servers only, without the subscriptions it merges in
-// itself: two panels that include each other do not echo each other's servers back.
+// DepthHeader marks a subscription request made by a panel merging another subscription in,
+// with how deep in the chain it is. A vynel panel merges its own merged subscriptions in too
+// (a subscription in a subscription in a subscription) up to MaxExternalDepth, and then answers
+// with its own servers only: two panels that include each other stop after a few rounds, and
+// the servers that come back twice are listed once.
 const DepthHeader = "X-Vynel-Depth"
 
-// ExternalRefreshEvery is how often external subscriptions are fetched again; a failed fetch
-// is retried sooner. Users always get the last good copy.
+// MaxExternalDepth is how many levels of merged subscriptions a subscription goes down.
+const MaxExternalDepth = 3
+
+// ExternalRefreshEvery is how often external subscriptions are fetched again in the background;
+// a failed fetch is retried sooner. A subscription request also fetches the merged ones that are
+// older than externalOnRequest (at most externalOnRequestWait), so a friend's new server shows up
+// on the next update. Users always get the last good copy.
 const (
-	ExternalRefreshEvery = 30 * time.Minute
-	externalRetry        = 5 * time.Minute
-	externalMaxBody      = 2 << 20
+	ExternalRefreshEvery  = 30 * time.Minute
+	externalRetry         = 5 * time.Minute
+	externalOnRequest     = time.Minute
+	externalOnRequestWait = 6 * time.Second
+	externalMaxBody       = 2 << 20
 )
+
+// RequestDepth reads the depth of a subscription request (0 = an app, not a panel).
+func RequestDepth(header string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(header))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
 
 // externalClient fetches external subscriptions (tests replace it).
 var externalClient = &http.Client{Timeout: 15 * time.Second}
@@ -39,11 +57,17 @@ var externalClient = &http.Client{Timeout: 15 * time.Second}
 // RefreshExternalSub fetches an external subscription now and stores its servers (on failure
 // the last good copy stays and the error is shown in the panel).
 func (s *Service) RefreshExternalSub(ctx context.Context, id int64) error {
+	return s.refreshExternal(ctx, id, 1)
+}
+
+// refreshExternal fetches one external subscription, asking another panel for depth (merged
+// subscriptions only affect subscriptions, not nodes: no reconcile).
+func (s *Service) refreshExternal(ctx context.Context, id int64, depth int) error {
 	e, err := store.GetExternalSub(ctx, s.st.DB, id)
 	if err != nil {
 		return err
 	}
-	links, ferr := s.fetchExternal(ctx, e.URL)
+	links, ferr := s.fetchExternal(ctx, e.URL, depth)
 	msg := ""
 	if ferr != nil {
 		msg = ferr.Error()
@@ -52,10 +76,54 @@ func (s *Service) RefreshExternalSub(ctx context.Context, id int64) error {
 		return err
 	}
 	s.Invalidate()
-	if s.OnChange != nil {
-		s.OnChange()
-	}
 	return ferr
+}
+
+var (
+	freshenMu sync.Mutex
+	freshenOn = map[int64]chan struct{}{} // external id → done, while a fetch runs
+)
+
+// freshenExternals fetches the user's merged subscriptions whose copy is older than a minute,
+// all at once and for a few seconds at most; a fetch already running for another request is
+// waited for, not repeated. It reports whether any copy changed.
+func (s *Service) freshenExternals(ctx context.Context, snap *configSnapshot, u *store.User, groups []int64, depth int) bool {
+	now := s.now()
+	var waits []chan struct{}
+	for _, g := range s.grantsOf(snap, u.ID, groups) {
+		at, ok := snap.externalAt[g.RefID]
+		if g.Kind != store.GrantExternal || !g.Active || !ok || now.Sub(time.Unix(at, 0)) < externalOnRequest {
+			continue
+		}
+		freshenMu.Lock()
+		done, running := freshenOn[g.RefID]
+		if !running {
+			done = make(chan struct{})
+			freshenOn[g.RefID] = done
+			go func(id int64) {
+				fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), externalOnRequestWait)
+				_ = s.refreshExternal(fctx, id, depth+1)
+				cancel()
+				freshenMu.Lock()
+				delete(freshenOn, id)
+				freshenMu.Unlock()
+				close(done)
+			}(g.RefID)
+		}
+		freshenMu.Unlock()
+		waits = append(waits, done)
+	}
+	timeout := time.After(externalOnRequestWait)
+	for _, d := range waits {
+		select {
+		case <-d:
+		case <-timeout:
+			return true
+		case <-ctx.Done():
+			return true
+		}
+	}
+	return len(waits) > 0
 }
 
 var externalBusy sync.Mutex
@@ -100,15 +168,19 @@ func (s *Service) refreshDueExternals(ctx context.Context) {
 	}()
 }
 
-// fetchExternal returns the links of a subscription, one per line. A link to a subscription of
-// this panel is read directly (no HTTP, and its own merged subscriptions come along).
-func (s *Service) fetchExternal(ctx context.Context, raw string) (string, error) {
+// fetchExternal returns the links of a subscription, one per line. Server links given instead of
+// a subscription are the links themselves. A link to a subscription of this panel is read
+// directly (no HTTP, and its own merged subscriptions come along).
+func (s *Service) fetchExternal(ctx context.Context, raw string, depth int) (string, error) {
+	if !isSubscriptionURL(raw) {
+		return strings.Join(linkLines([]byte(raw)), "\n"), nil
+	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return "", errors.New("not a link")
 	}
 	if user := s.ownSubscriptionUser(ctx, u); user != nil {
-		hosts, err := s.SubscriptionHosts(ctx, user, true)
+		hosts, err := s.SubscriptionHosts(ctx, user, depth)
 		if err != nil {
 			return "", err
 		}
@@ -133,7 +205,7 @@ func (s *Service) fetchExternal(ctx context.Context, raw string) (string, error)
 	req.Header.Set("x-hwid", hex.EncodeToString(sum[:8]))
 	req.Header.Set("x-device-os", "Linux")
 	req.Header.Set("x-device-model", "vynel")
-	req.Header.Set(DepthHeader, "1")
+	req.Header.Set(DepthHeader, strconv.Itoa(depth))
 	resp, err := externalClient.Do(req)
 	if err != nil {
 		return "", err
@@ -290,8 +362,20 @@ func parseLink(l string) (Host, bool) {
 }
 
 // SubscriptionHosts is everything a user's subscription lists: the own servers, then cascades
-// and servers from merged subscriptions (withExternal), each server once.
-func (s *Service) SubscriptionHosts(ctx context.Context, u *store.User, withExternal bool) ([]Host, error) {
+// and servers from merged subscriptions, each server once. depth is how deep in a chain of
+// merged subscriptions the request is (0 = an app): below MaxExternalDepth the merged ones come
+// along, refreshed first when their copy is old.
+func (s *Service) SubscriptionHosts(ctx context.Context, u *store.User, depth int) ([]Host, error) {
+	return s.subscriptionHosts(ctx, u, depth, true)
+}
+
+// CurrentHosts is what the subscription lists now, from the copies at hand (for the panel's own
+// views: they do not fetch anything).
+func (s *Service) CurrentHosts(ctx context.Context, u *store.User) ([]Host, error) {
+	return s.subscriptionHosts(ctx, u, 0, false)
+}
+
+func (s *Service) subscriptionHosts(ctx context.Context, u *store.User, depth int, freshen bool) ([]Host, error) {
 	groups, err := store.UserGroupIDs(ctx, s.st.DB, u.ID)
 	if err != nil {
 		return nil, err
@@ -299,6 +383,12 @@ func (s *Service) SubscriptionHosts(ctx context.Context, u *store.User, withExte
 	snap, err := s.snapshot(ctx)
 	if err != nil {
 		return nil, err
+	}
+	withExternal := depth < MaxExternalDepth
+	if withExternal && freshen && s.freshenExternals(ctx, snap, u, groups, depth) {
+		if snap, err = s.snapshot(ctx); err != nil {
+			return nil, err
+		}
 	}
 	own := snap.userHosts(groups)
 	return append(own, s.extraHosts(snap, u, groups, own, withExternal)...), nil

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -238,9 +239,14 @@ func TestExternalSubscription(t *testing.T) {
 	if friendProxy == nil || friendProxy["uuid"] != "11111111-2222-4333-8444-555555555555" {
 		t.Fatalf("mihomo proxies %v", doc.Proxies)
 	}
-	// A panel merging this subscription gets our servers only.
-	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1", service.DepthHeader, "1")); strings.Contains(strings.Join(ls, " "), "friend.example.org") {
-		t.Fatalf("merged servers echoed to another panel: %v", ls)
+	// A panel merging this subscription gets the merged ones too, a few levels down; then only
+	// ours (two panels including each other stop there).
+	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1", service.DepthHeader, "1")); !strings.Contains(strings.Join(ls, " "), "friend.example.org") {
+		t.Fatalf("a subscription in a subscription lost: %v", ls)
+	}
+	deep := strconv.Itoa(service.MaxExternalDepth)
+	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1", service.DepthHeader, deep)); strings.Contains(strings.Join(ls, " "), "friend.example.org") {
+		t.Fatalf("merged servers past the depth limit: %v", ls)
 	}
 
 	// The friend's site breaks: the last good copy stays, the error is shown.
@@ -317,5 +323,87 @@ func TestDefaultGroupGetsEverything(t *testing.T) {
 	}
 	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1")); slices.ContainsFunc(ls, func(l string) bool { return strings.Contains(l, secret) }) {
 		t.Fatalf("a cascade with its exit off is listed: %v", ls)
+	}
+}
+
+// Server links instead of a subscription link are taken as they are; a bad line is named.
+func TestExternalServerLinks(t *testing.T) {
+	e := newEnv(t)
+	_, err := e.svc.CreateExternalSub(e.ctx, actor, service.ExternalSubInput{URL: extRealityLink + "\nnot a link", Enabled: true})
+	if err == nil || !strings.Contains(err.Error(), "строка 2") {
+		t.Fatalf("a bad line: %v", err)
+	}
+	ext, err := e.svc.CreateExternalSub(e.ctx, actor, service.ExternalSubInput{URL: "\n" + extRealityLink + "\n", Enabled: true})
+	if err != nil || ext.Name != "Friend NL" || ext.Links != extRealityLink || ext.Error != "" {
+		t.Fatalf("links source: %+v %v", ext, err)
+	}
+	twin, err := e.svc.CreateExternalSub(e.ctx, actor, service.ExternalSubInput{URL: extRealityLink, Enabled: true})
+	if err != nil || twin.Name != "Friend NL 2" {
+		t.Fatalf("the same name twice: %+v %v", twin, err)
+	}
+	if _, err := e.svc.PutGrant(e.ctx, actor, service.GrantInput{UserID: e.user.ID, Kind: store.GrantExternal, RefID: ext.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1")); !strings.Contains(strings.Join(ls, " "), "friend.example.org") {
+		t.Fatalf("links %v", ls)
+	}
+}
+
+// An app's request fetches a merged subscription again when its copy is older than a minute:
+// the friend's new server is there on the next update, not half an hour later.
+func TestExternalRefreshedOnRequest(t *testing.T) {
+	e := newEnv(t)
+	now := time.Now()
+	e.svc.SetClock(func() time.Time { return now })
+	body := extRealityLink
+	var hits atomic.Int32
+	var bodyV atomic.Value
+	bodyV.Store(body)
+	friend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte(bodyV.Load().(string)))
+	}))
+	defer friend.Close()
+	ext, err := e.svc.CreateExternalSub(e.ctx, actor, service.ExternalSubInput{Name: "friend", URL: friend.URL, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.PutGrant(e.ctx, actor, service.GrantInput{UserID: e.user.ID, Kind: store.GrantExternal, RefID: ext.ID}); err != nil {
+		t.Fatal(err)
+	}
+	bodyV.Store(body + "\n" + strings.Replace(extRealityLink, "friend.example.org", "friend2.example.org", 1))
+	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1")); strings.Contains(strings.Join(ls, " "), "friend2") || hits.Load() != 1 {
+		t.Fatalf("a fresh copy fetched again: hits %d, %v", hits.Load(), ls)
+	}
+	now = now.Add(2 * time.Minute)
+	e.svc.Invalidate()
+	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1")); !strings.Contains(strings.Join(ls, " "), "friend2.example.org") || hits.Load() != 2 {
+		t.Fatalf("an old copy not refreshed on request: hits %d, %v", hits.Load(), ls)
+	}
+}
+
+// A template gives a merged subscription: a user created from it has it as an own grant.
+func TestTemplateGivesExternal(t *testing.T) {
+	e := newEnv(t)
+	ext, err := e.svc.CreateExternalSub(e.ctx, actor, service.ExternalSubInput{URL: extRealityLink, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.CreateUserTemplate(e.ctx, actor, service.UserTemplateInput{Name: "Друзья", ResetStrategy: "no",
+		Grants: []store.TemplateGrant{{Kind: "nope", RefID: 1}}}); err == nil {
+		t.Fatal("an unknown grant kind accepted")
+	}
+	tpl, err := e.svc.CreateUserTemplate(e.ctx, actor, service.UserTemplateInput{Name: "Друзья", ResetStrategy: "no",
+		Grants: []store.TemplateGrant{{Kind: store.GrantExternal, RefID: ext.ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := e.svc.CreateUser(e.ctx, actor, service.CreateUserInput{Username: "drug", TemplateID: tpl.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs, err := e.svc.UserGrants(e.ctx, u.ID)
+	if err != nil || len(gs) != 1 || gs[0].Kind != store.GrantExternal || gs[0].GrantID == 0 || !gs[0].Active {
+		t.Fatalf("grants of a user from the template: %+v %v", gs, err)
 	}
 }

@@ -787,7 +787,7 @@ func adminUserCmd() *cobra.Command {
 			if u.Status != store.StatusActive {
 				fmt.Fprintf(cmd.OutOrStdout(), "warning: user is %s, nodes will reject it\n", u.Status)
 			}
-			hosts, err := s.SubscriptionHosts(ctx, u, true)
+			hosts, err := s.CurrentHosts(ctx, u)
 			if err != nil {
 				return err
 			}

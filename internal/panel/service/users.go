@@ -128,6 +128,25 @@ func withAllGrants(grants []*store.Grant, rules []*store.AccessRule, cascades []
 
 // ---- user templates ----
 
+// checkTemplateGrants makes sure a template gives cascades and subscriptions that exist.
+func checkTemplateGrants(ctx context.Context, q store.DBTX, gs []store.TemplateGrant) error {
+	for _, g := range gs {
+		var err error
+		switch g.Kind {
+		case store.GrantCascade:
+			_, err = store.GetCascade(ctx, q, g.RefID)
+		case store.GrantExternal:
+			_, err = store.GetExternalSub(ctx, q, g.RefID)
+		default:
+			return invalid("«Каскады и подписки»: неизвестный вид %q", g.Kind)
+		}
+		if err != nil {
+			return fmt.Errorf("%s %d: %w", g.Kind, g.RefID, err)
+		}
+	}
+	return nil
+}
+
 // UserTemplateInput creates a user template.
 type UserTemplateInput struct {
 	Name              string
@@ -140,6 +159,7 @@ type UserTemplateInput struct {
 	ClientType        string
 	GroupIDs          []int64
 	Note              string
+	Grants            []store.TemplateGrant // cascades and merged subscriptions new users get
 }
 
 // CreateUserTemplate adds a template. The first template becomes the default.
@@ -155,13 +175,16 @@ func (s *Service) CreateUserTemplate(ctx context.Context, actor Actor, in UserTe
 	}
 	t := &store.UserTemplate{Name: strings.TrimSpace(in.Name), IsDefault: in.IsDefault, ExpireMonths: in.ExpireMonths, ExpireDays: in.ExpireDays,
 		TrafficLimitBytes: in.TrafficLimitBytes, ResetStrategy: in.ResetStrategy, HWIDLimit: in.HWIDLimit,
-		ClientType: firstNonEmpty(in.ClientType, "auto"), GroupIDs: in.GroupIDs, Note: in.Note}
+		ClientType: firstNonEmpty(in.ClientType, "auto"), GroupIDs: in.GroupIDs, Note: in.Note, Grants: in.Grants}
 	err := s.mutate(ctx, change{actor: actor, action: "user_template.create", entity: "user_template", entityID: idOf(&t.ID), diff: in},
 		func(q store.DBTX) error {
 			for _, g := range t.GroupIDs {
 				if _, err := store.GetGroup(ctx, q, g); err != nil {
 					return fmt.Errorf("group %d: %w", g, err)
 				}
+			}
+			if err := checkTemplateGrants(ctx, q, t.Grants); err != nil {
+				return err
 			}
 			if _, err := store.GetUserTemplate(ctx, q, 0); errors.Is(err, store.ErrNotFound) {
 				t.IsDefault = true
@@ -295,7 +318,19 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 			if in.GroupIDs != nil {
 				groups = in.GroupIDs
 			}
-			return store.SetUserGroups(ctx, q, u.ID, groups)
+			if err := store.SetUserGroups(ctx, q, u.ID, groups); err != nil {
+				return err
+			}
+			// What the template gives on top: own grants, without an end date.
+			for _, g := range tpl.Grants {
+				if checkTemplateGrants(ctx, q, []store.TemplateGrant{g}) != nil {
+					continue // deleted since the template was saved
+				}
+				if err := store.PutGrant(ctx, q, &store.Grant{UserID: &u.ID, Kind: g.Kind, RefID: g.RefID}); err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 	return u, err
 }

@@ -134,6 +134,12 @@ export interface Template {
   clientType: string
   groupIds: number[]
   note: string
+  grants: TemplateGrant[] // каскады и подписки, которые получает новый пользователь
+}
+
+export interface TemplateGrant {
+  kind: 'cascade' | 'external'
+  refId: number
 }
 
 export interface Host {

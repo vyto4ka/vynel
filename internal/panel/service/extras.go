@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -152,15 +153,68 @@ type ExternalSubInput struct {
 	Enabled bool
 }
 
+// checkExternal validates the source: a subscription link (https://…) or server links themselves
+// (vless://, hysteria2://, …, one per line). An empty name is made from the source.
 func checkExternal(in *ExternalSubInput) error {
 	in.Name, in.URL = strings.TrimSpace(in.Name), strings.TrimSpace(in.URL)
-	if in.Name == "" {
-		return invalid("name is required")
+	if in.URL == "" {
+		return invalid("«Ссылка»: вставьте ссылку на подписку или ссылки серверов")
 	}
-	if !strings.HasPrefix(in.URL, "https://") && !strings.HasPrefix(in.URL, "http://") {
-		return invalid("the link must start with https://")
+	if isSubscriptionURL(in.URL) {
+		u, err := url.Parse(in.URL)
+		if err != nil || u.Host == "" {
+			return invalid("«Ссылка»: %q — не ссылка", in.URL)
+		}
+		if in.Name == "" {
+			in.Name = u.Hostname()
+		}
+		return nil
+	}
+	links := linkLines([]byte(in.URL))
+	for i, l := range strings.Split(in.URL, "\n") {
+		if l = strings.TrimSpace(l); l != "" && !slices.Contains(links, l) {
+			return invalid("«Ссылка», строка %d: %q — не ссылка сервера (vless://, hysteria2://, …) и не https:// подписки", i+1, short(l, 60))
+		}
+	}
+	if len(links) == 0 {
+		return invalid("«Ссылка»: нет ни одной ссылки сервера")
+	}
+	in.URL = strings.Join(links, "\n")
+	if in.Name == "" {
+		in.Name = ParseLinks(links[0])[0].Remark
+		if len(links) > 1 {
+			in.Name += fmt.Sprintf(" и ещё %d", len(links)-1)
+		}
 	}
 	return nil
+}
+
+// isSubscriptionURL tells a subscription link from server links.
+func isSubscriptionURL(src string) bool {
+	return strings.HasPrefix(src, "https://") || strings.HasPrefix(src, "http://")
+}
+
+func short(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// uniqueExternalName adds " 2", " 3"… to a name another external subscription has.
+func uniqueExternalName(ctx context.Context, q store.DBTX, name string, self int64) string {
+	subs, _ := store.ListExternalSubs(ctx, q)
+	taken := map[string]bool{}
+	for _, e := range subs {
+		if e.ID != self {
+			taken[e.Name] = true
+		}
+	}
+	out := name
+	for i := 2; taken[out]; i++ {
+		out = fmt.Sprintf("%s %d", name, i)
+	}
+	return out
 }
 
 // CreateExternalSub adds an external subscription; its servers are fetched right away.
@@ -171,7 +225,10 @@ func (s *Service) CreateExternalSub(ctx context.Context, actor Actor, in Externa
 	e := &store.ExternalSub{Name: in.Name, URL: in.URL, Enabled: in.Enabled}
 	err := s.mutate(ctx, change{actor: actor, action: "external.create", entity: "external_sub", entityID: idOf(&e.ID), event: EvUserChanged,
 		diff: map[string]string{"name": in.Name}},
-		func(q store.DBTX) error { return store.CreateExternalSub(ctx, q, e) })
+		func(q store.DBTX) error {
+			e.Name = uniqueExternalName(ctx, q, e.Name, 0)
+			return store.CreateExternalSub(ctx, q, e)
+		})
 	if err != nil {
 		return nil, err
 	}

@@ -48,6 +48,7 @@ type configSnapshot struct {
 	groupGrants map[int64][]*store.Grant // by group
 	cascades    map[int64]*cascadeSnap   // by id
 	external    map[int64][]Host         // merged subscription id → its servers (enabled ones)
+	externalAt  map[int64]int64          // merged subscription id → when it was last fetched (subscription links only)
 }
 
 type cascadeSnap struct {
@@ -131,7 +132,7 @@ func (s *Service) buildSnapshot(ctx context.Context) (*configSnapshot, error) {
 	for _, n := range nodes {
 		on[n.ID] = n.Enabled
 	}
-	snap := &configSnapshot{hosts: map[int64]Host{}, cascades: map[int64]*cascadeSnap{}, external: map[int64][]Host{}}
+	snap := &configSnapshot{hosts: map[int64]Host{}, cascades: map[int64]*cascadeSnap{}, external: map[int64][]Host{}, externalAt: map[int64]int64{}}
 	byID := map[int64]*store.NodeInbound{}
 	for _, ni := range inbounds {
 		byID[ni.ID] = ni
@@ -197,6 +198,13 @@ func (s *Service) buildSnapshot(ctx context.Context) (*configSnapshot, error) {
 	for _, e := range externals {
 		if e.Enabled {
 			snap.external[e.ID] = ParseLinks(e.Links)
+			if isSubscriptionURL(e.URL) {
+				at := e.CreatedAt
+				if e.FetchedAt != nil {
+					at = *e.FetchedAt
+				}
+				snap.externalAt[e.ID] = at
+			}
 		}
 	}
 	return snap, nil
