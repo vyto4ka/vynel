@@ -18,10 +18,15 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
-// cascadeEnv adds a second node (DE) with the Reality profile and a cascade NL → DE.
+// cascadeEnv adds a second node (DE) with the Reality profile and a cascade NL → DE. The default
+// group gives only what it is granted here (not everything), so grants are what is tested.
 func cascadeEnv(t *testing.T) (*env, *store.Cascade) {
 	t.Helper()
 	e := newEnv(t)
+	main, _ := e.svc.GroupByName(e.ctx, "Основная")
+	if err := e.svc.RevokeAccess(e.ctx, actor, main.ID, store.AccessAll, 0); err != nil {
+		t.Fatal(err)
+	}
 	de, _, err := e.svc.CreateNode(e.ctx, actor, service.NodeInput{Name: "Германия", Country: "de", Domain: "de.example.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -276,5 +281,41 @@ func TestParseLinks(t *testing.T) {
 	if len(hs) != 4 || hs[0].Protocol != "vless" || hs[0].PublicKey != "PUBKEY" || hs[0].Flow != "xtls-rprx-vision" || hs[0].Remark != "Friend NL" ||
 		hs[1].Protocol != "hysteria" || hs[1].UUID != "pass" || hs[2].Raw == "" || hs[3].Raw == "" {
 		t.Fatalf("%+v", hs)
+	}
+}
+
+// The default group gets everything the servers offer: a cascade reaches its users without a
+// grant, on the nodes as in the subscription, and so does a server added later.
+func TestDefaultGroupGetsEverything(t *testing.T) {
+	e, c := cascadeEnv(t)
+	main, _ := e.svc.GroupByName(e.ctx, "Основная")
+	before := len(links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1")))
+	if err := e.svc.GrantAccess(e.ctx, actor, main.ID, store.AccessAll, 0); err != nil {
+		t.Fatal(err)
+	}
+	ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1"))
+	secret := service.CascadeUUID(e.user.UUID, c.ID)
+	if len(ls) != before+1 || !strings.HasPrefix(ls[len(ls)-1], "vless://"+secret+"@") {
+		t.Fatalf("cascade through everything: %v", ls)
+	}
+	states, err := e.svc.DesiredStates(e.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := e.svc.NodeInboundByTag(e.ctx, "VLESS_NL")
+	if !slices.Contains(clientsOf(states[entry.NodeID], "VLESS_NL"), service.CascadeEmail(e.user.ID, c.ID)+"="+secret) {
+		t.Fatalf("the entry node lacks the cascade user: %v", clientsOf(states[entry.NodeID], "VLESS_NL"))
+	}
+	if gs, _ := e.svc.UserGrants(e.ctx, e.user.ID); len(gs) != 1 || len(gs[0].Groups) != 1 || !gs[0].Active {
+		t.Fatalf("grants %+v", gs)
+	}
+
+	// A cascade whose exit is off is in neither place: a server that would not connect.
+	off := false
+	if _, err := e.svc.UpdateNodeInbound(e.ctx, actor, c.ExitInboundID, service.NodeInboundInput{Enabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if ls := links(t, e.get(e.path(), "v2rayNG/1.9", "hw-1")); slices.ContainsFunc(ls, func(l string) bool { return strings.Contains(l, secret) }) {
+		t.Fatalf("a cascade with its exit off is listed: %v", ls)
 	}
 }

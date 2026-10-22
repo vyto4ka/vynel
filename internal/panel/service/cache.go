@@ -51,9 +51,10 @@ type configSnapshot struct {
 }
 
 type cascadeSnap struct {
-	c     *store.Cascade
-	entry Host // the entry's connection point; ok = it is usable
-	ok    bool
+	c       *store.Cascade
+	entry   Host // the entry's connection point; ok = it is usable
+	ok      bool
+	problem string // why it is not usable, for the panel
 }
 
 // Invalidate drops the cached configuration (after a change, or one made by another process).
@@ -147,6 +148,11 @@ func (s *Service) buildSnapshot(ctx context.Context) (*configSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	cascades, err := store.ListCascades(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	grants = withAllGrants(grants, rules, cascades)
 	snap.userGrants, snap.groupGrants = map[int64][]*store.Grant{}, map[int64][]*store.Grant{}
 	for _, g := range grants {
 		if g.UserID != nil {
@@ -155,16 +161,31 @@ func (s *Service) buildSnapshot(ctx context.Context) (*configSnapshot, error) {
 			snap.groupGrants[*g.GroupID] = append(snap.groupGrants[*g.GroupID], g)
 		}
 	}
-	cascades, err := store.ListCascades(ctx, q)
-	if err != nil {
-		return nil, err
-	}
 	for _, c := range cascades {
 		cs := &cascadeSnap{c: c}
 		cs.c.Remark = s.CascadeRemark(ctx, q, c)
-		if entry := byID[c.EntryInboundID]; c.Enabled && entry != nil && entry.Enabled && on[entry.NodeID] {
-			if h, ok := snap.hosts[entry.ID]; ok {
-				cs.entry, cs.ok = h, true
+		// The same conditions as planCascades: a server in the subscription that the nodes do not
+		// carry would not connect. Both ends must be on and give a connection point.
+		entry, exit := byID[c.EntryInboundID], byID[c.ExitInboundID]
+		_, exitOK := snap.hosts[c.ExitInboundID]
+		h, entryOK := snap.hosts[c.EntryInboundID]
+		switch {
+		case !c.Enabled:
+			cs.problem = "каскад выключен"
+		case entry == nil || exit == nil:
+			cs.problem = "инбаунд входа или выхода удалён"
+		case !entry.Enabled || !on[entry.NodeID]:
+			cs.problem = "вход выключен (инбаунд или нода)"
+		case !exit.Enabled || !on[exit.NodeID]:
+			cs.problem = "выход выключен (инбаунд или нода)"
+		case !entryOK:
+			cs.problem = "у инбаунда входа нет адреса для подписки — проверьте ноду"
+		case !exitOK:
+			cs.problem = "у инбаунда выхода нет адреса — проверьте ноду"
+		default:
+			cs.entry, cs.ok = h, true
+			if h.Network == "xhttp" {
+				cs.problem = "вход по XHTTP: в sing-box его нет, в Mihomo — только если профиль это разрешает"
 			}
 		}
 		snap.cascades[c.ID] = cs

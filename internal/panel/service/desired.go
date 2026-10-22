@@ -264,8 +264,11 @@ func (s *Service) EnsureDefaults(ctx context.Context) error {
 		}
 		var groupIDs []int64
 		if len(groups) == 0 {
-			g := &store.Group{Name: "Основная", Description: "Группа по умолчанию"}
+			g := &store.Group{Name: "Основная", Description: "Группа по умолчанию: всё, что есть на серверах"}
 			if err := store.CreateGroup(ctx, q, g); err != nil {
+				return err
+			}
+			if err := store.AddAccessRule(ctx, q, &store.AccessRule{GroupID: g.ID, Kind: store.AccessAll}); err != nil {
 				return err
 			}
 			groupIDs = []int64{g.ID}

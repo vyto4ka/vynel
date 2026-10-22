@@ -535,9 +535,9 @@ func adminGroupCmd() *cobra.Command {
 		}),
 	}
 	grant := func(revoke bool) *cobra.Command {
-		use, short := "grant", "Grant access: profile NAME | node CODE | inbound TAG"
+		use, short := "grant", "Grant access: profile NAME | node CODE | inbound TAG | all - (every server and cascade)"
 		if revoke {
-			use, short = "revoke", "Revoke access: profile NAME | node CODE | inbound TAG"
+			use, short = "revoke", "Revoke access: profile NAME | node CODE | inbound TAG | all -"
 		}
 		return &cobra.Command{
 			Use: use + " GROUP KIND REF", Short: short, Args: cobra.ExactArgs(3),
@@ -586,6 +586,8 @@ func adminGroupCmd() *cobra.Command {
 
 func resolveRef(ctx context.Context, s *service.Service, kind, ref string) (string, int64, error) {
 	switch kind {
+	case "all":
+		return store.AccessAll, 0, nil
 	case "profile":
 		p, err := s.ProfileByName(ctx, ref)
 		if err != nil {
@@ -605,7 +607,7 @@ func resolveRef(ctx context.Context, s *service.Service, kind, ref string) (stri
 		}
 		return store.AccessNodeInbound, ni.ID, nil
 	}
-	return "", 0, fmt.Errorf("kind must be profile, node or inbound")
+	return "", 0, fmt.Errorf("kind must be profile, node, inbound or all")
 }
 
 func groupIDs(ctx context.Context, s *service.Service, names []string) ([]int64, error) {
