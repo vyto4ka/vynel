@@ -412,11 +412,6 @@ table.table { width: 100%; border-collapse: collapse; }
 .seg button:first-child, .segmented button:first-child { border-left: 0; padding-left: 18px; }
 .seg button:last-child, .segmented button:last-child { padding-right: 18px; }
 .seg button.on, .segmented button.on { background-color: var(--secondary-container); color: var(--on-secondary-container); }
-.seg button.on::before, .segmented button.on::before {
-  content: ""; width: 16px; height: 16px; margin-left: -4px; flex: none; background: currentColor;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center / contain no-repeat;
-}
 .segmented button { height: 34px; padding: 0 14px; font-size: 13px; }
 
 .empty { text-align: center; padding: 48px 20px; color: var(--muted); }
