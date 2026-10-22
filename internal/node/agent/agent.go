@@ -4,6 +4,7 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -636,7 +638,14 @@ func (a *Agent) ApplyDelta(ctx context.Context, d *nodev1.Delta) error {
 		return errors.New("xray is not running")
 	}
 	next := a.cur.Clone()
-	for _, op := range d.Ops {
+	// Removals first, whatever order the panel sent: Xray removes a VLESS user by email but
+	// forgets its UUID, so a user renamed to a new email with the same UUID would stop working
+	// if the old email were removed after the new one was added.
+	ops := slices.Clone(d.Ops)
+	slices.SortStableFunc(ops, func(x, y *nodev1.UserOp) int {
+		return cmp.Compare(btoi(x.Kind != nodev1.UserOp_KIND_REMOVE), btoi(y.Kind != nodev1.UserOp_KIND_REMOVE))
+	})
+	for _, op := range ops {
 		in := next.Inbound(op.Tag)
 		if in == nil {
 			return fmt.Errorf("unknown inbound %s", op.Tag)
@@ -669,6 +678,8 @@ func (a *Agent) ApplyDelta(ctx context.Context, d *nodev1.Delta) error {
 	return a.commitLocked(next)
 }
 
+// syncUsersLocked turns the users of cur into those of next. Everything that goes is removed
+// before anything is added (see ApplyDelta).
 func (a *Agent) syncUsersLocked(ctx context.Context, cur, next *state.State) error {
 	for _, in := range next.Inbounds {
 		old := map[string]string{}
@@ -677,31 +688,34 @@ func (a *Agent) syncUsersLocked(ctx context.Context, cur, next *state.State) err
 				old[u.Email] = u.ID
 			}
 		}
-		want := map[string]bool{}
+		want := map[string]string{}
 		for _, u := range in.Users {
-			want[u.Email] = true
-			id, ok := old[u.Email]
-			if ok && id == u.ID {
-				continue
-			}
-			if ok {
-				if err := a.api.RemoveUser(ctx, in.Tag, u.Email); err != nil {
-					return err
-				}
-			}
-			if err := a.addUser(ctx, &in, u); err != nil {
-				return err
-			}
+			want[u.Email] = u.ID
 		}
-		for email := range old {
-			if !want[email] {
+		for email, id := range old {
+			if wid, ok := want[email]; !ok || wid != id {
 				if err := a.api.RemoveUser(ctx, in.Tag, email); err != nil {
 					return err
 				}
 			}
 		}
+		for _, u := range in.Users {
+			if id, ok := old[u.Email]; ok && id == u.ID {
+				continue
+			}
+			if err := a.addUser(ctx, &in, u); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (a *Agent) addUser(ctx context.Context, in *state.Inbound, u state.User) error {

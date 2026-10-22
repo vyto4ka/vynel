@@ -674,7 +674,9 @@ func SnapshotParts(ds *service.DesiredState, rev int64, limit int) []*nodev1.Sna
 	return out
 }
 
-// Delta lists the user operations turning from into to (same structure).
+// Delta lists the user operations turning from into to (same structure). Removals come first:
+// Xray finds VLESS users by UUID but removes them by email, so removing a renamed user after
+// adding it under the new email would also drop the UUID the new one uses.
 func Delta(from, to *service.DesiredState, rev int64) *nodev1.Delta {
 	d := &nodev1.Delta{Revision: rev, BaseHash: from.Hash, Hash: to.Hash}
 	flows := map[string]string{}
@@ -684,14 +686,14 @@ func Delta(from, to *service.DesiredState, rev int64) *nodev1.Delta {
 	for _, in := range to.Inbounds {
 		old := index(from.Users[in.Tag])
 		cur := index(to.Users[in.Tag])
-		for _, c := range to.Users[in.Tag] {
-			if id, ok := old[c.Email]; !ok || id != c.ID {
-				d.Ops = append(d.Ops, &nodev1.UserOp{Kind: nodev1.UserOp_KIND_UPSERT, Tag: in.Tag, Flow: flows[in.Tag], User: &nodev1.User{Email: c.Email, Id: c.ID}})
-			}
-		}
 		for _, c := range from.Users[in.Tag] {
 			if _, ok := cur[c.Email]; !ok {
 				d.Ops = append(d.Ops, &nodev1.UserOp{Kind: nodev1.UserOp_KIND_REMOVE, Tag: in.Tag, User: &nodev1.User{Email: c.Email}})
+			}
+		}
+		for _, c := range to.Users[in.Tag] {
+			if id, ok := old[c.Email]; !ok || id != c.ID {
+				d.Ops = append(d.Ops, &nodev1.UserOp{Kind: nodev1.UserOp_KIND_UPSERT, Tag: in.Tag, Flow: flows[in.Tag], User: &nodev1.User{Email: c.Email, Id: c.ID}})
 			}
 		}
 	}
