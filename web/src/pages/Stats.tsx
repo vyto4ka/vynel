@@ -44,7 +44,6 @@ function loadRange(): Range {
   return '7d'
 }
 
-const pct = (v: number) => `${Math.round(v)}%`
 const count = (v: number) => String(Math.round(v))
 
 export function Stats() {
@@ -58,7 +57,7 @@ export function Stats() {
   return (
     <>
       <div className="stats-head">
-        <div className="muted small">{data ? <>Время — {data.timeZone}. Нагрузка и онлайн хранятся 7 дней, трафик — 90.</> : ' '}</div>
+        <div className="muted small">{data ? <>Время — {data.timeZone}. Онлайн хранится 7 дней, трафик — 90. Нагрузка серверов — на вкладке «Серверы».</> : ' '}</div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
       {!data || data.range !== range ? <Loading error={error} /> : <StatsBody d={data} range={range} />}
@@ -73,8 +72,6 @@ function StatsBody({ d, range }: { d: StatsT; range: Range }) {
   const usersTotal = u.active + u.limited + u.expired + u.disabled
   // Node colors follow the node (by id), not its rank in the period.
   const nodeColor = new Map([...d.nodes].sort((a, b) => a.id - b.id).map((n, i) => [n.id, SERIES[i % SERIES.length]]))
-  const nodes = d.nodes.slice(0, 6)
-  const metricsTimes = nodes[0]?.cpu.map((p) => p[0]) ?? []
   const lastWeek = range === '30d' || range === '90d' // load and online are kept 7 days
   const mb = d.metricsBucket
 
@@ -138,26 +135,6 @@ function StatsBody({ d, range }: { d: StatsT; range: Range }) {
         </div>
       </div>
 
-      {nodes.length > 0 && (
-        <div className="card section-gap">
-          <div className="card-head">
-            <div><h3>Нагрузка нод</h3><div className="card-sub">средняя за час{lastWeek ? ' · последние 7 дней' : ''}</div></div>
-            {nodes.length > 1 && <Legend items={nodes.map((n) => ({ label: `${n.flag} ${n.code}`, color: nodeColor.get(n.id)! }))} />}
-          </div>
-          <div className="card-pad small-multiples">
-            <div>
-              <div className="sm-title">Процессор</div>
-              <TimeChart times={metricsTimes} bucket={mb} kind="line" max={100} format={pct} height={180}
-                series={nodes.map((n) => ({ key: String(n.id), label: `${n.flag} ${n.name}`, color: nodeColor.get(n.id)!, values: n.cpu.map((p) => p[1]) }))} />
-            </div>
-            <div>
-              <div className="sm-title">Память</div>
-              <TimeChart times={metricsTimes} bucket={mb} kind="line" max={100} format={pct} height={180}
-                series={nodes.map((n) => ({ key: String(n.id), label: `${n.flag} ${n.name}`, color: nodeColor.get(n.id)!, values: n.mem.map((p) => p[1]) }))} />
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="cols-2 section-gap">
         <div className="card">

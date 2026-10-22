@@ -4,8 +4,7 @@ import './styles.css'
 import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
 import { ConfirmProvider, Icon, Logo, ToastProvider, useLoad } from './ui'
 import { Login } from './pages/Login'
-import { Overview } from './pages/Overview'
-import { Stats } from './pages/Stats'
+import { Dashboard } from './pages/Dashboard'
 import { Users } from './pages/Users'
 import { Groups } from './pages/Groups'
 import { Templates } from './pages/Templates'
@@ -22,8 +21,7 @@ type Page = { id: string; title: string; short?: string; icon: string; el: () =>
 
 const sections: { title: string; pages: Page[] }[] = [
   { title: 'Обзор', pages: [
-    { id: 'overview', title: 'Дашборд', icon: 'dashboard', el: () => <Overview /> },
-    { id: 'stats', title: 'Статистика', icon: 'chart', el: () => <Stats /> },
+    { id: 'overview', title: 'Дашборд', icon: 'dashboard', el: () => <Dashboard /> },
   ] },
   {
     title: 'Пользователи',
@@ -55,7 +53,7 @@ const allPages = sections.flatMap((s) => s.pages)
 
 function currentPage(): string {
   const id = location.hash.replace(/^#\/?/, '').split('/')[0]
-  return allPages.some((p) => p.id === id) ? id : 'overview'
+  return allPages.some((p) => p.id === id) ? id : 'overview' // #/stats — вкладка дашборда
 }
 
 function load(key: string, def: string): string {

@@ -32,6 +32,7 @@ func (s *Server) routes() {
 	s.handle("POST /api/account", s.account)
 	s.handle("GET /api/overview", s.overview)
 	s.handle("GET /api/stats", s.stats)
+	s.handle("GET /api/stats/load", s.serverLoad)
 	s.handle("GET /api/qr", s.qr)
 	s.handle("GET /api/audit", s.audit)
 

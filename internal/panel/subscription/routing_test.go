@@ -236,7 +236,7 @@ func TestKeqDroidRuleMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	rs, _ := e.svc.SubRules(e.ctx)
-	if rs[0].Format != "xray" || rs[1].Format != "base64" {
+	if rs[0].Format != "xray" || rs[1].Format != "base64" || rs[0].Note != "KeqDroid" {
 		t.Fatalf("rules %+v", rs)
 	}
 	edited := strings.Replace(old, "ссылки vless://", "ссылки", 1)

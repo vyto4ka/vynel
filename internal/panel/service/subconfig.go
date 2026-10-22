@@ -43,21 +43,30 @@ var SubFormats = []string{"base64", "mihomo", "singbox", "xray", "html"}
 // DefaultSubRules are the built-in rules (docs/ARCHITECTURE.md §8.3).
 func DefaultSubRules() []SubRule {
 	return []SubRule{
-		{Pattern: `(?i)keqdroid|keqdis`, Format: "xray", Enabled: true, Note: keqdroidNote},
-		{Pattern: `(?i)karing`, Format: "base64", Enabled: true, Note: "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся"},
-		{Pattern: `(?i)clash|mihomo|stash|flclash|koala`, Format: "mihomo", Enabled: true, Note: "Clash-клиенты"},
-		{Pattern: `(?i)sing-?box|\bSF[AIMT]\b`, Format: "singbox", Enabled: true, Note: "sing-box и его приложения"},
-		{Pattern: `(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, Format: "base64", Enabled: true, Note: "Приложения на ядре Xray"},
+		{Pattern: `(?i)keqdroid|keqdis`, Format: "xray", Enabled: true, Note: "KeqDroid"},
+		{Pattern: `(?i)karing`, Format: "base64", Enabled: true, Note: "Karing"},
+		{Pattern: `(?i)clash|mihomo|stash|flclash|koala`, Format: "mihomo", Enabled: true, Note: "Clash / Mihomo"},
+		{Pattern: `(?i)sing-?box|\bSF[AIMT]\b`, Format: "singbox", Enabled: true, Note: "sing-box"},
+		{Pattern: `(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, Format: "base64", Enabled: true, Note: "Xray-приложения"},
 	}
 }
 
-const (
-	keqdroidNote    = "KeqDroid: полный конфиг Xray с маршрутами и DNS"
-	oldKeqdroidNote = "KeqDroid лучше всего читает ссылки vless://"
-)
+const oldKeqdroidNote = "KeqDroid лучше всего читает ссылки vless://"
+
+// oldRuleNotes are notes of the built-in rules before they became client names (the
+// «Клиенты» switcher shows them): saved ones are renamed, the admin's own are left alone.
+var oldRuleNotes = map[string]string{
+	oldKeqdroidNote: "KeqDroid",
+	"KeqDroid: полный конфиг Xray с маршрутами и DNS":               "KeqDroid",
+	"Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся": "Karing",
+	"Clash-клиенты":             "Clash / Mihomo",
+	"sing-box и его приложения": "sing-box",
+	"Приложения на ядре Xray":   "Xray-приложения",
+}
 
 // migrateKeqDroidRule moves the KeqDroid rule saved with the old default (links) to Xray JSON,
 // which KeqDroid takes as a regular profile with routing. A rule the admin changed is left alone.
+// The built-in rules' old notes become short client names.
 func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
 	raw, ok, err := store.GetSetting(ctx, q, SettingSubRules)
 	if err != nil || !ok || strings.TrimSpace(raw) == "" {
@@ -70,7 +79,10 @@ func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
 	changed := false
 	for i := range rs {
 		if rs[i].Pattern == `(?i)keqdroid|keqdis` && rs[i].Format == "base64" && rs[i].Note == oldKeqdroidNote {
-			rs[i].Format, rs[i].Note, changed = "xray", keqdroidNote, true
+			rs[i].Format, changed = "xray", true
+		}
+		if name, ok := oldRuleNotes[rs[i].Note]; ok {
+			rs[i].Note, changed = name, true
 		}
 	}
 	if !changed {

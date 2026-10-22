@@ -76,7 +76,7 @@ export function Users() {
                 <tr>
                   {columns.map(([k, label, cls]) => (
                     <th key={k} className={'sortable ' + cls + (sort.key === k ? ' sorted' : '')} onClick={() => toggle(k)} aria-sort={sort.key === k ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
-                      {label}<span className="sort-mark">{sort.key === k ? (sort.desc ? ' ↓' : ' ↑') : ''}</span>
+                      {label}<span className="sort-mark">{sort.key === k ? (sort.desc ? ' ↓' : ' ↑') : ' ↕'}</span>
                     </th>
                   ))}
                 </tr>

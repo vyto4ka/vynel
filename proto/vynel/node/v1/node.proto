@@ -167,6 +167,7 @@ message Metrics {
   uint64 rx_bps = 5;
   uint64 tx_bps = 6;
   uint64 uptime = 7; // seconds
+  double steal = 8; // percent of CPU time the hypervisor gave to other guests (a crowded host)
 }
 
 message StatsAck {

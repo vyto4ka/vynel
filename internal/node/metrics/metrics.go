@@ -13,21 +13,24 @@ import (
 
 // Collector keeps the previous sample to compute rates.
 type Collector struct {
-	prevCPUIdle, prevCPUTotal uint64
-	prevRx, prevTx            uint64
-	prevAt                    time.Time
+	prevCPU        cpuStat
+	prevRx, prevTx uint64
+	prevAt         time.Time
 }
 
 // Sample returns current metrics; rates are zero on the first call.
 func (c *Collector) Sample() *nodev1.Metrics {
 	m := &nodev1.Metrics{}
 	now := time.Now()
-	if idle, total, ok := cpuTimes(); ok {
-		if c.prevCPUTotal > 0 && total > c.prevCPUTotal {
-			dt := float64(total - c.prevCPUTotal)
-			m.Cpu = 100 * (1 - float64(idle-c.prevCPUIdle)/dt)
+	if cs, ok := cpuTimes(); ok {
+		if c.prevCPU.total > 0 && cs.total > c.prevCPU.total {
+			dt := float64(cs.total - c.prevCPU.total)
+			m.Cpu = 100 * (1 - float64(cs.idle-c.prevCPU.idle)/dt)
+			if cs.steal >= c.prevCPU.steal {
+				m.Steal = 100 * float64(cs.steal-c.prevCPU.steal) / dt
+			}
 		}
-		c.prevCPUIdle, c.prevCPUTotal = idle, total
+		c.prevCPU = cs
 	}
 	m.MemTotal, m.MemUsed = memory()
 	m.Load1 = load1()
@@ -46,28 +49,45 @@ func (c *Collector) Sample() *nodev1.Metrics {
 	return m
 }
 
-func cpuTimes() (idle, total uint64, ok bool) {
+// cpuStat is the aggregate line of /proc/stat, in ticks.
+type cpuStat struct{ idle, steal, total uint64 }
+
+func cpuTimes() (cpuStat, bool) {
 	f, err := os.Open("/proc/stat")
 	if err != nil {
-		return 0, 0, false
+		return cpuStat{}, false
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	if !sc.Scan() {
-		return 0, 0, false
+		return cpuStat{}, false
 	}
-	fields := strings.Fields(sc.Text())
+	return parseCPU(sc.Text())
+}
+
+// parseCPU reads "cpu user nice system idle iowait irq softirq steal guest guest_nice". Steal
+// is time a busy hypervisor gave to other guests: it counts as busy, and is reported apart too.
+// guest and guest_nice are already inside user and nice.
+func parseCPU(line string) (cpuStat, bool) {
+	fields := strings.Fields(line)
 	if len(fields) < 5 || fields[0] != "cpu" {
-		return 0, 0, false
+		return cpuStat{}, false
 	}
+	var cs cpuStat
 	for i, v := range fields[1:] {
+		if i >= 8 { // guest, guest_nice
+			break
+		}
 		n, _ := strconv.ParseUint(v, 10, 64)
-		total += n
-		if i == 3 || i == 4 { // idle, iowait
-			idle += n
+		cs.total += n
+		switch i {
+		case 3, 4: // idle, iowait
+			cs.idle += n
+		case 7:
+			cs.steal = n
 		}
 	}
-	return idle, total, true
+	return cs, true
 }
 
 func memory() (total, used uint64) {

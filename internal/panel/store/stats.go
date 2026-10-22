@@ -168,13 +168,60 @@ type Metrics struct {
 	TxBps    int64
 	Uptime   int64
 	Online   int64
+	Steal    float64 // percent of CPU time taken by the hypervisor for others
 }
 
 // AddMetrics stores a metrics sample.
 func AddMetrics(ctx context.Context, q DBTX, m Metrics) error {
-	_, err := q.ExecContext(ctx, `INSERT OR REPLACE INTO node_metrics (node_id, ts, cpu, mem_used, mem_total, load1, rx_bps, tx_bps, uptime, online)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.NodeID, m.TS, m.CPU, m.MemUsed, m.MemTotal, m.Load1, m.RxBps, m.TxBps, m.Uptime, m.Online)
+	_, err := q.ExecContext(ctx, `INSERT OR REPLACE INTO node_metrics (node_id, ts, cpu, mem_used, mem_total, load1, rx_bps, tx_bps, uptime, online, steal)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, m.NodeID, m.TS, m.CPU, m.MemUsed, m.MemTotal, m.Load1, m.RxBps, m.TxBps, m.Uptime, m.Online, m.Steal)
 	return err
+}
+
+// RollupMetrics folds the samples of [from, to) into 5-minute rows (again when run twice: the
+// rows are replaced). to should be the start of the current 5 minutes.
+func RollupMetrics(ctx context.Context, q DBTX, from, to int64) error {
+	_, err := q.ExecContext(ctx, `INSERT OR REPLACE INTO node_metrics_5m
+		(node_id, ts, cpu, cpu_max, steal, mem_used, mem_total, rx_bps, tx_bps, rx_max, tx_max, online)
+		SELECT node_id, ts - ts % 300, avg(cpu), max(cpu), avg(steal), CAST(avg(mem_used) AS INTEGER), max(mem_total),
+			CAST(avg(rx_bps) AS INTEGER), CAST(avg(tx_bps) AS INTEGER), max(rx_bps), max(tx_bps), max(online)
+		FROM node_metrics WHERE ts >= ? AND ts < ? GROUP BY node_id, ts - ts % 300`, from, to)
+	return err
+}
+
+// LoadPoint is a node's load over one bucket of the dashboard.
+type LoadPoint struct {
+	NodeID   int64
+	T        int64
+	CPU      float64 // average percent
+	CPUMax   float64
+	Steal    float64
+	MemUsed  int64 // average bytes
+	MemTotal int64
+	RxBps    int64 // average
+	TxBps    int64
+	RxMax    int64
+	TxMax    int64
+}
+
+// LoadSeries reads the 5-minute rows of [from, to), merged into buckets of bucket seconds.
+func LoadSeries(ctx context.Context, q DBTX, from, to, bucket int64) ([]LoadPoint, error) {
+	rows, err := q.QueryContext(ctx, `SELECT node_id, ts - ts % ? AS t, avg(cpu), max(cpu_max), avg(steal), CAST(avg(mem_used) AS INTEGER),
+		max(mem_total), CAST(avg(rx_bps) AS INTEGER), CAST(avg(tx_bps) AS INTEGER), max(rx_max), max(tx_max)
+		FROM node_metrics_5m WHERE ts >= ? AND ts < ? GROUP BY node_id, t ORDER BY t`, bucket, from, to)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LoadPoint
+	for rows.Next() {
+		var p LoadPoint
+		if err := rows.Scan(&p.NodeID, &p.T, &p.CPU, &p.CPUMax, &p.Steal, &p.MemUsed, &p.MemTotal, &p.RxBps, &p.TxBps, &p.RxMax, &p.TxMax); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // LatestMetrics returns the newest sample of a node.
@@ -290,6 +337,7 @@ func PruneStats(ctx context.Context, q DBTX, now int64) error {
 		{`DELETE FROM user_node_daily WHERE day < ?`, 90 * 86400},
 		{`DELETE FROM node_traffic_hourly WHERE hour < ?`, 90 * 86400},
 		{`DELETE FROM node_metrics WHERE ts < ?`, 7 * 86400},
+		{`DELETE FROM node_metrics_5m WHERE ts < ?`, 90 * 86400},
 		{`DELETE FROM events_outbox WHERE ts < ?`, 30 * 86400},
 	}
 	for _, st := range stmts {
