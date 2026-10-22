@@ -384,6 +384,9 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		if blocks, changed := svc.IPs().Report(s.nodeID, online); changed {
 			s.r.setBlocks(blocks)
 		}
+		if err := svc.RecordIPs(ctx, s.nodeID, online); err != nil {
+			s.r.log.Warn("record addresses", "node", s.nodeID, "err", err)
+		}
 		return nil
 	case *nodev1.NodeMessage_Update:
 		u := m.Update

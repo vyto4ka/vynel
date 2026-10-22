@@ -240,7 +240,7 @@ nginx:
 }
 ```
 
-Клиенты при рендере: `{ "id": user.uuid, "email": user.id, "flow": "xtls-rprx-vision" }`. Если `target` локальный, панель при сборке ставит `xver: 2`: nginx получает адрес клиента заголовком PROXY.
+Клиенты при рендере: `{ "id": user.uuid, "email": "<user.id>.i<инбаунд>", "flow": "xtls-rprx-vision" }`. Если `target` локальный, панель при сборке ставит `xver: 2`: nginx получает адрес клиента заголовком PROXY.
 
 ### 3.4 nginx на ноде
 

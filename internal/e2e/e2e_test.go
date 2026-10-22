@@ -134,7 +134,12 @@ func users(ctx context.Context, n *nodeRun, tag string) ([]string, error) {
 	return us, err
 }
 
-func wantUsers(ctx context.Context, n *nodeRun, tag string, want ...string) func() error {
+func wantUsers(ctx context.Context, n *nodeRun, in *store.NodeInbound, ids ...int64) func() error {
+	tag := in.Tag
+	want := make([]string, 0, len(ids))
+	for _, id := range ids {
+		want = append(want, service.InboundEmail(id, in.ID))
+	}
 	slices.Sort(want)
 	return func() error {
 		got, err := users(ctx, n, tag)
@@ -250,9 +255,8 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ea := service.UserEmail(alice.ID)
-	xraytest.Eventually(t, wait, "alice on NL", wantUsers(ctx, nodeNL, nlIn.Tag, ea))
-	xraytest.Eventually(t, wait, "alice on DE", wantUsers(ctx, nodeDE, deIn.Tag, ea))
+	xraytest.Eventually(t, wait, "alice on NL", wantUsers(ctx, nodeNL, nlIn, alice.ID))
+	xraytest.Eventually(t, wait, "alice on DE", wantUsers(ctx, nodeDE, deIn, alice.ID))
 
 	r, err := svc.RenderNodeInbound(ctx, nlIn.ID)
 	if err != nil {
@@ -297,22 +301,22 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	if _, err := svc.SetUserEnabled(ctx, actor, alice.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	xraytest.Eventually(t, wait, "alice removed from NL", wantUsers(ctx, nodeNL, nlIn.Tag))
-	xraytest.Eventually(t, wait, "alice removed from DE", wantUsers(ctx, nodeDE, deIn.Tag))
+	xraytest.Eventually(t, wait, "alice removed from NL", wantUsers(ctx, nodeNL, nlIn))
+	xraytest.Eventually(t, wait, "alice removed from DE", wantUsers(ctx, nodeDE, deIn))
 	if err := fetchOK(); err == nil {
 		t.Fatal("disabled user still connects")
 	}
 	if _, err := svc.SetUserEnabled(ctx, actor, alice.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	xraytest.Eventually(t, wait, "alice back on NL", wantUsers(ctx, nodeNL, nlIn.Tag, ea))
+	xraytest.Eventually(t, wait, "alice back on NL", wantUsers(ctx, nodeNL, nlIn, alice.ID))
 
 	// A structural profile change restarts Xray via a snapshot; users survive the restart.
 	if _, err := svc.UpdateProfile(ctx, actor, prof.ID, service.ProfileInput{Override: map[string]any{"sniffing": map[string]any{"enabled": false}}}); err != nil {
 		t.Fatal(err)
 	}
 	xraytest.Eventually(t, wait, "converge after profile change", inSync(ctx, svc, "NL", "DE"))
-	xraytest.Eventually(t, wait, "alice kept after restart", wantUsers(ctx, nodeNL, nlIn.Tag, ea))
+	xraytest.Eventually(t, wait, "alice kept after restart", wantUsers(ctx, nodeNL, nlIn, alice.ID))
 	xraytest.Eventually(t, wait, "traffic after restart", fetchOK)
 
 	// Panel outage: the node keeps serving, even across an agent restart (saved state).
@@ -331,12 +335,11 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eb := service.UserEmail(bob.ID)
-	xraytest.Eventually(t, wait, "bob reaches NL after panel restart", wantUsers(ctx, nodeNL, nlIn.Tag, ea, eb))
+	xraytest.Eventually(t, wait, "bob reaches NL after panel restart", wantUsers(ctx, nodeNL, nlIn, alice.ID, bob.ID))
 	// The in-process node is bound to the panel process, so it restarts with it.
 	nodeDE.stop()
 	nodeDE = startAgent(t, bin, deDir, app.LocalDialer(ctx, panel.Reconciler, de.ID), apiDE)
-	xraytest.Eventually(t, wait, "bob reaches DE", wantUsers(ctx, nodeDE, deIn.Tag, ea, eb))
+	xraytest.Eventually(t, wait, "bob reaches DE", wantUsers(ctx, nodeDE, deIn, alice.ID, bob.ID))
 
 	// Changes made by another process (the CLI) are picked up through the outbox poll.
 	cli, err := store.Open(ctx, filepath.Join(dir, "panel.db"))
@@ -348,7 +351,7 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	xraytest.Eventually(t, wait, "carol from another process", wantUsers(ctx, nodeNL, nlIn.Tag, ea, eb, service.UserEmail(carol.ID)))
+	xraytest.Eventually(t, wait, "carol from another process", wantUsers(ctx, nodeNL, nlIn, alice.ID, bob.ID, carol.ID))
 
 	// Traffic reaches the panel; crossing the limit removes the user from the nodes.
 	xraytest.Eventually(t, wait, "alice's traffic is counted", func() error {
@@ -382,7 +385,7 @@ func TestPanelAndNodesEndToEnd(t *testing.T) {
 		}
 		return nil
 	})
-	xraytest.Eventually(t, wait, "limited alice removed from NL", wantUsers(ctx, nodeNL, nlIn.Tag, eb, service.UserEmail(carol.ID)))
+	xraytest.Eventually(t, wait, "limited alice removed from NL", wantUsers(ctx, nodeNL, nlIn, bob.ID, carol.ID))
 	ov, err := svc.Overview(ctx)
 	if err != nil || ov.TodayBytes < 2*xraytest.OriginSize {
 		t.Fatalf("overview %+v %v", ov, err)

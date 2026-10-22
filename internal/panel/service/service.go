@@ -76,6 +76,7 @@ type Service struct {
 	notices    chan Notice
 	ipOnce     sync.Once
 	ips        *IPTracker
+	ipLog      ipLog // addresses written for the «Аналитика» page
 	grantCheck int64 // when Maintenance last looked for ended grants
 	cache      confCache
 	snapMu     sync.Mutex // one snapshot builder at a time

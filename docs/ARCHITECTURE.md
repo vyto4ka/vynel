@@ -210,6 +210,8 @@ sub_templates       id, name, format, body, is_builtin
 ── статистика ──────────────────────────────────────────────────────
 user_traffic_hourly user_id, hour_ts, up, down                 -- 7 дней
 user_node_daily     user_id, node_id, day, up, down            -- 90 дней
+user_ref_daily      user_id, ref(i<инбаунд>|c<каскад>), day, up, down  -- 90 дней, «Аналитика»
+user_ips            user_id, ip, node_id, first_at, last_at    -- 90 дней по last_at
 user_traffic_daily  user_id, day, up, down                     -- бессрочно
 node_traffic_hourly node_id, hour_ts, up, down                 -- 30 дней, потом daily
 node_metrics        node_id, ts, cpu, mem, load1, rx_bps, tx_bps, online   -- 7 дней, прореживание

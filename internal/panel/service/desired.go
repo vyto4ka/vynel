@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/vyto4ka/vynel/internal/caddyconf"
 	"github.com/vyto4ka/vynel/internal/nginxconf"
@@ -42,6 +43,18 @@ type DesiredState struct {
 
 // UserEmail is the stable Xray "email" of a user: its id. Stats are keyed by it.
 func UserEmail(userID int64) string { return strconv.FormatInt(userID, 10) }
+
+// InboundEmail is a user's Xray email on one of its inbounds: the id with the inbound, so the
+// traffic of each profile is told apart (the «Аналитика» page).
+func InboundEmail(userID, nodeInboundID int64) string {
+	return UserEmail(userID) + ".i" + strconv.FormatInt(nodeInboundID, 10)
+}
+
+// EmailRef is where an Xray email's traffic went: "i<inbound>", "c<cascade>" or "" (a plain id).
+func EmailRef(email string) string {
+	_, ref, _ := strings.Cut(email, ".")
+	return ref
+}
 
 // DesiredStates computes the desired state of every node in one pass.
 func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, error) {
@@ -142,7 +155,7 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 				ds.Inbounds = append(ds.Inbounds, DesiredInbound{Tag: r.Tag, Protocol: r.Protocol, Flow: r.Flow})
 				clients := make([]xrayconf.Client, 0, len(usersByInbound[ni.ID])+len(casc.clients[ni.ID]))
 				for uid, uuid := range usersByInbound[ni.ID] {
-					clients = append(clients, xrayconf.Client{Email: UserEmail(uid), ID: uuid})
+					clients = append(clients, xrayconf.Client{Email: InboundEmail(uid, ni.ID), ID: uuid})
 				}
 				clients = append(clients, casc.clients[ni.ID]...)
 				sort.Slice(clients, func(i, j int) bool { return clients[i].Email < clients[j].Email })

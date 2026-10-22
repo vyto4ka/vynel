@@ -51,7 +51,7 @@ func AddUserTraffic(ctx context.Context, q DBTX, userID, nodeID, ts, up, down in
 // prepared once: a node's batch has a row per active user, and parsing the same SQL for each
 // of tens of thousands of rows was most of the time.
 type TrafficWriter struct {
-	user, hourly, daily, nodeDaily, online *sql.Stmt
+	user, hourly, daily, nodeDaily, ref, online *sql.Stmt
 }
 
 type preparer interface {
@@ -76,6 +76,8 @@ func NewTrafficWriter(ctx context.Context, q DBTX) (*TrafficWriter, error) {
 			ON CONFLICT (user_id, day) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`},
 		{&w.nodeDaily, `INSERT INTO user_node_daily (user_id, node_id, day, up, down) VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT (user_id, node_id, day) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`},
+		{&w.ref, `INSERT INTO user_ref_daily (user_id, ref, day, up, down) VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT (day, user_id, ref) DO UPDATE SET up = up + excluded.up, down = down + excluded.down`},
 		{&w.online, `UPDATE users SET online_at=? WHERE id=?`},
 	} {
 		st, err := p.PrepareContext(ctx, s.sql)
@@ -90,7 +92,7 @@ func NewTrafficWriter(ctx context.Context, q DBTX) (*TrafficWriter, error) {
 
 // Close releases the statements.
 func (w *TrafficWriter) Close() {
-	for _, s := range []*sql.Stmt{w.user, w.hourly, w.daily, w.nodeDaily, w.online} {
+	for _, s := range []*sql.Stmt{w.user, w.hourly, w.daily, w.nodeDaily, w.ref, w.online} {
 		if s != nil {
 			_ = s.Close()
 		}
@@ -116,6 +118,12 @@ func (w *TrafficWriter) Add(ctx context.Context, userID, nodeID, ts, up, down in
 		return false, err
 	}
 	return true, nil
+}
+
+// Ref adds a user's traffic to where it went (an inbound or a cascade), for the «Аналитика» page.
+func (w *TrafficWriter) Ref(ctx context.Context, userID int64, ref string, ts, up, down int64) error {
+	_, err := w.ref.ExecContext(ctx, userID, ref, Day(ts), up, down)
+	return err
 }
 
 // Online is MarkOnline with the prepared statement.
@@ -335,6 +343,8 @@ func PruneStats(ctx context.Context, q DBTX, now int64) error {
 	}{
 		{`DELETE FROM user_traffic_hourly WHERE hour < ?`, 7 * 86400},
 		{`DELETE FROM user_node_daily WHERE day < ?`, 90 * 86400},
+		{`DELETE FROM user_ref_daily WHERE day < ?`, 90 * 86400},
+		{`DELETE FROM user_ips WHERE last_at < ?`, 90 * 86400},
 		{`DELETE FROM node_traffic_hourly WHERE hour < ?`, 90 * 86400},
 		{`DELETE FROM node_metrics WHERE ts < ?`, 7 * 86400},
 		{`DELETE FROM node_metrics_5m WHERE ts < ?`, 90 * 86400},

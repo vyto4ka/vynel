@@ -83,6 +83,7 @@ func (s *Server) routes() {
 
 	s.subscriptionRoutes()
 	s.extraRoutes()
+	s.insightRoutes()
 	s.botRoutes()
 
 	s.handle("GET /api/settings", s.settings)
