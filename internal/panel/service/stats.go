@@ -65,6 +65,19 @@ func (s *Service) IngestStats(ctx context.Context, nodeID int64, b *nodev1.Stats
 			}
 		}
 		if m := b.Metrics; m != nil {
+			// The interface traffic for the provider's limit: the rates times the time since
+			// the previous sample (a gap counts as one usual interval).
+			prev, err := store.LastMetricsAt(ctx, q, nodeID, ts)
+			if err != nil {
+				return err
+			}
+			dt := ts - prev
+			if prev == 0 || dt <= 0 || dt > 60 {
+				dt = 10
+			}
+			if err := store.AddIfaceTraffic(ctx, q, nodeID, ts, int64(m.RxBps)*dt, int64(m.TxBps)*dt); err != nil {
+				return err
+			}
 			if err := store.AddMetrics(ctx, q, store.Metrics{
 				NodeID: nodeID, TS: ts, CPU: m.Cpu, MemUsed: int64(m.MemUsed), MemTotal: int64(m.MemTotal), Load1: m.Load1,
 				RxBps: int64(m.RxBps), TxBps: int64(m.TxBps), Uptime: int64(m.Uptime), Online: int64(len(online)), Steal: m.Steal,
@@ -180,6 +193,9 @@ func (s *Service) Maintenance(ctx context.Context, prune bool) error {
 	// Node load for the dashboard: the last hour's finished 5 minutes, again each run (cheap, and
 	// late samples from a node that was offline land too).
 	if err := store.RollupMetrics(ctx, s.st.DB, now-now%300-3600, now-now%300); err != nil {
+		return err
+	}
+	if err := s.checkBilling(ctx); err != nil {
 		return err
 	}
 	if prune {

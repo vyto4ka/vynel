@@ -284,6 +284,14 @@ input[type="color"] { border-radius: var(--shape-sm); cursor: pointer; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, .35); font-size: 12.5px; line-height: 1.5; font-weight: 400; letter-spacing: .1px; text-transform: none; white-space: normal; }
 .info-pop p { margin: 0 0 6px; }
 .page-info { display: flex; align-items: center; min-width: 0; }
+
+/* Биллинг: провайдеры */
+.provider-icon { display: inline-block; flex: none; border-radius: 5px; object-fit: contain; background: #fff1; vertical-align: middle; }
+.provider-icon.letter { display: inline-grid; place-items: center; background: var(--secondary-container); color: var(--on-surface); font-weight: 600; }
+.provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.provider-tile { border: 1px solid var(--outline-variant); border-radius: var(--shape-md, 12px); padding: 14px; min-width: 0; background: var(--container-low, transparent); }
+.provider-chip { display: inline-flex; align-items: center; gap: 6px; color: var(--on-surface-variant); text-decoration: none; }
+.provider-chip:hover { color: var(--primary); }
 .info-pop p:last-child { margin-bottom: 0; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }

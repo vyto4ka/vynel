@@ -122,6 +122,11 @@ func (s *Service) UpdateNode(ctx context.Context, actor Actor, id int64, in Node
 				n.Country = strings.ToUpper(in.Country)
 			}
 			n.Domain = strings.ToLower(strings.TrimSpace(in.Domain))
+			if enabled && !n.Enabled {
+				if err := nodeSwitchedOn(ctx, q, id); err != nil {
+					return err
+				}
+			}
 			n.Enabled = enabled
 			return store.UpdateNode(ctx, q, n)
 		})

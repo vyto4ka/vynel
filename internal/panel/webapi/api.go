@@ -84,6 +84,7 @@ func (s *Server) routes() {
 	s.subscriptionRoutes()
 	s.extraRoutes()
 	s.insightRoutes()
+	s.billingRoutes()
 	s.botRoutes()
 
 	s.handle("GET /api/settings", s.settings)
@@ -149,6 +150,7 @@ type Node struct {
 	Metrics      *Metrics  `json:"metrics"`
 	Inbounds     []Inbound `json:"inbounds"`
 	Addresses    []Address `json:"addresses"`
+	Provider     *Provider `json:"provider"` // where the node is rented, nil = not set
 }
 
 // Metrics are the latest host numbers of a node.
@@ -826,6 +828,12 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 			profiles[p.ID] = p.Name
 		}
 	}
+	var providers map[int64]*store.Provider
+	if details {
+		if providers, err = s.svc.NodeProviders(ctx); err != nil {
+			return nil, err
+		}
+	}
 	out := make([]Node, 0, len(sts))
 	for _, ns := range sts {
 		n := ns.Node
@@ -840,6 +848,10 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 		if m := ns.Metrics; m != nil {
 			d.Metrics = &Metrics{TS: m.TS, CPU: m.CPU, MemUsed: m.MemUsed, MemTotal: m.MemTotal, Load1: m.Load1, RxBps: m.RxBps,
 				TxBps: m.TxBps, Uptime: m.Uptime, Online: m.Online}
+		}
+		if p := providers[n.ID]; p != nil {
+			pd := providerDTO(p)
+			d.Provider = &pd
 		}
 		if details {
 			nis, err := s.svc.NodeInbounds(ctx, n.ID)

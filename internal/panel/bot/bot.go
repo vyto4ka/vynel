@@ -235,6 +235,8 @@ func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
 				b.onLoginBlocked(ctx, n)
 			case n.Kind == "ip-limit":
 				b.onIPLimit(ctx, n)
+			case n.Kind == "billing":
+				b.toAdmins(ctx, n.Text)
 			}
 		case <-tick:
 			return true

@@ -392,6 +392,18 @@ func (b *Bot) firewallAction(ctx context.Context, api *client, chat, msg int64, 
 
 // onIPLimit tells the admins that a user connects from more addresses than allowed: the extra
 // ones are blocked on the nodes (at most one message per user in a few hours).
+// toAdmins sends a ready message to every admin.
+func (b *Bot) toAdmins(ctx context.Context, text string) {
+	api := b.client()
+	if api == nil || text == "" {
+		return
+	}
+	admins, _ := b.svc.BotAdmins(ctx)
+	for _, a := range admins {
+		_, _ = api.send(ctx, a.ID, text, nil)
+	}
+}
+
 func (b *Bot) onIPLimit(ctx context.Context, n service.Notice) {
 	api := b.client()
 	if api == nil {
