@@ -246,6 +246,7 @@ type DeviceVerdict struct {
 	OK     bool
 	Off    bool   // HWID is not checked (globally or for this user)
 	NoHWID bool   // the client sent no x-hwid
+	Links  bool   // let in without x-hwid because devices are not limited: give it links
 	Full   bool   // refused: the device limit is reached
 	Reason string // shown to the user inside the stub subscription
 	Count  int
@@ -266,6 +267,11 @@ func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) 
 		limit = int(*u.HWIDLimit)
 	}
 	if d.HWID == "" {
+		// No device limit: an app without HWID has nothing to count against, so it gets the
+		// servers as plain links, which any app can import.
+		if limit == 0 {
+			return DeviceVerdict{OK: true, NoHWID: true, Links: true}, nil
+		}
 		allow, _ := s.Setting(ctx, SettingHWIDAllowNone, "false")
 		if allow == "true" {
 			return DeviceVerdict{OK: true, NoHWID: true, Limit: limit}, nil

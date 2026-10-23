@@ -179,7 +179,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hosts, reason := h.hostsFor(ctx, w, r, u, ip, format)
+	// An app without HWID under no device limit gets links, unless the link or the user asks
+	// for a format.
+	_, own := ParseFormat(explicit)
+	if _, set := ParseFormat(u.ClientType); set {
+		own = true
+	}
+	hosts, reason := h.hostsFor(ctx, w, r, u, ip, &format, !own)
+	if format == FormatBase64 {
+		tpl = ""
+	}
 	uuid := u.UUID
 	if reason != "" {
 		// A refused client gets no credentials at all, only a server named after the reason.
@@ -221,8 +230,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(body)
 }
 
-// hostsFor returns the user's hosts for a format, or a reason why the user gets a stub.
-func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User, ip string, format Format) ([]service.Host, string) {
+// hostsFor returns the user's hosts for a format, or a reason why the user gets a stub. An app
+// without HWID let in as one that gets links switches format to links when mayLink.
+func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User, ip string, format *Format, mayLink bool) ([]service.Host, string) {
 	switch u.Status {
 	case store.StatusExpired:
 		exp := ""
@@ -253,7 +263,7 @@ func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.R
 	// turn on sending x-hwid by themselves.
 	if !v.Off {
 		w.Header().Set("x-hwid-active", "true")
-		if v.NoHWID {
+		if v.NoHWID && !v.Links {
 			w.Header().Set("x-hwid-not-supported", "true")
 		}
 		if v.Full {
@@ -262,6 +272,9 @@ func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.R
 	}
 	if !v.OK {
 		return nil, v.Reason
+	}
+	if v.Links && mayLink {
+		*format = FormatBase64
 	}
 	// A panel merging this subscription in says how deep it is (see DepthHeader).
 	all, err := h.svc.SubscriptionHosts(ctx, u, service.RequestDepth(r.Header.Get(service.DepthHeader)))

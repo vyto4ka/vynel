@@ -350,3 +350,58 @@ func TestIPLimitStub(t *testing.T) {
 		t.Fatalf("the admitted address got %v", ls)
 	}
 }
+
+// With no device limit an app without HWID is let in and gets plain links, with the usual
+// headers; a format in the link or set for the user still wins, and an app with HWID gets its
+// own format as before.
+func TestNoDeviceLimitGivesLinksWithoutHWID(t *testing.T) {
+	e := newEnv(t)
+	if err := e.svc.SetSetting(e.ctx, actor, service.SettingHWIDLimit, "0"); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.get(e.path(), "FlClashX/0.9", "")
+	if ls := links(t, rec); len(ls) != 2 || strings.Contains(ls[0], StubUUID) || !strings.HasPrefix(ls[0], "vless://") {
+		t.Fatalf("an app without HWID must get links: %v", ls)
+	}
+	h := rec.Header()
+	if !strings.HasPrefix(h.Get("Subscription-Userinfo"), "upload=") || h.Get("Profile-Update-Interval") == "" || h.Get("Profile-Title") == "" {
+		t.Fatalf("headers missing: %v", h)
+	}
+	if h.Get("x-hwid-active") != "true" || h.Get("x-hwid-not-supported") != "" {
+		t.Fatalf("hwid headers: %v", h)
+	}
+	if devs, _ := e.svc.Devices(e.ctx, e.user.ID); len(devs) != 0 {
+		t.Fatalf("a device without HWID registered: %+v", devs)
+	}
+	if body := e.get(e.path()+"/mihomo", "FlClashX/0.9", "").Body.String(); !strings.Contains(body, "proxies:") {
+		t.Fatalf("an explicit format lost:\n%.200s", body)
+	}
+	if body := e.get(e.path(), "FlClashX/0.9", "hw-1").Body.String(); !strings.Contains(body, "proxies:") {
+		t.Fatalf("an app with HWID lost its format:\n%.200s", body)
+	}
+	if body := e.get(e.path(), "Mozilla/5.0", "", "Accept", "text/html").Body.String(); !strings.Contains(body, "<html") {
+		t.Fatal("a browser must still get the page")
+	}
+
+	// A limit of the user's own: 0 there, the default elsewhere.
+	if err := e.svc.SetSetting(e.ctx, actor, service.SettingHWIDLimit, "2"); err != nil {
+		t.Fatal(err)
+	}
+	if ls := links(t, e.get(e.path(), "Happ/3", "")); !strings.Contains(ls[0], StubUUID) {
+		t.Fatal("with a device limit an app without HWID must get the stub")
+	}
+	zero := int64(0)
+	if _, err := e.svc.SetUserDetails(e.ctx, actor, e.user.ID, service.UserDetailsInput{HWIDLimit: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	if ls := links(t, e.get(e.path(), "Happ/3", "")); len(ls) != 2 || strings.Contains(ls[0], StubUUID) {
+		t.Fatalf("the user's own limit 0 must let it in: %v", ls)
+	}
+	mihomo := "mihomo"
+	if _, err := e.svc.SetUserDetails(e.ctx, actor, e.user.ID, service.UserDetailsInput{ClientType: &mihomo}); err != nil {
+		t.Fatal(err)
+	}
+	if body := e.get(e.path(), "Happ/3", "").Body.String(); !strings.Contains(body, "proxies:") {
+		t.Fatalf("the user's own format lost:\n%.200s", body)
+	}
+}
