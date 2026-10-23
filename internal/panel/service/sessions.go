@@ -65,7 +65,7 @@ const (
 
 // Notice is something the bot tells the admins about right away.
 type Notice struct {
-	Kind    string // login | ended | login-blocked | ip-limit
+	Kind    string // login | ended | login-blocked | ip-limit | billing
 	Session *store.WebSession
 	// login-blocked: the address that kept failing to sign in, how often, and until when it
 	// may not try again.
@@ -76,6 +76,8 @@ type Notice struct {
 	User         string
 	Addrs        []string
 	Count, Limit int
+	// billing: a ready message (payment due, a node switched off or on by its traffic limit).
+	Text string
 }
 
 // LoginBlocked records that an address failed to sign in too often and is refused for a

@@ -345,6 +345,7 @@ func PruneStats(ctx context.Context, q DBTX, now int64) error {
 		{`DELETE FROM user_node_daily WHERE day < ?`, 90 * 86400},
 		{`DELETE FROM user_ref_daily WHERE day < ?`, 90 * 86400},
 		{`DELETE FROM user_ips WHERE last_at < ?`, 90 * 86400},
+		{`DELETE FROM node_iface_hourly WHERE hour < ?`, 90 * 86400},
 		{`DELETE FROM node_traffic_hourly WHERE hour < ?`, 90 * 86400},
 		{`DELETE FROM node_metrics WHERE ts < ?`, 7 * 86400},
 		{`DELETE FROM node_metrics_5m WHERE ts < ?`, 90 * 86400},

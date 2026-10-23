@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate } from '../api'
+import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate, Provider } from '../api'
 import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
+import { ProviderIcon } from './Billing'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
 import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
 
@@ -57,6 +58,14 @@ export function Nodes() {
                     <div>
                       <h3>{n.name} <span className="muted small">{n.code}</span> {n.local && <Badge>на сервере панели</Badge>}</h3>
                       <div className="card-sub">{n.domain || 'без домена'} · связь {ago(n.lastSeenAt)}</div>
+                      {n.provider && (
+                        <div className="row small" style={{ gap: 8, marginTop: 4 }}>
+                          <a className="provider-chip" href={n.provider.loginUrl || n.provider.url || '#/billing'} target={n.provider.loginUrl || n.provider.url ? '_blank' : undefined}
+                            rel="noreferrer" title={n.provider.loginUrl ? 'Войти к провайдеру' : 'Сайт провайдера'}>
+                            <ProviderIcon p={n.provider} size={16} />{n.provider.name}
+                          </a>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="row" style={{ gap: 6 }}>
@@ -275,10 +284,16 @@ function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSav
   const [name, setName] = useState(n.name)
   const [country, setCountry] = useState(n.country)
   const [domain, setDomain] = useState(n.domain)
+  const [providerId, setProviderId] = useState(n.provider?.id || 0)
+  const providers = useLoad(() => get<{ providers: Provider[] }>('billing'))
   const act = useAction()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const r = await act(() => patch(`nodes/${n.id}`, { name, country, domain }), 'Сохранено')
+    const r = await act(async () => {
+      await patch(`nodes/${n.id}`, { name, country, domain })
+      if (providerId !== (n.provider?.id || 0)) await patch(`nodes/${n.id}/billing`, { providerId })
+      return true
+    }, 'Сохранено')
     if (r !== undefined) onSaved()
   }
   return (
@@ -291,6 +306,12 @@ function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSav
         </div>
         <Field label="Домен" info="Смена домена меняет SNI и сертификат. Клиенты получат новые настройки со следующим обновлением подписки.">
           <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} />
+        </Field>
+        <Field label="Провайдер" help={<>Стоимость, оплата и лимит трафика — в <a href="#/billing" onClick={onClose}>«Биллинге»</a></>}>
+          <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
+            <option value={0}>— не указан —</option>
+            {(providers.data?.providers || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
         </Field>
       </form>
     </Modal>

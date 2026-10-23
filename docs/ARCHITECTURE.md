@@ -212,6 +212,9 @@ user_traffic_hourly user_id, hour_ts, up, down                 -- 7 дней
 user_node_daily     user_id, node_id, day, up, down            -- 90 дней
 user_ref_daily      user_id, ref(i<инбаунд>|c<каскад>), day, up, down  -- 90 дней, «Аналитика»
 user_ips            user_id, ip, node_id, first_at, last_at    -- 90 дней по last_at
+node_iface_hourly   node_id, hour, rx, tx                     -- 90 дней, трафик интерфейса для лимита провайдера
+providers           id, name, url, login_url, icon
+node_billing        node_id, provider_id, cost, currency, cost_period, paid_until, traffic_limit, reset_day, ...
 user_traffic_daily  user_id, day, up, down                     -- бессрочно
 node_traffic_hourly node_id, hour_ts, up, down                 -- 30 дней, потом daily
 node_metrics        node_id, ts, cpu, mem, load1, rx_bps, tx_bps, online   -- 7 дней, прореживание

@@ -200,6 +200,46 @@ export interface Node {
   } | null
   inbounds: Inbound[]
   addresses: { id: number; ip: string; interface: string; onInterface: boolean; primary: boolean }[]
+  provider: Provider | null // где арендован сервер
+}
+
+// Хостинг-провайдер: сайт, вход в личный кабинет, иконка с сайта.
+export interface Provider {
+  id: number
+  name: string
+  url: string
+  loginUrl: string
+  icon: string // data: URI, '' — нет
+}
+
+// Нода в «Биллинге»: стоимость, оплата и лимит трафика у провайдера.
+export interface BillingNode {
+  id: number
+  code: string
+  name: string
+  flag: string
+  enabled: boolean
+  providerId: number | null
+  cost: number
+  currency: string
+  costPeriod: 'month' | 'year'
+  monthlyCost: number
+  paidUntil: number | null
+  trafficLimit: number // байты, 0 — без лимита
+  resetDay: number
+  trafficCount: 'both' | 'out' | 'in'
+  used: number
+  periodFrom: number
+  periodTo: number
+  offByLimit: boolean
+  overridden: boolean
+}
+
+export interface Billing {
+  providers: Provider[]
+  nodes: BillingNode[]
+  margin: number
+  remindDays: number
 }
 
 export interface Variable {

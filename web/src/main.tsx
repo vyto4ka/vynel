@@ -6,6 +6,7 @@ import { ConfirmProvider, Icon, Logo, ToastProvider, useLoad } from './ui'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Insights } from './pages/Insights'
+import { Billing } from './pages/Billing'
 import { Users } from './pages/Users'
 import { Groups } from './pages/Groups'
 import { Templates } from './pages/Templates'
@@ -39,6 +40,7 @@ const sections: { title: string; pages: Page[] }[] = [
     pages: [
       { id: 'nodes', title: 'Ноды', icon: 'nodes', el: () => <Nodes /> },
       { id: 'profiles', title: 'Профили', icon: 'profiles', el: () => <Profiles /> },
+      { id: 'billing', title: 'Биллинг', icon: 'wallet', el: () => <Billing /> },
     ],
   },
   {
