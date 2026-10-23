@@ -77,7 +77,7 @@ var hiddenSettings = map[string]bool{
 	// edited on the «Telegram» page
 	service.SettingBotAdmins: true, service.SettingBotBackupTime: true, service.SettingBotTimezone: true,
 	service.SettingBotAlerts: true, service.SettingBotAlertDelay: true, service.SettingBotAlertState: true, "bot.backup_last": true,
-	service.SettingBotSummaryTime: true, service.SettingBotSummaryLast: true,
+	service.SettingBotSummaryTime: true, service.SettingBotSummaryLast: true, service.SettingBotQuickKeys: true,
 	// edited on the «Аккаунт» page
 	service.SettingWebPasswordLogin: true,
 }

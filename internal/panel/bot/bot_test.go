@@ -244,6 +244,52 @@ func TestBot(t *testing.T) {
 		t.Fatal("login token worked twice")
 	}
 
+	// The quick buttons: given once, pinned under the input field.
+	keys := fake.waitCall(t, 0, "quick buttons", func(c call) bool { return strings.Contains(fmt.Sprint(c.Params["reply_markup"]), "is_persistent:true") })
+	if s := fmt.Sprint(keys.Params["reply_markup"]); !strings.Contains(s, keyLogin) || !strings.Contains(s, keyMenu) {
+		t.Fatalf("quick buttons %s", s)
+	}
+	time.Sleep(200 * time.Millisecond)
+	given := 0
+	for _, c := range fake.since(0) {
+		if strings.Contains(fmt.Sprint(c.Params["reply_markup"]), "is_persistent:true") {
+			given++
+		}
+	}
+	if given != 1 {
+		t.Fatalf("quick buttons given %d times", given)
+	}
+	// A press leaves nothing in the chat: its message goes, the link comes; a second press
+	// replaces the first link.
+	n = fake.n()
+	fake.text(42, keyLogin)
+	fake.waitCall(t, n, "press deleted", func(c call) bool { return c.Method == "deleteMessage" && c.Params["message_id"] == float64(1) })
+	first := fake.waitCall(t, n, "login link by button", textHas("sendMessage", "Вход в панель"))
+	_ = first
+	n = fake.n()
+	fake.text(42, keyLogin)
+	fake.waitCall(t, n, "second link", textHas("sendMessage", "Вход в панель"))
+	fake.waitCall(t, n, "first link deleted", func(c call) bool { return c.Method == "deleteMessage" && c.Params["message_id"] != float64(1) })
+	n = fake.n()
+	fake.text(42, keyMenu)
+	fake.waitCall(t, n, "menu by button", func(c call) bool {
+		return c.Method == "sendMessage" && strings.Contains(fmt.Sprint(c.Params["reply_markup"]), "inline_keyboard")
+	})
+	// A name typed after the question: the question goes and the card comes below the name.
+	n = fake.n()
+	fake.press(42, "nu")
+	prompt := fake.waitCall(t, n, "name question", textHas("sendMessage", "Имя нового пользователя"))
+	_ = prompt
+	n = fake.n()
+	fake.text(42, "petya")
+	fake.waitCall(t, n, "new card below", textHas("sendMessage", "petya"))
+	fake.waitCall(t, n, "question deleted", func(c call) bool { return c.Method == "deleteMessage" })
+	for _, c := range fake.since(n) {
+		if textHas("editMessageText", "petya")(c) {
+			t.Fatal("the card replaced the question above the typed name")
+		}
+	}
+
 	// Node alerts: one message, edited while down, closed with a reply when back.
 	n = fake.n()
 	connected.Store(false)

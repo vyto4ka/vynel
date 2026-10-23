@@ -14,6 +14,7 @@ func (s *Server) botRoutes() {
 	s.api.HandleFunc("POST /api/login/magic", s.magicLogin)
 	s.api.HandleFunc("POST /api/login/telegram", s.telegramLogin)
 	s.api.HandleFunc("GET /api/login/options", s.loginOptions)
+	s.handle("POST /api/login/browser-link", s.browserLink)
 	s.handle("GET /api/sessions", s.sessions)
 	s.handle("DELETE /api/sessions/{id}", s.endSession)
 	s.handle("POST /api/sessions/end-others", s.endOtherSessions)
@@ -244,6 +245,23 @@ func (s *Server) telegramLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("web login from telegram mini app", "ip", clientIP(r), "telegram_id", id)
 	s.respond(w, r, func(*http.Request) (any, error) { return map[string]string{"login": login}, nil })
+}
+
+// browserLink gives the panel opened in Telegram a one-time link to open it in a browser:
+// POST /api/login/browser-link.
+func (s *Server) browserLink(r *http.Request) (any, error) {
+	ctx := r.Context()
+	sess := current(r)
+	actor := "web:" + sess.Login
+	if ws, err := s.svc.WebSessionActor(ctx, sess.ID); err == nil && ws != "" {
+		actor = ws
+	}
+	link, exp, err := s.svc.BrowserLink(ctx, sess.ID, actor)
+	if err != nil {
+		return nil, err
+	}
+	s.log.Info("browser login link issued from the telegram mini app", "actor", actor)
+	return map[string]any{"url": link, "expiresAt": exp.Unix()}, nil
 }
 
 // loginOptions tells the login page which ways in work.

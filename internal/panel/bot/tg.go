@@ -201,6 +201,22 @@ func (c *client) send(ctx context.Context, chat int64, html string, kb Keyboard)
 	return &m, c.call(ctx, "sendMessage", p, &m)
 }
 
+// sendQuickKeys sends a message that pins buttons under the input field: pressing one sends its
+// text, which the bot deletes at once.
+func (c *client) sendQuickKeys(ctx context.Context, chat int64, html string, keys [][]string, placeholder string) (*Message, error) {
+	rows := make([][]map[string]string, 0, len(keys))
+	for _, r := range keys {
+		var bs []map[string]string
+		for _, k := range r {
+			bs = append(bs, map[string]string{"text": k})
+		}
+		rows = append(rows, bs)
+	}
+	var m Message
+	return &m, c.call(ctx, "sendMessage", map[string]any{"chat_id": chat, "text": html, "parse_mode": "HTML", "link_preview_options": noPreview,
+		"reply_markup": map[string]any{"keyboard": rows, "is_persistent": true, "resize_keyboard": true, "input_field_placeholder": placeholder}}, &m)
+}
+
 func (c *client) reply(ctx context.Context, chat, to int64, html string) error {
 	return c.call(ctx, "sendMessage", map[string]any{"chat_id": chat, "text": html, "parse_mode": "HTML",
 		"reply_parameters": map[string]any{"message_id": to, "allow_sending_without_reply": true}, "link_preview_options": noPreview}, nil)
