@@ -79,6 +79,9 @@ func duration(d time.Duration) string {
 func (b *Bot) onMessage(ctx context.Context, api *client, m *Message) {
 	text := strings.TrimSpace(m.Text)
 	chat := m.Chat.ID
+	if b.onQuickKey(ctx, api, m) {
+		return
+	}
 	if strings.HasPrefix(text, "/") {
 		b.mu.Lock()
 		delete(b.pending, chat)
@@ -87,7 +90,10 @@ func (b *Bot) onMessage(ctx context.Context, api *client, m *Message) {
 		cmd, _, _ = strings.Cut(cmd, "@")
 		arg = strings.TrimSpace(arg)
 		switch cmd {
-		case "/start", "/menu":
+		case "/start":
+			b.sendQuickKeys(ctx, api, chat)
+			b.sendMenu(ctx, api, chat)
+		case "/menu":
 			b.sendMenu(ctx, api, chat)
 		case "/users":
 			b.showUsers(ctx, api, chat, 0, 0, "")
@@ -130,11 +136,16 @@ func (b *Bot) onMessage(ctx context.Context, api *client, m *Message) {
 	p, ok := b.pending[chat]
 	delete(b.pending, chat)
 	b.mu.Unlock()
+	// The answer comes below what was typed: the question above it goes, so the chat reads top
+	// to bottom.
+	if ok {
+		_ = api.deleteMessage(ctx, chat, p.msg)
+	}
 	switch {
 	case ok && p.kind == "newuser":
-		b.newUser(ctx, api, chat, p.msg, text)
+		b.newUser(ctx, api, chat, 0, text)
 	case ok && p.kind == "search":
-		b.showUsers(ctx, api, chat, p.msg, 0, text)
+		b.showUsers(ctx, api, chat, 0, 0, text)
 	default:
 		// Plain text is a search: the quickest way to open someone's card.
 		b.showUsers(ctx, api, chat, 0, 0, text)
@@ -157,7 +168,7 @@ func (b *Bot) help(ctx context.Context, api *client, chat int64) {
 /users — пользователи; просто напишите имя, чтобы найти
 /new vasya — новый пользователь по шаблону
 /nodes — ноды и их состояние
-/login — ссылка входа в веб-панель (1 минута, один раз)
+/login — ссылка входа в веб-панель (1 минута, один раз); то же — кнопка «🔑 Вход» внизу
 /sessions — кто вошёл в веб-панель, завершить сессию
 /summary — сводка за сутки
 /firewall — файрвол: кто заблокирован, разблокировать, выключить
@@ -658,6 +669,17 @@ func (b *Bot) sendLoginLink(ctx context.Context, api *client, from, chat int64) 
 	if err != nil {
 		return
 	}
+	// Only the newest link stays in the chat.
+	b.mu.Lock()
+	if b.loginMsg == nil {
+		b.loginMsg = map[int64]int64{}
+	}
+	prev := b.loginMsg[chat]
+	b.loginMsg[chat] = m.MessageID
+	b.mu.Unlock()
+	if prev != 0 {
+		_ = api.deleteMessage(ctx, chat, prev)
+	}
 	b.log.Info("web login link issued via telegram", "admin", from)
 	go func() {
 		wait := time.Until(exp) + time.Second
@@ -666,6 +688,6 @@ func (b *Bot) sendLoginLink(ctx context.Context, api *client, from, chat int64) 
 			return
 		case <-time.After(wait):
 		}
-		_ = api.edit(context.WithoutCancel(ctx), chat, m.MessageID, "🔑 Ссылка входа истекла. Новая: /login, или кнопка «Панель» у поля ввода", nil)
+		_ = api.edit(context.WithoutCancel(ctx), chat, m.MessageID, "🔑 Ссылка входа истекла. Новая — кнопка «"+keyLogin+"» внизу", nil)
 	}()
 }

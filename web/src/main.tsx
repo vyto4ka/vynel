@@ -2,7 +2,8 @@ import { ReactElement, StrictMode, useCallback, useEffect, useState } from 'reac
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
-import { ConfirmProvider, Icon, Logo, ToastProvider, useLoad } from './ui'
+import { ConfirmProvider, Icon, Logo, ToastProvider, useAction, useLoad } from './ui'
+import { openExternal } from './telegram'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 import { Insights } from './pages/Insights'
@@ -75,7 +76,7 @@ function save(key: string, v: string) {
   }
 }
 
-function Shell({ login, version, onLogout }: { login: string; version: string; onLogout: () => void }) {
+function Shell({ login, version, onLogout, inTelegram }: { login: string; version: string; onLogout: () => void; inTelegram?: boolean }) {
   const [page, setPage] = useState(currentPage)
   const [collapsed, setCollapsed] = useState(() => load('vynel.sidebar', 'open') === 'collapsed')
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -182,6 +183,7 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
           <button className="btn ghost icon burger" onClick={() => setMobileOpen(true)} aria-label="Меню"><Icon name="menu" /></button>
           <h1>{p.title}</h1>
           <div className="spacer" />
+          {inTelegram && <BrowserButton />}
         </header>
         <main className="content" key={page}>{p.el()}</main>
       </div>
@@ -189,8 +191,22 @@ function Shell({ login, version, onLogout }: { login: string; version: string; o
   )
 }
 
+// BrowserButton — в панели, открытой в Telegram: одноразовая ссылка входа, сразу во внешний браузер.
+function BrowserButton() {
+  const [busy, setBusy] = useState(false)
+  const act = useAction()
+  return (
+    <button className="btn sm" disabled={busy} title="Открыть панель в браузере: одноразовая ссылка, без сообщений в боте" onClick={async () => {
+      setBusy(true)
+      const r = await act(() => post<{ url: string }>('login/browser-link'))
+      setBusy(false)
+      if (r?.url) openExternal(r.url)
+    }}><Icon name="external" size={16} /> <span className="hide-sm">В браузере</span><span className="show-sm">Браузер</span></button>
+  )
+}
+
 function App() {
-  const [session, setSession] = useState<{ login: string; version: string } | null | undefined>(undefined)
+  const [session, setSession] = useState<{ login: string; version: string; method?: string } | null | undefined>(undefined)
   const [magicError, setMagicError] = useState('')
   const check = useCallback(() => {
     get('session').then(setSession, () => setSession(null))
@@ -230,7 +246,7 @@ function App() {
   if (session === undefined) return null
   if (session === null) return <Login onLogin={() => { setMagicError(''); check() }} error={magicError} />
   return (
-    <Shell login={session.login} version={session.version}
+    <Shell login={session.login} version={session.version} inTelegram={session.method === 'telegram'}
       onLogout={() => post('logout').finally(() => setSession(null))} />
   )
 }

@@ -148,6 +148,34 @@ func (s *Service) webBindIP(ctx context.Context) bool {
 // WebSessionCheck decides whether a request may use a session. active: the request comes from
 // something the admin did (not background polling). It returns "" when the session is fine, or
 // why it has ended — the session is ended right there (another IP, too long without actions).
+// WebSessionMethod is how a live session signed in ("" = unknown or ended).
+func (s *Service) WebSessionMethod(ctx context.Context, id string) string {
+	w, err := store.GetWebSession(ctx, s.st.DB, id)
+	if err != nil || w.RevokedAt != nil {
+		return ""
+	}
+	return w.Method
+}
+
+// WebSessionActor is who signed in to a session ("bot:<telegram id>" for the Mini App).
+func (s *Service) WebSessionActor(ctx context.Context, id string) (string, error) {
+	w, err := store.GetWebSession(ctx, s.st.DB, id)
+	if err != nil {
+		return "", err
+	}
+	return w.Actor, nil
+}
+
+// BrowserLink is a one-time sign-in link for the browser, for the panel opened inside Telegram
+// (a Mini App session): from there the admin moves to a browser without the bot's /login.
+func (s *Service) BrowserLink(ctx context.Context, sessionID, actor string) (string, time.Time, error) {
+	if s.WebSessionMethod(ctx, sessionID) != LoginTelegram {
+		return "", time.Time{}, invalid("ссылка для браузера выдаётся только панели, открытой в Telegram")
+	}
+	kind, id, _ := strings.Cut(actor, ":")
+	return s.LoginLink(ctx, Actor{Kind: kind, ID: id})
+}
+
 func (s *Service) WebSessionCheck(ctx context.Context, id, ip string, active bool) string {
 	w, err := store.GetWebSession(ctx, s.st.DB, id)
 	now := s.now().Unix()

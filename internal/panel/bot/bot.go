@@ -44,6 +44,7 @@ type Bot struct {
 	api      *client
 	pending  map[int64]pendingInput // chat -> what the next text message means
 	menuSet  map[int64]string       // chat -> Mini App URL its menu button opens
+	loginMsg map[int64]int64        // chat -> the latest sign-in link message (the older one is deleted)
 	failures int                    // wrong bind codes since the last good one
 
 	alerts  alertState
@@ -212,6 +213,7 @@ func (b *Bot) watch(ctx context.Context) {
 		b.maybeBackup(ctx)
 		b.maybeSummary(ctx)
 		b.setMenuButtons(ctx)
+		b.ensureQuickKeys(ctx)
 		b.dropLoginNotices(ctx)
 		if !b.nextTick(ctx, t.C) {
 			return
@@ -336,6 +338,7 @@ func (b *Bot) onStranger(ctx context.Context, api *client, m *Message) {
 	b.mu.Unlock()
 	b.log.Info("telegram admin bound", "id", m.From.ID, "username", m.From.Username)
 	_, _ = api.send(ctx, m.Chat.ID, "✅ Готово, <b>"+esc(name)+"</b>: вы администратор панели.\nУведомления о нодах и ночные бэкапы будут приходить сюда.", nil)
+	b.sendQuickKeys(ctx, api, m.Chat.ID)
 	b.sendMenu(ctx, api, m.Chat.ID)
 }
 

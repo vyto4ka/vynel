@@ -137,4 +137,30 @@ func TestTelegramMiniAppLogin(t *testing.T) {
 	if w := c.do("GET", "/api/users", "", false); w.Code != 200 {
 		t.Fatalf("after mini app login: %d", w.Code)
 	}
+	// From the Mini App to a browser: a one-time link, no message in the bot.
+	_ = svc.SetSetting(context.Background(), service.ActorCLI, service.SettingSubDomain, "nl.example.com")
+	w := c.do("POST", "/api/login/browser-link", "{}", true)
+	var link struct{ URL string }
+	_ = json.Unmarshal(w.Body.Bytes(), &link)
+	i := strings.Index(link.URL, "#/magic/")
+	if w.Code != 200 || i < 0 {
+		t.Fatalf("browser link: %d %s", w.Code, w.Body.String())
+	}
+	if issuer, err := svc.UseLoginToken(context.Background(), link.URL[i+len("#/magic/"):], ""); err != nil || issuer != "bot:4242" {
+		t.Fatalf("the link: %q %v", issuer, err)
+	}
+	if w := c.do("GET", "/api/session", "", false); !strings.Contains(w.Body.String(), `"method":"telegram"`) {
+		t.Fatalf("session: %s", w.Body.String())
+	}
+}
+
+// A session signed in with a password gets no browser link: it is in a browser already.
+func TestBrowserLinkOnlyFromMiniApp(t *testing.T) {
+	c, _, pw := newServer(t)
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != 200 {
+		t.Fatalf("login: %d", w.Code)
+	}
+	if w := c.do("POST", "/api/login/browser-link", "{}", true); w.Code == 200 {
+		t.Fatalf("a password session got a browser link: %s", w.Body.String())
+	}
 }

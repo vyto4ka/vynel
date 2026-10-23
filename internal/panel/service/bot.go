@@ -30,6 +30,7 @@ const (
 	SettingBotAlertState  = "bot.alert_state"  // JSON: messages being edited (survives restarts)
 	SettingBotSummaryTime = "bot.summary_time" // HH:MM of the daily summary, "off" = none
 	SettingBotSummaryLast = "bot.summary_last" // date of the last summary
+	SettingBotQuickKeys   = "bot.quick_keys"   // JSON {admin id: version} of the quick buttons each admin has
 	// SettingBackupPassword encrypts backups (Telegram, download, local copies) when set (secret).
 	SettingBackupPassword = "backup.password"
 )
