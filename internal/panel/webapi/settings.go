@@ -43,11 +43,11 @@ var settingDefs = []settingDef{
 
 	{Key: service.SettingHWIDEnabled, Section: "Устройства (HWID)", Title: "Учитывать устройства", Type: "bool", Default: "true"},
 	{Key: service.SettingHWIDLimit, Section: "Устройства (HWID)", Title: "Лимит устройств по умолчанию", Type: "int", Default: "0",
-		Hint: "0 — без ограничения", Help: "Для пользователей без своего лимита. Одновременные подключения ограничивает лимит IP."},
+		Hint: "0 — без ограничения", Help: "Для пользователей без своего лимита. Одновременные подключения ограничивает лимит IP. Без лимита (0) приложения без HWID тоже пускаются и получают подписку ссылками, с обычными заголовками."},
 	{Key: service.SettingIPLimit, Section: "Устройства (HWID)", Title: "Лимит IP одновременно", Type: "int", Default: "3",
 		Hint: "Все серверы вместе; 0 — без ограничения", Help: "Со скольких адресов пользователь может быть подключён сразу. Лишний адрес блокируется на нодах, а подписка с него показывает «лимит»."},
 	{Key: service.SettingHWIDAllowNone, Section: "Устройства (HWID)", Title: "Пускать приложения без HWID", Type: "bool", Default: "false",
-		Help: "Для всех пользователей. Для одного — переключатель «Проверять HWID» в его карточке. Иначе приложение без HWID получит сервер-заглушку с объяснением; Karing передаёт HWID, если включить X-HWID в настройках профиля."},
+		Help: "Для пользователей с лимитом устройств (без лимита такие приложения и так пускаются, ссылками). Для одного — переключатель «Проверять HWID» в его карточке. Иначе приложение без HWID получит сервер-заглушку с объяснением; Karing передаёт HWID, если включить X-HWID в настройках профиля."},
 
 	{Key: service.SettingCaddyEmail, Section: "Сертификаты", Title: "Email для Let's Encrypt", Type: "string"},
 	{Key: service.SettingCaddyIssuer, Section: "Сертификаты", Title: "Кто выдаёт сертификаты", Type: "select", Default: "acme", Options: []string{"acme", "internal"},
