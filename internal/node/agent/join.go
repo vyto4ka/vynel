@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -128,6 +129,9 @@ func pinnedVerifier(sni, fingerprint string) func(tls.ConnectionState) error {
 
 // SetPanelAddr changes the panel address the node dials (`vynel node set-panel`, docs/ARCHITECTURE.md §11.3).
 func SetPanelAddr(dir, addr string) error {
+	if host, port, err := net.SplitHostPort(addr); err != nil || host == "" || port == "" {
+		return fmt.Errorf("panel address %q is not host:port", addr)
+	}
 	info, err := loadPanelInfo(dir)
 	if err != nil {
 		return err

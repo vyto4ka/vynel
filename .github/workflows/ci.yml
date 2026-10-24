@@ -5,7 +5,17 @@ on:
     branches: [main, "claude/**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer and release scripts
+        run: scripts/test-install.sh
+
   go:
     runs-on: ubuntu-latest
     steps:

@@ -236,7 +236,7 @@
   <h2><span class="sn">03</span> Запустите установщик</h2>
   <p>На сервере под root:</p>
   <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
-<pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)</code></pre></div>
+<pre><code>bash &lt;(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh)</code></pre></div>
   <p>Откроется форма в терминале. Первым пунктом выберите <b>«Всё на этом сервере»</b>. Дальше в большинстве полей уже стоит подходящее значение (серым) — его оставляет <kbd>Enter</kbd>.</p>
   <div class="table-scroll"><table>
     <thead><tr><th>Клавиши</th><th class="wrap">Что делают</th></tr></thead>
@@ -286,7 +286,7 @@
   <p>Последний экран показывает, что будет сделано. «Установить» — и 1–3 минуты: пакеты, Xray, nginx, сертификат, запуск.</p>
   <details class="more"><summary>Установка без вопросов (для скриптов)</summary><div>
     <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
-<pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh) \
+<pre><code>bash &lt;(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh) \
   --mode aio --domain nl.example.com --admin-login admin --yes</code></pre></div>
     <p>Ещё флаги: <code>--email</code>, <code>--sub-domain</code>, <code>--name</code>, <code>--country</code>, <code>--bot-token</code>, <code>--login-mode link</code>, <code>--firewall off</code>, <code>--ssh-keys-only</code>, <code>--ssh-port random</code>, <code>--restore файл</code>, <code>--no-tui</code>.</p>
   </div></details>
@@ -527,7 +527,7 @@ vynel admin inbound host VLESS_NL --set remark="🇳🇱 Амстердам"</co
   <div class="step"><span class="num">3</span><div class="step-body">
     <p>Панель покажет команду с токеном (одноразовый, 24 часа). Выполните её на новом сервере:</p>
     <div class="code"><div class="code-bar"><span class="code-name">на новом сервере</span></div>
-<pre>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/…/scripts/install.sh) --mode node --token vyn1.…</pre></div>
+<pre>bash &lt;(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh) --mode node --token vyn1.…</pre></div>
     <p>Через минуту нода станет «работает», и пользователи групп с доступом к её профилям получат новый сервер в подписке сами.</p>
   </div></div>
   <div class="note warn"><b>Порт 9443</b> на панели открыт только адресам нод. Нода сменила IP и не подключается — на панели <code>vynel firewall gateway open</code>, после подключения <code>vynel firewall gateway nodes</code>.</div>
@@ -588,7 +588,7 @@ vynel admin bot code           <span class="c"># код привязки: бот
 ls /var/lib/vynel/backups/                           <span class="c"># последние 7 ночных и перед обновлениями</span></code></pre></div>
   <p><b>Переезд на новый сервер:</b> направьте домен на новый IP, скопируйте бэкап и запустите установщик с ним — логин и пароль останутся прежними:</p>
   <div class="code"><div class="code-bar"><span class="code-name">на новом сервере</span><button class="copy" type="button">Копировать</button></div>
-<pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh) \
+<pre><code>bash &lt;(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh) \
   --mode aio --domain nl.example.com --restore /root/vynel-backup.tar.gz</code></pre></div>
   <p>Если сменился IP панели, на каждой отдельной ноде: <code>vynel node set-panel НОВЫЙ_IP:9443</code>.</p>
 </section>
