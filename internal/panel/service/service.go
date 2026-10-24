@@ -77,6 +77,9 @@ type Service struct {
 	ipOnce     sync.Once
 	ips        *IPTracker
 	ipLog      ipLog // addresses written for the «Аналитика» page
+	bindMu     sync.Mutex
+	bindFor    string // the bind code the wrong tries are counted for
+	bindFails  int
 	grantCheck int64 // when Maintenance last looked for ended grants
 	cache      confCache
 	snapMu     sync.Mutex // one snapshot builder at a time

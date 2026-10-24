@@ -187,7 +187,13 @@ func (s *Service) fetchExternal(ctx context.Context, raw string, depth int) (str
 		var lines []string
 		for _, h := range hosts {
 			if !h.Hidden {
-				lines = append(lines, HostLink(h, user.UUID))
+				// A server with a key of its own (a cascade, one merged in from elsewhere)
+				// keeps it; the user's key is for the rest.
+				id := h.UUID
+				if id == "" {
+					id = user.UUID
+				}
+				lines = append(lines, HostLink(h, id))
 			}
 		}
 		if user.Status != store.StatusActive || len(lines) == 0 {

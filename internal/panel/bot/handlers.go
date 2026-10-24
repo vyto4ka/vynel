@@ -91,7 +91,7 @@ func (b *Bot) onMessage(ctx context.Context, api *client, m *Message) {
 		arg = strings.TrimSpace(arg)
 		switch cmd {
 		case "/start":
-			b.sendQuickKeys(ctx, api, chat)
+			b.sendQuickKeys(ctx, api, chat, true)
 			b.sendMenu(ctx, api, chat)
 		case "/menu":
 			b.sendMenu(ctx, api, chat)

@@ -237,3 +237,12 @@ func TestClientTemplateByUserAgent(t *testing.T) {
 		t.Fatalf("a bad template: %v", err)
 	}
 }
+
+func TestUniqueNames(t *testing.T) {
+	hosts := []service.Host{{Remark: "NL"}, {Remark: "NL 2"}, {Remark: "NL"}, {Remark: "NL"}, {Tag: "VLESS_DE"}, {Tag: "VLESS_DE"}}
+	got := uniqueNames(hosts)
+	want := []string{"NL", "NL 2", "NL 3", "NL 4", "VLESS_DE", "VLESS_DE 2"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("%v, want %v", got, want)
+	}
+}

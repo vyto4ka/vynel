@@ -224,3 +224,27 @@ func must0(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+// Raising the limit of a node the limit switched off does not wait on the database: the time
+// zone is read before the transaction, even when the settings are not cached.
+func TestRaiseLimitWithColdSettings(t *testing.T) {
+	f := newFixture(t)
+	nl, _ := must2(f.s.CreateNode(f.ctx, ActorCLI, NodeInput{Name: "NL", Country: "nl", Domain: "nl.example.com"}))
+	limit := int64(10 << 30)
+	must(f.s.SetNodeBilling(f.ctx, ActorCLI, nl.ID, NodeBillingInput{TrafficLimit: &limit}))
+	_ = store.AddIfaceTraffic(f.ctx, f.s.Store().DB, nl.ID, f.now.Unix(), 0, 10<<30)
+	must0(t, f.s.Maintenance(f.ctx, false))
+	if n := must(store.GetNode(f.ctx, f.s.Store().DB, nl.ID)); n.Enabled {
+		t.Fatal("not switched off")
+	}
+	f.s.Invalidate()
+	ctx, cancel := context.WithTimeout(f.ctx, 3*time.Second)
+	defer cancel()
+	more := int64(100 << 30)
+	if _, err := f.s.SetNodeBilling(ctx, ActorCLI, nl.ID, NodeBillingInput{TrafficLimit: &more}); err != nil {
+		t.Fatalf("raising the limit: %v", err)
+	}
+	if n := must(store.GetNode(f.ctx, f.s.Store().DB, nl.ID)); !n.Enabled {
+		t.Fatal("not back on")
+	}
+}

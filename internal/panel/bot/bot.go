@@ -45,7 +45,7 @@ type Bot struct {
 	pending  map[int64]pendingInput // chat -> what the next text message means
 	menuSet  map[int64]string       // chat -> Mini App URL its menu button opens
 	loginMsg map[int64]int64        // chat -> the latest sign-in link message (the older one is deleted)
-	failures int                    // wrong bind codes since the last good one
+	quickMu  sync.Mutex             // one quick-buttons check-and-send at a time
 
 	alerts  alertState
 	backup  backupState
@@ -310,35 +310,22 @@ func (b *Bot) onStranger(ctx context.Context, api *client, m *Message) {
 	if !ok || code == "" {
 		return
 	}
-	b.mu.Lock()
-	tooMany := b.failures >= 10
-	b.mu.Unlock()
-	if tooMany {
-		return
-	}
 	name := strings.TrimSpace(m.From.FirstName + " " + m.From.LastName)
 	bound, err := b.svc.BindBotAdmin(ctx, code, service.BotAdmin{ID: m.From.ID, Name: name, Username: m.From.Username})
+	if errors.Is(err, service.ErrBindCodeBurned) {
+		b.log.Warn("telegram bot: " + err.Error())
+		return
+	}
 	if err != nil {
 		b.log.Error("telegram bind", "err", err)
 		return
 	}
 	if !bound {
-		b.mu.Lock()
-		b.failures++
-		if b.failures >= 10 {
-			// Someone is guessing: burn the code, a new one is needed.
-			_, _ = b.svc.NewBindCode(ctx, service.Actor{Kind: "bot"})
-			b.log.Warn("telegram bot: 10 wrong bind codes, the code was replaced; create a new one")
-		}
-		b.mu.Unlock()
 		return
 	}
-	b.mu.Lock()
-	b.failures = 0
-	b.mu.Unlock()
 	b.log.Info("telegram admin bound", "id", m.From.ID, "username", m.From.Username)
 	_, _ = api.send(ctx, m.Chat.ID, "✅ Готово, <b>"+esc(name)+"</b>: вы администратор панели.\nУведомления о нодах и ночные бэкапы будут приходить сюда.", nil)
-	b.sendQuickKeys(ctx, api, m.Chat.ID)
+	b.sendQuickKeys(ctx, api, m.Chat.ID, false)
 	b.sendMenu(ctx, api, m.Chat.ID)
 }
 
