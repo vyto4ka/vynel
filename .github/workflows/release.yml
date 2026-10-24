@@ -1,0 +1,123 @@
+name: release
+
+# Stable releases: what the Releases tab shows and what every server and every new install
+# follows. Nothing else publishes here, so servers get an update when you decide, not on every
+# commit (the per-commit builds are the dev channel, edge.yml).
+#
+# How to release (docs/DEVELOPMENT.md, "Сборки и релизы"):
+#   1. commit to main, try the build on your own server (dev channel: `vynel update --channel
+#      dev --ref main`);
+#   2. Actions -> release -> Run workflow, version 1.2.0 (the tag becomes v1.2.0), ref empty for
+#      the tip of main or the commit you tried. Or push the tag yourself: git tag v1.2.0 && git
+#      push origin v1.2.0.
+#   A version with a suffix (1.2.0-rc1) is published as a pre-release: it is not "latest", so
+#   servers on the stable channel do not move to it.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, for example 1.2.0 (the tag will be v1.2.0)"
+        required: true
+      ref:
+        description: "Commit to release (empty: the tip of main). It must be on main and have a passing ci run"
+        required: false
+        default: ""
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.ref || 'main') || github.ref }}
+      - name: Version and commit
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            tag="v${INPUT_VERSION#v}"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$tag' is not a version like v1.2.0 or v1.2.0-rc1"; exit 1
+          fi
+          sha="$(git rev-parse HEAD)"
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::commit ${sha:0:7} is not on main: releases are made from main only"; exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::the tag $tag already exists"; exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::the release $tag already exists: a published release is never replaced, make a new version"; exit 1
+          fi
+          {
+            echo "TAG=$tag"
+            echo "SHA=$sha"
+            # A suffix means a pre-release: its installer is pinned to it, "latest" does not move.
+            if [[ "$tag" == *-* ]]; then echo "PRERELEASE=1"; echo "FOLLOWS=$tag"; else echo "PRERELEASE="; echo "FOLLOWS=latest"; fi
+          } >> "$GITHUB_ENV"
+      - name: CI passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ok="$(gh run list --workflow ci.yml --commit "$SHA" --status success --json conclusion --jq length)"
+          if [ "${ok:-0}" -lt 1 ]; then
+            echo "::error::no passing ci run for ${SHA:0:7}: wait for ci (or fix it) and release again"; exit 1
+          fi
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Build the web UI (embedded into the binary)
+        run: make web && test -f web/dist/index.html
+      - name: Build
+        run: make build-all VERSION="$TAG"
+      - name: Installer, checksums, signature
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        # The installer of a release installs that release's binary and, later, its successors.
+        run: scripts/release-assets.sh bin "$TAG" "$FOLLOWS" main
+      - name: Tag
+        if: github.event_name == 'workflow_dispatch'
+        run: git tag "$TAG" "$SHA" && git push origin "refs/tags/$TAG"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # A draft first: the files of a release are all there when it becomes visible, so a
+        # server never sees VERSION of a release whose binaries are still uploading.
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          Install: \`bash <(curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh)\`
+
+          Update a server: \`vynel update\` (or the button in the panel).
+          NOTES
+          pre=(); [ -n "$PRERELEASE" ] && pre=(--prerelease)
+          gh release create "$TAG" bin/vynel-linux-* bin/install.sh bin/SHA256SUMS $(ls bin/SHA256SUMS.signed 2>/dev/null) bin/VERSION \
+            --draft --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes "${pre[@]}"
+          if [ -n "$PRERELEASE" ]; then
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$TAG" --draft=false --prerelease=false --latest
+          fi

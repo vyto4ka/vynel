@@ -1,11 +1,20 @@
 name: edge
 
-# Every push publishes prebuilt binaries as the pre-release "edge-<branch>" (slashes -> dashes),
-# so scripts/install-aio.sh downloads vynel instead of compiling it on the server.
+# The dev channel. Every push to main or a claude/** branch builds the binaries and
+#   - attaches them to the run as an artifact (vynel-edge-<branch>-<version>, 14 days): take a build
+#     of any commit by hand, `gh run download` or the run page, then `install.sh --binary FILE`;
+#   - publishes them as the pre-release "edge-<branch>" (slashes -> dashes), which a server
+#     follows when it is switched to the dev channel: `vynel update --channel dev --ref BRANCH`,
+#     or a fresh install from that release's install.sh.
+#
+# Nobody gets these builds unless their server was put on the dev channel: servers installed the
+# usual way follow the stable releases, which only .github/workflows/release.yml publishes
+# (docs/DEVELOPMENT.md, "Сборки и релизы"). Run it by hand on any other branch with
+# "Run workflow".
 #
 # A push of docs, tests or CI files only builds nothing, and the build's version is the last
-# commit that changed code (scripts/code-version.sh): panels offer an update only when the
-# binaries really change, not for a README fix.
+# commit that changed code (scripts/code-version.sh): a server on the dev channel is offered an
+# update only when the binaries really change, not for a README fix.
 on:
   push:
     branches: [main, "claude/**"]
@@ -17,10 +26,13 @@ on:
       - "internal/e2e/**"
       - "**/testdata/**"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/release.yml"
+      - ".github/dependabot.yml"
       - ".claude/**"
       - "scripts/code-version.sh"
       - "scripts/release-key.sh"
       - "scripts/load-memory.sh"
+      - "scripts/test-install.sh"
   workflow_dispatch:
 
 permissions:
@@ -31,14 +43,18 @@ concurrency:
   cancel-in-progress: false # a cancelled publish could leave files of two builds
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the code version looks for the last commit that changed code
-      - name: Code version
-        run: echo "CODE_VERSION=$(scripts/code-version.sh)" >> "$GITHUB_ENV"
+      - name: Names
+        run: |
+          branch="$GITHUB_REF_NAME"
+          echo "CODE_VERSION=$(scripts/code-version.sh)" >> "$GITHUB_ENV"
+          echo "BRANCH=$branch" >> "$GITHUB_ENV"
+          echo "TAG=edge-${branch//\//-}" >> "$GITHUB_ENV"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -54,28 +70,20 @@ jobs:
         run: make web && test -f web/dist/index.html
       - name: Build
         run: make build-all VERSION="$CODE_VERSION"
-      - name: Checksums
-        # install.sh goes into the signed checksums too: `vynel update` runs it only when the
-        # signature and its checksum match.
-        run: cp scripts/install.sh bin/install.sh && cd bin && sha256sum vynel-linux-* install.sh > SHA256SUMS && cat SHA256SUMS && echo "$CODE_VERSION" > VERSION
-      - name: Sign
-        # SHA256SUMS.signed = the checksums plus "# ed25519 <signature>" in one file, uploaded in
-        # one go, so a downloader never sees checksums and a signature from different builds.
+      - name: Installer, checksums, signature
         env:
-          KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-        run: |
-          if [ -z "$KEY" ]; then echo "no RELEASE_SIGNING_KEY secret: releases are not signed (scripts/release-key.sh)"; exit 0; fi
-          umask 077
-          printf '%s\n' "$KEY" > "$RUNNER_TEMP/release.pem"
-          openssl pkeyutl -sign -rawin -inkey "$RUNNER_TEMP/release.pem" -in bin/SHA256SUMS -out "$RUNNER_TEMP/sums.sig"
-          rm -f "$RUNNER_TEMP/release.pem"
-          { cat bin/SHA256SUMS; printf '# ed25519 %s\n' "$(base64 -w0 "$RUNNER_TEMP/sums.sig")"; } > bin/SHA256SUMS.signed
-          # The key in scripts/install.sh must match, or every install would fail.
-          pub="$(grep -o 'VYNEL_RELEASE_PUBKEY:-[^}]*' scripts/install.sh | cut -d- -f2-)"
-          if [ -n "$pub" ]; then
-            printf -- '-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----\n' "$pub" > "$RUNNER_TEMP/release.pub"
-            openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/release.pub" -rawin -in bin/SHA256SUMS -sigfile "$RUNNER_TEMP/sums.sig"
-          fi
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        # The installer of this release follows this release (the dev channel of the branch).
+        run: scripts/release-assets.sh bin "$CODE_VERSION" "$TAG" "$BRANCH"
+      - name: Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vynel-${{ env.TAG }}-${{ env.CODE_VERSION }}
+          path: |
+            bin/vynel-linux-*
+            bin/SHA256SUMS
+            bin/VERSION
+          retention-days: 14
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -84,18 +92,34 @@ jobs:
         # SHA256SUMS last, so a downloader sees either the old or the new checksums; a mismatch
         # in between is retried by the installer.
         run: |
-          tag="edge-${GITHUB_REF_NAME//\//-}"
-          title="edge: $GITHUB_REF_NAME @ $CODE_VERSION"
-          notes="Automatic build of \`$GITHUB_REF_NAME\` at ${GITHUB_SHA}. Used by scripts/install.sh."
-          git push -f origin "$GITHUB_SHA:refs/tags/$tag"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" bin/vynel-linux-* bin/install.sh --clobber
-            gh release upload "$tag" bin/SHA256SUMS --clobber
-            if [ -f bin/SHA256SUMS.signed ]; then gh release upload "$tag" bin/SHA256SUMS.signed --clobber; fi
-            # VERSION last: panels compare it with what they run, so it must not name a build
+          title="dev build: $BRANCH @ $CODE_VERSION"
+          notes="Automatic build of \`$BRANCH\` at ${GITHUB_SHA} for trying a commit on your own server; it is not a release and nobody is offered it. Switch a server to it with \`vynel update --channel dev --ref $BRANCH\`; back with \`vynel update --channel stable\`. Releases for everyone: https://github.com/${GITHUB_REPOSITORY}/releases/latest"
+          git push -f origin "$GITHUB_SHA:refs/tags/$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" bin/vynel-linux-* bin/install.sh --clobber
+            gh release upload "$TAG" bin/SHA256SUMS --clobber
+            if [ -f bin/SHA256SUMS.signed ]; then gh release upload "$TAG" bin/SHA256SUMS.signed --clobber; fi
+            # VERSION last: servers compare it with what they run, so it must not name a build
             # whose files are not all there yet.
-            gh release upload "$tag" bin/VERSION --clobber
-            gh release edit "$tag" --title "$title" --notes "$notes" --prerelease
+            gh release upload "$TAG" bin/VERSION --clobber
+            gh release edit "$TAG" --title "$title" --notes "$notes" --prerelease --latest=false
           else
-            gh release create "$tag" bin/vynel-linux-* bin/install.sh bin/SHA256SUMS $(ls bin/SHA256SUMS.signed 2>/dev/null) bin/VERSION --prerelease --verify-tag --title "$title" --notes "$notes"
+            gh release create "$TAG" bin/vynel-linux-* bin/install.sh bin/SHA256SUMS $(ls bin/SHA256SUMS.signed 2>/dev/null) bin/VERSION \
+              --prerelease --latest=false --verify-tag --title "$title" --notes "$notes"
           fi
+      - name: Remove the builds of deleted branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Keeps the Releases tab to the releases and the few branches that are alive.
+        run: |
+          branches="$(gh api --paginate "repos/$GITHUB_REPOSITORY/branches" --jq '.[].name' | tr '/' '-')"
+          if ! grep -qxF -- "${TAG#edge-}" <<<"$branches"; then
+            echo "branch list incomplete, nothing removed"; exit 0
+          fi
+          gh release list --limit 200 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease and (.tagName | startswith("edge-"))) | .tagName' |
+            while read -r tag; do
+              if ! grep -qxF -- "${tag#edge-}" <<<"$branches"; then
+                echo "removing $tag: its branch is gone"
+                gh release delete "$tag" --cleanup-tag --yes || true
+              fi
+            done

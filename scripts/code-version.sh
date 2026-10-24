@@ -13,10 +13,13 @@ not_code=(
   ':(exclude)internal/e2e'
   ':(exclude)*/testdata'
   ':(exclude).github/workflows/ci.yml'
+  ':(exclude).github/workflows/release.yml'
+  ':(exclude).github/dependabot.yml'
   ':(exclude).claude'
   ':(exclude)scripts/code-version.sh'
   ':(exclude)scripts/release-key.sh'
   ':(exclude)scripts/load-memory.sh'
+  ':(exclude)scripts/test-install.sh'
 )
 
 v="$(git log -1 --format=%h --abbrev=7 -- . "${not_code[@]}")"

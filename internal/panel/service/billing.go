@@ -186,17 +186,22 @@ func FetchSiteInfo(ctx context.Context, site string) SiteInfo {
 	return info
 }
 
+// publicOnly is a net.Dialer Control: it refuses private, loopback and link-local addresses. It
+// runs on the address that is about to be dialled, so a name that resolves to a private address
+// (or is rebound to one after a check) and redirects to one are refused as well.
+func publicOnly(_, address string, _ syscall.RawConn) error {
+	host, _, _ := net.SplitHostPort(address)
+	ip := net.ParseIP(host)
+	if !FetchPrivate && (ip == nil || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() ||
+		ip.IsLinkLocalMulticast() || ip.IsMulticast()) {
+		return fmt.Errorf("address %s is not public", host)
+	}
+	return nil
+}
+
 // siteClient fetches public sites only: no private, loopback or link-local addresses.
 func siteClient() *http.Client {
-	d := &net.Dialer{Timeout: 6 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
-		host, _, _ := net.SplitHostPort(address)
-		ip := net.ParseIP(host)
-		if !FetchPrivate && (ip == nil || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() ||
-			ip.IsLinkLocalMulticast() || ip.IsMulticast()) {
-			return fmt.Errorf("address %s is not public", host)
-		}
-		return nil
-	}}
+	d := &net.Dialer{Timeout: 6 * time.Second, Control: publicOnly}
 	tr := &http.Transport{DialContext: d.DialContext, TLSHandshakeTimeout: 6 * time.Second,
 		ResponseHeaderTimeout: 8 * time.Second}
 	return &http.Client{Transport: tr, Timeout: 10 * time.Second, CheckRedirect: func(_ *http.Request, via []*http.Request) error {

@@ -51,8 +51,17 @@ func RequestDepth(header string) int {
 	return n
 }
 
-// externalClient fetches external subscriptions (tests replace it).
-var externalClient = &http.Client{Timeout: 15 * time.Second}
+// externalClient fetches external subscriptions (tests replace it). Like siteClient it reaches
+// public addresses only: the address of a subscription is typed in by an admin, and the panel
+// must not be a way to probe the server's own network (127.0.0.1, the cloud metadata service).
+var externalClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 6 * time.Second, Control: publicOnly}).DialContext,
+		TLSHandshakeTimeout:   6 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+	},
+}
 
 // RefreshExternalSub fetches an external subscription now and stores its servers (on failure
 // the last good copy stays and the error is shown in the panel).

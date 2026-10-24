@@ -31,13 +31,31 @@ var (
 )
 
 // Source is where this server takes its updates from.
+//
+// Two channels (docs/DEVELOPMENT.md, "Сборки и релизы"):
+//   - stable: Release is ReleaseLatest, the newest published GitHub release (v1.2.3). Panels and
+//     nodes see a new version only when a release is published on purpose.
+//   - dev: Release is edge-<branch>, the build CI makes from every push to that branch. It is for
+//     trying a commit on your own server before releasing it.
 type Source struct {
 	Ref, Release, ReleaseURL, GHProxy string
 }
 
+// ReleaseLatest is the Release of the stable channel: GitHub's "latest" release.
+const ReleaseLatest = "latest"
+
+const releasesBase = "https://github.com/vyto4ka/vynel/releases"
+
+// Channel names, as `vynel update --channel` and the installer's --channel take them.
+const (
+	ChannelStable = "stable"
+	ChannelDev    = "dev"
+)
+
 var (
 	refRe   = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,100}$`)
 	proxyRe = regexp.MustCompile(`^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$`)
+	ansiRe  = regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]|\r")
 )
 
 // LoadSource reads EnvFile; a server installed before it existed updates from main.
@@ -74,20 +92,79 @@ func LoadSource() Source {
 		}
 	}
 	if s.Release == "" {
-		s.Release = "edge-" + strings.ReplaceAll(s.Ref, "/", "-")
+		// An installer from before channels recorded no release: it followed its branch's builds.
+		s.Release = devRelease(s.Ref)
 	}
 	return s
 }
 
+// SaveSource writes the source to EnvFile, the format scripts/install.sh writes and LoadSource
+// reads.
+func SaveSource(s Source) error {
+	var b strings.Builder
+	b.WriteString("# written by scripts/install.sh and `vynel update --channel`; read by `vynel update`\n")
+	fmt.Fprintf(&b, "VYNEL_REF=%s\nVYNEL_RELEASE=%s\n", s.Ref, s.Release)
+	if s.ReleaseURL != "" {
+		fmt.Fprintf(&b, "VYNEL_RELEASE_URL=%s\n", s.ReleaseURL)
+	}
+	if s.GHProxy != "" {
+		fmt.Fprintf(&b, "VYNEL_GH_PROXY=%s\n", s.GHProxy)
+	}
+	if err := os.MkdirAll(filepath.Dir(EnvFile), 0o755); err != nil {
+		return err
+	}
+	tmp := EnvFile + ".new"
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, EnvFile)
+}
+
+// Channel is the channel this source belongs to: dev for an edge-<branch> build, else stable
+// (the latest release, or a pinned v1.2.3).
+func (s Source) Channel() string {
+	if strings.HasPrefix(s.Release, "edge-") {
+		return ChannelDev
+	}
+	return ChannelStable
+}
+
+// WithChannel returns the source of another channel. dev takes a branch (ref; "" keeps the
+// current one), stable takes none.
+func (s Source) WithChannel(channel, ref string) (Source, error) {
+	switch channel {
+	case ChannelStable:
+		if ref != "" {
+			return s, errors.New("the stable channel has no branch: --ref is for --channel dev")
+		}
+		s.Release, s.ReleaseURL = ReleaseLatest, ""
+	case ChannelDev:
+		if ref == "" {
+			ref = s.Ref
+		}
+		if !refRe.MatchString(ref) {
+			return s, fmt.Errorf("bad branch name %q", ref)
+		}
+		s.Ref, s.Release, s.ReleaseURL = ref, devRelease(ref), ""
+	default:
+		return s, fmt.Errorf("unknown channel %q (stable or dev)", channel)
+	}
+	return s, nil
+}
+
+// devRelease is the tag CI publishes the builds of a branch under.
+func devRelease(ref string) string { return "edge-" + strings.ReplaceAll(ref, "/", "-") }
+
+// releaseURL is the directory that holds the release's files (vynel-linux-*, SHA256SUMS,
+// VERSION, install.sh).
 func (s Source) releaseURL() string {
 	if s.ReleaseURL != "" {
 		return s.ReleaseURL
 	}
-	return s.GHProxy + "https://github.com/vyto4ka/vynel/releases/download/" + s.Release
-}
-
-func (s Source) scriptURL() string {
-	return s.GHProxy + "https://raw.githubusercontent.com/vyto4ka/vynel/" + s.Ref + "/scripts/install.sh"
+	if s.Release == ReleaseLatest {
+		return s.GHProxy + releasesBase + "/latest/download"
+	}
+	return s.GHProxy + releasesBase + "/download/" + s.Release
 }
 
 func (s Source) env() []string {
@@ -119,12 +196,16 @@ func Latest(ctx context.Context, s Source) (string, error) {
 	return v, nil
 }
 
+// httpClient bounds every download even when the caller's context has no deadline (`vynel update
+// --foreground` has none): a server that stops answering must not hang the update for good.
+var httpClient = &http.Client{Timeout: 2 * time.Minute}
+
 func get(ctx context.Context, url string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -217,8 +298,9 @@ func Start(ctx context.Context) error {
 }
 
 // Run updates this server here and now, writing the installer's output to w and LogFile.
-func Run(ctx context.Context, w io.Writer) error {
-	s := LoadSource()
+func Run(ctx context.Context, w io.Writer) error { return run(ctx, w, LoadSource()) }
+
+func run(ctx context.Context, w io.Writer, s Source) error {
 	logf, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -231,8 +313,9 @@ func Run(ctx context.Context, w io.Writer) error {
 
 	// The installer runs as root, so where it comes from matters. With a release key (signed
 	// releases) it is the release's own installer, run only when the signature and its checksum
-	// match; a bad signature stops the update. Without a key it is the branch's installer (fixes
-	// to the update itself arrive with it), or the one built into this binary when GitHub does
+	// match; a bad signature stops the update. Without a key it is still the release's installer
+	// (so fixes to the update itself arrive with the release, and only releases are ever
+	// installed from), or the one built into this binary when the release has none or GitHub does
 	// not answer.
 	key, err := releaseKey()
 	if err != nil {
@@ -251,12 +334,12 @@ func Run(ctx context.Context, w io.Writer) error {
 		fmt.Fprintln(out, note)
 	} else {
 		fmt.Fprintln(out, "releases are not signed (no key: scripts/release-key.sh): the installer is not verified")
-		script, err = get(ctx, s.scriptURL(), 4<<20)
+		script, err = get(ctx, s.releaseURL()+"/install.sh", 4<<20)
 		if err != nil || !strings.HasPrefix(string(script), "#!") {
 			if err == nil {
 				err = errors.New("not a script")
 			}
-			fmt.Fprintf(out, "cannot download the installer (%v): using the one built into this version\n", err)
+			fmt.Fprintf(out, "cannot download the release's installer (%v): using the one built into this version\n", err)
 			script = scripts.Install
 		}
 	}
@@ -268,6 +351,7 @@ func Run(ctx context.Context, w io.Writer) error {
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.Write(script); err != nil {
 		tmp.Close()
+		saveResult(Result{StartedAt: started, At: time.Now().Unix(), Error: err.Error()})
 		return err
 	}
 	tmp.Close()
@@ -305,7 +389,7 @@ func tail(path string, n int) string {
 		return ""
 	}
 	// The installer colours its output; the panel shows plain text.
-	clean := regexp.MustCompile("\x1b\\[[0-9;]*[A-Za-z]|\r").ReplaceAllString(string(b), "")
+	clean := ansiRe.ReplaceAllString(string(b), "")
 	var lines []string
 	for _, l := range strings.Split(clean, "\n") {
 		if strings.TrimSpace(l) != "" {

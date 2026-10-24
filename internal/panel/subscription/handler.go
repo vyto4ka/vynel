@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/clientip"
 	"github.com/vyto4ka/vynel/internal/decoy"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -338,17 +339,5 @@ func (h *Handler) miss(ip string) {
 	}
 }
 
-// clientIP trusts X-Forwarded-For only from the local reverse proxy (Caddy).
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			first, _, _ := strings.Cut(xff, ",")
-			return strings.TrimSpace(first)
-		}
-	}
-	return host
-}
+// clientIP trusts X-Forwarded-For only from the local reverse proxy.
+func clientIP(r *http.Request) string { return clientip.From(r) }

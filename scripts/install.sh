@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # vynel installer: one script for every role (docs/INSTALL_GUIDE.md).
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)
+#   bash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh)
+#
+# The installer is always taken from a release, never from a branch, and installs the binary of
+# that same release: the latest published release (stable channel, the default) or, for trying a
+# commit before it is released, the build CI makes of a branch (dev channel):
+#
+#   bash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/download/edge-BRANCH/install.sh)
+#   install.sh --channel dev --ref BRANCH      (BRANCH with "/" written as "-" in the URL above)
+#   install.sh --binary ./vynel-linux-amd64    (a build from a CI run's artifacts, see docs/DEVELOPMENT.md)
 #
 # Without arguments it shows a menu: everything on one server, panel only, node only, update,
 # uninstall. Every choice can also run unattended:
@@ -13,12 +21,21 @@
 #   install.sh --mode harden  [--ssh-keys-only] [--ssh-port random|N] [--firewall on|off]
 #   install.sh --mode uninstall [--purge] [--yes]
 #
-# Binaries come from the branch's "edge" release built by CI; without one vynel is built from
-# source (slow on small servers). Updates keep all data.
+# Without a downloadable release vynel can be built from source (slow on small servers). Updates
+# keep all data.
 set -euo pipefail
 
+# CI fills these in when it publishes this file as a release asset (scripts/release-assets.sh) and
+# they are empty in the repository: the copy that came from a release follows that release. A
+# stable release's installer follows the latest release, a dev build's follows its branch.
+BUILT_RELEASE=""
+BUILT_REF=""
+
 REPO="${VYNEL_REPO:-https://github.com/vyto4ka/vynel.git}"
-REF="${VYNEL_REF:-main}"
+REF="${VYNEL_REF:-${BUILT_REF:-main}}"
+# --ref (or VYNEL_REF) without --channel means the dev channel of that branch, as before channels existed.
+REF_SET=0 CHANNEL="${VYNEL_CHANNEL:-}" LOCAL_BIN=""
+[[ -n "${VYNEL_REF:-}" ]] && REF_SET=1
 SRC=/opt/vynel-src
 DATA=/var/lib/vynel
 NODE_DATA=/var/lib/vynel-node
@@ -74,7 +91,10 @@ Options:
   --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
   --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz, or .age if encrypted)
   --backup-password PASS password of an encrypted backup (asked when needed and not given)
-  --ref REF              git branch whose release to install (default $REF)
+  --channel CHANNEL      stable: the latest published release (default); dev: the build CI makes of a
+                         branch from every push, to try a commit before it is released (see --ref)
+  --ref BRANCH           the branch of the dev channel (implies --channel dev); "/" in the name is "-" in release names
+  --binary FILE          install this vynel binary (e.g. from a CI run's artifacts) instead of downloading one
   --gh-proxy URL         prefix for github.com downloads when GitHub is slow or blocked,
                          e.g. https://ghfast.top/ (also VYNEL_GH_PROXY)
   --build-from-source    allow compiling vynel when no prebuilt release can be downloaded
@@ -108,7 +128,9 @@ while [[ $# -gt 0 ]]; do
     --restore) RESTORE="${2:-}"; shift 2 ;;
     --backup-password) export VYNEL_BACKUP_PASSWORD="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
-    --ref) REF="${2:-}"; shift 2 ;;
+    --ref) REF="${2:-}"; REF_SET=1; shift 2 ;;
+    --channel) CHANNEL="${2:-}"; shift 2 ;;
+    --binary) LOCAL_BIN="${2:-}"; shift 2 ;;
     --gh-proxy) GH_PROXY="${2:-}"; shift 2 ;;
     --build-from-source) FROM_SOURCE=1; shift ;;
     --yes|-y) ASSUME_YES=1; shift ;;
@@ -756,10 +778,32 @@ check_ports() {
 }
 
 # ---- binaries ----
-# vynel: a prebuilt binary from the branch's "edge" release (built by .github/workflows/edge.yml).
+# vynel: a prebuilt binary from a GitHub release. Two channels:
+#   stable  the latest published release (.github/workflows/release.yml): the default, and the
+#           only one that moves when a release is published on purpose;
+#   dev     the pre-release CI builds of a branch on every push (.github/workflows/edge.yml), for
+#           trying a commit on your own server before it is released.
 # Building from source is the fallback only: on a 1 vCPU / 1 GB VPS it takes 10–20 minutes.
-RELEASE="${VYNEL_RELEASE:-edge-${REF//\//-}}"
-RELEASE_URL="${VYNEL_RELEASE_URL:-https://github.com/vyto4ka/vynel/releases/download/$RELEASE}"
+case "$CHANNEL" in
+  "") ;;
+  stable|dev) ;;
+  *) die "unknown channel '$CHANNEL' (stable or dev)" ;;
+esac
+if [[ -n "${VYNEL_RELEASE:-}" ]]; then
+  RELEASE="$VYNEL_RELEASE"
+elif [[ "$CHANNEL" == dev || ( -z "$CHANNEL" && $REF_SET -eq 1 ) ]]; then
+  RELEASE="edge-${REF//\//-}"
+elif [[ "$CHANNEL" == stable ]]; then
+  RELEASE=latest
+else
+  RELEASE="${BUILT_RELEASE:-latest}"
+fi
+# release_dir RELEASE: where the files of a release are downloaded from.
+release_dir() {
+  if [[ "$1" == latest ]]; then echo "https://github.com/vyto4ka/vynel/releases/latest/download"
+  else echo "https://github.com/vyto4ka/vynel/releases/download/$1"; fi
+}
+RELEASE_URL="${VYNEL_RELEASE_URL:-$(release_dir "$RELEASE")}"
 TEMP_SWAP=0
 # Releases are signed (Ed25519, SHA256SUMS.signed): with a key here a binary whose checksums are
 # not signed by it is never installed, even when it comes through --gh-proxy. Set up with
@@ -970,7 +1014,20 @@ save_install_env() {
 # install_vynel: VYNEL_CHANGED=1 when a new binary was put in place.
 VYNEL_CHANGED=0
 install_vynel() {
-  save_install_env
+  # A binary you give is a trial: the channel this server follows stays as it is.
+  if [[ -z "$LOCAL_BIN" || ! -f "$INSTALL_ENV" ]]; then save_install_env; fi
+  if [[ -n "$LOCAL_BIN" ]]; then
+    [[ -f "$LOCAL_BIN" ]] || die "--binary: no such file: $LOCAL_BIN"
+    local ver
+    ver="$(chmod 755 "$LOCAL_BIN" 2>/dev/null; "$LOCAL_BIN" version 2>/dev/null)" || die "--binary: $LOCAL_BIN does not run here (wrong architecture?)"
+    info "vynel: installing the binary you gave ($ver); the next \`vynel update\` returns this server to its channel"
+    [[ -x /usr/local/bin/vynel ]] && cp -f /usr/local/bin/vynel /usr/local/bin/vynel.prev
+    install -m 755 "$LOCAL_BIN" /usr/local/bin/vynel.new
+    mv -f /usr/local/bin/vynel.new /usr/local/bin/vynel
+    VYNEL_CHANGED=1
+    green "  installed $(/usr/local/bin/vynel version)"
+    return 0
+  fi
   info "vynel: checking the release $RELEASE"
   # Right after a push CI rebuilds the release (2–3 minutes): wait for it instead of compiling.
   local attempt rc tries="${VYNEL_RELEASE_TRIES:-10}" netfail=0
@@ -994,7 +1051,7 @@ install_vynel() {
   done
   if [[ -x /usr/local/bin/vynel && $FROM_SOURCE -eq 0 ]]; then
     red "  cannot download the release: nothing changed, vynel keeps running."
-    red "  Check https://github.com/vyto4ka/vynel/releases/tag/$RELEASE and run the update again;"
+    red "  Check https://github.com/vyto4ka/vynel/releases and run the update again;"
     red "  if GitHub is slow from this server, add --gh-proxy https://ghfast.top/"
     return 1
   fi
@@ -1157,7 +1214,7 @@ open_ports() {
 
 # The command the panel shows for new nodes (Ноды → + Нода).
 script_command() {
-  local cmd="bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/$REF/scripts/install.sh)"
+  local cmd="bash <(curl -fsSL $(release_dir "$RELEASE")/install.sh)"
   printf '%s' "$cmd"
 }
 
