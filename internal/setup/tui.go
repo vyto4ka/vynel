@@ -184,12 +184,12 @@ func sshFacts() (keys, password bool, ports []int) {
 	files, _ := filepath.Glob("/home/*/.ssh/authorized_keys")
 	for _, f := range append([]string{"/root/.ssh/authorized_keys"}, files...) {
 		b, err := os.ReadFile(f)
-		if err == nil && regexp.MustCompile(`(?m)^(ssh-|ecdsa-|sk-)`).Match(b) {
+		if err == nil && sshKeyLine.Match(b) {
 			keys = true
 		}
 	}
 	if out, err := exec.Command("sshd", "-T").Output(); err == nil {
-		password = regexp.MustCompile(`(?m)^passwordauthentication yes`).Match(out)
+		password = sshPasswordOn.Match(out)
 	}
 	return keys, password, firewall.SSHPorts(context.Background())
 }
@@ -197,6 +197,11 @@ func sshFacts() (keys, password bool, ports []int) {
 func countryName(cc string) string { return or(xrayconf.CountryName(cc), "VPN") }
 
 var installedNames = map[string]string{"aio": "панель + нода (всё на одном сервере)", "panel": "панель", "node": "нода", "": "ничего"}
+
+var (
+	sshKeyLine    = regexp.MustCompile(`(?m)^(ssh-|ecdsa-|sk-)`)
+	sshPasswordOn = regexp.MustCompile(`(?m)^passwordauthentication yes`)
+)
 
 // Run shows the form and returns the answers.
 func Run(o Options) (*Answers, error) {

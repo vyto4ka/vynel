@@ -3,6 +3,7 @@
 package webapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -11,13 +12,13 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/clientip"
 	"github.com/vyto4ka/vynel/internal/decoy"
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
@@ -206,7 +207,7 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request, rest string) {
 	} else if strings.HasPrefix(name, "assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	http.ServeContent(w, r, name, time.Time{}, strings.NewReader(string(b)))
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(b))
 }
 
 // ---- sessions ----
@@ -426,19 +427,7 @@ func actor(r *http.Request) service.Actor {
 	return service.Actor{Kind: "admin", ID: current(r).Login}
 }
 
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			first, _, _ := strings.Cut(xff, ",")
-			return strings.TrimSpace(first)
-		}
-	}
-	return host
-}
+func clientIP(r *http.Request) string { return clientip.From(r) }
 
 // ---- login ----
 

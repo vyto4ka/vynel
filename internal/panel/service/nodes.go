@@ -22,6 +22,9 @@ const InstallTokenTTL = 24 * time.Hour
 
 var codeRe = regexp.MustCompile(`^[A-Z][A-Z0-9]{0,9}$`)
 
+// countryRe is a two-letter country code.
+var countryRe = regexp.MustCompile(`^[A-Z]{2}$`)
+
 // PendingNodeName names a node created without a name and country; the node replaces it with
 // its country's name when it joins (LearnNodeCountry).
 const PendingNodeName = "Новый сервер"
@@ -43,7 +46,7 @@ func (s *Service) CreateNode(ctx context.Context, actor Actor, in NodeInput) (*s
 	in.Name = strings.TrimSpace(in.Name)
 	in.Country = strings.ToUpper(strings.TrimSpace(in.Country))
 	in.Code = strings.ToUpper(strings.TrimSpace(in.Code))
-	if in.Country != "" && !regexp.MustCompile(`^[A-Z]{2}$`).MatchString(in.Country) {
+	if in.Country != "" && !countryRe.MatchString(in.Country) {
 		return nil, "", invalid("country must be a 2-letter code")
 	}
 	if in.Name == "" {
@@ -229,7 +232,7 @@ func (s *Service) ConsumeInstallToken(ctx context.Context, token string, sign fu
 // the inbound tags that were built from it. A node that already has a country is left as is.
 func (s *Service) LearnNodeCountry(ctx context.Context, nodeID int64, cc string) error {
 	cc = strings.ToUpper(strings.TrimSpace(cc))
-	if !regexp.MustCompile(`^[A-Z]{2}$`).MatchString(cc) {
+	if !countryRe.MatchString(cc) {
 		return nil
 	}
 	return s.mutate(ctx, change{actor: ActorSystem, action: "node.country", entity: "node", entityID: func() int64 { return nodeID }, event: EvNodeChanged, diff: map[string]string{"country": cc}},

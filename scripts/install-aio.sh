@@ -6,5 +6,11 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
 if [[ -n "$here" && -f "$here/install.sh" ]]; then
   exec bash "$here/install.sh" "$@"
 fi
-REF="${VYNEL_REF:-main}"
-exec bash <(curl -fsSL "https://raw.githubusercontent.com/vyto4ka/vynel/$REF/scripts/install.sh") "$@"
+# The installer comes from a release (the latest one; VYNEL_RELEASE=edge-BRANCH for a dev build).
+RELEASE="${VYNEL_RELEASE:-latest}"
+if [[ "$RELEASE" == latest ]]; then
+  url="https://github.com/vyto4ka/vynel/releases/latest/download/install.sh"
+else
+  url="https://github.com/vyto4ka/vynel/releases/download/$RELEASE/install.sh"
+fi
+exec bash <(curl -fsSL "$url") "$@"

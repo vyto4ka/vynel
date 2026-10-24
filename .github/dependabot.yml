@@ -1,0 +1,7 @@
+# The workflows use third-party actions; this keeps their versions current.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
