@@ -25,13 +25,21 @@ var quickKeys = [][]string{{keyLogin, keyMenu}}
 const quickKeysText = "⌨️ Внизу закреплены кнопки: <b>" + keyLogin + "</b> — ссылка входа в панель, <b>" + keyMenu +
 	"</b> — главное меню. Нажатие не оставляет сообщений в чате.\n\nБез всяких сообщений: кнопка «Панель» слева от поля ввода → «Открыть в браузере»."
 
-// sendQuickKeys gives an admin the quick buttons and remembers it.
-func (b *Bot) sendQuickKeys(ctx context.Context, api *client, chat int64) {
+// sendQuickKeys gives an admin the quick buttons and remembers it: again when force (/start),
+// else only if the admin does not have this version yet. The check, the message and the note
+// are one step, so the watcher and a new binding cannot both send them.
+func (b *Bot) sendQuickKeys(ctx context.Context, api *client, chat int64, force bool) {
+	b.quickMu.Lock()
+	defer b.quickMu.Unlock()
+	sent := b.quickKeysSent(ctx)
+	id := strconv.FormatInt(chat, 10)
+	if !force && sent[id] == quickKeysVersion {
+		return
+	}
 	if _, err := api.sendQuickKeys(ctx, chat, quickKeysText, quickKeys, "Имя пользователя — найти"); err != nil {
 		return
 	}
-	sent := b.quickKeysSent(ctx)
-	sent[strconv.FormatInt(chat, 10)] = quickKeysVersion
+	sent[id] = quickKeysVersion
 	raw, _ := json.Marshal(sent)
 	_ = b.svc.SetSetting(ctx, service.Actor{Kind: "bot"}, service.SettingBotQuickKeys, string(raw))
 }
@@ -51,11 +59,8 @@ func (b *Bot) ensureQuickKeys(ctx context.Context) {
 		return
 	}
 	admins, _ := b.svc.BotAdmins(ctx)
-	sent := b.quickKeysSent(ctx)
 	for _, a := range admins {
-		if sent[strconv.FormatInt(a.ID, 10)] != quickKeysVersion {
-			b.sendQuickKeys(ctx, api, a.ID)
-		}
+		b.sendQuickKeys(ctx, api, a.ID, false)
 	}
 }
 

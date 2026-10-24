@@ -375,6 +375,7 @@ type NodeBillingInput struct {
 func (s *Service) SetNodeBilling(ctx context.Context, actor Actor, nodeID int64, in NodeBillingInput) (*store.NodeBilling, error) {
 	var b *store.NodeBilling
 	reenable := false
+	loc := s.BotLocation(ctx)
 	err := s.mutate(ctx, change{actor: actor, action: "node.billing", entity: "node", entityID: func() int64 { return nodeID }, event: EvNodeChanged, diff: in},
 		func(q store.DBTX) error {
 			n, err := store.GetNode(ctx, q, nodeID)
@@ -444,7 +445,7 @@ func (s *Service) SetNodeBilling(ctx context.Context, actor Actor, nodeID int64,
 			}
 			// A node the limit switched off comes back when the limit is gone or raised past use.
 			if b.OffPeriod != 0 && !n.Enabled {
-				used, _, err := s.nodeUse(ctx, q, b)
+				used, _, err := s.nodeUse(ctx, q, b, loc)
 				if err != nil {
 					return err
 				}
@@ -481,8 +482,10 @@ func BillingPeriod(now time.Time, loc *time.Location, resetDay int) (from, to ti
 }
 
 // nodeUse is the traffic a node used in its current period as the provider counts it.
-func (s *Service) nodeUse(ctx context.Context, q store.DBTX, b *store.NodeBilling) (used int64, period [2]int64, err error) {
-	from, to := BillingPeriod(s.now(), s.BotLocation(ctx), b.ResetDay)
+// loc is the bot's time zone, read before any transaction: settings are read through the
+// database, whose one connection a transaction holds.
+func (s *Service) nodeUse(ctx context.Context, q store.DBTX, b *store.NodeBilling, loc *time.Location) (used int64, period [2]int64, err error) {
+	from, to := BillingPeriod(s.now(), loc, b.ResetDay)
 	rx, tx, err := store.IfaceTraffic(ctx, q, b.NodeID, from.Unix())
 	if err != nil {
 		return 0, period, err
@@ -512,6 +515,7 @@ type NodeBill struct {
 // BillingOverview lists every node with its billing and traffic.
 func (s *Service) BillingOverview(ctx context.Context) ([]NodeBill, error) {
 	q := s.st.DB
+	loc := s.BotLocation(ctx)
 	nodes, err := store.ListNodes(ctx, q)
 	if err != nil {
 		return nil, err
@@ -526,7 +530,7 @@ func (s *Service) BillingOverview(ctx context.Context) ([]NodeBill, error) {
 		if b == nil {
 			b = store.DefaultBilling(n.ID)
 		}
-		used, period, err := s.nodeUse(ctx, q, b)
+		used, period, err := s.nodeUse(ctx, q, b, loc)
 		if err != nil {
 			return nil, err
 		}
@@ -568,6 +572,7 @@ func (s *Service) NodeProviders(ctx context.Context) (map[int64]*store.Provider,
 // limit, back on when its period starts again, and reminds about payments due.
 func (s *Service) checkBilling(ctx context.Context) error {
 	q := s.st.DB
+	loc := s.BotLocation(ctx)
 	all, err := store.ListNodeBilling(ctx, q)
 	if err != nil {
 		return err
@@ -588,7 +593,7 @@ func (s *Service) checkBilling(ctx context.Context) error {
 		if b.TrafficLimit == 0 && b.OffPeriod == 0 {
 			continue
 		}
-		used, period, err := s.nodeUse(ctx, q, b)
+		used, period, err := s.nodeUse(ctx, q, b, loc)
 		if err != nil {
 			return err
 		}
@@ -609,7 +614,7 @@ func (s *Service) checkBilling(ctx context.Context) error {
 				return err
 			}
 			s.notify(Notice{Kind: "billing", Text: fmt.Sprintf("⛔ Нода <b>%s</b> выключена: израсходовано %s из %s трафика у провайдера. Включится %s, в новый период.\n\n<i>Включить раньше — переключатель ноды в панели или «Биллинг» → лимит.</i>",
-				esc(nodeTitle(n)), gb(used), gb(b.TrafficLimit), time.Unix(period[1], 0).In(s.BotLocation(ctx)).Format("02.01 15:04"))})
+				esc(nodeTitle(n)), gb(used), gb(b.TrafficLimit), time.Unix(period[1], 0).In(loc).Format("02.01 15:04"))})
 		}
 	}
 	return nil

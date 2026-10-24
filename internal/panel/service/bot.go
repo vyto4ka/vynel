@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -152,14 +153,40 @@ func (s *Service) NewBindCode(ctx context.Context, actor Actor) (string, error) 
 	return code, s.setSecret(ctx, actor, settingBotBindCode, code+"|"+strconv.FormatInt(exp, 10))
 }
 
+// MaxBindFailures is how many wrong codes a bind code survives: then it is burnt, and only a
+// new one (which starts the count again) binds.
+const MaxBindFailures = 10
+
+// ErrBindCodeBurned comes with a wrong code that used up the current code's tries.
+var ErrBindCodeBurned = errors.New("too many wrong bind codes: the code was burnt, create a new one")
+
 // BindBotAdmin consumes a bind code and binds the account. It returns false for a wrong or
-// expired code.
+// expired code; the wrong tries are counted for the current code only.
 func (s *Service) BindBotAdmin(ctx context.Context, code string, a BotAdmin) (bool, error) {
 	raw, _ := s.Setting(ctx, settingBotBindCode, "")
 	want, expStr, _ := strings.Cut(raw, "|")
 	exp, _ := strconv.ParseInt(expStr, 10, 64)
 	code = strings.TrimSpace(code)
+	s.bindMu.Lock()
+	if s.bindFor != raw {
+		s.bindFor, s.bindFails = raw, 0
+	}
+	s.bindMu.Unlock()
 	if want == "" || len(code) != len(want) || subtle.ConstantTimeCompare([]byte(code), []byte(want)) != 1 || s.now().Unix() > exp {
+		if want == "" {
+			return false, nil
+		}
+		s.bindMu.Lock()
+		s.bindFails++
+		burn := s.bindFails >= MaxBindFailures
+		s.bindMu.Unlock()
+		if burn {
+			// Someone is guessing: the code goes; the admin creates a new one.
+			if err := s.setSecret(ctx, Actor{Kind: "bot"}, settingBotBindCode, ""); err != nil {
+				return false, err
+			}
+			return false, ErrBindCodeBurned
+		}
 		return false, nil
 	}
 	actor := Actor{Kind: "bot", ID: strconv.FormatInt(a.ID, 10)}

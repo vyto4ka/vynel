@@ -78,19 +78,22 @@ func Base64(hosts []service.Host, uuid string) []byte {
 	return []byte(base64.StdEncoding.EncodeToString([]byte(strings.Join(lines, "\n"))))
 }
 
-// uniqueNames makes remarks unique (Mihomo and sing-box key proxies by name).
+// uniqueNames makes remarks unique (Mihomo and sing-box key proxies by name): a repeated name
+// gets the first free number, checked against every name given out, so "NL", "NL 2", "NL"
+// become "NL", "NL 2", "NL 3".
 func uniqueNames(hosts []service.Host) []string {
-	seen := map[string]int{}
+	taken := map[string]bool{}
 	out := make([]string, len(hosts))
 	for i, h := range hosts {
-		name := h.Remark
-		if name == "" {
-			name = h.Tag
+		base := h.Remark
+		if base == "" {
+			base = h.Tag
 		}
-		seen[name]++
-		if n := seen[name]; n > 1 {
-			name = fmt.Sprintf("%s %d", name, n)
+		name := base
+		for n := 2; taken[name]; n++ {
+			name = fmt.Sprintf("%s %d", base, n)
 		}
+		taken[name] = true
 		out[i] = name
 	}
 	return out
