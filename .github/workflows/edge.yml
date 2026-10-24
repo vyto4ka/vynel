@@ -76,7 +76,7 @@ jobs:
         # The installer of this release follows this release (the dev channel of the branch).
         run: scripts/release-assets.sh bin "$CODE_VERSION" "$TAG" "$BRANCH"
       - name: Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vynel-${{ env.TAG }}-${{ env.CODE_VERSION }}
           path: |
