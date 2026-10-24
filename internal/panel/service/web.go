@@ -223,7 +223,7 @@ func (s *Service) HasAdmin(ctx context.Context) bool {
 const SettingInstallCommand = "install.command"
 
 // DefaultInstallCommand is used until the installer has stored its own.
-const DefaultInstallCommand = "bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)"
+const DefaultInstallCommand = "bash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh)"
 
 // NodeInstallCommand is the one-liner that installs a node with a join token.
 func (s *Service) NodeInstallCommand(ctx context.Context, token string) string {

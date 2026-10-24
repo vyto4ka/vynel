@@ -26,7 +26,7 @@ VLESS Reality · XHTTP · Hysteria2 · один исполняемый файл 
 Под root на сервере:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/install.sh)
+bash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh)
 ```
 
 **[Пошаговое руководство →](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html)** — что подготовить, что значит каждый вопрос установщика, первое подключение и администрирование.
@@ -38,6 +38,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/scripts/i
 Дальше — в панели: «Пользователи» → «Пользователь», и ссылка подписки открывается на устройстве. Рекомендуемый клиент — [KeqDroid](https://github.com/Lemonochka/keqdroid/releases/latest): он добавляет подписку одной кнопкой.
 
 Отдельная панель и ноды, обновление, удаление, типичные проблемы — [INSTALL_GUIDE.md](docs/INSTALL_GUIDE.md).
+
+Установка и обновления идут из [релизов](https://github.com/vyto4ka/vynel/releases): сервер получает новую версию, когда выпущен релиз, а не с каждым коммитом. Проверить свежий коммит на своём сервере до выпуска можно командой `vynel update --channel dev --ref main` ([как это устроено](docs/DEVELOPMENT.md#сборки-и-релизы)).
 
 ---
 

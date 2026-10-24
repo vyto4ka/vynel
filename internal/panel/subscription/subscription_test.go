@@ -33,6 +33,9 @@ type env struct {
 // newEnv builds NL with Reality and XHTTP CDN inbounds and one user with access to both.
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	// The tests' "friend" panels listen on loopback, which the panel refuses to fetch in production.
+	service.FetchPrivate = true
+	t.Cleanup(func() { service.FetchPrivate = false })
 	ctx := context.Background()
 	st, err := store.Open(ctx, ":memory:")
 	if err != nil {

@@ -15,7 +15,7 @@
 ## 1. Запуск
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/vyto4ka/vynel/main/install.sh)
+bash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh)
 ```
 
 Схема в два слоя:
