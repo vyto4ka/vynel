@@ -37,7 +37,7 @@ jobs:
         run: go test -count=1 -race ./...
       - name: Build
         run: make build-all
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
