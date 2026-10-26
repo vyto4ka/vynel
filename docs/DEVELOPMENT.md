@@ -235,7 +235,6 @@ Xray тратит около 1 КБ на пользователя и около 
 
 - `scripts/release-assets.sh` готовит каталог релиза (установщик с вписанным `BUILT_RELEASE`/`BUILT_REF`, `SHA256SUMS`, `VERSION`, подпись). Его используют оба workflow.
 - `scripts/test-install.sh` проверяет без root и сети, какой релиз выберет установщик в каждой комбинации `--channel`/`--ref`, и что `release-assets.sh` даёт согласованные суммы. Запускается в `ci`.
-- `.github/dependabot.yml` обновляет версии GitHub Actions.
 
 ### Подписанные релизы
 
