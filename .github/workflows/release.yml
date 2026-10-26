@@ -8,8 +8,8 @@ name: release
 #   1. commit to main, try the build on your own server (dev channel: `vynel update --channel
 #      dev --ref main`);
 #   2. Actions -> release -> Run workflow, version 1.2.0 (the tag becomes v1.2.0), ref empty for
-#      the tip of main or the commit you tried. Or push the tag yourself: git tag v1.2.0 && git
-#      push origin v1.2.0.
+#      the tip of main or the commit you tried. Or push the tag yourself, with the text of the
+#      release in it: git tag -a v1.2.0 --cleanup=verbatim -F notes.md && git push origin v1.2.0.
 #   A version with a suffix (1.2.0-rc1) is published as a pre-release: it is not "latest", so
 #   servers on the stable channel do not move to it.
 on:
@@ -107,8 +107,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # A draft first: the files of a release are all there when it becomes visible, so a
         # server never sees VERSION of a release whose binaries are still uploading.
+        # The text of an annotated tag (git tag -a v1.2.0 --cleanup=verbatim -F notes.md) opens the
+        # notes; checkout may leave the tag lightweight, so it is fetched again.
         run: |
-          cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          : > "$RUNNER_TEMP/notes.md"
+          git fetch -q -f origin "refs/tags/$TAG:refs/tags/$TAG"
+          if [ "$(git cat-file -t "refs/tags/$TAG")" = tag ]; then
+            { git tag -l --format='%(contents)' "$TAG"; echo; } > "$RUNNER_TEMP/notes.md"
+          fi
+          cat >> "$RUNNER_TEMP/notes.md" <<NOTES
           Install: \`bash <(curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh)\`
 
           Update a server: \`vynel update\` (or the button in the panel).
