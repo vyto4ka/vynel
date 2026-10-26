@@ -152,6 +152,40 @@ func (s Source) WithChannel(channel, ref string) (Source, error) {
 	return s, nil
 }
 
+// Follow returns the source of the release the panel follows, so a node updates to the panel's
+// version: release is "latest", a pinned v1.2.3 or edge-<branch>, ref its branch ("" keeps the
+// node's). The node's mirror stays; a direct release URL is dropped when the release changes.
+func (s Source) Follow(release, ref string) (Source, error) {
+	if !refRe.MatchString(release) || (ref != "" && !refRe.MatchString(ref)) {
+		return s, fmt.Errorf("bad release %q (branch %q)", release, ref)
+	}
+	if release != s.Release {
+		s.Release, s.ReleaseURL = release, ""
+	}
+	if ref != "" {
+		s.Ref = ref
+	}
+	return s, nil
+}
+
+// StartFollowing switches this server to the release the panel follows (Follow; "" = stay) and
+// starts the update.
+func StartFollowing(ctx context.Context, release, ref string) error {
+	if release != "" {
+		s := LoadSource()
+		next, err := s.Follow(release, ref)
+		if err != nil {
+			return err
+		}
+		if next != s {
+			if err := SaveSource(next); err != nil {
+				return fmt.Errorf("cannot switch to the panel's release %s: %w", release, err)
+			}
+		}
+	}
+	return Start(ctx)
+}
+
 // devRelease is the tag CI publishes the builds of a branch under.
 func devRelease(ref string) string { return "edge-" + strings.ReplaceAll(ref, "/", "-") }
 

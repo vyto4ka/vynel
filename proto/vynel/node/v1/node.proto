@@ -125,6 +125,11 @@ message Command {
   }
   string id = 1;
   Action action = 2;
+  // ACTION_UPDATE: the release the panel follows ("latest", v1.2.3 or edge-<branch>) and its
+  // branch. The node switches to them before updating, so it ends up on the panel's version. Empty
+  // (an older panel): the node updates from its own release.
+  string release = 3;
+  string ref = 4;
 }
 
 // CommandResult answers a Command. For a service restart or reboot it is sent before acting.

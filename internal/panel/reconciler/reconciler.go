@@ -455,7 +455,7 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 var ErrNotConnected = errors.New("the node is not connected")
 
 // Command sends an admin action to a connected node and waits for its answer.
-func (r *Reconciler) Command(ctx context.Context, nodeID int64, action nodev1.Command_Action) (*nodev1.CommandResult, error) {
+func (r *Reconciler) Command(ctx context.Context, nodeID int64, cmd *nodev1.Command) (*nodev1.CommandResult, error) {
 	r.mu.Lock()
 	s := r.sessions[nodeID]
 	r.mu.Unlock()
@@ -477,7 +477,8 @@ func (r *Reconciler) Command(ctx context.Context, nodeID int64, action nodev1.Co
 		delete(s.waiters, id)
 		s.mu.Unlock()
 	}()
-	msg := &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Command{Command: &nodev1.Command{Id: id, Action: action}}}
+	cmd.Id = id
+	msg := &nodev1.PanelMessage{Msg: &nodev1.PanelMessage_Command{Command: cmd}}
 	select {
 	case s.out <- msg:
 	case <-ctx.Done():
