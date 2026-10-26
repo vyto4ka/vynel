@@ -1,6 +1,7 @@
 name: edge
 
-# The dev channel. Every push to main or a claude/** branch builds the binaries and
+# The dev channel. Every push to a branch (main, test, fix-ci, …; not Dependabot's) builds the
+# binaries and
 #   - attaches them to the run as an artifact (vynel-edge-<branch>-<version>, 14 days): take a build
 #     of any commit by hand, `gh run download` or the run page, then `install.sh --binary FILE`;
 #   - publishes them as the pre-release "edge-<branch>" (slashes -> dashes), which a server
@@ -9,15 +10,16 @@ name: edge
 #
 # Nobody gets these builds unless their server was put on the dev channel: servers installed the
 # usual way follow the stable releases, which only .github/workflows/release.yml publishes
-# (docs/DEVELOPMENT.md, "Сборки и релизы"). Run it by hand on any other branch with
-# "Run workflow".
+# (docs/DEVELOPMENT.md, "Сборки и релизы"). A panel on the dev channel updates its nodes to the
+# same build. Run it by hand on a branch with "Run workflow".
 #
-# A push of docs, tests or CI files only builds nothing, and the build's version is the last
-# commit that changed code (scripts/code-version.sh): a server on the dev channel is offered an
-# update only when the binaries really change, not for a README fix.
+# A push of docs, tests or CI files only builds nothing, and the build's version is the next
+# patch after the last release plus the last commit that changed code, v0.1.1-dev.3f2a1bc
+# (scripts/code-version.sh --dev): a server on the dev channel is offered an update only when the
+# binaries really change, not for a README fix.
 on:
   push:
-    branches: [main, "claude/**"]
+    branches-ignore: ["dependabot/**"]
     paths-ignore: # keep in step with scripts/code-version.sh
       - "**.md"
       - "docs/**"
@@ -48,11 +50,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # the code version looks for the last commit that changed code
+          fetch-depth: 0 # the code version looks for the last commit that changed code and the last release tag
       - name: Names
         run: |
           branch="$GITHUB_REF_NAME"
-          echo "CODE_VERSION=$(scripts/code-version.sh)" >> "$GITHUB_ENV"
+          echo "CODE_VERSION=$(scripts/code-version.sh --dev)" >> "$GITHUB_ENV"
           echo "BRANCH=$branch" >> "$GITHUB_ENV"
           echo "TAG=edge-${branch//\//-}" >> "$GITHUB_ENV"
       - uses: actions/setup-go@v5

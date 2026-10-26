@@ -1214,8 +1214,7 @@ open_ports() {
 
 # The command the panel shows for new nodes (Ноды → + Нода).
 script_command() {
-  local cmd="bash <(curl -fsSL $(release_dir "$RELEASE")/install.sh)"
-  printf '%s' "$cmd"
+  printf 'bash <(curl -fsSL %s/install.sh)' "$(release_dir "$RELEASE")"
 }
 
 admin() { vynel admin --data-dir "$DATA" "$@"; }

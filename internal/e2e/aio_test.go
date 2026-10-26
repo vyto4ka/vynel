@@ -79,13 +79,15 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 
 	restarted := make(chan string, 2)
 	var updState atomic.Pointer[update.Status]
+	updFollow := make(chan string, 1) // the release and branch the update was told to follow
 	a, err := agent.New(agent.Config{
 		DataDir: filepath.Join(t.TempDir(), "node"), Xray: bin, Version: "test", CaddyBin: caddyBin, NginxUser: nginxUser(),
 		Dial: app.LocalDialer(ctx, panel.Reconciler, node.ID), Log: logger("aio-node"),
 		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond, StatsInterval: 200 * time.Millisecond,
 		Restart: func() { restarted <- "service" }, Reboot: func() error { restarted <- "reboot"; return nil },
 		// A fake update: it says it runs, logs two steps and finishes, as update.Run would.
-		Update: func(context.Context) error {
+		Update: func(_ context.Context, release, ref string) error {
+			updFollow <- release + " " + ref
 			go func() {
 				now := time.Now().Unix()
 				updState.Store(&update.Status{Running: true, StartedAt: now, Log: "vynel: downloading"})
@@ -301,7 +303,7 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	// and a reboot are answered first and then handed to the hooks.
 	for _, act := range []nodev1.Command_Action{nodev1.Command_ACTION_RESTART_XRAY, nodev1.Command_ACTION_RESTART_CADDY} {
 		cctx, ccancel := context.WithTimeout(ctx, wait)
-		res, err := panel.Reconciler.Command(cctx, node.ID, act)
+		res, err := panel.Reconciler.Command(cctx, node.ID, &nodev1.Command{Action: act})
 		ccancel()
 		if err != nil || res.Error != "" {
 			t.Fatalf("%v: %v %+v", act, err, res)
@@ -316,7 +318,7 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	}
 	for act, want := range map[nodev1.Command_Action]string{nodev1.Command_ACTION_RESTART_AGENT: "service", nodev1.Command_ACTION_REBOOT: "reboot"} {
 		cctx, ccancel := context.WithTimeout(ctx, wait)
-		res, err := panel.Reconciler.Command(cctx, node.ID, act)
+		res, err := panel.Reconciler.Command(cctx, node.ID, &nodev1.Command{Action: act})
 		ccancel()
 		if err != nil || res.Error != "" || res.Detail == "" {
 			t.Fatalf("%v: %v %+v", act, err, res)
@@ -332,10 +334,13 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 	}
 	// An update: the command is accepted, the node reports it running with its log, then done.
 	cctx, ccancel := context.WithTimeout(ctx, wait)
-	res, err := panel.Reconciler.Command(cctx, node.ID, nodev1.Command_ACTION_UPDATE)
+	res, err := panel.Reconciler.Command(cctx, node.ID, &nodev1.Command{Action: nodev1.Command_ACTION_UPDATE, Release: "edge-test", Ref: "test"})
 	ccancel()
 	if err != nil || res.Error != "" {
 		t.Fatalf("update: %v %+v", err, res)
+	}
+	if got := <-updFollow; got != "edge-test test" {
+		t.Fatalf("the update follows %q, want the panel's edge-test test", got)
 	}
 	var sawRunning bool
 	xraytest.Eventually(t, wait, "update reported as done", func() error {
@@ -355,7 +360,7 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 		t.Fatal("the running update and its log never reached the panel")
 	}
 
-	if _, err := panel.Reconciler.Command(ctx, 9999, nodev1.Command_ACTION_RESTART_XRAY); err == nil {
+	if _, err := panel.Reconciler.Command(ctx, 9999, &nodev1.Command{Action: nodev1.Command_ACTION_RESTART_XRAY}); err == nil {
 		t.Fatal("a command to a node that is not connected must fail")
 	}
 }

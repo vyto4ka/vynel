@@ -27,6 +27,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
 	"github.com/vyto4ka/vynel/internal/panel/webapi"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xray"
 )
 
@@ -139,9 +140,15 @@ func nodeAction(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int
 		if !ok {
 			return "", fmt.Errorf("unknown action %q", action)
 		}
+		c := &nodev1.Command{Action: cmd}
+		if cmd == nodev1.Command_ACTION_UPDATE {
+			// Nodes update to the release the panel follows, so the panel and its nodes run one version.
+			src := update.LoadSource()
+			c.Release, c.Ref = src.Release, src.Ref
+		}
 		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
-		res, err := rec.Command(ctx, nodeID, cmd)
+		res, err := rec.Command(ctx, nodeID, c)
 		switch {
 		case errors.Is(err, reconciler.ErrNotConnected):
 			return "", errors.New("нода не на связи")

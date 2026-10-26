@@ -82,6 +82,28 @@ func TestWithChannel(t *testing.T) {
 	}
 }
 
+// A node installed before channels follows edge-main; told the panel's release, it moves there
+// (keeping its mirror) and stays on it for later updates.
+func TestFollowThePanel(t *testing.T) {
+	old := Source{Ref: "main", Release: "edge-main", ReleaseURL: "https://mirror.example/r", GHProxy: "https://ghfast.top/"}
+	s, err := old.Follow(ReleaseLatest, "main")
+	if err != nil || s.Release != ReleaseLatest || s.Ref != "main" || s.ReleaseURL != "" || s.GHProxy != old.GHProxy || s.Channel() != ChannelStable {
+		t.Fatalf("to stable: %+v %v", s, err)
+	}
+	if same, err := old.Follow("edge-main", ""); err != nil || same != old {
+		t.Fatalf("the same release changes nothing: %+v %v", same, err)
+	}
+	dev, err := s.Follow("edge-test", "test")
+	if err != nil || dev.Release != "edge-test" || dev.Ref != "test" || dev.Channel() != ChannelDev {
+		t.Fatalf("to the panel's test builds: %+v %v", dev, err)
+	}
+	for _, c := range [][2]string{{"", ""}, {"latest;rm", ""}, {"edge-x", "bad branch"}} {
+		if _, err := old.Follow(c[0], c[1]); err == nil {
+			t.Errorf("accepted release %q ref %q", c[0], c[1])
+		}
+	}
+}
+
 // Without a release key the update still runs the installer of its release, not one from a
 // branch, and the result is recorded.
 func TestRunTakesTheInstallerFromTheRelease(t *testing.T) {

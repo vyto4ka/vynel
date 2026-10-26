@@ -1071,9 +1071,14 @@ func (x *IPBlock) GetIps() []string {
 
 // Command is an admin action on the node (panel: «Ноды» → «Действия»).
 type Command struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Action        Command_Action         `protobuf:"varint,2,opt,name=action,proto3,enum=vynel.node.v1.Command_Action" json:"action,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Action Command_Action         `protobuf:"varint,2,opt,name=action,proto3,enum=vynel.node.v1.Command_Action" json:"action,omitempty"`
+	// ACTION_UPDATE: the release the panel follows ("latest", v1.2.3 or edge-<branch>) and its
+	// branch. The node switches to them before updating, so it ends up on the panel's version. Empty
+	// (an older panel): the node updates from its own release.
+	Release       string `protobuf:"bytes,3,opt,name=release,proto3" json:"release,omitempty"`
+	Ref           string `protobuf:"bytes,4,opt,name=ref,proto3" json:"ref,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1120,6 +1125,20 @@ func (x *Command) GetAction() Command_Action {
 		return x.Action
 	}
 	return Command_ACTION_UNSPECIFIED
+}
+
+func (x *Command) GetRelease() string {
+	if x != nil {
+		return x.Release
+	}
+	return ""
+}
+
+func (x *Command) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
 }
 
 // CommandResult answers a Command. For a service restart or reboot it is sent before acting.
@@ -1988,10 +2007,12 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\x06blocks\x18\x01 \x03(\v2\x16.vynel.node.v1.IPBlockR\x06blocks\"4\n" +
 	"\aIPBlock\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x10\n" +
-	"\x03ips\x18\x02 \x03(\tR\x03ips\"\xe6\x01\n" +
+	"\x03ips\x18\x02 \x03(\tR\x03ips\"\x92\x02\n" +
 	"\aCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
-	"\x06action\x18\x02 \x01(\x0e2\x1d.vynel.node.v1.Command.ActionR\x06action\"\x93\x01\n" +
+	"\x06action\x18\x02 \x01(\x0e2\x1d.vynel.node.v1.Command.ActionR\x06action\x12\x18\n" +
+	"\arelease\x18\x03 \x01(\tR\arelease\x12\x10\n" +
+	"\x03ref\x18\x04 \x01(\tR\x03ref\"\x93\x01\n" +
 	"\x06Action\x12\x16\n" +
 	"\x12ACTION_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13ACTION_RESTART_XRAY\x10\x01\x12\x18\n" +
