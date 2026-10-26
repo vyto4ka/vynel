@@ -6,7 +6,8 @@
 #   scripts/release-assets.sh DIR VERSION BUILT_RELEASE [BUILT_REF]
 #
 #   DIR            holds vynel-linux-amd64 and vynel-linux-arm64 (make build-all); the files below
-#                  are written next to them
+#                  are written next to them, and the binaries xz-compressed (vynel-linux-*.xz,
+#                  a quarter of the size: what install.sh downloads when it can)
 #   VERSION        what `vynel version` prints for these binaries; goes to DIR/VERSION
 #   BUILT_RELEASE  the release this copy of install.sh follows: "latest" for the stable channel,
 #                  "edge-<branch>" for a dev build, a tag for a pinned release
@@ -39,9 +40,12 @@ bash -n "$dir/install.sh"
 chmod 755 "$dir/install.sh"
 
 printf '%s\n' "$version" >"$dir/VERSION"
+for f in vynel-linux-amd64 vynel-linux-arm64; do
+  xz -9 -T1 -c "$dir/$f" >"$dir/$f.xz"
+done
 # install.sh is in the checksums: `vynel update` runs it only when it matches them (and, with a
-# key, the signature).
-(cd "$dir" && sha256sum vynel-linux-amd64 vynel-linux-arm64 install.sh >SHA256SUMS)
+# key, the signature). The plain binaries stay for older installers and `install.sh --binary`.
+(cd "$dir" && sha256sum vynel-linux-amd64 vynel-linux-arm64 vynel-linux-amd64.xz vynel-linux-arm64.xz install.sh >SHA256SUMS)
 cat "$dir/SHA256SUMS"
 
 key="${RELEASE_SIGNING_KEY:-}"
