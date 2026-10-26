@@ -72,9 +72,10 @@ type Config struct {
 	Restart func()
 	// Reboot reboots the server (admin action). Default: systemctl reboot.
 	Reboot func() error
-	// Update starts updating vynel, Xray and nginx in the background (admin action).
-	// Default: update.Start.
-	Update func(context.Context) error
+	// Update starts updating vynel, Xray and nginx in the background (admin action), first
+	// switching to the release the panel follows ("" = the node's own). Default:
+	// update.StartFollowing.
+	Update func(ctx context.Context, release, ref string) error
 	// UpdateStatus reports how the last update went. Default: update.LocalStatus.
 	UpdateStatus func() *update.Status
 	// UpdateEvery is how often a running update is reported, default 2s.
@@ -140,7 +141,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg.Restart = func() { _ = syscall.Kill(os.Getpid(), syscall.SIGTERM) }
 	}
 	if cfg.Update == nil {
-		cfg.Update = update.Start
+		cfg.Update = update.StartFollowing
 	}
 	if cfg.UpdateStatus == nil {
 		cfg.UpdateStatus = update.LocalStatus
@@ -486,7 +487,7 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 		res.Detail = "the service restarts now"
 		after = a.cfg.Restart
 	case nodev1.Command_ACTION_UPDATE:
-		if err = a.cfg.Update(ctx); err == nil {
+		if err = a.cfg.Update(ctx, c.Release, c.Ref); err == nil {
 			res.Detail = "the update is running"
 		}
 	case nodev1.Command_ACTION_REBOOT:

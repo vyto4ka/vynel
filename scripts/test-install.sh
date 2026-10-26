@@ -18,9 +18,12 @@ if command -v shellcheck >/dev/null; then
 fi
 
 # ---- which release is followed ----
+# shellcheck disable=SC2016 # the sed pattern names $CHANNEL literally
 block="$(sed -n '/^case "\$CHANNEL" in/,/^RELEASE_URL=/p' scripts/install.sh)"
 [[ -n "$block" ]] || { echo "FAIL: the channel block is not in install.sh" >&2; exit 1; }
 
+# The block runs through eval, so shellcheck sees neither its die nor its inputs used.
+# shellcheck disable=SC2034,SC2329
 resolve() { # CHANNEL REF_SET REF BUILT_RELEASE VYNEL_RELEASE VYNEL_RELEASE_URL -> "RELEASE URL"
   (
     die() { echo "die: $*"; exit 3; }
@@ -63,6 +66,7 @@ n="$(diff scripts/install.sh "$tmp/install.sh" | grep -c '^[<>]' || true)"
 scripts/release-assets.sh "$tmp" 'x;y' latest >/dev/null 2>&1 && bad "a bad version was accepted"
 
 # ---- the baked installer says where it follows ----
+# shellcheck disable=SC2016 # the pattern names ${VYNEL_REF literally
 sed -n '/^BUILT_RELEASE=/,/^\[\[ -n "\${VYNEL_REF/p' "$tmp/install.sh" | grep -q 'BUILT_REF' || bad "built values not read"
 
 exit $fail
