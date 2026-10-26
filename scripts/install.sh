@@ -527,7 +527,7 @@ ensure_packages() {
   try_packages "$@" || die "cannot install $*: see $APT_LOG"
 }
 # What the installation needs (the questions need nothing beyond curl, which got this script here).
-BASE_PKGS=(curl unzip ca-certificates iproute2 psmisc nftables openssl)
+BASE_PKGS=(curl unzip xz-utils ca-certificates iproute2 psmisc nftables openssl)
 
 detect_ip() {
   [[ -n "$PUBLIC_IP" ]] && return 0
@@ -864,14 +864,29 @@ gh() { printf '%s%s' "$GH_PROXY" "$1"; }
 
 # fetch URL FILE [LABEL]: download with a visible progress bar. It never hangs: the connection
 # must open within 20 s and a transfer slower than 2 KB/s for 30 s is aborted, with 2 retries.
-# A slow but moving download is allowed to finish. Returns curl's code (22 = HTTP error).
+# A slow but moving download is allowed to finish. Without a terminal (`vynel update`, the panel's
+# update log) the size so far is printed every 10 s instead of the bar. Returns curl's code
+# (22 = HTTP error).
 STALL_SECS="${VYNEL_STALL_SECS:-30}"
 fetch() {
-  local url="$1" out="$2" label="${3:-}" progress=(-sS)
+  local url="$1" out="$2" label="${3:-}" progress=(-sS) watch="" rc=0
   [[ -t 1 && -n "$label" ]] && progress=(--progress-bar)
-  [[ -n "$label" ]] && echo "  $label: $url"
+  if [[ -n "$label" ]]; then
+    echo "  $label: $url"
+    if [[ ! -t 1 ]]; then
+      ( while sleep 10; do
+          [[ -f "$out" ]] && echo "  $label: $(stat -c %s "$out" 2>/dev/null | awk '{printf "%.1f", $1 / 1048576}') MB"
+        done ) &
+      watch=$!
+    fi
+  fi
   curl -fL "${progress[@]}" --connect-timeout 20 --speed-limit 2048 --speed-time "$STALL_SECS" \
-    --retry 2 --retry-delay 3 --retry-connrefused -o "$out" "$url"
+    --retry 2 --retry-delay 3 --retry-connrefused -o "$out" "$url" || rc=$?
+  if [[ -n "$watch" ]]; then
+    kill "$watch" 2>/dev/null || true
+    wait "$watch" 2>/dev/null || true
+  fi
+  return $rc
 }
 
 # gh_latest OWNER/REPO [ASSET]: the latest release tag, or nothing. Tried in order: the
@@ -913,15 +928,29 @@ release_sums() {
 }
 
 # release_binary DIR: downloads vynel for this machine into DIR/vynel and checks it -> 0/1/3.
+# A release that has it gives the binary xz-compressed: about a quarter of the size, which matters
+# where GitHub is slow. Its checksum is checked before unpacking, the binary's after.
 release_binary() {
-  local want rc=0
+  local want packed rc=0
   want="$(awk -v f="vynel-linux-$GOARCH" '$2 == f {print $1}' "$1/SHA256SUMS")"
   [[ -n "$want" ]] || return 1
   if [[ -n "$SETUP_BIN" && "$(sha256sum "$SETUP_BIN" 2>/dev/null | awk '{print $1}')" == "$want" ]]; then
     cp -f "$SETUP_BIN" "$1/vynel" # already downloaded for the setup form
     return 0
   fi
-  fetch "$(gh "$RELEASE_URL/vynel-linux-$GOARCH")" "$1/vynel" "vynel" || rc=$?
+  packed="$(awk -v f="vynel-linux-$GOARCH.xz" '$2 == f {print $1}' "$1/SHA256SUMS")"
+  if [[ -n "$packed" ]] && command -v xz >/dev/null; then
+    fetch "$(gh "$RELEASE_URL/vynel-linux-$GOARCH.xz")" "$1/vynel.xz" "vynel" || rc=$?
+    if [[ $rc -eq 0 ]]; then
+      if [[ "$(sha256sum "$1/vynel.xz" | awk '{print $1}')" != "$packed" ]] || ! xz -dc "$1/vynel.xz" >"$1/vynel"; then
+        echo "  checksum does not match yet (the release is being updated)"
+        return 1
+      fi
+      rm -f "$1/vynel.xz"
+    fi
+  else
+    fetch "$(gh "$RELEASE_URL/vynel-linux-$GOARCH")" "$1/vynel" "vynel" || rc=$?
+  fi
   if [[ $rc -ne 0 ]]; then
     [[ $rc -eq 22 ]] && return 1
     return 3
