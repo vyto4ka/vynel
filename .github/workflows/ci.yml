@@ -8,9 +8,16 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older run. Runs on main all finish: a release
+# needs a passing run on its exact commit.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   scripts:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Installer and release scripts
@@ -18,6 +25,7 @@ jobs:
 
   go:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -39,10 +47,12 @@ jobs:
         run: make build-all
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned: a new release brings new checks, so it is bumped on purpose, not by itself.
+          version: v2.14.0
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v6

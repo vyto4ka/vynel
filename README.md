@@ -14,8 +14,9 @@ VLESS Reality · XHTTP · Hysteria2 · один исполняемый файл 
 [![Xray](https://img.shields.io/badge/Xray-26.x-1fa79d)](https://github.com/XTLS/Xray-core)
 [![nginx](https://img.shields.io/badge/nginx-1.18%2B-009639?logo=nginx&logoColor=white)](https://nginx.org)
 [![Platform](https://img.shields.io/badge/Ubuntu%20%7C%20Debian-amd64%20%7C%20arm64-ff5fa2?logo=linux&logoColor=white)](#требования)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-a6e3a1)](LICENSE)
 
-[Установка](#установка) · [Руководство](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html) · [Обзор](#обзор) · [Возможности](#возможности) · [Требования](#требования) · [Потребление памяти](#потребление-памяти) · [Документация](#документация)
+[Установка](#установка) · [Руководство](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html) · [Обзор](#обзор) · [Возможности](#возможности) · [Требования](#требования) · [Потребление памяти](#потребление-памяти) · [Документация](#документация) · [Лицензия](#лицензия)
 
 </div>
 
@@ -240,6 +241,12 @@ vynel firewall status                      # открытые порты и за
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Устройство панели, нод и подписок |
 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Структура кода, сборка, тесты, нагрузочные тесты, релизы, добавление шаблонов |
 | [ROADMAP.md](docs/ROADMAP.md) | Реализованное и планируемое |
+
+---
+
+## Лицензия
+
+[GNU AGPL-3.0](LICENSE). Пользоваться, изменять и распространять можно свободно. Если вы даёте другим доступ к изменённой панели по сети, исходный код этих изменений нужно открыть им на тех же условиях.
 
 <div align="center">
 <br>

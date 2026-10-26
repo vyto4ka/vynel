@@ -29,6 +29,9 @@ on:
 permissions:
   contents: write
   actions: read
+  id-token: write # build provenance: a Sigstore certificate for this run
+  attestations: write
+  artifact-metadata: write
 
 concurrency:
   group: release
@@ -37,6 +40,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,6 +116,14 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         # The installer of a release installs that release's binary and, later, its successors.
         run: scripts/release-assets.sh bin "$TAG" "$FOLLOWS" main
+      - name: Build provenance
+        # Proves that the files were built by this workflow from this commit:
+        # gh attestation verify vynel-linux-amd64 --repo vyto4ka/vynel
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            bin/vynel-linux-*
+            bin/install.sh
       - name: Tag
         if: github.event_name == 'workflow_dispatch'
         run: git tag "$TAG" "$SHA" && git push origin "refs/tags/$TAG"
