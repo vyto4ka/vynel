@@ -7,9 +7,10 @@ name: release
 # How to release (docs/DEVELOPMENT.md, "Сборки и релизы"):
 #   1. commit to main, try the build on your own server (dev channel: `vynel update --channel
 #      dev --ref main`);
-#   2. Actions -> release -> Run workflow, version 1.2.0 (the tag becomes v1.2.0), ref empty for
-#      the tip of main or the commit you tried. Or push the tag yourself, with the text of the
-#      release in it: git tag -a v1.2.0 --cleanup=verbatim -F notes.md && git push origin v1.2.0.
+#   2. add the section "## v1.2.0 — <date>" to CHANGELOG.md: it becomes the text of the release;
+#   3. Actions -> release -> Run workflow, version 1.2.0 (the tag becomes v1.2.0), ref empty for
+#      the tip of main or the commit you tried. Or push the tag yourself: git tag v1.2.0 && git
+#      push origin v1.2.0.
 #   A version with a suffix (1.2.0-rc1) is published as a pre-release: it is not "latest", so
 #   servers on the stable channel do not move to it.
 on:
@@ -71,6 +72,18 @@ jobs:
             # A suffix means a pre-release: its installer is pinned to it, "latest" does not move.
             if [[ "$tag" == *-* ]]; then echo "PRERELEASE=1"; echo "FOLLOWS=$tag"; else echo "PRERELEASE="; echo "FOLLOWS=latest"; fi
           } >> "$GITHUB_ENV"
+      - name: Release text from CHANGELOG.md
+        # The section "## v1.2.0 …" of CHANGELOG.md at the released commit opens the description of
+        # the release; a stable release must have one, a pre-release may go without.
+        run: |
+          awk -v tag="$TAG" '/^## / { if (on) exit; on = ($2 == tag); next } on' CHANGELOG.md \
+            > "$RUNNER_TEMP/changelog.md" 2>/dev/null || true
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/changelog.md"; then
+            if [ -z "$PRERELEASE" ]; then
+              echo "::error::CHANGELOG.md at ${SHA:0:7} has no section \"## $TAG\": add it to main and release again"; exit 1
+            fi
+            : > "$RUNNER_TEMP/changelog.md"
+          fi
       - name: CI passed on this commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -107,13 +120,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         # A draft first: the files of a release are all there when it becomes visible, so a
         # server never sees VERSION of a release whose binaries are still uploading.
-        # The text of an annotated tag (git tag -a v1.2.0 --cleanup=verbatim -F notes.md) opens the
-        # notes; checkout may leave the tag lightweight, so it is fetched again.
         run: |
           : > "$RUNNER_TEMP/notes.md"
-          git fetch -q -f origin "refs/tags/$TAG:refs/tags/$TAG"
-          if [ "$(git cat-file -t "refs/tags/$TAG")" = tag ]; then
-            { git tag -l --format='%(contents)' "$TAG"; echo; } > "$RUNNER_TEMP/notes.md"
+          if [ -s "$RUNNER_TEMP/changelog.md" ]; then
+            { cat "$RUNNER_TEMP/changelog.md"; echo; } > "$RUNNER_TEMP/notes.md"
           fi
           cat >> "$RUNNER_TEMP/notes.md" <<NOTES
           Install: \`bash <(curl -fsSL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/install.sh)\`
