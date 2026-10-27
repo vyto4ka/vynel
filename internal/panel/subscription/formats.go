@@ -293,9 +293,16 @@ func singBoxOutbounds(hosts []service.Host, uuid string) ([]map[string]any, []st
 	return outbounds, names
 }
 
-// XrayOutbound renders the proxy outbound of a host.
+// XrayOutbound renders the proxy outbound of a host, with its finalmask (the ClientHello
+// fragment) when it has one.
 func XrayOutbound(h service.Host, uuid string) map[string]any {
-	return service.HostOutbound(h, cred(h, uuid), "proxy")
+	out := service.HostOutbound(h, cred(h, uuid), "proxy")
+	if len(h.FinalMask) > 0 {
+		if ss, ok := out["streamSettings"].(map[string]any); ok {
+			ss["finalmask"] = h.FinalMask
+		}
+	}
+	return out
 }
 
 // cred is the secret a host takes: its own (a cascade, another subscription) or the user's.

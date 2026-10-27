@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -33,6 +35,91 @@ type ClientRouting struct {
 	Direct []string `json:"direct"`
 	Proxy  []string `json:"proxy"` // through the tunnel even when RU or the direct list would match
 	Block  []string `json:"block"`
+	// Fragment cuts the TLS ClientHello into pieces on the way out (Xray JSON only).
+	Fragment ClientFragment `json:"fragment"`
+}
+
+// ClientFragment is Xray's finalmask "fragment": the client sends its TLS ClientHello in small
+// pieces with pauses, for networks that drop TCP 443 connections by it. It reaches apps in the
+// Xray JSON format (KeqDroid, Happ, v2RayTun), for every server but Hysteria2 (UDP) and those
+// with their own finalmask; links, Mihomo and sing-box cannot carry it.
+type ClientFragment struct {
+	Enabled bool   `json:"enabled"`
+	Packets string `json:"packets"` // "tlshello", or the packets to cut: "1-3"
+	Length  string `json:"length"`  // bytes per piece: "10-20"
+	Delay   string `json:"delay"`   // milliseconds between pieces: "10-20"
+}
+
+// DefaultClientFragment is off, with the usual settings ready.
+func DefaultClientFragment() ClientFragment {
+	return ClientFragment{Packets: "tlshello", Length: "10-20", Delay: "10-20"}
+}
+
+// FinalMask is the streamSettings.finalmask that carries the fragment.
+func (f ClientFragment) FinalMask() map[string]any {
+	return map[string]any{"tcp": []any{map[string]any{"type": "fragment",
+		"settings": map[string]any{"packets": f.Packets, "length": f.Length, "delay": f.Delay}}}}
+}
+
+// WithFragment gives the servers the subscription's fragment, when it is on: a copy of hosts in
+// which every TCP server without its own finalmask has it.
+func WithFragment(hosts []Host, f ClientFragment) []Host {
+	if !f.Enabled {
+		return hosts
+	}
+	out := slices.Clone(hosts)
+	for i := range out {
+		if h := &out[i]; h.FinalMask == nil && h.Raw == "" && h.Protocol != "hysteria" {
+			h.FinalMask = f.FinalMask()
+		}
+	}
+	return out
+}
+
+var rangeRe = regexp.MustCompile(`^(\d{1,5})(?:-(\d{1,5}))?$`)
+
+// checkRange checks "N" or "N-M" (N <= M) with N at least least; field names it in the panel.
+func checkRange(v string, least int, field string) error {
+	m := rangeRe.FindStringSubmatch(v)
+	if m == nil {
+		return invalid("«%s»: число или диапазон, например 10-20", field)
+	}
+	from, _ := strconv.Atoi(m[1])
+	to := from
+	if m[2] != "" {
+		to, _ = strconv.Atoi(m[2])
+	}
+	if from > to {
+		return invalid("«%s»: начало диапазона больше конца", field)
+	}
+	if from < least {
+		return invalid("«%s»: не меньше %d", field, least)
+	}
+	return nil
+}
+
+// checkFragment validates the fragment and fills empty fields with the defaults.
+func checkFragment(f *ClientFragment) error {
+	d := DefaultClientFragment()
+	f.Packets, f.Length, f.Delay = strings.TrimSpace(f.Packets), strings.TrimSpace(f.Length), strings.TrimSpace(f.Delay)
+	if f.Packets == "" {
+		f.Packets = d.Packets
+	}
+	if f.Length == "" {
+		f.Length = d.Length
+	}
+	if f.Delay == "" {
+		f.Delay = d.Delay
+	}
+	if f.Packets != "tlshello" {
+		if err := checkRange(f.Packets, 1, "Фрагментация: пакеты"); err != nil {
+			return err
+		}
+	}
+	if err := checkRange(f.Length, 1, "Фрагментация: длина куска"); err != nil {
+		return err
+	}
+	return checkRange(f.Delay, 0, "Фрагментация: пауза")
 }
 
 // DefaultClientRouting is what subscriptions carry until changed: Russian sites direct with
@@ -44,6 +131,7 @@ func DefaultClientRouting() ClientRouting {
 		DNSProxy:  []string{"https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query"},
 		Torrent:   "direct",
 		Direct:    []string{}, Proxy: []string{}, Block: []string{},
+		Fragment: DefaultClientFragment(),
 	}
 }
 
@@ -80,6 +168,9 @@ var processRe = regexp.MustCompile(`^[\p{L}\p{N}_.+()-][\p{L}\p{N}_.+() -]{0,127
 // CheckClientRouting validates and tidies a routing (empty lines dropped). Errors name the
 // field and the line as the panel shows them.
 func CheckClientRouting(r *ClientRouting) error {
+	if err := checkFragment(&r.Fragment); err != nil {
+		return err
+	}
 	switch r.Torrent {
 	case "":
 		r.Torrent = "proxy"
@@ -250,4 +341,41 @@ func ParseClientConfig(src string) (map[string]any, error) {
 		return nil, invalid("«Конфиг JSON»: routing должен быть объектом")
 	}
 	return m, nil
+}
+
+// CheckFinalMask checks a connection point's own finalmask as Xray reads it: tcp and udp lists of
+// masks with a type, and quicParams.
+func CheckFinalMask(v any) error {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return invalid(`Final Mask: нужен JSON-объект, например {"tcp": [{"type": "fragment", "settings": {…}}]}`)
+	}
+	for k, x := range m {
+		switch k {
+		case "tcp", "udp":
+			l, ok := x.([]any)
+			if !ok {
+				return invalid("Final Mask: «%s» должен быть списком", k)
+			}
+			for i, e := range l {
+				o, ok := e.(map[string]any)
+				if !ok || str(o["type"]) == "" {
+					return invalid("Final Mask: «%s», элемент %d: нужен объект с полем type", k, i+1)
+				}
+				st, _ := o["settings"].(map[string]any)
+				if _, has := st["interval"]; has && o["type"] == "fragment" {
+					if _, ok := st["delay"]; !ok {
+						return invalid("Final Mask: «%s», элемент %d: пауза между кусками в Xray называется delay, а не interval", k, i+1)
+					}
+				}
+			}
+		case "quicParams":
+			if _, ok := x.(map[string]any); !ok {
+				return invalid("Final Mask: «quicParams» должен быть объектом")
+			}
+		default:
+			return invalid("Final Mask: неизвестное поле «%s» (есть tcp, udp и quicParams)", k)
+		}
+	}
+	return nil
 }

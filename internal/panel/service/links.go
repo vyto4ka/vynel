@@ -67,6 +67,9 @@ type Host struct {
 	// Raw is a link from another subscription that is passed on as it is (vmess, trojan, ss…):
 	// only the links format can carry it.
 	Raw string
+	// FinalMask is the client's streamSettings.finalmask (Xray JSON only): the host's own from the
+	// template or the connection point, else the subscription's fragment (WithFragment).
+	FinalMask map[string]any
 }
 
 // UserInbounds returns the enabled node inbounds (on enabled nodes) a user can use.
@@ -138,6 +141,9 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 	if c := ClientOf(p); c.Custom {
 		h.Client = &c
 	}
+	if fm, ok := hm["finalmask"].(map[string]any); ok && len(fm) > 0 {
+		h.FinalMask = copyMap(fm)
+	}
 	if l, ok := hm["alpn"].([]any); ok {
 		for _, a := range l {
 			h.ALPN = append(h.ALPN, str(a))
@@ -187,10 +193,15 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 // (keys: remark, address, port, sni, fingerprint, hidden; null deletes).
 func (s *Service) SetHostOverride(ctx context.Context, actor Actor, niID int64, patch map[string]any) error {
 	allowed := map[string]bool{"remark": true, "address": true, "port": true, "sni": true, "host": true, "fingerprint": true, "hidden": true, "alpn": true,
-		"mihomo": true, "mihomo_x25519mlkem768": true}
+		"mihomo": true, "mihomo_x25519mlkem768": true, "finalmask": true}
 	for k := range patch {
 		if !allowed[k] {
 			return invalid("connection point field %q cannot be overridden", k)
+		}
+	}
+	if fm, ok := patch["finalmask"]; ok && fm != nil {
+		if err := CheckFinalMask(fm); err != nil {
+			return err
 		}
 	}
 	return s.mutate(ctx, change{actor: actor, action: "host.update", entity: "node_inbound", entityID: func() int64 { return niID }, event: EvInboundChanged, diff: patch},
