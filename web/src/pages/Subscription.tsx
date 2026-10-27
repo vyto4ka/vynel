@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
+import { ClientFragment, ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
 import { ExternalList } from '../extras'
 import { RoutingForm } from '../routing'
 import { Badge, Field, Icon, Info, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
@@ -132,11 +132,40 @@ function RoutingTab({ r, set, onReset }: { r: ClientRouting; set: (r: ClientRout
         <div className="card-sub" style={{ marginBottom: 14 }}>Xray JSON, Mihomo и sing-box; не для ссылок vless://</div>
         <RoutingForm r={r} set={set} />
       </div>
+      <FragmentCard f={r.fragment ?? defaultFragment} set={(fragment) => set({ ...r, fragment })} />
       <div className="card card-pad small text-2 row">
         <button className="btn ghost sm" onClick={onReset}>Вернуть маршруты по умолчанию</button>
         <span>Свои маршруты профиля <Info>У профиля можно включить «Кастомный профиль клиента» (Профили → профиль → «Клиент»): свои маршруты или целый JSON-конфиг Xray для его серверов. Это действует в Xray JSON — там у каждого сервера свой конфиг. Mihomo и sing-box получают один файл на все серверы и берут маршруты отсюда.</Info></span>
       </div>
     </>
+  )
+}
+
+const defaultFragment: ClientFragment = { enabled: false, packets: 'tlshello', length: '10-20', delay: '10-20' }
+
+function FragmentCard({ f, set }: { f: ClientFragment; set: (f: ClientFragment) => void }) {
+  const field = (k: 'packets' | 'length' | 'delay') => (e: React.ChangeEvent<HTMLInputElement>) => set({ ...f, [k]: e.target.value })
+  return (
+    <div className="card card-pad">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h3 style={{ margin: 0 }}>Фрагментация ClientHello <Info>Приложение отправляет начало TLS-соединения (ClientHello) маленькими кусками с паузами. Помогает, когда оператор обрывает соединения на TCP 443 по ClientHello. Уходит в Xray JSON (KeqDroid, Happ, v2RayTun) для всех серверов, кроме Hysteria2 (он на UDP) и тех, у которых своя Final Mask в точке подключения. Ссылкам vless://, Mihomo и sing-box не передаётся. Нужен Xray 26 в приложении: старое ядро настройку просто пропустит.</Info></h3>
+        <Switch checked={f.enabled} onChange={(enabled) => set({ ...f, enabled })} />
+      </div>
+      <div className="card-sub" style={{ margin: '4px 0 14px' }}>Для операторов, которые режут TLS на 443; только Xray JSON</div>
+      {f.enabled && (
+        <div className="grid3">
+          <Field label="Пакеты" info="tlshello — только ClientHello (обычно этого достаточно). Диапазон 1-3 — первые пакеты соединения.">
+            <input className="input mono" value={f.packets} onChange={field('packets')} placeholder="tlshello" />
+          </Field>
+          <Field label="Длина куска, байт" info="Размер каждого куска: число или диапазон, из которого берётся случайное значение.">
+            <input className="input mono" value={f.length} onChange={field('length')} placeholder="10-20" />
+          </Field>
+          <Field label="Пауза, мс" info="Пауза между кусками. 0 — без пауз.">
+            <input className="input mono" value={f.delay} onChange={field('delay')} placeholder="10-20" />
+          </Field>
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -199,6 +199,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.log.Warn("subscription routing", "err", err)
 	}
+	hosts = service.WithFragment(hosts, routing.Fragment)
 	var body []byte
 	switch {
 	case format == FormatMihomo && tpl != "":

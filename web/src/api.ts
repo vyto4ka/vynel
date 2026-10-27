@@ -452,6 +452,15 @@ export interface ClientRouting {
   direct: string[]
   proxy: string[]
   block: string[]
+  fragment?: ClientFragment
+}
+
+// Фрагментация ClientHello (finalmask «fragment» в Xray JSON).
+export interface ClientFragment {
+  enabled: boolean
+  packets: string
+  length: string
+  delay: string
 }
 
 // Свой клиентский конфиг профиля (галочка «Кастомный профиль клиента»).

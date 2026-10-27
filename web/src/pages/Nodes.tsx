@@ -356,6 +356,9 @@ function Attach({ node, profiles, onClose, onDone }: { node: Node; profiles: Pro
   )
 }
 
+// Фрагментация ClientHello в виде finalmask (у Xray пауза называется delay).
+const fragmentMask = { tcp: [{ type: 'fragment', settings: { packets: 'tlshello', length: '10-20', delay: '10-20' } }] }
+
 function HostForm({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; onSaved: () => void }) {
   const o = i.hostOverride
   const [remark, setRemark] = useState(String(o.remark ?? ''))
@@ -364,11 +367,15 @@ function HostForm({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; on
   const [sni, setSni] = useState(String(o.sni ?? ''))
   const [fp, setFp] = useState(String(o.fingerprint ?? ''))
   const [hidden, setHidden] = useState(!!o.hidden)
+  const [maskText, setMaskText] = useState(o.finalmask ? pretty(o.finalmask) : '')
+  const mask = parseObject(maskText)
   const act = useAction()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    if (mask.error) return
     const v = (s: string) => (s.trim() === '' ? null : s.trim())
-    const host = { remark: v(remark), address: v(address), port: port ? Number(port) : null, sni: v(sni), fingerprint: v(fp), hidden: hidden || null }
+    const host = { remark: v(remark), address: v(address), port: port ? Number(port) : null, sni: v(sni), fingerprint: v(fp), hidden: hidden || null,
+      finalmask: mask.value && Object.keys(mask.value).length ? mask.value : null }
     const r = await act(() => patch(`inbounds/${i.id}`, { host }), 'Точка подключения сохранена')
     if (r !== undefined) onSaved()
   }
@@ -386,6 +393,11 @@ function HostForm({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; on
           <Field label="Fingerprint"><input className="input" value={fp} onChange={(e) => setFp(e.target.value)} placeholder={h?.fingerprint} /></Field>
         </div>
         <label className="check"><input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} /> Скрыть из подписок</label>
+        <Field label="Final Mask" info="streamSettings.finalmask для приложений с Xray JSON (KeqDroid, Happ, v2RayTun): например, фрагментация ClientHello против операторов, которые режут TLS на 443. Пусто — действует переключатель «Фрагментация ClientHello» в Подписка → Маршруты. Ссылкам vless://, Mihomo и sing-box не передаётся."
+          help={mask.error ? <span className="pink-text">{mask.error}</span> : 'JSON-объект: tcp, udp, quicParams. Пусто — как в подписке'}>
+          <CodeEditor lang="json" value={maskText} onChange={setMaskText} height={140} />
+        </Field>
+        <button type="button" className="btn ghost sm" onClick={() => setMaskText(pretty(fragmentMask))}>Вставить фрагментацию ClientHello</button>
       </form>
     </Modal>
   )
