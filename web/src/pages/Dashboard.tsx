@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { Overview } from './Overview'
 import { ServerLoad } from './ServerLoad'
 import { Stats } from './Stats'
+import { t } from '../i18n'
 
 type Tab = 'summary' | 'connections' | 'servers'
-const tabs: [Tab, string][] = [['summary', 'Сводка'], ['connections', 'Подключения'], ['servers', 'Серверы']]
+const tabs: [Tab, string][] = [['summary', t('dashboard.summary')], ['connections', t('dashboard.connections')], ['servers', t('common.servers')]]
 
 // Вкладка из адреса: #/overview/servers; старая ссылка #/stats — это «Подключения».
 function tabFromHash(): Tab {

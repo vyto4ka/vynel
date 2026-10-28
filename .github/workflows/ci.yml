@@ -63,4 +63,4 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - run: cd web && pnpm install --frozen-lockfile && pnpm build
+      - run: cd web && pnpm install --frozen-lockfile && pnpm i18n:check && pnpm build

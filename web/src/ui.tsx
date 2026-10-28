@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { Day } from './api'
 import { fmtBytes, TimeChart } from './charts'
 import { bytes } from './format'
+import { Link, useLinkHandlers } from './jsonlink'
+import { t } from './i18n'
 
 // ---------- иконки ----------
 
@@ -31,6 +33,8 @@ const paths: Record<string, ReactNode> = {
   link: <><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></>,
   telegram: <path d="M21 4 3 11l6 2.5M21 4l-4 16-8-6.5M21 4 9 13.5V19l3-3.5" />,
   code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
+  xray: <><path d="M12 2.5 20 7v10l-8 4.5L4 17V7z" /><path d="m9 9.5 6 5M15 9.5l-6 5" /></>,
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   chart: <><path d="M4 4v16h16" /><path d="m7 14 4-4 3 3 5-6" /></>,
   wallet: <><rect x="3" y="6" width="18" height="14" rx="2.5" /><path d="M3 10h18M16 15h2M6 6l9-3 2 3" /></>,
   external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,
@@ -136,7 +140,7 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = [], refreshMs
 
 export function Loading({ error }: { error?: string | null }) {
   if (error) return <div className="alert pink">{error}</div>
-  return <div className="empty">Загрузка…</div>
+  return <div className="empty">{t('common.loading')}</div>
 }
 
 // ---------- оверлеи ----------
@@ -152,7 +156,7 @@ export function Modal({ title, children, footer, onClose, wide, xl }: { title: R
       <div className={'modal' + (wide ? ' wide' : '') + (xl ? ' xl' : '')} role="dialog">
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="btn ghost icon sm" onClick={onClose} aria-label="Закрыть"><Icon name="close" /></button>
+          <button className="btn ghost icon sm" onClick={onClose} aria-label={t('common.close')}><Icon name="close" /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -174,7 +178,7 @@ export function Drawer({ title, children, onClose, actions }: { title: ReactNode
         <div className="drawer-head">
           <h2 className="grow ellipsis">{title}</h2>
           {actions}
-          <button className="btn ghost icon sm" onClick={onClose} aria-label="Закрыть"><Icon name="close" /></button>
+          <button className="btn ghost icon sm" onClick={onClose} aria-label={t('common.close')}><Icon name="close" /></button>
         </div>
         <div className="drawer-body">{children}</div>
       </aside>
@@ -188,7 +192,7 @@ export const useConfirm = () => useContext(ConfirmCtx)
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [st, setSt] = useState<ConfirmState>(null)
-  const ask = useCallback((text: ReactNode, ok = 'Да', danger = true) => new Promise<boolean>((resolve) => setSt({ text, ok, danger, resolve })), [])
+  const ask = useCallback((text: ReactNode, ok = t('common.yes'), danger = true) => new Promise<boolean>((resolve) => setSt({ text, ok, danger, resolve })), [])
   const close = (v: boolean) => {
     st?.resolve(v)
     setSt(null)
@@ -197,8 +201,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <ConfirmCtx.Provider value={ask}>
       {children}
       {st && (
-        <Modal title="Подтверждение" onClose={() => close(false)}
-          footer={<><button className="btn ghost" onClick={() => close(false)}>Отмена</button>
+        <Modal title={t('ui.confirmation')} onClose={() => close(false)}
+          footer={<><button className="btn ghost" onClick={() => close(false)}>{t('common.cancel')}</button>
             <button className={'btn ' + (st.danger ? 'pink' : 'primary')} autoFocus onClick={() => close(true)}>{st.ok}</button></>}>
           <div className="text-2">{st.text}</div>
         </Modal>
@@ -248,7 +252,7 @@ export function Badge({ color, children, dot }: { color?: string; children: Reac
 
 // Info — кнопка «i» с пояснением во всплывающем окне: что это такое и зачем. Короткие уточнения
 // («пусто — без лимита», «за сутки») остаются на виду, в подписи поля.
-export function Info({ children, label = 'Что это' }: { children: ReactNode; label?: string }) {
+export function Info({ children, label = t('ui.what_is_this') }: { children: ReactNode; label?: string }) {
   const [open, setOpen] = useState<'hover' | 'click' | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
@@ -281,7 +285,7 @@ export function Info({ children, label = 'Что это' }: { children: ReactNod
       <button type="button" ref={btn} className={'info-btn' + (open ? ' on' : '')} aria-label={label} aria-expanded={!!open}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(open === 'click' ? null : 'click') }}
         onMouseEnter={() => { if (!open && matchMedia('(hover: hover)').matches) setOpen('hover') }}
-        onMouseLeave={() => { if (open === 'hover') setOpen(null) }}>i</button>
+        onMouseLeave={() => { if (open === 'hover') setOpen(null) }}>?</button>
       {open && createPortal(
         <div ref={pop} className="info-pop" role="tooltip" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden', left: 0, top: 0 }}
           onClick={(e) => e.stopPropagation()}>{children}</div>,
@@ -293,12 +297,13 @@ export function Info({ children, label = 'Что это' }: { children: ReactNod
 
 // PageInfo — «О разделе» с пояснением во всплывающем окне, слева в панели инструментов.
 export function PageInfo({ children }: { children: ReactNode }) {
-  return <div className="grow page-info"><span className="muted small">О разделе</span><Info label="О разделе">{children}</Info></div>
+  return <div className="grow page-info"><span className="muted small">{t('ui.about_this_page')}</span><Info label={t('ui.about_this_page')}>{children}</Info></div>
 }
 
-export function Field({ label, help, info, children }: { label: ReactNode; help?: ReactNode; info?: ReactNode; children: ReactNode }) {
+export function Field({ label, help, info, link, children }: { label: ReactNode; help?: ReactNode; info?: ReactNode; link?: Link; children: ReactNode }) {
+  const h = useLinkHandlers(link)
   return (
-    <div className="field">
+    <div className="field" {...h}>
       <label>{label}{info && <Info>{info}</Info>}</label>
       {children}
       {help && <div className="help">{help}</div>}
@@ -320,9 +325,8 @@ export function CopyField({ value, wrap }: { value: string; wrap?: boolean }) {
   return (
     <div className={'copy' + (wrap ? ' wrap' : '')}>
       <code title={value}>{value}</code>
-      <button className="btn sm" onClick={() => copyText(value).then(() => toast('Скопировано'))}>
-        <Icon name="copy" /> Копировать
-      </button>
+      <button className="btn sm" onClick={() => copyText(value).then(() => toast(t('ui.copied')))}>
+        <Icon name="copy" />{' '}{t('ui.copy')}</button>
     </div>
   )
 }
@@ -355,8 +359,8 @@ export function TrafficChart({ days }: { days: Day[] }) {
   return (
     <TimeChart times={days.map((d) => d.day)} bucket={86400} kind="bars" stacked unit="bytes" format={fmtBytes} height={190}
       series={[
-        { key: 'down', label: 'скачано', color: 'var(--s1)', values: days.map((d) => d.down) },
-        { key: 'up', label: 'отдано', color: 'var(--s2)', values: days.map((d) => d.up) },
+        { key: 'down', label: t('common.downloaded'), color: 'var(--s1)', values: days.map((d) => d.down) },
+        { key: 'up', label: t('common.uploaded'), color: 'var(--s2)', values: days.map((d) => d.up) },
       ]} />
   )
 }
@@ -364,8 +368,8 @@ export function TrafficChart({ days }: { days: Day[] }) {
 export function ChartLegend() {
   return (
     <div className="legend">
-      <span><i style={{ background: 'var(--s1)' }} />скачано</span>
-      <span><i style={{ background: 'var(--s2)' }} />отдано</span>
+      <span><i style={{ background: 'var(--s1)' }} />{t('common.downloaded')}</span>
+      <span><i style={{ background: 'var(--s2)' }} />{t('common.uploaded')}</span>
     </div>
   )
 }

@@ -1,13 +1,14 @@
 import { FormEvent, useState } from 'react'
 import { Billing as BillingT, BillingNode, del, get, patch, post, Provider, put } from '../api'
-import { bytes, date, fromDateInput, GiB, plural, toDateInput } from '../format'
+import { bytes, date, fromDateInput, GiB, toDateInput } from '../format'
 import { Bar, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
+import { t, Trans } from '../i18n'
 
 // Биллинг — где арендованы серверы, сколько стоят, до когда оплачены и сколько трафика им можно.
 // За 5 дней до оплаты бот присылает напоминание; ноду, которая вот-вот выйдет за лимит трафика
 // провайдера, панель выключает до нового периода.
 
-const countLabels: Record<BillingNode['trafficCount'], string> = { both: 'входящий + исходящий', out: 'только исходящий', in: 'только входящий' }
+const countLabels: Record<BillingNode['trafficCount'], string> = { both: t('billing.incoming_outgoing'), out: t('billing.outgoing_only'), in: t('billing.incoming_only') }
 
 const money = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(2)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
 
@@ -41,36 +42,34 @@ export function Billing() {
     <>
       <div className="toolbar">
         <PageInfo>
-          <p>Провайдеры — где арендованы серверы: ссылка на сайт и на вход в личный кабинет. Иконка и название берутся с сайта.</p>
-          <p>У каждой ноды — провайдер, стоимость и дата, до которой она оплачена: за {data.remindDays} дней бот напомнит об оплате.
-            Лимит трафика провайдера считается по сетевому интерфейсу сервера: за {bytes(data.margin)} до лимита нода выключается
-            и включается сама в день сброса.</p>
+          <p>{t('billing.providers_are_where_the_servers')}</p>
+          <p><Trans k="billing.each_node_has_a_provider" v={{ remindDays: data.remindDays, v: bytes(data.margin) }} /></p>
         </PageInfo>
-        <button className="btn primary" onClick={() => setEditProvider('new')}><Icon name="plus" /> Провайдер</button>
+        <button className="btn primary" onClick={() => setEditProvider('new')}><Icon name="plus" />{' '}{t('common.provider')}</button>
       </div>
 
       <div className="stats">
         <div className="card stat kpi">
-          <div className="k">В месяц</div>
+          <div className="k">{t('billing.per_month')}</div>
           <div className="v">{monthly.size === 0 ? '—' : [...monthly].map(([c, v]) => `${money(Math.round(v * 100) / 100)} ${c}`).join(' + ')}</div>
-          <div className="s">{data.nodes.filter((n) => n.cost > 0).length} из {data.nodes.length} нод с ценой</div>
+          <div className="s"><Trans k="billing.of_nodes_have_a_price" v={{ length: data.nodes.filter((n) => n.cost > 0).length, length2: data.nodes.length }} /></div>
         </div>
         <div className="card stat kpi pink">
-          <div className="k">Ближайшая оплата</div>
+          <div className="k">{t('billing.next_payment')}</div>
           <div className="v">{due ? date(due.paidUntil) : '—'}</div>
-          <div className="s">{due ? <>{due.flag} {due.name} · <PaidLeft ts={due.paidUntil!} /></> : 'даты оплаты не заданы'}</div>
+          <div className="s">{due ? <>{due.flag} {due.name} · <PaidLeft ts={due.paidUntil!} /></> : t('billing.no_payment_dates_set')}</div>
         </div>
         <div className="card stat kpi">
-          <div className="k">Трафик у провайдера</div>
+          <div className="k">{t('billing.provider_traffic')}</div>
           <div className="v">{fullest ? `${Math.min(100, Math.round((100 * fullest.used) / fullest.trafficLimit))}%` : '—'}</div>
-          <div className="s">{fullest ? `больше всех: ${fullest.flag} ${fullest.name}` : 'лимиты не заданы'}</div>
+          <div className="s">{fullest ? t('billing.most', { flag: fullest.flag, name: fullest.name }) : t('billing.no_limits_set')}</div>
         </div>
       </div>
 
       <div className="card section-gap">
-        <div className="card-head"><div><h3>Провайдеры</h3><div className="card-sub">иконка и название — с сайта</div></div></div>
+        <div className="card-head"><div><h3>{t('billing.providers')}</h3><div className="card-sub">{t('billing.icon_and_name_come_from')}</div></div></div>
         {data.providers.length === 0 ? (
-          <Empty icon="🏢">Провайдеров пока нет. Нажмите «Провайдер» и вставьте ссылку на сайт.</Empty>
+          <Empty icon="🏢">{t('billing.no_providers_yet_press_provider')}</Empty>
         ) : (
           <div className="provider-grid card-pad">
             {data.providers.map((p) => {
@@ -81,22 +80,22 @@ export function Billing() {
                     <ProviderIcon p={p} size={28} />
                     <div className="grow" style={{ minWidth: 0 }}>
                       <div className="ellipsis"><b>{p.name}</b></div>
-                      <div className="muted small ellipsis">{p.url ? new URL(p.url).hostname.replace(/^www\./, '') : 'без сайта'} · {nodes.length} {plural(nodes.length, 'нода', 'ноды', 'нод')}</div>
+                      <div className="muted small ellipsis">{p.url ? new URL(p.url).hostname.replace(/^www\./, '') : t('billing.no_site')} · {t('common.nodes_count', { n: nodes.length })}</div>
                     </div>
-                    <Menu title="Действия" items={[
-                      { label: 'Изменить', icon: 'edit', onClick: () => setEditProvider(p) },
-                      { label: 'Обновить иконку и название с сайта', icon: 'refresh', disabled: !p.url && !p.loginUrl,
-                        onClick: () => act(() => put(`providers/${p.id}`, { name: '', url: p.url, loginUrl: p.loginUrl, refresh: true }), 'Обновлено').then(reload) },
+                    <Menu title={t('common.actions')} items={[
+                      { label: t('common.edit'), icon: 'edit', onClick: () => setEditProvider(p) },
+                      { label: t('billing.refresh_the_icon_and_name'), icon: 'refresh', disabled: !p.url && !p.loginUrl,
+                        onClick: () => act(() => put(`providers/${p.id}`, { name: '', url: p.url, loginUrl: p.loginUrl, refresh: true }), t('common.updated')).then(reload) },
                       'divider',
-                      { label: 'Удалить', icon: 'trash', danger: true, onClick: async () => {
-                        if (await confirm(<>Удалить провайдера <b>{p.name}</b>? У нод останутся стоимость и даты, без провайдера.</>, 'Удалить'))
-                          act(() => del(`providers/${p.id}`), 'Провайдер удалён').then(reload)
+                      { label: t('common.delete'), icon: 'trash', danger: true, onClick: async () => {
+                        if (await confirm(<><Trans k="billing.delete_the_provider_nodes_keep" v={{ name: p.name }} /></>, t('common.delete')))
+                          act(() => del(`providers/${p.id}`), t('billing.provider_deleted')).then(reload)
                       } },
                     ]} />
                   </div>
                   <div className="row" style={{ gap: 6, marginTop: 10 }}>
-                    {p.url && <a className="btn sm" href={p.url} target="_blank" rel="noreferrer"><Icon name="external" size={16} /> Сайт</a>}
-                    {p.loginUrl && <a className="btn sm primary" href={p.loginUrl} target="_blank" rel="noreferrer"><Icon name="key" size={16} /> Войти</a>}
+                    {p.url && <a className="btn sm" href={p.url} target="_blank" rel="noreferrer"><Icon name="external" size={16} />{' '}{t('billing.site')}</a>}
+                    {p.loginUrl && <a className="btn sm primary" href={p.loginUrl} target="_blank" rel="noreferrer"><Icon name="key" size={16} />{' '}{t('common.sign_in')}</a>}
                   </div>
                 </div>
               )
@@ -106,27 +105,27 @@ export function Billing() {
       </div>
 
       <div className="card section-gap">
-        <div className="card-head"><div><h3>Ноды</h3><div className="card-sub">нажмите на строку, чтобы задать провайдера, цену и лимит</div></div></div>
-        {data.nodes.length === 0 ? <Empty>Нод пока нет</Empty> : (
+        <div className="card-head"><div><h3>{t('common.nodes')}</h3><div className="card-sub">{t('billing.click_a_row_to_set')}</div></div></div>
+        {data.nodes.length === 0 ? <Empty>{t('common.no_nodes_yet')}</Empty> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Нода</th><th className="hide-sm">Провайдер</th><th>Стоимость</th><th>Оплачено до</th><th className="hide-sm">Трафик у провайдера</th></tr></thead>
+              <thead><tr><th>{t('common.node')}</th><th className="hide-sm">{t('common.provider')}</th><th>{t('billing.price')}</th><th>{t('billing.paid_until')}</th><th className="hide-sm">{t('billing.provider_traffic')}</th></tr></thead>
               <tbody>
                 {data.nodes.map((n) => {
                   const p = n.providerId ? byId.get(n.providerId) : null
                   return (
                     <tr key={n.id} className="click" onClick={() => setEditNode(n)}>
                       <td className="nowrap"><span style={{ fontSize: 16 }}>{n.flag}</span> <b>{n.name}</b> <span className="muted small">{n.code}</span>
-                        {n.offByLimit && <div className="small pink-text">выключена по лимиту</div>}</td>
+                        {n.offByLimit && <div className="small pink-text">{t('billing.switched_off_by_the_limit')}</div>}</td>
                       <td className="nowrap hide-sm">{p ? <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><ProviderIcon p={p} />{p.name}</span> : <span className="muted">—</span>}</td>
-                      <td className="nowrap">{n.cost > 0 ? <>{money(n.cost)} {n.currency}<span className="muted small"> / {n.costPeriod === 'year' ? 'год' : 'мес'}</span></> : <span className="muted">—</span>}</td>
+                      <td className="nowrap">{n.cost > 0 ? <>{money(n.cost)} {n.currency}<span className="muted small"> / {n.costPeriod === 'year' ? t('billing.year') : t('billing.mo')}</span></> : <span className="muted">—</span>}</td>
                       <td className="nowrap">{n.paidUntil ? <><div>{date(n.paidUntil)}</div><div className="small"><PaidLeft ts={n.paidUntil} /></div></> : <span className="muted">—</span>}</td>
                       <td className="hide-sm" style={{ minWidth: 190 }}>
                         {n.trafficLimit > 0 ? <>
-                          <div className="small text-2">{bytes(n.used)} из {bytes(n.trafficLimit)}</div>
+                          <div className="small text-2"><Trans k="billing.of" v={{ v: bytes(n.used), v2: bytes(n.trafficLimit) }} /></div>
                           <Bar value={n.used} max={n.trafficLimit} />
-                          <div className="muted small">сброс {date(n.periodTo)}</div>
-                        </> : <span className="muted small">{bytes(n.used)} с {date(n.periodFrom)}, без лимита</span>}
+                          <div className="muted small"><Trans k="billing.reset" v={{ v: date(n.periodTo) }} /></div>
+                        </> : <span className="muted small"><Trans k="billing.since_no_limit" v={{ v: bytes(n.used), v2: date(n.periodFrom) }} /></span>}
                       </td>
                     </tr>
                   )
@@ -146,9 +145,9 @@ export function Billing() {
 
 function PaidLeft({ ts }: { ts: number }) {
   const d = daysTo(ts)
-  if (d < 0) return <span className="pink-text">просрочено на {-d} дн.</span>
-  if (d === 0) return <span className="pink-text">сегодня</span>
-  return <span className={d <= 5 ? 'pink-text' : 'muted'}>ещё {d} дн.</span>
+  if (d < 0) return <span className="pink-text"><Trans k="billing.overdue_by_d" v={{ v: -d }} /></span>
+  if (d === 0) return <span className="pink-text">{t('billing.today')}</span>
+  return <span className={d <= 5 ? 'pink-text' : 'muted'}><Trans k="billing.d_left" v={{ d: d }} /></span>
 }
 
 function ProviderForm({ p, onClose, onSaved }: { p: Provider | null; onClose: () => void; onSaved: () => void }) {
@@ -161,22 +160,22 @@ function ProviderForm({ p, onClose, onSaved }: { p: Provider | null; onClose: ()
     e.preventDefault()
     setBusy(true)
     const body = { name, url, loginUrl }
-    const r = await act(() => (p ? put(`providers/${p.id}`, body) : post('providers', body)), p ? 'Сохранено' : 'Провайдер добавлен')
+    const r = await act(() => (p ? put(`providers/${p.id}`, body) : post('providers', body)), p ? t('common.saved') : t('billing.provider_added'))
     setBusy(false)
     if (r !== undefined) onSaved()
   }
   return (
-    <Modal title={p ? p.name : 'Новый провайдер'} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button>
-        <button className="btn primary" form="provider-form" disabled={busy || (!url.trim() && !loginUrl.trim() && !name.trim())}>{busy ? 'Загружаю сайт…' : 'Сохранить'}</button></>}>
+    <Modal title={p ? p.name : t('billing.new_provider')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
+        <button className="btn primary" form="provider-form" disabled={busy || (!url.trim() && !loginUrl.trim() && !name.trim())}>{busy ? t('billing.loading_the_site') : t('common.save')}</button></>}>
       <form id="provider-form" onSubmit={submit}>
-        <Field label="Сайт" info="Ссылка на главную страницу провайдера: с неё панель возьмёт название и иконку.">
+        <Field label={t('billing.site')} info={t('billing.a_link_to_the_provider')}>
           <input className="input" autoFocus value={url} onChange={(e) => setUrl(e.target.value)} inputMode="url" />
         </Field>
-        <Field label="Вход в личный кабинет" help="Необязательно">
+        <Field label={t('billing.account_login')} help={t('common.optional')}>
           <input className="input" value={loginUrl} onChange={(e) => setLoginUrl(e.target.value)} inputMode="url" />
         </Field>
-        <Field label="Название" help="Пусто — возьмётся с сайта">
+        <Field label={t('common.name')} help={t('billing.empty_taken_from_the_site')}>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
       </form>
@@ -209,56 +208,52 @@ function NodeBillingForm({ n, providers, margin, remindDays, onClose, onSaved, o
       paidUntil: fromDateInput(paid) || 0, trafficLimit: Math.round((Number(limit.replace(',', '.')) || 0) * GiB),
       resetDay: Math.min(31, Math.max(1, Number(resetDay) || 1)), trafficCount: count,
     }
-    const r = await act(() => patch(`nodes/${n.id}/billing`, body), 'Сохранено')
+    const r = await act(() => patch(`nodes/${n.id}/billing`, body), t('common.saved'))
     if (r !== undefined) onSaved()
   }
   return (
     <Modal title={<>{n.flag} {n.name} <span className="muted small">{n.code}</span></>} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="node-billing">Сохранить</button></>}>
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="node-billing">{t('common.save')}</button></>}>
       <form id="node-billing" onSubmit={submit}>
-        <Field label="Провайдер">
+        <Field label={t('common.provider')}>
           <div className="row" style={{ flexWrap: 'nowrap' }}>
             <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
-              <option value={0}>— не указан —</option>
+              <option value={0}>{t('common.not_set')}</option>
               {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-            <button type="button" className="btn ghost" onClick={onNewProvider}><Icon name="plus" /> <span className="hide-sm">Новый</span></button>
+            <button type="button" className="btn ghost" onClick={onNewProvider}><Icon name="plus" /> <span className="hide-sm">{t('billing.new')}</span></button>
           </div>
         </Field>
         <div className="grid3">
-          <Field label="Стоимость"><input className="input" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" /></Field>
-          <Field label="Валюта"><input className="input" value={currency} maxLength={8} onChange={(e) => setCurrency(e.target.value)} list="currencies" /></Field>
-          <Field label="За">
+          <Field label={t('billing.price')}><input className="input" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" /></Field>
+          <Field label={t('billing.currency')}><input className="input" value={currency} maxLength={8} onChange={(e) => setCurrency(e.target.value)} list="currencies" /></Field>
+          <Field label={t('billing.per')}>
             <select className="input" value={period} onChange={(e) => setPeriod(e.target.value as BillingNode['costPeriod'])}>
-              <option value="month">месяц</option><option value="year">год</option>
+              <option value="month">{t('billing.month')}</option><option value="year">{t('billing.year')}</option>
             </select>
           </Field>
         </div>
         <datalist id="currencies"><option value="₽" /><option value="$" /><option value="€" /></datalist>
-        <Field label="Оплачено до" help={`За ${remindDays} дней бот напомнит об оплате; пусто — не следить`}>
+        <Field label={t('billing.paid_until')} help={t('billing.the_bot_reminds_you_days', { remindDays })}>
           <div className="row" style={{ flexWrap: 'nowrap' }}>
             <input className="input" type="date" value={paid} onChange={(e) => setPaid(e.target.value)} />
-            <button type="button" className="btn ghost" onClick={() => extend(period === 'year' ? 12 : 1)}>+1 {period === 'year' ? 'год' : 'мес'}</button>
+            <button type="button" className="btn ghost" onClick={() => extend(period === 'year' ? 12 : 1)}>+1 {period === 'year' ? t('billing.year') : t('billing.mo')}</button>
           </div>
         </Field>
-        <div className="label" style={{ margin: '6px 0 8px' }}>Трафик у провайдера
-          <Info>Считается по сетевому интерфейсу сервера — весь трафик, не только пользователей. За {bytes(margin)} до лимита
-            (у маленького лимита — за десятую часть) нода выключится, а в день сброса включится сама. Включить раньше — переключатель
-            ноды в разделе «Ноды»: до конца периода лимит её больше не тронет.</Info>
+        <div className="label" style={{ margin: '6px 0 8px' }}>{t('billing.provider_traffic')}<Info><Trans k="billing.counted_on_the_server_s" v={{ v: bytes(margin) }} /></Info>
         </div>
         <div className="grid3">
-          <Field label="Лимит, ГБ" help="Пусто — без лимита"><input className="input" inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="∞" /></Field>
-          <Field label="Сброс, число" help="Каждый месяц"><input className="input" inputMode="numeric" value={resetDay} onChange={(e) => setResetDay(e.target.value.replace(/\D/g, ''))} /></Field>
-          <Field label="Считать">
+          <Field label={t('billing.limit_gb')} help={t('common.empty_no_limit')}><input className="input" inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="∞" /></Field>
+          <Field label={t('billing.reset_day')} help={t('billing.every_month')}><input className="input" inputMode="numeric" value={resetDay} onChange={(e) => setResetDay(e.target.value.replace(/\D/g, ''))} /></Field>
+          <Field label={t('billing.count')}>
             <select className="input" value={count} onChange={(e) => setCount(e.target.value as BillingNode['trafficCount'])}>
               {Object.entries(countLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </Field>
         </div>
-        <div className="small text-2">
-          Сейчас: {bytes(n.used)} с {date(n.periodFrom)}{n.trafficLimit > 0 && <> из {bytes(n.trafficLimit)}</>}
-          {n.offByLimit && <span className="pink-text"> · выключена по лимиту</span>}
-          {n.overridden && <span> · включена вручную до конца периода</span>}
+        <div className="small text-2"><Trans k="billing.now_since" v={{ v: bytes(n.used), v2: date(n.periodFrom) }} />{n.trafficLimit > 0 && <>{' '}<Trans k="billing.of_2" v={{ v: bytes(n.trafficLimit) }} /></>}
+          {n.offByLimit && <span className="pink-text">{' '}{t('billing.switched_off_by_the_limit_2')}</span>}
+          {n.overridden && <span>{' '}{t('billing.switched_on_manually_until')}</span>}
         </div>
       </form>
     </Modal>

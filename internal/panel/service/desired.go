@@ -58,6 +58,12 @@ func EmailRef(email string) string {
 
 // DesiredStates computes the desired state of every node in one pass.
 func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, error) {
+	return s.desiredStates(ctx, nil)
+}
+
+// desiredStates is DesiredStates with the base config replaced by baseJSON for every node (nil =
+// the stored ones): what nodes would get if the edited base config were saved.
+func (s *Service) desiredStates(ctx context.Context, baseJSON *string) (map[int64]*DesiredState, error) {
 	if err := s.syncTemplates(ctx); err != nil {
 		return nil, err
 	}
@@ -125,8 +131,10 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 			return nil, err
 		}
 		apiAddr := "127.0.0.1:" + nodePort
-		base, err := store.GetBaseConfig(ctx, q, n.BaseConfigID)
-		if errors.Is(err, store.ErrNotFound) {
+		var base *store.BaseConfig
+		if baseJSON != nil {
+			base = &store.BaseConfig{JSON: *baseJSON}
+		} else if base, err = store.GetBaseConfig(ctx, q, n.BaseConfigID); errors.Is(err, store.ErrNotFound) {
 			base = &store.BaseConfig{JSON: xrayconf.DefaultBaseJSON}
 		} else if err != nil {
 			return nil, err

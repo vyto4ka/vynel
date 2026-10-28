@@ -1,6 +1,8 @@
 // Клиент API. Адреса относительные: панель открывается по секретному пути (/xxxx/),
 // и "api/..." указывает на /xxxx/api/...
 
+import { lang, t } from './i18n'
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message)
@@ -16,7 +18,7 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
   const res = await fetch('api/' + path, {
     method,
     credentials: 'same-origin',
-    headers: { 'X-Vynel': '1', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { 'X-Vynel': '1', 'X-Lang': lang(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
   const text = await res.text()
@@ -36,9 +38,9 @@ export async function api<T = any>(method: string, path: string, body?: unknown)
 // plainError explains an answer that did not come from the panel's API (no JSON error).
 function plainError(res: Response): string {
   const code = `HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''}`
-  if (res.status === 404) return `Панель не ответила (${code}): адрес сессии больше не работает — обновите страницу или войдите заново`
-  if (res.status >= 502 && res.status <= 504) return `Панель недоступна (${code}): она перезапускается или остановлена — попробуйте через минуту`
-  return `Ошибка сервера: ${code}`
+  if (res.status === 404) return t('api.no_answer', { code })
+  if (res.status >= 502 && res.status <= 504) return t('api.unavailable', { code })
+  return t('api.server_error', { code })
 }
 
 export const get = <T = any>(p: string) => api<T>('GET', p)
@@ -305,6 +307,8 @@ export interface InboundDetails {
   profile: { id: number; name: string }
   addresses: { id: number; ip: string; interface: string; onInterface: boolean; primary: boolean }[]
   variables?: Variable[]
+  inboundSource?: Record<string, any> // the profile's inbound with ${VARIABLES} in place
+  hostSource?: Record<string, any>
   rendered?: Record<string, any>
   error?: string
 }

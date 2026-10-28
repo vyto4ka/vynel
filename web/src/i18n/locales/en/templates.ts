@@ -1,0 +1,17 @@
+export default {
+  a_template_is_a_set: 'A template is a set of defaults for new users: term, limits, groups. To create a user it is enough to enter a name; the rest comes from the default template.',
+  and_days: 'and days',
+  default_template: 'Default template',
+  delete_the_template_users_already: 'Delete the template <b>{name}</b>? Users already created from it do not change.',
+  e_g_one_month: 'E.g. One month',
+  empty_the_shared_one_from: 'Empty — the shared one from settings, 0 — no limit',
+  every_new_user_gets_them: 'Every new user gets them automatically. For example, a friend’s subscription — its servers go below the main ones.',
+  n0_and_0_no_expiry: '0 and 0 — no expiry',
+  no_expiry: 'No expiry',
+  no_templates: 'No templates',
+  note_for_new_users: 'Note for new users',
+  template: 'Template “{name}”',
+  template_saved: 'Template saved',
+  term_months: 'Term, months',
+  what_it_gives: 'What it gives',
+}

@@ -3,6 +3,7 @@ import { get } from '../api'
 import { Legend, Segmented, SERIES, TimeChart } from '../charts'
 import { GiB } from '../format'
 import { Empty, Info, Loading, useLoad } from '../ui'
+import { t, Trans } from '../i18n'
 
 // Точка: t, CPU %, CPU max %, steal %, память (байты), rx, tx, rx max, tx max (байт/с).
 type Point = [number, number, number, number, number, number, number, number, number]
@@ -17,9 +18,9 @@ interface LoadT {
 
 type Range = '24h' | '7d' | '30d' | '90d'
 const ranges: { value: Range; label: string }[] = [
-  { value: '24h', label: '24 часа' }, { value: '7d', label: '7 дней' }, { value: '30d', label: '30 дней' }, { value: '90d', label: '90 дней' },
+  { value: '24h', label: t('common.n24_hours') }, { value: '7d', label: t('common.n7_days') }, { value: '30d', label: t('common.n30_days') }, { value: '90d', label: t('common.n90_days') },
 ]
-const bucketWord: Record<number, string> = { 300: '5 минут', 1800: '30 минут', 10800: '3 часа', 43200: '12 часов' }
+const bucketWord: Record<number, string> = { 300: t('serverload.n5_minutes'), 1800: t('serverload.n30_minutes'), 10800: t('serverload.n3_hours'), 43200: t('serverload.n12_hours') }
 
 function savedRange(): Range {
   try {
@@ -31,14 +32,14 @@ function savedRange(): Range {
 
 const pct = (v: number) => `${Math.round(v)}%`
 const pct1 = (v: number) => `${v < 10 ? v.toFixed(1) : Math.round(v)}%`
-const gb = (v: number) => `${(v / GiB).toFixed(v < 10 * GiB ? 1 : 0)} ГБ`
+const gb = (v: number) => t('serverload.gb', { toFixed: (v / GiB).toFixed(v < 10 * GiB ? 1 : 0) })
 // Канал — в битах в секунду, как его продают хостеры.
 export function bits(bytesPerSec: number): string {
   const b = bytesPerSec * 8
-  if (b >= 1e9) return `${(b / 1e9).toFixed(1)} Гбит/с`
-  if (b >= 1e6) return `${(b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} Мбит/с`
-  if (b >= 1e3) return `${Math.round(b / 1e3)} Кбит/с`
-  return `${Math.round(b)} бит/с`
+  if (b >= 1e9) return t('serverload.gbit_s', { toFixed: (b / 1e9).toFixed(1) })
+  if (b >= 1e6) return t('serverload.mbit_s', { toFixed: (b / 1e6).toFixed(b >= 1e8 ? 0 : 1) })
+  if (b >= 1e3) return t('serverload.kbit_s', { round: Math.round(b / 1e3) })
+  return t('serverload.bit_s', { round: Math.round(b) })
 }
 
 // ServerLoad — нагрузка нод во времени: процессор, steal, память в гигабайтах, канал.
@@ -53,10 +54,10 @@ export function ServerLoad() {
   return (
     <>
       <div className="stats-head">
-        <div className="muted small">{data ? <>Средние за {bucketWord[data.bucket] || `${data.bucket / 60} мин`} <Info>Нода присылает замеры каждые 10 секунд; панель сворачивает их в средние за 5 минут и хранит 90 дней. Вкладка обновляется раз в 5 минут; текущее состояние — в разделе «Ноды».</Info></> : ' '}</div>
+        <div className="muted small">{data ? <>{t('serverload.averages_per')}{' '}{bucketWord[data.bucket] || t('serverload.min', { v: data.bucket / 60 })} <Info>{t('serverload.a_node_sends_measurements_every')}</Info></> : ' '}</div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
-      {!data || data.range !== range ? <Loading error={error} /> : data.nodes.length === 0 ? <div className="card"><Empty>Нод пока нет</Empty></div> : (
+      {!data || data.range !== range ? <Loading error={error} /> : data.nodes.length === 0 ? <div className="card"><Empty>{t('common.no_nodes_yet')}</Empty></div> : (
         <div className="cards">
           {data.nodes.length > 1 && <AllNodesCard d={data} />}
           {data.nodes.map((n) => <NodeLoadCard key={n.id} n={n} d={data} />)}
@@ -85,24 +86,24 @@ function AllNodesCard({ d }: { d: LoadT }) {
   return (
     <div className="card">
       <div className="card-head">
-        <div><h3>Все ноды</h3><div className="card-sub">наложены друг на друга</div></div>
+        <div><h3>{t('serverload.all_nodes')}</h3><div className="card-sub">{t('serverload.overlaid')}</div></div>
         <Legend items={nodes.map((n, i) => ({ label: `${n.flag} ${n.code}`, color: color(i) }))} />
       </div>
       <div className="card-pad small-multiples load-grid">
         <div>
-          <div className="sm-title">Процессор, в среднем</div>
+          <div className="sm-title">{t('serverload.processor_average')}</div>
           <TimeChart times={times} bucket={d.bucket} kind="line" max={100} format={pct} height={170} series={series((p) => p[1])} />
         </div>
         <div>
-          <div className="sm-title">Steal<Info>Время процессора, которое хостер отдал другим виртуальным машинам на том же железе.</Info></div>
+          <div className="sm-title">Steal<Info>{t('serverload.cpu_time_the_hosting_provider')}</Info></div>
           <TimeChart times={times} bucket={d.bucket} kind="line" format={pct1} height={170} series={series((p) => p[3])} />
         </div>
         <div>
-          <div className="sm-title">Оперативная память</div>
+          <div className="sm-title">{t('serverload.memory')}</div>
           <TimeChart times={times} bucket={d.bucket} kind="line" unit="bytes" format={gb} height={170} series={series((p) => p[4])} />
         </div>
         <div>
-          <div className="sm-title">Канал, входящий + исходящий</div>
+          <div className="sm-title">{t('serverload.bandwidth_incoming_outgoing')}</div>
           <TimeChart times={times} bucket={d.bucket} kind="line" format={bits} height={170} series={series((p) => p[5] + p[6])} />
         </div>
       </div>
@@ -123,42 +124,42 @@ function NodeLoadCard({ n, d }: { n: LoadT['nodes'][number]; d: LoadT }) {
           <h3><span style={{ fontSize: 18 }}>{n.flag}</span> {n.name} <span className="muted small">{n.code}</span></h3>
           {last ? (
             <div className="card-sub load-now">
-              <span>ЦП {pct(last[1])}</span>
+              <span><Trans k="serverload.cpu" v={{ v: pct(last[1]) }} /></span>
               {last[3] >= 0.5 && <span className={last[3] >= 5 ? 'pink-text' : ''}>steal {last[3].toFixed(1)}%</span>}
-              <span>ОЗУ {gb(last[4])}{n.memTotal ? ` из ${gb(n.memTotal)}` : ''}</span>
+              <span><Trans k="serverload.ram" v={{ v: gb(last[4]) }} />{n.memTotal ? t('serverload.of', { v: gb(n.memTotal) }) : ''}</span>
               <span>↓ {bits(last[5])} · ↑ {bits(last[6])}</span>
             </div>
-          ) : <div className="card-sub">данных за период нет</div>}
+          ) : <div className="card-sub">{t('serverload.no_data_for_the_period')}</div>}
         </div>
       </div>
       {!empty && (
         <div className="card-pad small-multiples load-grid">
           <div>
-            <div className="row between"><div className="sm-title">Процессор</div>
-              <Legend items={[{ label: 'в среднем', color: 'var(--s1)' }, { label: 'пик', color: 'var(--s4)' }]} /></div>
+            <div className="row between"><div className="sm-title">{t('serverload.processor')}</div>
+              <Legend items={[{ label: t('serverload.average'), color: 'var(--s1)' }, { label: t('serverload.peak'), color: 'var(--s4)' }]} /></div>
             <TimeChart times={times} bucket={d.bucket} kind="line" max={100} format={pct} height={160}
               series={[
-                { key: 'max', label: 'пик', color: 'var(--s4)', values: col(2) },
-                { key: 'avg', label: 'в среднем', color: 'var(--s1)', values: col(1) },
+                { key: 'max', label: t('serverload.peak'), color: 'var(--s4)', values: col(2) },
+                { key: 'avg', label: t('serverload.average'), color: 'var(--s1)', values: col(1) },
               ]} />
           </div>
           <div>
-            <div className="sm-title">Steal<Info>Время процессора, которое хостер отдал другим виртуальным машинам на том же железе. Если steal постоянно выше нескольких процентов, сервер тормозит не из-за вас — повод сменить тариф или хостера.</Info></div>
+            <div className="sm-title">Steal<Info>{t('serverload.cpu_time_the_hosting_provider_2')}</Info></div>
             <TimeChart times={times} bucket={d.bucket} kind="line" format={pct1} height={160}
               series={[{ key: 'steal', label: 'steal', color: 'var(--s2)', values: col(3) }]} />
           </div>
           <div>
-            <div className="sm-title">Оперативная память{n.memTotal ? <span className="muted small"> — всего {gb(n.memTotal)}</span> : null}</div>
+            <div className="sm-title">{t('serverload.memory')}{n.memTotal ? <span className="muted small">{' '}<Trans k="serverload.total" v={{ v: gb(n.memTotal) }} /></span> : null}</div>
             <TimeChart times={times} bucket={d.bucket} kind="area" unit="bytes" max={n.memTotal || undefined} format={gb} height={160}
-              series={[{ key: 'mem', label: 'занято', color: 'var(--s3)', values: col(4) }]} />
+              series={[{ key: 'mem', label: t('serverload.used'), color: 'var(--s3)', values: col(4) }]} />
           </div>
           <div>
-            <div className="row between"><div className="sm-title">Канал</div>
-              <Legend items={[{ label: 'входящий', color: 'var(--s1)' }, { label: 'исходящий', color: 'var(--s2)' }]} /></div>
+            <div className="row between"><div className="sm-title">{t('serverload.bandwidth')}</div>
+              <Legend items={[{ label: t('serverload.incoming'), color: 'var(--s1)' }, { label: t('serverload.outgoing'), color: 'var(--s2)' }]} /></div>
             <TimeChart times={times} bucket={d.bucket} kind="line" format={bits} height={160}
               series={[
-                { key: 'rx', label: 'входящий', color: 'var(--s1)', values: col(5) },
-                { key: 'tx', label: 'исходящий', color: 'var(--s2)', values: col(6) },
+                { key: 'rx', label: t('serverload.incoming'), color: 'var(--s1)', values: col(5) },
+                { key: 'tx', label: t('serverload.outgoing'), color: 'var(--s2)', values: col(6) },
               ]} />
           </div>
         </div>

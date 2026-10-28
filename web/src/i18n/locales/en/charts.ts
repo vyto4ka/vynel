@@ -1,0 +1,17 @@
+export default {
+  fri: 'Fri',
+  hover_over_a_cell: 'Hover over a cell',
+  less: 'less',
+  little_data_for_the_previous: 'little data for the previous period',
+  mon: 'Mon',
+  more: 'more',
+  no_data_for_the_previous: 'no data for the previous period',
+  no_data_for_this_period: 'No data for this period yet',
+  sat: 'Sat',
+  sun: 'Sun',
+  thu: 'Thu',
+  total: 'total<b>{v}</b>',
+  tue: 'Tue',
+  vs_previous_period: 'vs previous period',
+  wed: 'Wed',
+}

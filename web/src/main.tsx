@@ -2,7 +2,7 @@ import { ReactElement, StrictMode, useCallback, useEffect, useState } from 'reac
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
-import { ConfirmProvider, Icon, Logo, ToastProvider, useAction, useLoad } from './ui'
+import { ConfirmProvider, Icon, Info, Logo, ToastProvider, useAction, useLoad } from './ui'
 import { openExternal } from './telegram'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
@@ -13,44 +13,48 @@ import { Groups } from './pages/Groups'
 import { Templates } from './pages/Templates'
 import { Nodes } from './pages/Nodes'
 import { Profiles } from './pages/Profiles'
+import { Xray } from './pages/Xray'
 import { Settings } from './pages/Settings'
 import { Subscription } from './pages/Subscription'
 import { Audit } from './pages/Audit'
 import { Telegram } from './pages/Telegram'
 import { Account } from './pages/Account'
+import { languages, lang, setLang, t } from './i18n'
+import { ModeProvider, useMode } from './mode'
 
 // short is the label under the icon when the menu is collapsed into a rail.
-type Page = { id: string; title: string; short?: string; icon: string; el: () => ReactElement }
+type Page = { id: string; title: string; short?: string; icon: string; advanced?: boolean; el: () => ReactElement }
 
 const sections: { title: string; pages: Page[] }[] = [
-  { title: 'Обзор', pages: [
-    { id: 'overview', title: 'Дашборд', icon: 'dashboard', el: () => <Dashboard /> },
-    { id: 'insights', title: 'Аналитика', icon: 'chart', el: () => <Insights /> },
+  { title: t('main.overview'), pages: [
+    { id: 'overview', title: t('main.dashboard'), icon: 'dashboard', el: () => <Dashboard /> },
+    { id: 'insights', title: t('main.analytics'), icon: 'chart', el: () => <Insights /> },
   ] },
   {
-    title: 'Пользователи',
+    title: t('common.users'),
     pages: [
-      { id: 'users', title: 'Пользователи', icon: 'users', el: () => <Users /> },
-      { id: 'groups', title: 'Группы', icon: 'groups', el: () => <Groups /> },
-      { id: 'templates', title: 'Шаблоны пользователей', short: 'Шаблоны', icon: 'templates', el: () => <Templates /> },
-      { id: 'subscription', title: 'Подписка', icon: 'sub', el: () => <Subscription /> },
+      { id: 'users', title: t('common.users'), icon: 'users', el: () => <Users /> },
+      { id: 'groups', title: t('common.groups'), icon: 'groups', el: () => <Groups /> },
+      { id: 'templates', title: t('main.user_templates'), short: t('main.templates'), icon: 'templates', el: () => <Templates /> },
+      { id: 'subscription', title: t('common.subscription'), icon: 'sub', el: () => <Subscription /> },
     ],
   },
   {
-    title: 'Серверы',
+    title: t('common.servers'),
     pages: [
-      { id: 'nodes', title: 'Ноды', icon: 'nodes', el: () => <Nodes /> },
-      { id: 'profiles', title: 'Профили', icon: 'profiles', el: () => <Profiles /> },
-      { id: 'billing', title: 'Биллинг', icon: 'wallet', el: () => <Billing /> },
+      { id: 'nodes', title: t('common.nodes'), icon: 'nodes', el: () => <Nodes /> },
+      { id: 'profiles', title: t('common.profiles'), icon: 'profiles', el: () => <Profiles /> },
+      { id: 'xray', title: 'Xray', icon: 'xray', advanced: true, el: () => <Xray /> },
+      { id: 'billing', title: t('main.billing'), icon: 'wallet', el: () => <Billing /> },
     ],
   },
   {
-    title: 'Система',
+    title: t('main.system'),
     pages: [
-      { id: 'settings', title: 'Настройки', icon: 'settings', el: () => <Settings /> },
+      { id: 'settings', title: t('common.settings'), icon: 'settings', el: () => <Settings /> },
       { id: 'telegram', title: 'Telegram', icon: 'telegram', el: () => <Telegram /> },
-      { id: 'audit', title: 'Журнал', icon: 'audit', el: () => <Audit /> },
-      { id: 'account', title: 'Аккаунт', icon: 'account', el: () => <Account /> },
+      { id: 'audit', title: t('main.log'), icon: 'audit', el: () => <Audit /> },
+      { id: 'account', title: t('main.account'), icon: 'account', el: () => <Account /> },
     ],
   },
 ]
@@ -129,6 +133,7 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
     return () => window.removeEventListener('hashchange', h)
   }, [])
 
+  const { mode } = useMode()
   const p = allPages.find((x) => x.id === page)!
   useEffect(() => {
     document.title = `${p.title} · vynel`
@@ -152,12 +157,12 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
           {sections.map((s) => (
             <div key={s.title}>
               <div className="nav-section">{s.title}</div>
-              {s.pages.map((x) => (
+              {s.pages.filter((x) => !x.advanced || mode === 'advanced' || x.id === page).map((x) => (
                 <a key={x.id} href={'#/' + x.id} className={'nav-item' + (x.id === page ? ' active' : '')} title={x.title}>
                   <Icon name={x.icon} />
                   <span className="nav-label">{x.title}</span>
                   <span className="nav-short">{x.short || x.title}</span>
-                  {x.id === 'nodes' && (updates.data?.count || 0) > 0 && <span className="nav-badge" title="Есть обновление">{updates.data!.count}</span>}
+                  {x.id === 'nodes' && (updates.data?.count || 0) > 0 && <span className="nav-badge" title={t('main.update_available')}>{updates.data!.count}</span>}
                 </a>
               ))}
             </div>
@@ -165,28 +170,57 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
         </nav>
         <div className="side-foot">
           <div className="side-foot-text">{login} · {version}</div>
-          <button className="nav-item" onClick={onLogout} title="Выйти">
+          <button className="nav-item" onClick={onLogout} title={t('main.log_out')}>
             <Icon name="logout" />
-            <span className="nav-label">Выйти</span>
-            <span className="nav-short">Выйти</span>
+            <span className="nav-label">{t('main.log_out')}</span>
+            <span className="nav-short">{t('main.log_out')}</span>
           </button>
-          <button className="nav-item collapse-btn" onClick={toggle} title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}>
+          <button className="nav-item collapse-btn" onClick={toggle} title={collapsed ? t('main.expand_menu') : t('main.collapse_menu')}>
             <Icon name={collapsed ? 'expand' : 'collapse'} />
-            <span className="nav-label">Свернуть</span>
-            <span className="nav-short">Меню</span>
+            <span className="nav-label">{t('main.collapse')}</span>
+            <span className="nav-short">{t('main.menu')}</span>
           </button>
         </div>
       </aside>
       <div className="scrim" onClick={() => setMobileOpen(false)} />
       <div className="main">
         <header className={'topbar' + (scrolled ? ' scrolled' : '')}>
-          <button className="btn ghost icon burger" onClick={() => setMobileOpen(true)} aria-label="Меню"><Icon name="menu" /></button>
+          <button className="btn ghost icon burger" onClick={() => setMobileOpen(true)} aria-label={t('main.menu')}><Icon name="menu" /></button>
           <h1>{p.title}</h1>
           <div className="spacer" />
+          <ModeSwitch />
+          <LangSwitch />
           {inTelegram && <BrowserButton />}
         </header>
         <main className="content" key={page}>{p.el()}</main>
       </div>
+    </div>
+  )
+}
+
+// ModeSwitch — «Простой / Расширенный»: только формы или формы с сырым конфигом Xray.
+function ModeSwitch() {
+  const { mode, setMode } = useMode()
+  return (
+    <div className="row mode-switch" style={{ gap: 6 }}>
+      <span className="muted small hide-sm">{t('main.mode')}</span>
+      <div className="seg sm">
+        <button className={mode === 'simple' ? 'on' : ''} onClick={() => setMode('simple')}>{t('main.mode_simple')}</button>
+        <button className={mode === 'advanced' ? 'on' : ''} onClick={() => setMode('advanced')}>{t('main.mode_advanced')}</button>
+      </div>
+      <span className="hide-sm"><Info label={t('main.mode')}>{t('main.mode_info')}</Info></span>
+    </div>
+  )
+}
+
+// LangSwitch — язык интерфейса; после смены страница перезагружается: подписи читаются при загрузке.
+function LangSwitch() {
+  return (
+    <div className="seg sm" title={t('main.language')}>
+      {languages.map((l) => (
+        <button key={l.code} className={lang() === l.code ? 'on' : ''} title={l.name}
+          onClick={() => { if (lang() !== l.code) setLang(l.code).then(() => location.reload()) }}>{l.short}</button>
+      ))}
     </div>
   )
 }
@@ -196,12 +230,12 @@ function BrowserButton() {
   const [busy, setBusy] = useState(false)
   const act = useAction()
   return (
-    <button className="btn sm" disabled={busy} title="Открыть панель в браузере: одноразовая ссылка, без сообщений в боте" onClick={async () => {
+    <button className="btn sm" disabled={busy} title={t('main.open_the_panel_in_a')} onClick={async () => {
       setBusy(true)
       const r = await act(() => post<{ url: string }>('login/browser-link'))
       setBusy(false)
       if (r?.url) openExternal(r.url)
-    }}><Icon name="external" size={16} /> <span className="hide-sm">В браузере</span><span className="show-sm">Браузер</span></button>
+    }}><Icon name="external" size={16} /> <span className="hide-sm">{t('main.in_browser')}</span><span className="show-sm">{t('main.browser')}</span></button>
   )
 }
 
@@ -214,7 +248,7 @@ function App() {
   useEffect(() => {
     setUnauthorizedHandler((message) => {
       // Why the server ended the session (inactivity, another IP, a closed page) goes on the login screen.
-      if (message.startsWith('Сессия')) setMagicError(message)
+      if (message.startsWith(t('main.session'))) setMagicError(message)
       setSession(null)
     })
     // Одноразовая ссылка из Telegram-бота: токен во фрагменте адреса (#/magic/…). Сразу убрать его
@@ -255,7 +289,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ToastProvider>
       <ConfirmProvider>
-        <App />
+        <ModeProvider>
+          <App />
+        </ModeProvider>
       </ConfirmProvider>
     </ToastProvider>
   </StrictMode>,

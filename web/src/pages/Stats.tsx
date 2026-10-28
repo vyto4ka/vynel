@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { get } from '../api'
 import { BarList, Delta, fmtBytes, Heatmap, Legend, Segmented, SERIES, ShareBar, Sparkline, TimeChart } from '../charts'
-import { bytes, plural } from '../format'
+import { bytes } from '../format'
 import { Empty, Info, Loading, useLoad } from '../ui'
+import { t, Trans } from '../i18n'
 
 type Pt = [number, number | null]
 
@@ -32,9 +33,9 @@ interface StatsT {
 
 type Range = '24h' | '7d' | '30d' | '90d'
 const ranges: { value: Range; label: string }[] = [
-  { value: '24h', label: '24 часа' }, { value: '7d', label: '7 дней' }, { value: '30d', label: '30 дней' }, { value: '90d', label: '90 дней' },
+  { value: '24h', label: t('common.n24_hours') }, { value: '7d', label: t('common.n7_days') }, { value: '30d', label: t('common.n30_days') }, { value: '90d', label: t('common.n90_days') },
 ]
-const rangeWord: Record<Range, string> = { '24h': 'за сутки', '7d': 'за 7 дней', '30d': 'за 30 дней', '90d': 'за 90 дней' }
+const rangeWord: Record<Range, string> = { '24h': t('stats.in_a_day'), '7d': t('common.in_7_days'), '30d': t('common.in_30_days'), '90d': t('common.in_90_days') }
 
 function loadRange(): Range {
   try {
@@ -57,7 +58,7 @@ export function Stats() {
   return (
     <>
       <div className="stats-head">
-        <div className="muted small">{data ? <>Время — {data.timeZone} <Info>Онлайн хранится 7 дней, трафик — 90. Нагрузка серверов — на вкладке «Серверы».</Info></> : ' '}</div>
+        <div className="muted small">{data ? <><Trans k="stats.time" v={{ timeZone: data.timeZone }} />{' '}<Info>{t('stats.online_is_kept_for_7')}</Info></> : ' '}</div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
       {!data || data.range !== range ? <Loading error={error} /> : <StatsBody d={data} range={range} />}
@@ -79,24 +80,24 @@ function StatsBody({ d, range }: { d: StatsT; range: Range }) {
     <>
       <div className="stats">
         <div className="card stat kpi">
-          <div className="k">Трафик {rangeWord[range]}</div>
+          <div className="k"><Trans k="stats.traffic" v={{ v: rangeWord[range] }} /></div>
           <div className="v">{bytes(d.total)}</div>
           <div className="s"><Delta now={d.total} prev={d.prevTotal} /></div>
           <Sparkline values={totalSeries} />
         </div>
         <div className="card stat kpi pink">
-          <div className="k">Активных пользователей</div>
-          <div className="v">{d.activeUsers}<span className="muted" style={{ fontSize: 15, fontWeight: 500 }}> из {usersTotal}</span></div>
+          <div className="k">{t('stats.active_users')}</div>
+          <div className="v">{d.activeUsers}<span className="muted" style={{ fontSize: 15, fontWeight: 500 }}>{' '}<Trans k="stats.of" v={{ usersTotal: usersTotal }} /></span></div>
           <div className="s"><Delta now={d.activeUsers} prev={d.prevActive} /></div>
         </div>
         <div className="card stat kpi">
-          <div className="k">Онлайн сейчас</div>
+          <div className="k">{t('common.online_now')}</div>
           <div className="v">{d.onlineNow}</div>
-          <div className="s">пик {rangeWord[lastWeek ? '7d' : range]}: <b>{d.peakOnline}</b></div>
+          <div className="s"><Trans k="stats.peak" v={{ v: rangeWord[lastWeek ? '7d' : range], peakOnline: d.peakOnline }} /></div>
           <Sparkline values={d.online.map((p) => p[1] ?? 0)} color="var(--s2)" />
         </div>
         <div className="card stat kpi pink">
-          <div className="k">В среднем на активного</div>
+          <div className="k">{t('stats.average_per_active_user')}</div>
           <div className="v">{bytes(d.activeUsers ? d.total / d.activeUsers : 0)}</div>
           <div className="s">{rangeWord[range]}</div>
         </div>
@@ -104,30 +105,30 @@ function StatsBody({ d, range }: { d: StatsT; range: Range }) {
 
       <div className="card section-gap">
         <div className="card-head">
-          <div><h3>Трафик</h3><div className="card-sub">{d.bucket < 86400 ? 'по часам' : 'по дням'}, все пользователи</div></div>
-          <Legend items={[{ label: 'скачано', color: 'var(--s1)' }, { label: 'отдано', color: 'var(--s2)' }]} />
+          <div><h3>{t('common.traffic')}</h3><div className="card-sub">{d.bucket < 86400 ? t('stats.by_hour') : t('stats.by_day')}{t('stats.all_users')}</div></div>
+          <Legend items={[{ label: t('common.downloaded'), color: 'var(--s1)' }, { label: t('common.uploaded'), color: 'var(--s2)' }]} />
         </div>
         <div className="card-pad">
           <TimeChart times={times} bucket={d.bucket} kind={d.bucket < 86400 ? 'area' : 'bars'} stacked unit="bytes" format={fmtBytes} height={260}
             series={[
-              { key: 'down', label: 'скачано', color: 'var(--s1)', values: d.traffic.map((p) => p[1]) },
-              { key: 'up', label: 'отдано', color: 'var(--s2)', values: d.traffic.map((p) => p[2]) },
+              { key: 'down', label: t('common.downloaded'), color: 'var(--s1)', values: d.traffic.map((p) => p[1]) },
+              { key: 'up', label: t('common.uploaded'), color: 'var(--s2)', values: d.traffic.map((p) => p[2]) },
             ]} />
         </div>
       </div>
 
       <div className="cols-2 section-gap">
         <div className="card">
-          <div className="card-head"><div><h3>Онлайн</h3><div className="card-sub">пользователей одновременно, все ноды{lastWeek ? ' · последние 7 дней' : ''}</div></div></div>
+          <div className="card-head"><div><h3>{t('common.online')}</h3><div className="card-sub">{t('stats.users_at_the_same_time')}{lastWeek ? t('stats.last_7_days') : ''}</div></div></div>
           <div className="card-pad">
             <TimeChart times={d.online.map((p) => p[0])} bucket={mb} kind="line" format={count} height={200}
-              series={[{ key: 'online', label: 'онлайн', color: 'var(--s2)', values: d.online.map((p) => p[1]) }]} />
+              series={[{ key: 'online', label: t('common.online_2'), color: 'var(--s2)', values: d.online.map((p) => p[1]) }]} />
           </div>
         </div>
         <div className="card">
-          <div className="card-head"><div><h3>Трафик по нодам</h3><div className="card-sub">{rangeWord[range]}, всё, что прошло через ноду</div></div></div>
+          <div className="card-head"><div><h3>{t('stats.traffic_by_node')}</h3><div className="card-sub"><Trans k="stats.everything_that_passed_through" v={{ v: rangeWord[range] }} /></div></div></div>
           <div className="card-pad">
-            {d.nodes.length === 0 ? <Empty>Нод пока нет</Empty> : (
+            {d.nodes.length === 0 ? <Empty>{t('common.no_nodes_yet')}</Empty> : (
               <BarList format={fmtBytes} rows={d.nodes.map((n) => ({ key: n.id, label: `${n.flag} ${n.name}`, sub: n.code, value: n.total, color: nodeColor.get(n.id) }))}
                 onClick={() => (location.hash = '#/nodes')} />
             )}
@@ -138,13 +139,13 @@ function StatsBody({ d, range }: { d: StatsT; range: Range }) {
 
       <div className="cols-2 section-gap">
         <div className="card">
-          <div className="card-head"><div><h3>Когда пользуются</h3><div className="card-sub">трафик за последние 7 дней по дням недели и часам</div></div></div>
+          <div className="card-head"><div><h3>{t('stats.when_they_use_it')}</h3><div className="card-sub">{t('stats.traffic_in_the_last_7')}</div></div></div>
           <div className="card-pad"><Heatmap data={d.heatmap} /></div>
         </div>
         <div className="card">
-          <div className="card-head"><div><h3>Больше всех трафика</h3><div className="card-sub">{rangeWord[range]}</div></div></div>
+          <div className="card-head"><div><h3>{t('stats.top_traffic')}</h3><div className="card-sub">{rangeWord[range]}</div></div></div>
           <div className="card-pad">
-            {d.topUsers.length === 0 ? <Empty>Трафика пока нет</Empty> : (
+            {d.topUsers.length === 0 ? <Empty>{t('common.no_traffic_yet')}</Empty> : (
               <BarList format={fmtBytes} rows={d.topUsers.map((t) => ({ key: t.id, label: t.username, value: t.bytes }))}
                 onClick={(id) => (location.hash = '#/users/' + id)} />
             )}
@@ -153,31 +154,31 @@ function StatsBody({ d, range }: { d: StatsT; range: Range }) {
       </div>
 
       <div className="card section-gap">
-        <div className="card-head"><div><h3>Пользователи</h3><div className="card-sub">{usersTotal} {plural(usersTotal, 'пользователь', 'пользователя', 'пользователей')} по состоянию</div></div></div>
+        <div className="card-head"><div><h3>{t('common.users')}</h3><div className="card-sub">{t('common.users_count', { n: usersTotal })}{' '}{t('stats.by_state')}</div></div></div>
         <div className="card-pad">
           <ShareBar parts={[
-            { label: 'активны', value: u.active, color: 'var(--miku)' },
-            { label: 'трафик исчерпан', value: u.limited, color: 'var(--amber)' },
-            { label: 'срок истёк', value: u.expired, color: 'var(--red)' },
-            { label: 'отключены', value: u.disabled, color: 'var(--muted)' },
+            { label: t('stats.active'), value: u.active, color: 'var(--miku)' },
+            { label: t('stats.traffic_used_up'), value: u.limited, color: 'var(--amber)' },
+            { label: t('stats.expired'), value: u.expired, color: 'var(--red)' },
+            { label: t('stats.disabled'), value: u.disabled, color: 'var(--muted)' },
           ]} />
         </div>
       </div>
 
       <div className="cols-2 section-gap">
         <div className="card">
-          <div className="card-head"><div><h3>Приложения</h3><div className="card-sub">чем пользователи последний раз обновляли подписку</div></div></div>
+          <div className="card-head"><div><h3>{t('common.apps')}</h3><div className="card-sub">{t('stats.what_users_last_refreshed_their')}</div></div></div>
           <div className="card-pad">
-            {d.apps.length === 0 ? <Empty>Подписки ещё не обновлялись</Empty> : (
-              <BarList format={(v) => `${v} ${plural(v, 'польз.', 'польз.', 'польз.')}`} color="var(--s5)" rows={d.apps.slice(0, 10).map((a) => ({ key: a.label, label: a.label, value: a.n }))} />
+            {d.apps.length === 0 ? <Empty>{t('stats.no_subscription_refreshed_yet')}</Empty> : (
+              <BarList format={(v) => t('stats.users_short', { n: v })} color="var(--s5)" rows={d.apps.slice(0, 10).map((a) => ({ key: a.label, label: a.label, value: a.n }))} />
             )}
           </div>
         </div>
         <div className="card">
-          <div className="card-head"><div><h3>Устройства</h3><div className="card-sub">зарегистрированные по HWID, по платформам</div></div></div>
+          <div className="card-head"><div><h3>{t('common.devices')}</h3><div className="card-sub">{t('stats.registered_by_hwid_by_platform')}</div></div></div>
           <div className="card-pad">
-            {d.platforms.length === 0 ? <Empty>Устройств пока нет</Empty> : (
-              <BarList format={(v) => `${v} ${plural(v, 'устройство', 'устройства', 'устройств')}`} color="var(--s3)" rows={d.platforms.map((p) => ({ key: p.label, label: p.label, value: p.n }))} />
+            {d.platforms.length === 0 ? <Empty>{t('common.no_devices_yet')}</Empty> : (
+              <BarList format={(v) => t('common.devices_count', { n: v })} color="var(--s3)" rows={d.platforms.map((p) => ({ key: p.label, label: p.label, value: p.n }))} />
             )}
           </div>
         </div>

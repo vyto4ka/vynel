@@ -3,14 +3,15 @@ import { del, get, Group, patch, post, Template, User, UserDetails } from '../ap
 import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
 import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Info, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
+import { t as tr, Trans } from '../i18n'
 
 const pageSize = 200
 
 // Колонки, по которым сортирует сервер (список идёт страницами).
 type SortKey = 'username' | 'status' | 'traffic' | 'expire' | 'groups' | 'online' | 'created'
 const columns: [SortKey, string, string][] = [
-  ['username', 'Имя', ''], ['status', 'Статус', ''], ['traffic', 'Трафик', 'hide-sm'], ['expire', 'Срок', ''],
-  ['groups', 'Группы', 'hide-sm'], ['online', 'Был онлайн', 'hide-sm'], ['created', 'Создан', 'hide-sm'],
+  ['username', tr('users.name'), ''], ['status', tr('users.status'), ''], ['traffic', tr('common.traffic'), 'hide-sm'], ['expire', tr('users.expires'), ''],
+  ['groups', tr('common.groups'), 'hide-sm'], ['online', tr('users.last_online'), 'hide-sm'], ['created', tr('users.created'), 'hide-sm'],
 ]
 
 function savedSort(): { key: SortKey | ''; desc: boolean } {
@@ -60,15 +61,15 @@ export function Users() {
     <>
       <div className="toolbar">
         <div className="grow search-box">
-          <input className="input" placeholder="Поиск по имени или заметке" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="input" placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
           <span className="muted search-icon"><Icon name="search" size={18} /></span>
         </div>
-        <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" /> <span className="hide-sm">Пользователь</span></button>
+        <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" /> <span className="hide-sm">{tr('common.user')}</span></button>
       </div>
 
       <div className="card">
         {!users.data ? <Loading error={users.error} /> : users.data.length === 0 ? (
-          <Empty icon="🌱">{search ? 'Никого не нашлось' : <>Пользователей пока нет.<br />Нажмите «Пользователь» — достаточно ввести имя.</>}</Empty>
+          <Empty icon="🌱">{search ? tr('users.nobody_found') : <>{tr('users.no_users_yet')}<br />{tr('users.press_user_a_name_is')}</>}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -88,7 +89,7 @@ export function Users() {
                     <tr key={u.id} className={'click' + (open === u.id ? ' selected' : '')} onClick={() => show(u.id)}>
                       <td>
                         <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
-                          {isOnline(u.onlineAt) && <span className="online-dot" title="онлайн" />}
+                          {isOnline(u.onlineAt) && <span className="online-dot" title={tr('common.online_2')} />}
                           <b>{u.username}</b>
                         </div>
                         {u.note && <div className="muted small ellipsis" style={{ maxWidth: 220 }}>{u.note}</div>}
@@ -103,7 +104,7 @@ export function Users() {
                         <div className={'small ' + (u.expireAt && u.expireAt - Date.now() / 1000 < 7 * 86400 ? 'pink-text' : 'muted')}>{left(u.expireAt)}</div>
                       </td>
                       <td className="small text-2 hide-sm">{u.groupIds.map((g) => groupName.get(g)).filter(Boolean).join(', ') || '—'}</td>
-                      <td className="small muted nowrap hide-sm">{isOnline(u.onlineAt) ? <span className="miku-text">сейчас</span> : ago(u.onlineAt)}</td>
+                      <td className="small muted nowrap hide-sm">{isOnline(u.onlineAt) ? <span className="miku-text">{tr('common.now')}</span> : ago(u.onlineAt)}</td>
                       <td className="small muted nowrap hide-sm">{date(u.createdAt)}</td>
                     </tr>
                   )
@@ -114,10 +115,10 @@ export function Users() {
         )}
         {total > pageSize && (
           <div className="row between card-pad small text-2">
-            <span>{page * pageSize + 1}–{Math.min(total, (page + 1) * pageSize)} из {total}</span>
+            <span><Trans k="common.of" v={{ v: page * pageSize + 1, min: Math.min(total, (page + 1) * pageSize), total: total }} /></span>
             <div className="row" style={{ gap: 6 }}>
-              <button className="btn sm ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>← Назад</button>
-              <button className="btn sm ghost" disabled={(page + 1) * pageSize >= total} onClick={() => setPage(page + 1)}>Дальше →</button>
+              <button className="btn sm ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>{tr('common.back')}</button>
+              <button className="btn sm ghost" disabled={(page + 1) * pageSize >= total} onClick={() => setPage(page + 1)}>{tr('common.next')}</button>
             </div>
           </div>
         )}
@@ -165,59 +166,58 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
     if (reset) body.resetStrategy = reset
     if (num(hwid) != null) body.hwidLimit = num(hwid)
     if (num(ip) != null) body.ipLimit = num(ip)
-    const u = await act(() => post<User>('users', body), `Пользователь ${username} создан`)
+    const u = await act(() => post<User>('users', body), tr('users.user_created', { username }))
     if (u) onCreated(u)
   }
   const tplExpiry = tpl && (tpl.expireMonths || tpl.expireDays)
-  const fromTpl = <span className="from-tpl">из шаблона</span>
+  const fromTpl = <span className="from-tpl">{tr('users.from_the_template')}</span>
 
   return (
-    <Modal title="Новый пользователь" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="create-user" disabled={!username.trim()}>Создать</button></>}>
+    <Modal title={tr('users.new_user')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" form="create-user" disabled={!username.trim()}>{tr('common.create')}</button></>}>
       <form id="create-user" onSubmit={submit}>
-        <Field label="Имя" help="Латиница, цифры и _ . - @. Например vasya или ivan.petrov">
+        <Field label={tr('users.name')} help={tr('users.latin_letters_digits_and_e')}>
           <input className="input" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="vasya" />
         </Field>
-        <Field label="Шаблон" help="Серым — значения шаблона" info="Не трогайте поле — значение возьмётся из шаблона; введите своё — будет своё.">
+        <Field label={tr('common.template')} help={tr('users.grey_template_values')} info={tr('users.leave_a_field_alone_and')}>
           <select className="input" value={templateId} onChange={(e) => setTemplateId(Number(e.target.value))}>
-            <option value={0}>по умолчанию{templates.data?.find((t) => t.isDefault) ? ` (${templates.data.find((t) => t.isDefault)!.name})` : ''}</option>
+            <option value={0}><Trans k="common.default_2" v={{ v: templates.data?.find((t) => t.isDefault) ? ` (${templates.data.find((t) => t.isDefault)!.name})` : '' }} /></option>
             {templates.data?.filter((t) => !t.isDefault).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
         <div className="grid2 keep2">
-          <Field label={<>Срок, месяцев {months === '' && !never && fromTpl}</>}>
+          <Field label={<><Trans k="users.term_months" v={{ v: months === '' && !never && fromTpl }} /></>}>
             <input className="input" inputMode="numeric" disabled={never} value={months} onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))}
               placeholder={tplExpiry ? String(tpl!.expireMonths) : '—'} />
           </Field>
-          <Field label={<>и дней {days === '' && !never && fromTpl}</>}>
+          <Field label={<><Trans k="users.and_days" v={{ v: days === '' && !never && fromTpl }} /></>}>
             <input className="input" inputMode="numeric" disabled={never} value={days} onChange={(e) => setDays(e.target.value.replace(/\D/g, ''))}
-              placeholder={tplExpiry ? String(tpl!.expireDays) : 'бессрочно'} />
+              placeholder={tplExpiry ? String(tpl!.expireDays) : tr('users.no_expiry')} />
           </Field>
         </div>
         <label className="check" style={{ marginTop: -6, marginBottom: 12 }}>
-          <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} /> бессрочно
-        </label>
+          <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} />{' '}{tr('users.no_expiry')}</label>
         <div className="grid2 keep2">
-          <Field label={<>Трафик, ГБ {traffic === '' && fromTpl}</>} help="0 — без лимита">
+          <Field label={<><Trans k="users.traffic_gb" v={{ v: traffic === '' && fromTpl }} /></>} help={tr('users.n0_no_limit')}>
             <input className="input" inputMode="decimal" value={traffic} onChange={(e) => setTraffic(e.target.value.replace(/[^\d.,]/g, ''))}
-              placeholder={tpl?.trafficLimit ? String(+(tpl.trafficLimit / GiB).toFixed(2)) : 'без лимита'} />
+              placeholder={tpl?.trafficLimit ? String(+(tpl.trafficLimit / GiB).toFixed(2)) : tr('users.no_limit')} />
           </Field>
-          <Field label={<>Сброс трафика {reset === '' && fromTpl}</>}>
+          <Field label={<><Trans k="users.traffic_reset" v={{ v: reset === '' && fromTpl }} /></>}>
             <select className={'input' + (reset === '' ? ' placeholder' : '')} value={reset} onChange={(e) => setReset(e.target.value)}>
               <option value="">{resetLabels[tpl?.resetStrategy || 'no']}</option>
               {Object.entries(resetLabels).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             </select>
           </Field>
-          <Field label={<>Устройств {hwid === '' && fromTpl}</>} help="0 — без лимита">
+          <Field label={<><Trans k="users.devices" v={{ v: hwid === '' && fromTpl }} /></>} help={tr('users.n0_no_limit')}>
             <input className="input" inputMode="numeric" value={hwid} onChange={(e) => setHwid(e.target.value.replace(/\D/g, ''))}
-              placeholder={tpl?.hwidLimit != null ? String(tpl.hwidLimit || '∞') : `общий: ${session.data?.hwidDefault || '∞'}`} />
+              placeholder={tpl?.hwidLimit != null ? String(tpl.hwidLimit || '∞') : tr('users.shared', { v: session.data?.hwidDefault || '∞' })} />
           </Field>
-          <Field label={<>Адресов сразу {ip === '' && <span className="from-tpl">общий лимит</span>}</>} help="0 — без лимита">
+          <Field label={<>{tr('users.ip_limit_at_once')}{' '}{ip === '' && <span className="from-tpl">{tr('users.shared_limit')}</span>}</>} help={tr('users.n0_no_limit')}>
             <input className="input" inputMode="numeric" value={ip} onChange={(e) => setIp(e.target.value.replace(/\D/g, ''))}
               placeholder={String(session.data?.ipDefault || '∞')} />
           </Field>
         </div>
-        <Field label={<>Группы {ownGroups === null && fromTpl}</>}>
+        <Field label={<><Trans k="users.groups" v={{ v: ownGroups === null && fromTpl }} /></>}>
           <div className="row">
             {groups.map((g) => {
               const on = (ownGroups ?? tpl?.groupIds ?? []).includes(g.id)
@@ -233,13 +233,13 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
             })}
           </div>
         </Field>
-        <Field label="Заметка">
-          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={tpl?.note || 'например, телеграм @vasya'} />
+        <Field label={tr('users.note')}>
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={tpl?.note || tr('users.e_g_telegram_vasya')} />
         </Field>
-        <Field label="Ссылка подписки" help={<>Пусто — случайная (её не подобрать). Своя: 8–64 символа, латиница, цифры, _ и -. Короткие слова легко угадать.</>}>
+        <Field label={tr('users.subscription_link')} help={tr('users.link_help')} info={tr('users.link_info')}>
           <div className="link-input">
             <span className="mono muted">{session.data?.subBase || '…/s/'}</span>
-            <input className="input mono" value={subToken} onChange={(e) => setSubToken(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} placeholder="случайная" maxLength={64} />
+            <input className="input mono" value={subToken} onChange={(e) => setSubToken(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} placeholder={tr('users.random')} maxLength={64} />
           </div>
         </Field>
       </form>
@@ -249,13 +249,13 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
 
 export function templateSummary(t: Template, groups: Group[]): string {
   const parts: string[] = []
-  if (t.expireMonths || t.expireDays) parts.push('срок ' + [t.expireMonths && `${t.expireMonths} мес`, t.expireDays && `${t.expireDays} дн`].filter(Boolean).join(' '))
-  else parts.push('бессрочно')
-  parts.push(t.trafficLimit ? `${bytes(t.trafficLimit)}, сброс: ${resetLabels[t.resetStrategy]}` : 'трафик без лимита')
-  if (t.hwidLimit != null) parts.push(`устройств: ${t.hwidLimit || '∞'}`)
+  if (t.expireMonths || t.expireDays) parts.push(tr('users.term_of', { v: [t.expireMonths && tr('users.mo', { expireMonths: t.expireMonths }), t.expireDays && tr('users.d', { expireDays: t.expireDays })].filter(Boolean).join(' ') }))
+  else parts.push(tr('users.no_expiry'))
+  parts.push(t.trafficLimit ? tr('users.reset', { v: bytes(t.trafficLimit), v2: resetLabels[t.resetStrategy] }) : tr('users.unlimited_traffic'))
+  if (t.hwidLimit != null) parts.push(tr('users.devices_2', { v: t.hwidLimit || '∞' }))
   const g = t.groupIds.map((id) => groups.find((x) => x.id === id)?.name).filter(Boolean)
-  if (g.length) parts.push('группы: ' + g.join(', '))
-  if (t.grants?.length) parts.push(`каскадов и подписок: ${t.grants.length}`)
+  if (g.length) parts.push(tr('users.groups_of', { v: g.join(', ') }))
+  if (t.grants?.length) parts.push(tr('users.cascades_and_subscriptions', { length: t.grants.length }))
   return parts.join(' · ')
 }
 
@@ -281,10 +281,10 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
 
   return (
     <Drawer title={<>{u.username} <Badge color={st.color} dot>{st.label}</Badge></>} onClose={onClose}
-      actions={<button className="btn sm" onClick={() => setEditing(true)}><Icon name="edit" /> Изменить</button>}>
+      actions={<button className="btn sm" onClick={() => setEditing(true)}><Icon name="edit" />{' '}{tr('common.edit')}</button>}>
 
       <div className="card card-pad">
-        <div className="label" style={{ marginBottom: 8 }}>Ссылка подписки — отправьте её пользователю</div>
+        <div className="label" style={{ marginBottom: 8 }}>{tr('users.subscription_link_send_it_to')}<Info>{tr('users.on_a_phone_the_link')}</Info></div>
         {data.subUrl ? (
           <>
             <CopyField value={data.subUrl} />
@@ -294,115 +294,108 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
                 <input className="input mono" autoFocus value={linkEdit} maxLength={64}
                   onChange={(e) => setLinkEdit(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} />
                 <button className="btn sm primary" disabled={linkEdit.length < 8} onClick={async () => {
-                  if (!(await confirm('Старая ссылка перестанет работать: пользователю нужно будет добавить новую.', 'Сменить'))) return
-                  await run(() => post(`users/${u.id}/link`, { token: linkEdit }), 'Ссылка изменена')
+                  if (!(await confirm(tr('users.the_old_link_will_stop'), tr('common.change')))) return
+                  await run(() => post(`users/${u.id}/link`, { token: linkEdit }), tr('users.link_changed'))
                   setLinkEdit(null)
-                }}>Сохранить</button>
-                <button className="btn sm ghost" onClick={() => setLinkEdit(null)}>Отмена</button>
+                }}>{tr('common.save')}</button>
+                <button className="btn sm ghost" onClick={() => setLinkEdit(null)}>{tr('common.cancel')}</button>
               </div>
             )}
             <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn sm" onClick={() => setShowQR(!showQR)}>{showQR ? 'Скрыть QR' : 'Показать QR'}</button>
-              {linkEdit === null && <button className="btn sm" onClick={() => setLinkEdit(data.subUrl!.split('/').pop() || '')}><Icon name="edit" /> Своя ссылка</button>}
-              <a className="btn sm" href={data.subUrl} target="_blank" rel="noreferrer"><Icon name="link" /> Открыть страницу</a>
+              <button className="btn sm" onClick={() => setShowQR(!showQR)}>{showQR ? tr('users.hide_qr') : tr('users.show_qr')}</button>
+              {linkEdit === null && <button className="btn sm" onClick={() => setLinkEdit(data.subUrl!.split('/').pop() || '')}><Icon name="edit" />{' '}{tr('users.custom_link')}</button>}
+              <a className="btn sm" href={data.subUrl} target="_blank" rel="noreferrer"><Icon name="link" />{' '}{tr('users.open_the_page')}</a>
             </div>
             {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
-            <div className="muted small" style={{ marginTop: 10 }}>
-              Ссылку вставляют в приложение или открывают на телефоне <Info>На телефоне ссылка открывает страницу с QR-кодом и кнопками приложений. Её же можно вставить в приложение как подписку.</Info>
-            </div>
           </>
-        ) : <div className="alert amber">Ссылки нет: {data.subError}. Проверьте «Домен подписок» в настройках.</div>}
+        ) : <div className="alert amber"><Trans k="users.no_link_check_subscription" v={{ subError: data.subError }} /></div>}
       </div>
 
       <div className="card card-pad">
         <div className="kv">
-          <div className="k">Срок</div>
-          <div>{u.expireAt ? <>{dateTime(u.expireAt)} <span className="muted">({left(u.expireAt)})</span></> : 'бессрочно'}</div>
-          <div className="k">Трафик</div>
-          <div>
-            {bytes(u.trafficUsed)} из {bytes(u.trafficLimit)} <span className="muted">· сброс: {resetLabels[u.resetStrategy] || u.resetStrategy}</span>
-            {u.trafficLimit != null && <div style={{ marginTop: 6 }}><Bar value={u.trafficUsed} max={u.trafficLimit} /></div>}
-          </div>
-          <div className="k">Всего за всё время</div><div>{bytes(u.lifetimeUsed)}</div>
-          <div className="k">Устройства</div><div>{u.hwidOff
-            ? <span className="amber-text">HWID не проверяется — пускает любое приложение</span>
-            : <>{data.devices.length} из {(u.hwidLimit ?? data.hwidDefault) || '∞'} {u.hwidLimit == null && <span className="muted">(по умолчанию)</span>}</>}</div>
-          <div className="k">Адреса сразу</div><div>
-            {data.ips.length} из {(u.ipLimit ?? data.ipDefault) || '∞'} {u.ipLimit == null && <span className="muted">(по умолчанию)</span>}
+          <div className="k">{tr('users.expires')}</div>
+          <div>{u.expireAt ? <>{dateTime(u.expireAt)} <span className="muted">({left(u.expireAt)})</span></> : tr('users.no_expiry')}</div>
+          <div className="k">{tr('common.traffic')}</div>
+          <div><Trans k="users.of_reset" v={{ v: bytes(u.trafficUsed), v2: bytes(u.trafficLimit), v3: resetLabels[u.resetStrategy] || u.resetStrategy, v4: u.trafficLimit != null && <div style={{ marginTop: 6 }}><Bar value={u.trafficUsed} max={u.trafficLimit} /></div> }} /></div>
+          <div className="k">{tr('users.total_over_all_time')}</div><div>{bytes(u.lifetimeUsed)}</div>
+          <div className="k">{tr('common.devices')}</div><div>{u.hwidOff
+            ? <span className="amber-text">{tr('users.hwid_is_not_checked_any')}</span>
+            : <><Trans k="users.of" v={{ length: data.devices.length, v: (u.hwidLimit ?? data.hwidDefault) || '∞' }} />{' '}{u.hwidLimit == null && <span className="muted">{tr('users.default')}</span>}</>}</div>
+          <div className="k">{tr('users.addresses_at_once_2')}</div><div><Trans k="users.of" v={{ length: data.ips.length, v: (u.ipLimit ?? data.ipDefault) || '∞' }} />{' '}{u.ipLimit == null && <span className="muted">{tr('users.default')}</span>}
             {data.ips.length > 0 && <div className="row small" style={{ marginTop: 6, gap: 6 }}>
               {data.ips.map((a) => (
                 <span key={a.addr} className={'chip static' + (a.blocked ? ' pink-text' : '')}
-                  title={a.blocked ? 'сверх лимита — заблокирован на нодах' : a.admitted ? `подключён с ${dateTime(a.since)}` : 'проверяется (короткие подключения не считаются)'}>
+                  title={a.blocked ? tr('users.over_the_limit_blocked_on') : a.admitted ? tr('users.connected_from', { v: dateTime(a.since) }) : tr('users.being_checked_short_connections')}>
                   {a.blocked ? '⛔ ' : a.admitted ? '' : '… '}<span className="mono">{a.addr}</span>
                 </span>
               ))}
             </div>}
           </div>
-          <div className="k">Группы</div><div>{u.groupIds.map((g) => groups.find((x) => x.id === g)?.name).filter(Boolean).join(', ') || <span className="pink-text">нет — серверов в подписке не будет</span>}</div>
-          <div className="k">Онлайн</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">сейчас</span> : ago(u.onlineAt)}</div>
-          <div className="k">Подписка обновлялась</div><div>{ago(u.subLastAt)} {u.subLastUA && <span className="muted small">· {u.subLastUA}</span>}</div>
-          <div className="k">Формат</div><div>{clientTypes[u.clientType] || u.clientType}</div>
-          {u.note && <><div className="k">Заметка</div><div>{u.note}</div></>}
-          <div className="k">Создан</div><div>{dateTime(u.createdAt)}</div>
+          <div className="k">{tr('common.groups')}</div><div>{u.groupIds.map((g) => groups.find((x) => x.id === g)?.name).filter(Boolean).join(', ') || <span className="pink-text">{tr('users.none_the_subscription_will')}</span>}</div>
+          <div className="k">{tr('common.online')}</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">{tr('common.now')}</span> : ago(u.onlineAt)}</div>
+          <div className="k">{tr('users.subscription_refreshed')}</div><div>{ago(u.subLastAt)} {u.subLastUA && <span className="muted small">· {u.subLastUA}</span>}</div>
+          <div className="k">{tr('users.format')}</div><div>{clientTypes[u.clientType] || u.clientType}</div>
+          {u.note && <><div className="k">{tr('users.note')}</div><div>{u.note}</div></>}
+          <div className="k">{tr('users.created')}</div><div>{dateTime(u.createdAt)}</div>
         </div>
       </div>
 
       <div className="card card-pad">
-        <div className="label" style={{ marginBottom: 10 }}>Действия</div>
+        <div className="label" style={{ marginBottom: 10 }}>{tr('common.actions')}</div>
         <div className="row">
-          <span className="text-2 small">Продлить:</span>
+          <span className="text-2 small">{tr('users.extend')}</span>
           {[1, 3, 6, 12].map((m) => (
-            <button key={m} className="btn sm primary" onClick={() => run(() => post(`users/${id}/extend`, { months: m }), `Продлено на ${m} мес`)}>+{m} мес</button>
+            <button key={m} className="btn sm primary" onClick={() => run(() => post(`users/${id}/extend`, { months: m }), tr('users.extended_by_mo', { m }))}><Trans k="users.mo_2" v={{ m: m }} /></button>
           ))}
         </div>
         <div className="row" style={{ marginTop: 10 }}>
           {u.enabled
-            ? <button className="btn sm" onClick={() => run(() => patch(`users/${id}`, { enabled: false }), 'Отключён')}>Отключить</button>
-            : <button className="btn sm primary" onClick={() => run(() => patch(`users/${id}`, { enabled: true }), 'Включён')}>Включить</button>}
-          <button className="btn sm" onClick={() => run(() => post(`users/${id}/reset`), 'Трафик сброшен')}>Сбросить трафик</button>
+            ? <button className="btn sm" onClick={() => run(() => patch(`users/${id}`, { enabled: false }), tr('users.disabled'))}>{tr('users.disable')}</button>
+            : <button className="btn sm primary" onClick={() => run(() => patch(`users/${id}`, { enabled: true }), tr('users.enabled'))}>{tr('users.enable')}</button>}
+          <button className="btn sm" onClick={() => run(() => post(`users/${id}/reset`), tr('users.traffic_reset_2'))}>{tr('users.reset_traffic')}</button>
           <button className="btn sm" onClick={async () => {
-            if (await confirm('Старая ссылка подписки перестанет работать. Пользователю нужно будет добавить новую.', 'Выпустить новую'))
-              run(() => post(`users/${id}/reissue`, { token: true }), 'Новая ссылка выпущена')
-          }}>Новая ссылка</button>
+            if (await confirm(tr('users.the_old_subscription_link_will'), tr('users.issue_a_new_one')))
+              run(() => post(`users/${id}/reissue`, { token: true }), tr('users.new_link_issued'))
+          }}>{tr('users.new_link')}</button>
           <button className="btn sm" onClick={async () => {
-            if (await confirm('Сменить UUID: все устройства отключатся, пока не обновят подписку. Нужно, если ключ утёк.', 'Сменить'))
-              run(() => post(`users/${id}/reissue`, { uuid: true }), 'UUID сменён')
-          }}>Сменить UUID</button>
+            if (await confirm(tr('users.change_the_uuid_all_devices'), tr('common.change')))
+              run(() => post(`users/${id}/reissue`, { uuid: true }), tr('users.uuid_changed'))
+          }}>{tr('users.change_uuid')}</button>
           <button className="btn sm danger" onClick={async () => {
-            if (await confirm(<>Удалить пользователя <b>{u.username}</b>? Это нельзя отменить.</>, 'Удалить')) {
-              const r = await act(() => del(`users/${id}`), 'Пользователь удалён')
+            if (await confirm(<><Trans k="users.delete_the_user_this_cannot" v={{ username: u.username }} /></>, tr('common.delete'))) {
+              const r = await act(() => del(`users/${id}`), tr('users.user_deleted'))
               if (r !== undefined) { onChanged(); onClose() }
             }
-          }}><Icon name="trash" /> Удалить</button>
+          }}><Icon name="trash" />{' '}{tr('common.delete')}</button>
         </div>
       </div>
 
       <div className="card">
         <div className="card-head">
           <div>
-            <h3>Устройства (HWID)</h3>
-            <div className="card-sub">{u.hwidOff ? 'проверка выключена для этого пользователя' : `${data.devices.length} из ${(u.hwidLimit ?? data.hwidDefault) || '∞'}`}</div>
+            <h3>{tr('users.devices_hwid')}</h3>
+            <div className="card-sub">{u.hwidOff ? tr('users.the_check_is_off_for') : tr('users.of', { length: data.devices.length, v: (u.hwidLimit ?? data.hwidDefault) || '∞' })}</div>
           </div>
           <label className="row small text-2" style={{ gap: 8, flexWrap: 'nowrap' }}>
-            <span>Проверять HWID<Info>Выключите для приложений без HWID — подписка будет выдаваться без проверки устройств.</Info></span>
-            <Switch checked={!u.hwidOff} onChange={(v) => run(() => patch(`users/${id}`, { hwidOff: !v }), v ? 'Проверка HWID включена' : 'HWID для пользователя выключен')} />
+            <span>{tr('users.check_hwid')}<Info>{tr('users.turn_it_off_for_apps')}</Info></span>
+            <Switch checked={!u.hwidOff} onChange={(v) => run(() => patch(`users/${id}`, { hwidOff: !v }), v ? tr('users.hwid_check_is_on') : tr('users.hwid_is_off_for_this'))} />
           </label>
         </div>
-        {data.devices.length === 0 ? <Empty>Устройства появятся после первого обновления подписки в приложении</Empty> : (
+        {data.devices.length === 0 ? <Empty>{tr('users.devices_appear_after_the_first')}</Empty> : (
           <div className="table-wrap">
             <table className="table">
               <tbody>
                 {data.devices.map((d) => (
                   <tr key={d.id}>
                     <td>
-                      <div>{d.model || 'устройство'} <span className="muted small">{d.platform} {d.osVersion}</span></div>
+                      <div>{d.model || tr('users.device')} <span className="muted small">{d.platform} {d.osVersion}</span></div>
                       <div className="muted small ellipsis" style={{ maxWidth: 300 }}>{d.userAgent}</div>
                     </td>
                     <td className="small muted nowrap">{ago(d.lastSeen)}<br />{d.lastIp}</td>
                     <td style={{ width: 40 }}>
-                      <button className="btn ghost icon sm" title="Отвязать" onClick={async () => {
-                        if (await confirm('Отвязать устройство? Место освободится; если приложение снова обновит подписку, устройство добавится заново.', 'Отвязать'))
-                          run(() => del(`users/${id}/devices/${d.id}`), 'Устройство отвязано')
+                      <button className="btn ghost icon sm" title={tr('common.unlink')} onClick={async () => {
+                        if (await confirm(tr('users.unlink_the_device_the_slot'), tr('common.unlink')))
+                          run(() => del(`users/${id}/devices/${d.id}`), tr('users.device_unlinked'))
                       }}><Icon name="trash" /></button>
                     </td>
                   </tr>
@@ -414,7 +407,7 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
       </div>
 
       <div className="card">
-        <div className="card-head"><h3>Трафик за 30 дней</h3><ChartLegend /></div>
+        <div className="card-head"><h3>{tr('users.traffic_in_30_days')}</h3><ChartLegend /></div>
         <div className="card-pad">
           <TrafficChart days={data.daily} />
           {data.trafficByNode.length > 0 && (
@@ -422,19 +415,19 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
               {data.trafficByNode.map((t) => <span key={t.code} className="chip static">{t.code}: {bytes(t.bytes)}</span>)}
             </div>
           )}
-          <a className="small" href={`#/insights/traffic/${id}`} style={{ display: 'inline-block', marginTop: 8 }}>Трафик по профилям →</a>
+          <a className="small" href={`#/insights/traffic/${id}`} style={{ display: 'inline-block', marginTop: 8 }}>{tr('users.traffic_by_profile')}</a>
         </div>
       </div>
 
       <UserExtras userId={id} grants={data.grants} groups={groups} onChanged={reload} />
 
       <div className="card">
-        <div className="card-head"><h3>Серверы в подписке</h3><span className="card-sub">отдельные ссылки — для ручного импорта</span></div>
+        <div className="card-head"><h3>{tr('users.servers_in_the_subscription')}</h3><span className="card-sub">{tr('users.separate_links_for_manual_import')}</span></div>
         <div className="card-pad">
-          {data.links.length === 0 ? <div className="muted">Нет доступных серверов: проверьте группы пользователя и доступы групп.</div> :
+          {data.links.length === 0 ? <div className="muted">{tr('users.no_servers_available_check')}</div> :
             data.links.map((l, i) => (
               <div key={i} style={{ marginBottom: 12 }}>
-                <div className="small text-2" style={{ marginBottom: 5 }}>{l.remark} <span className="muted">· {l.tag}{l.hidden ? ' · скрыт' : ''}</span></div>
+                <div className="small text-2" style={{ marginBottom: 5 }}>{l.remark} <span className="muted">· {l.tag}{l.hidden ? tr('users.hidden') : ''}</span></div>
                 <CopyField value={l.link} />
               </div>
             ))}
@@ -469,39 +462,39 @@ function EditUser({ u, hwidDefault, ipDefault, groups, onClose, onSaved }: { u: 
     }
     if (exp) body.expireAt = exp
     else body.neverExpires = true
-    const r = await act(() => patch(`users/${u.id}`, body), 'Сохранено')
+    const r = await act(() => patch(`users/${u.id}`, body), tr('common.saved'))
     if (r !== undefined) onSaved()
   }
 
   return (
-    <Modal title={`Изменить ${u.username}`} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="edit-user">Сохранить</button></>}>
+    <Modal title={tr('users.edit', { username: u.username })} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" form="edit-user">{tr('common.save')}</button></>}>
       <form id="edit-user" onSubmit={save}>
         <div className="grid2 keep2">
-          <Field label="Действует до" help="Пусто — бессрочно">
+          <Field label={tr('users.valid_until')} help={tr('users.empty_no_expiry')}>
             <input className="input" type="date" value={expire} onChange={(e) => setExpire(e.target.value)} />
           </Field>
-          <Field label="Лимит трафика, ГБ" help="Пусто — без лимита">
+          <Field label={tr('common.traffic_limit_gb')} help={tr('common.empty_no_limit')}>
             <input className="input" inputMode="decimal" value={limitGB} onChange={(e) => setLimitGB(e.target.value.replace(',', '.'))} placeholder="∞" />
           </Field>
-          <Field label="Сброс трафика">
+          <Field label={tr('common.traffic_reset')}>
             <select className="input" value={reset} onChange={(e) => setReset(e.target.value)}>
               {Object.entries(resetLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </Field>
-          <Field label="Лимит устройств" help={`Пусто — по умолчанию (${hwidDefault || '∞'}), 0 — без лимита`}>
+          <Field label={tr('common.device_limit')} help={tr('users.empty_default_0_no_limit', { v: hwidDefault || '∞' })}>
             <input className="input" inputMode="numeric" value={hwid} onChange={(e) => setHwid(e.target.value.replace(/\D/g, ''))} placeholder={String(hwidDefault)} />
           </Field>
-          <Field label="Лимит IP одновременно" help={`Пусто — по умолчанию (${ipDefault || '∞'}), 0 — без лимита`}>
+          <Field label={tr('users.ip_limit_at_once')} help={tr('users.empty_default_0_no_limit', { v: ipDefault || '∞' })}>
             <input className="input" inputMode="numeric" value={ipLimit} onChange={(e) => setIPLimit(e.target.value.replace(/\D/g, ''))} placeholder={String(ipDefault)} />
           </Field>
         </div>
-        <Field label="Формат подписки" help="Обычно менять не нужно" info="«Авто» определяет формат по приложению, которое запрашивает подписку (вкладка «Клиенты» в разделе «Подписка»).">
+        <Field label={tr('common.subscription_format')} help={tr('users.usually_no_need_to_change')} info={tr('users.auto_picks_the_format_by')}>
           <select className="input" value={clientType} onChange={(e) => setClientType(e.target.value)}>
             {Object.entries(clientTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
         </Field>
-        <Field label="Группы">
+        <Field label={tr('common.groups')}>
           <div className="row">
             {groups.map((g) => (
               <label key={g.id} className="check">
@@ -512,7 +505,7 @@ function EditUser({ u, hwidDefault, ipDefault, groups, onClose, onSaved }: { u: 
             ))}
           </div>
         </Field>
-        <Field label="Заметка">
+        <Field label={tr('users.note')}>
           <input className="input" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
       </form>
