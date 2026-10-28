@@ -3,9 +3,11 @@
 // surface: adjacent pairs pass the CVD and normal-vision checks); text always uses text tokens.
 import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { bytes } from './format'
+import { t, Trans } from './i18n'
 
 export const SERIES = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)']
 
+/** Width of an element, following resizes. */
 /** Width of an element, following resizes. */
 function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   const ref = useRef<T>(null)
@@ -21,6 +23,7 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   return [ref as React.RefObject<T>, w]
 }
 
+/** Clean axis maximum and ticks: 0, step, 2·step… covering max. */
 /** Clean axis maximum and ticks: 0, step, 2·step… covering max. */
 function niceTicks(max: number, count = 4, unit: 'bytes' | 'plain' = 'plain'): number[] {
   if (max <= 0) return [0, 1]
@@ -72,6 +75,7 @@ interface TimeChartProps {
   empty?: ReactNode
 }
 
+/** A time series chart with a crosshair tooltip. Stacked areas/bars sum series bottom-up. */
 /** A time series chart with a crosshair tooltip. Stacked areas/bars sum series bottom-up. */
 export function TimeChart({ times, bucket, series, kind, stacked, height = 220, format = String, unit = 'plain', max: fixedMax, empty }: TimeChartProps) {
   const [ref, width] = useWidth<HTMLDivElement>()
@@ -198,20 +202,21 @@ export function TimeChart({ times, bucket, series, kind, stacked, height = 220, 
           <rect x={pad.l} y={pad.t} width={iw} height={ih} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
         </svg>
       )}
-      {!any && width > 0 && <div className="tchart-empty">{empty ?? 'Данных за этот период пока нет'}</div>}
+      {!any && width > 0 && <div className="tchart-empty">{empty ?? t('charts.no_data_for_this_period')}</div>}
       {hover != null && any && (
         <div className="tip" style={{ left: Math.min(Math.max(x(hover) + 12, 0), W - 190), top: 8 }}>
           <div className="tip-h">{timeLabel(times[hover], bucket, true)}</div>
           {series.slice().reverse().map((s) => (
             <div key={s.key} className="tip-r"><i style={{ background: s.color }} />{s.label}<b>{s.values[hover] == null ? '—' : format(s.values[hover]!)}</b></div>
           ))}
-          {stacked && series.length > 1 && <div className="tip-r tip-sum">всего<b>{format(series.reduce((a, s) => a + (s.values[hover] ?? 0), 0))}</b></div>}
+          {stacked && series.length > 1 && <div className="tip-r tip-sum"><Trans k="charts.total" v={{ v: format(series.reduce((a, s) => a + (s.values[hover] ?? 0), 0)) }} /></div>}
         </div>
       )}
     </div>
   )
 }
 
+/** A bar rounded at the data end (top), square at the baseline. */
 /** A bar rounded at the data end (top), square at the baseline. */
 function barPath(x: number, y: number, w: number, h: number, r: number) {
   if (r <= 0) return `M${x},${y}h${w}v${h}h${-w}Z`
@@ -226,6 +231,7 @@ export function Legend({ items }: { items: { label: string; color: string }[] })
   )
 }
 
+/** Horizontal bars: a ranked list with values at the tip. */
 /** Horizontal bars: a ranked list with values at the tip. */
 export function BarList({ rows, format = String, color = 'var(--s1)', onClick }: {
   rows: { key: string | number; label: ReactNode; value: number; sub?: ReactNode; color?: string }[]
@@ -252,6 +258,7 @@ export function BarList({ rows, format = String, color = 'var(--s1)', onClick }:
 }
 
 /** Sequential teal ramp for magnitude: near-surface for zero, bright teal for the maximum. */
+/** Sequential teal ramp for magnitude: near-surface for zero, bright teal for the maximum. */
 function ramp(t: number): string {
   const a = [0x24, 0x31, 0x37] // --container-high
   const b = [0x75, 0xe0, 0xd7] // --primary
@@ -259,8 +266,9 @@ function ramp(t: number): string {
   return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`
 }
 
-const DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
+const DAYS = [t('charts.mon'), t('charts.tue'), t('charts.wed'), t('charts.thu'), t('charts.fri'), t('charts.sat'), t('charts.sun')]
 
+/** Weekday × hour heatmap of traffic. */
 /** Weekday × hour heatmap of traffic. */
 export function Heatmap({ data }: { data: number[][] }) {
   const [hover, setHover] = useState<[number, number] | null>(null)
@@ -280,8 +288,8 @@ export function Heatmap({ data }: { data: number[][] }) {
         ))}
       </div>
       <div className="heatmap-foot">
-        <span className="small text-2">{hover ? <>{DAYS[hover[0]]}, {String(hover[1]).padStart(2, '0')}:00–{String(hover[1] + 1).padStart(2, '0')}:00 — <b>{bytes(data[hover[0]][hover[1]])}</b></> : 'Наведите на клетку'}</span>
-        <span className="hm-scale"><span className="small muted">меньше</span>{[0.05, 0.25, 0.5, 0.75, 1].map((t) => <i key={t} style={{ background: ramp(t) }} />)}<span className="small muted">больше</span></span>
+        <span className="small text-2">{hover ? <>{DAYS[hover[0]]}, {String(hover[1]).padStart(2, '0')}:00–{String(hover[1] + 1).padStart(2, '0')}:00 — <b>{bytes(data[hover[0]][hover[1]])}</b></> : t('charts.hover_over_a_cell')}</span>
+        <span className="hm-scale"><span className="small muted">{t('charts.less')}</span>{[0.05, 0.25, 0.5, 0.75, 1].map((t) => <i key={t} style={{ background: ramp(t) }} />)}<span className="small muted">{t('charts.more')}</span></span>
       </div>
     </div>
   )
@@ -291,6 +299,7 @@ function FragmentRow({ label, children }: { label: string; children: ReactNode }
   return <><span className="hm-d">{label}</span>{children}</>
 }
 
+/** Tiny trend line for a stat tile. */
 /** Tiny trend line for a stat tile. */
 export function Sparkline({ values, color = 'var(--s1)' }: { values: number[]; color?: string }) {
   const [ref, w] = useWidth<HTMLDivElement>()
@@ -312,20 +321,22 @@ export function Sparkline({ values, color = 'var(--s1)' }: { values: number[]; c
 }
 
 /** Change vs the previous period: ▲ 12% / ▼ 3% / no data. */
+/** Change vs the previous period: ▲ 12% / ▼ 3% / no data. */
 export function Delta({ now, prev, upIsGood = true }: { now: number; prev: number; upIsGood?: boolean }) {
-  if (!prev) return <span className="delta muted">нет данных за прошлый период</span>
+  if (!prev) return <span className="delta muted">{t('charts.no_data_for_the_previous')}</span>
   // A barely recorded previous period (the panel is new) gives absurd percentages.
-  if (prev * 20 < now) return <span className="delta muted">мало данных за прошлый период</span>
+  if (prev * 20 < now) return <span className="delta muted">{t('charts.little_data_for_the_previous')}</span>
   const pct = ((now - prev) / prev) * 100
   const up = pct >= 0
   const good = up === upIsGood
   return (
     <span className={'delta ' + (Math.abs(pct) < 0.5 ? 'muted' : good ? 'good' : 'bad')}>
-      {up ? '▲' : '▼'} {Math.abs(pct) < 10 ? Math.abs(pct).toFixed(1) : Math.round(Math.abs(pct))}% <span className="muted">к прошлому периоду</span>
+      {up ? '▲' : '▼'} {Math.abs(pct) < 10 ? Math.abs(pct).toFixed(1) : Math.round(Math.abs(pct))}% <span className="muted">{t('charts.vs_previous_period')}</span>
     </span>
   )
 }
 
+/** Segmented control for a small set of options. */
 /** Segmented control for a small set of options. */
 export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return (
@@ -337,6 +348,7 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
   )
 }
 
+/** A stacked share bar (e.g. users by status) with a labelled legend underneath. */
 /** A stacked share bar (e.g. users by status) with a labelled legend underneath. */
 export function ShareBar({ parts }: { parts: { label: string; value: number; color: string }[] }) {
   const total = parts.reduce((a, p) => a + p.value, 0)

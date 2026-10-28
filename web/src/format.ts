@@ -1,6 +1,8 @@
+import { fmtDate, t } from './i18n'
+
 export function bytes(b: number | null | undefined): string {
   if (b == null) return '∞'
-  const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ']
+  const u = [t('format.b'), t('format.kb'), t('format.mb'), t('format.gb'), t('format.tb')]
   let i = 0
   let v = b
   while (v >= 1024 && i < u.length - 1) {
@@ -11,49 +13,40 @@ export function bytes(b: number | null | undefined): string {
 }
 
 export function bps(b: number): string {
-  return bytes(b) + '/с'
+  return bytes(b) + t('format.per_second')
 }
 
 export const GiB = 1024 ** 3
 
 export function date(ts: number | null | undefined): string {
   if (!ts) return '—'
-  return new Date(ts * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return fmtDate(new Date(ts * 1000), { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 export function dateTime(ts: number | null | undefined): string {
   if (!ts) return '—'
-  return new Date(ts * 1000).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
-
-export function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10
-  const m100 = n % 100
-  if (m10 === 1 && m100 !== 11) return one
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
-  return many
+  return fmtDate(new Date(ts * 1000), { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 export function ago(ts: number | null | undefined): string {
-  if (!ts) return 'никогда'
+  if (!ts) return t('format.never')
   const s = Math.floor(Date.now() / 1000 - ts)
-  if (s < 60) return 'только что'
+  if (s < 60) return t('format.just_now')
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m} мин назад`
+  if (m < 60) return t('format.minutes_ago', { n: m })
   const h = Math.floor(m / 60)
-  if (h < 24) return `${h} ч назад`
-  const d = Math.floor(h / 24)
-  return `${d} ${plural(d, 'день', 'дня', 'дней')} назад`
+  if (h < 24) return t('format.hours_ago', { n: h })
+  return t('format.days_ago', { n: Math.floor(h / 24) })
 }
 
 export function left(ts: number | null | undefined): string {
-  if (!ts) return 'бессрочно'
+  if (!ts) return t('format.unlimited')
   const s = ts - Date.now() / 1000
-  if (s <= 0) return 'истекла'
+  if (s <= 0) return t('format.expired')
   const d = Math.floor(s / 86400)
-  if (d >= 1) return `ещё ${d} ${plural(d, 'день', 'дня', 'дней')}`
+  if (d >= 1) return t('format.days_left', { n: d })
   const h = Math.floor(s / 3600)
-  return h >= 1 ? `ещё ${h} ч` : 'меньше часа'
+  return h >= 1 ? t('format.hours_left', { n: h }) : t('format.less_than_an_hour')
 }
 
 export function isOnline(ts: number | null | undefined): boolean {
@@ -63,36 +56,37 @@ export function isOnline(ts: number | null | undefined): boolean {
 export function uptime(s: number): string {
   const d = Math.floor(s / 86400)
   const h = Math.floor((s % 86400) / 3600)
-  if (d > 0) return `${d} д ${h} ч`
+  if (d > 0) return t('format.uptime_days', { d, h })
   const m = Math.floor((s % 3600) / 60)
-  return `${h} ч ${m} мин`
+  return t('format.uptime_hours', { h, m })
 }
 
+// Labels are looked up when used, so they follow the interface language.
 export const statusInfo: Record<string, { label: string; color: string }> = {
-  active: { label: 'активен', color: 'green' },
-  limited: { label: 'трафик исчерпан', color: 'pink' },
-  expired: { label: 'истёк', color: 'amber' },
-  disabled: { label: 'отключён', color: '' },
+  active: { get label() { return t('format.status_active') }, color: 'green' },
+  limited: { get label() { return t('format.status_limited') }, color: 'pink' },
+  expired: { get label() { return t('format.status_expired') }, color: 'amber' },
+  disabled: { get label() { return t('format.status_disabled') }, color: '' },
 }
 
 export const nodeStateInfo: Record<string, { label: string; color: string }> = {
-  'in sync': { label: 'работает', color: 'green' },
-  syncing: { label: 'применяет', color: 'amber' },
-  offline: { label: 'нет связи', color: 'pink' },
-  pending: { label: 'ждёт подключения', color: 'amber' },
-  disabled: { label: 'выключена', color: '' },
+  'in sync': { get label() { return t('format.node_in_sync') }, color: 'green' },
+  syncing: { get label() { return t('format.node_syncing') }, color: 'amber' },
+  offline: { get label() { return t('format.node_offline') }, color: 'pink' },
+  pending: { get label() { return t('format.node_pending') }, color: 'amber' },
+  disabled: { get label() { return t('format.node_disabled') }, color: '' },
 }
 
 export const resetLabels: Record<string, string> = {
-  no: 'не сбрасывать',
-  day: 'каждый день',
-  week: 'каждую неделю',
-  month: 'каждый месяц',
+  get no() { return t('format.reset_no') },
+  get day() { return t('format.reset_day') },
+  get week() { return t('format.reset_week') },
+  get month() { return t('format.reset_month') },
 }
 
 export const clientTypes: Record<string, string> = {
-  auto: 'авто (по приложению)',
-  base64: 'ссылки (base64)',
+  get auto() { return t('format.client_auto') },
+  get base64() { return t('format.client_base64') },
   mihomo: 'Clash / Mihomo',
   singbox: 'sing-box',
   xray: 'Xray JSON',

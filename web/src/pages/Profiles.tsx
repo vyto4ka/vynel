@@ -5,9 +5,10 @@ import { RoutingForm } from '../routing'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { templateStarter } from '../templateStarter'
 import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { t as tr, Trans } from '../i18n'
 
 const sourceLabel: Record<string, string> = {
-  input: 'вводится', const: 'константа', generate: 'генерируется', derived: 'вычисляется',
+  input: tr('profiles.typed_in'), const: tr('profiles.constant'), generate: tr('profiles.generated'), derived: tr('profiles.computed'),
 }
 
 export function Profiles() {
@@ -17,15 +18,15 @@ export function Profiles() {
     <>
       <div className="toolbar">
         <div className="seg">
-          <button className={tab === 'profiles' ? 'on' : ''} onClick={() => setTab('profiles')}>Профили</button>
-          <button className={tab === 'templates' ? 'on' : ''} onClick={() => setTab('templates')}>Шаблоны профилей</button>
-          <button className={tab === 'cascades' ? 'on' : ''} onClick={() => setTab('cascades')}>Каскады</button>
+          <button className={tab === 'profiles' ? 'on' : ''} onClick={() => setTab('profiles')}>{tr('common.profiles')}</button>
+          <button className={tab === 'templates' ? 'on' : ''} onClick={() => setTab('templates')}>{tr('profiles.profile_templates')}</button>
+          <button className={tab === 'cascades' ? 'on' : ''} onClick={() => setTab('cascades')}>{tr('profiles.cascades')}</button>
         </div>
         <PageInfo>
           {tab === 'profiles'
-            ? 'Профиль — общие настройки VLESS-инбаунда по шаблону. На каждой ноде из профиля получается свой инбаунд со своими ключами.'
-            : tab === 'cascades' ? 'Каскад — сервер, где трафик входит на одной ноде и выходит через другую.'
-            : 'Шаблон — заготовка профиля: JSON инбаунда Xray с переменными, точка подключения для подписки и роль nginx. Свой шаблон — кнопка «Новый шаблон» (заготовка с пояснениями) или копия встроенного.'}
+            ? tr('profiles.a_profile_is_the_common')
+            : tab === 'cascades' ? tr('profiles.a_cascade_is_a_server')
+            : tr('profiles.a_template_is_a_profile')}
         </PageInfo>
       </div>
       {tab === 'profiles' ? <ProfileList /> : tab === 'cascades' ? <CascadeList /> : <TemplateList />}
@@ -47,9 +48,9 @@ function ProfileList() {
   return (
     <>
       <div className="row" style={{ marginBottom: 14, justifyContent: 'flex-end' }}>
-        <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" /> Профиль</button>
+        <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" />{' '}{tr('common.profile')}</button>
       </div>
-      {profiles.data.length === 0 ? <div className="card"><Empty>Профилей нет</Empty></div> : (
+      {profiles.data.length === 0 ? <div className="card"><Empty>{tr('profiles.no_profiles')}</Empty></div> : (
         <div className="cards cols">
           {profiles.data.map((p) => {
             const t = tpls.data!.find((x) => x.id === p.templateId)
@@ -59,13 +60,13 @@ function ProfileList() {
                 <div className="card-head">
                   <div>
                     <h3>{p.name}</h3>
-                    <div className="card-sub">{p.templateTitle || p.templateId} {t?.custom && <Badge color="pink">свой шаблон</Badge>}</div>
+                    <div className="card-sub">{p.templateTitle || p.templateId} {t?.custom && <Badge color="pink">{tr('profiles.own_template')}</Badge>}</div>
                   </div>
                   <div className="row" style={{ gap: 4 }}>
-                    <button className="btn sm" onClick={() => setEdit(p.id)}><Icon name="edit" /> Изменить</button>
-                    <button className="btn ghost icon sm" title="Удалить" onClick={async () => {
-                      if (await confirm(<>Удалить профиль <b>{p.name}</b>? {p.inbounds.length > 0 && `Он используется на нодах: ${p.inbounds.join(', ')}.`}</>, 'Удалить'))
-                        act(() => del(`profiles/${p.id}`), 'Профиль удалён').then((r) => { if (r !== undefined) profiles.reload() })
+                    <button className="btn sm" onClick={() => setEdit(p.id)}><Icon name="edit" />{' '}{tr('common.edit')}</button>
+                    <button className="btn ghost icon sm" title={tr('common.delete')} onClick={async () => {
+                      if (await confirm(<><Trans k="profiles.delete_the_profile" v={{ name: p.name }} />{' '}{p.inbounds.length > 0 && tr('profiles.it_is_used_on_nodes', { join: p.inbounds.join(', ') })}</>, tr('common.delete')))
+                        act(() => del(`profiles/${p.id}`), tr('profiles.profile_deleted')).then((r) => { if (r !== undefined) profiles.reload() })
                     }}><Icon name="trash" /></button>
                   </div>
                 </div>
@@ -74,14 +75,14 @@ function ProfileList() {
                     {(t?.variables || []).filter((v) => v.scope === 'profile' && v.source !== 'derived').map((v) => (
                       <ValueRow key={v.name} k={v.name} v={p.values[v.name]} def={v.default} />
                     ))}
-                    <div className="k">Тег</div><div className="mono">{p.tagPattern}</div>
-                    <div className="k">В приложениях</div><div className="mono">{p.remarkPattern}</div>
+                    <div className="k">{tr('common.tag')}</div><div className="mono">{p.tagPattern}</div>
+                    <div className="k">{tr('profiles.in_apps')}</div><div className="mono">{p.remarkPattern}</div>
                   </div>
                   <div className="row small" style={{ marginTop: 12, gap: 6 }}>
-                    <span className="muted">На нодах:</span>
-                    {p.inbounds.length === 0 ? <span className="muted">нигде — добавьте в разделе «Ноды»</span> : p.inbounds.map((tag) => <span key={tag} className="chip static mono">{tag}</span>)}
+                    <span className="muted">{tr('profiles.on_nodes')}</span>
+                    {p.inbounds.length === 0 ? <span className="muted">{tr('profiles.nowhere_add_it_on_the')}</span> : p.inbounds.map((tag) => <span key={tag} className="chip static mono">{tag}</span>)}
                   </div>
-                  {overridden && <div className="small pink-text" style={{ marginTop: 8 }}>Есть ручная правка JSON поверх шаблона</div>}
+                  {overridden && <div className="small pink-text" style={{ marginTop: 8 }}>{tr('profiles.there_is_a_manual_json')}</div>}
                 </div>
               </div>
             )
@@ -100,7 +101,7 @@ function ValueRow({ k, v, def }: { k: string; v: any; def?: any }) {
     <>
       <div className="k">{k}</div>
       <div className="mono ellipsis" title={v == null ? '' : show(v)}>
-        {v == null || v === '' ? (def != null ? <span className="muted">{show(def)} (по умолчанию)</span> : '—') : show(v)}
+        {v == null || v === '' ? (def != null ? <span className="muted"><Trans k="profiles.default" v={{ v: show(def) }} /></span> : '—') : show(v)}
       </div>
     </>
   )
@@ -120,17 +121,17 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const r = await act(() => post<{ id: number }>('profiles', { name, templateId, values, groupIds: gids }), 'Профиль создан')
+    const r = await act(() => post<{ id: number }>('profiles', { name, templateId, values, groupIds: gids }), tr('profiles.profile_created'))
     if (r) onCreated(r.id)
   }
   return (
-    <Modal title="Новый профиль" onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="new-profile" disabled={!name.trim() || !templateId}>Создать</button></>}>
+    <Modal title={tr('profiles.new_profile')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" form="new-profile" disabled={!name.trim() || !templateId}>{tr('common.create')}</button></>}>
       <form id="new-profile" onSubmit={submit}>
-        <Field label="Название"><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Reality" /></Field>
-        <Field label="Шаблон" info={t?.summary || undefined}>
+        <Field label={tr('common.name')}><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Reality" /></Field>
+        <Field label={tr('common.template')} info={t?.summary || undefined}>
           <select className="input" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-            {usable.map((x) => <option key={x.id} value={x.id}>{x.title}{x.custom ? ' (свой)' : ''}</option>)}
+            {usable.map((x) => <option key={x.id} value={x.id}>{x.title}{x.custom ? tr('profiles.own') : ''}</option>)}
           </select>
         </Field>
         {required.map((v) => (
@@ -138,7 +139,7 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
             <input className="input" value={values[v.name] || ''} onChange={(e) => setValues({ ...values, [v.name]: e.target.value })} />
           </Field>
         ))}
-        <Field label="Дать доступ группам" info="Пользователи этих групп получат профиль на всех нодах, где он стоит.">
+        <Field label={tr('profiles.give_access_to_groups')} info={tr('profiles.users_of_these_groups_get')}>
           <div className="row">
             {(groups.data || []).map((g) => (
               <label key={g.id} className="check">
@@ -148,7 +149,7 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
             ))}
           </div>
         </Field>
-        <div className="muted small">Остальное — параметры, ключи, правка JSON — настраивается в редакторе, он откроется сразу после создания.</div>
+        <div className="muted small">{tr('profiles.the_rest_parameters_keys_json')}</div>
       </form>
     </Modal>
   )
@@ -215,13 +216,13 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
     return () => clearTimeout(t)
   }, [JSON.stringify(body), loaded.data])
 
-  if (!loaded.data) return <Modal title="Профиль" onClose={onClose}><Loading error={loaded.error} /></Modal>
+  if (!loaded.data) return <Modal title={tr('common.profile')} onClose={onClose}><Loading error={loaded.error} /></Modal>
   const p = loaded.data
   const failed = preview?.error || preview?.items.some((i) => i.error)
 
   const save = async () => {
-    if (regenerate && !(await confirm('Сгенерировать значения профиля заново? Клиенты получат их при следующем обновлении подписки.', 'Да'))) return
-    const r = await act(() => patch(`profiles/${id}`, body), 'Профиль сохранён — ноды получат изменения за несколько секунд')
+    if (regenerate && !(await confirm(tr('profiles.generate_the_profile_values'), tr('common.yes')))) return
+    const r = await act(() => patch(`profiles/${id}`, body), tr('profiles.profile_saved_nodes_get_the'))
     if (r !== undefined) {
       onSaved()
       onClose()
@@ -230,42 +231,39 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
   const item = preview?.items[Math.min(selected, (preview?.items.length || 1) - 1)]
 
   return (
-    <Modal title={<>Профиль «{p.name}» <span className="muted small" style={{ fontWeight: 400 }}>· {p.template?.title}</span></>} xl onClose={onClose}
+    <Modal title={<><Trans k="profiles.profile" v={{ name: p.name, v: <span className="muted small" style={{ fontWeight: 400 }}>· {p.template?.title}</span> }} /></>} xl onClose={onClose}
       footer={<>
-        {failed ? <span className="pink-text small grow">Есть ошибки — сохранить не получится</span> : <span className="muted small grow">Изменения применятся на всех нодах профиля</span>}
-        <button className="btn ghost" onClick={onClose}>Отмена</button>
-        <button className="btn primary" disabled={!!jsonError || !!failed} onClick={save}>Сохранить</button>
+        {failed ? <span className="pink-text small grow">{tr('profiles.there_are_errors_saving_is')}</span> : <span className="muted small grow">{tr('profiles.changes_apply_on_all_nodes')}</span>}
+        <button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
+        <button className="btn primary" disabled={!!jsonError || !!failed} onClick={save}>{tr('common.save')}</button>
       </>}>
       <div className="seg" style={{ marginBottom: 14 }}>
-        <button className={tab === 'params' ? 'on' : ''} onClick={() => setTab('params')}>Параметры</button>
-        <button className={tab === 'inbound' ? 'on' : ''} onClick={() => setTab('inbound')}>Сервер · JSON{ownInbound && <span className="dot-own" title="свой, не как в шаблоне" />}</button>
-        <button className={tab === 'host' ? 'on' : ''} onClick={() => setTab('host')}>Подписка · JSON{ownHost && <span className="dot-own" title="свой, не как в шаблоне" />}</button>
-        <button className={tab === 'client' ? 'on' : ''} onClick={() => setTab('client')}>Клиент{client.custom && <span className="dot-own" title="кастомный профиль клиента" />}</button>
+        <button className={tab === 'params' ? 'on' : ''} onClick={() => setTab('params')}>{tr('profiles.parameters')}</button>
+        <button className={tab === 'inbound' ? 'on' : ''} onClick={() => setTab('inbound')}>{tr('profiles.server_json')}{ownInbound && <span className="dot-own" title={tr('profiles.own_not_as_in_the')} />}</button>
+        <button className={tab === 'host' ? 'on' : ''} onClick={() => setTab('host')}>{tr('profiles.subscription_json')}{ownHost && <span className="dot-own" title={tr('profiles.own_not_as_in_the')} />}</button>
+        <button className={tab === 'client' ? 'on' : ''} onClick={() => setTab('client')}>{tr('common.client')}{client.custom && <span className="dot-own" title={tr('profiles.custom_client_profile')} />}</button>
       </div>
       <div className="editor-split">
         {tab === 'params' ? <div>
           <div className="grid2">
-            <Field label="Название"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            <Field label="Тег инбаунда" help="${NODE_CODE} — код ноды: VLESS_NL, VLESS_DE…">
+            <Field label={tr('common.name')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+            <Field label={tr('profiles.inbound_tag')} help={tr('profiles.is_the_node_code_vless')}>
               <input className="input mono" value={tagPattern} onChange={(e) => setTagPattern(e.target.value)} />
             </Field>
           </div>
-          <Field label="Название сервера в приложениях" help="${NODE_FLAG} ${NODE_NAME} → «🇳🇱 Нидерланды». Можно добавить своё: ${NODE_FLAG} ${NODE_NAME} · Reality">
+          <Field label={tr('common.server_name_in_apps')} help={tr('profiles.netherlands_you_can_add_your')}>
             <input className="input mono" value={remarkPattern} onChange={(e) => setRemarkPattern(e.target.value)} />
           </Field>
 
-          <div className="label" style={{ margin: '6px 0 8px' }}>Параметры профиля</div>
+          <div className="label" style={{ margin: '6px 0 8px' }}>{tr('profiles.profile_parameters')}</div>
           <VariableTable vars={vars.filter((v) => v.scope === 'profile')} values={values} onChange={setValues}
-            empty="У этого шаблона нет параметров уровня профиля" />
+            empty={tr('profiles.this_template_has_no_profile')} />
           {vars.some((v) => v.scope === 'profile' && v.source === 'generate') && (
             <label className="check" style={{ margin: '8px 0 14px' }}>
-              <input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} /> Сгенерировать значения профиля заново
-            </label>
+              <input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} />{' '}{tr('profiles.generate_the_profile_values_2')}</label>
           )}
           {vars.some((v) => v.scope === 'node') && (
-            <div className="muted small" style={{ margin: '6px 0 14px' }}>
-              На каждой ноде свои: {vars.filter((v) => v.scope === 'node').map((v) => <span key={v.name} className="mono">{v.name} </span>)} — они в «Ноды» → инбаунд → «Настроить».
-            </div>
+            <div className="muted small" style={{ margin: '6px 0 14px' }}><Trans k="profiles.each_node_has_its_own" v={{ map: vars.filter((v) => v.scope === 'node').map((v) => <span key={v.name} className="mono">{v.name} </span>) }} /></div>
           )}
         </div> : tab === 'client' ? (
           <ClientEditor c={client} set={setClient} base={p.subRouting} error={clientError} />
@@ -283,7 +281,7 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
 
         <div className="preview-pane">
           <div className="row between" style={{ marginBottom: 8 }}>
-            <span className="label">Что получат ноды</span>
+            <span className="label">{tr('profiles.what_the_nodes_get')}</span>
             {preview && preview.items.length > 1 && (
               <select className="input" style={{ width: 'auto', height: 30 }} value={selected} onChange={(e) => setSelected(Number(e.target.value))}>
                 {preview.items.map((it, i) => <option key={it.id} value={i}>{it.tag}{it.error ? ' ⚠' : ''}</option>)}
@@ -291,11 +289,11 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
             )}
           </div>
           {!preview ? <Loading /> : preview.error ? <div className="alert pink">{preview.error}</div> : preview.items.length === 0 ? (
-            <div className="muted small">Профиль ещё не стоит ни на одной ноде — добавьте его в разделе «Ноды». Шаблон при этом проверяется при сохранении.</div>
+            <div className="muted small">{tr('profiles.the_profile_is_not_on')}</div>
           ) : item && (
             <>
               <div className="small text-2" style={{ marginBottom: 6 }}>
-                {item.node} · <span className="mono">{item.tag}</span> · {tab === 'host' ? 'точка подключения для подписки' : 'inbound на ноде'}
+                {item.node} · <span className="mono">{item.tag}</span> · {tab === 'host' ? tr('profiles.connection_point_for_the_subscription') : tr('profiles.inbound_on_the_node')}
               </div>
               {item.error ? <div className="alert pink">{item.error}</div>
                 : tab === 'host'
@@ -327,7 +325,7 @@ function clientConfigError(text: string): string | undefined {
   try {
     const v = JSON.parse(text)
     const one = Array.isArray(v) ? (v.length === 1 ? v[0] : null) : v
-    if (one === null || typeof one !== 'object' || Array.isArray(one)) return 'нужен JSON-объект конфига: { … }'
+    if (one === null || typeof one !== 'object' || Array.isArray(one)) return tr('profiles.a_json_config_object_is')
   } catch (e: any) {
     return e.message
   }
@@ -342,19 +340,18 @@ function ClientEditor({ c, set, base, error }: { c: ProfileClient; set: (c: Prof
       <label className="row" style={{ gap: 10, marginBottom: 12 }}>
         <Switch checked={c.custom} onChange={(v) => set({ ...c, custom: v, mode: c.mode || 'routing', routing: c.routing ?? base })} />
         <span>
-          <b>Кастомный профиль клиента</b>
-          <div className="small text-2">только Xray JSON: KeqDroid, Happ, v2RayTun <Info>Свои маршруты и DNS для серверов этого профиля вместо общих (Подписка → Маршруты). Mihomo и sing-box получают один файл на все серверы, поэтому берут общие.</Info></div>
+          <b>{tr('profiles.custom_client_profile_2')}</b>
+          <div className="small text-2">{tr('profiles.xray_json_only_keqdroid_happ')}{' '}<Info>{tr('profiles.its_own_routes_and_dns')}</Info></div>
         </span>
       </label>
       {c.custom && <>
         <div className="seg" style={{ marginBottom: 12 }}>
-          <button className={mode === 'routing' ? 'on' : ''} onClick={() => set({ ...c, mode: 'routing', routing: c.routing ?? base })}>Настройки</button>
-          <button className={mode === 'json' ? 'on' : ''} onClick={() => set({ ...c, mode: 'json', config: c.config || pretty(clientExample) })}>Конфиг JSON</button>
+          <button className={mode === 'routing' ? 'on' : ''} onClick={() => set({ ...c, mode: 'routing', routing: c.routing ?? base })}>{tr('common.settings')}</button>
+          <button className={mode === 'json' ? 'on' : ''} onClick={() => set({ ...c, mode: 'json', config: c.config || pretty(clientExample) })}>{tr('profiles.json_config')}</button>
         </div>
         {mode === 'routing' && c.routing && <RoutingForm r={c.routing} set={(r) => set({ ...c, routing: r })} />}
         {mode === 'json' && <>
-          <div className="small text-2" style={{ marginBottom: 8 }}>
-            Полный конфиг клиента Xray <Info>Outbound с тегом <span className="mono">proxy</span> заменится сервером (если его нет — сервер встанет первым), «remarks» — его названием.</Info>
+          <div className="small text-2" style={{ marginBottom: 8 }}>{tr('profiles.a_full_xray_client_config')}{' '}<Info><Trans k="profiles.the_outbound_with_the_proxy" /></Info>
           </div>
           <CodeEditor lang="json" value={c.config || ''} onChange={(v) => set({ ...c, config: v })} height="calc(100vh - 380px)" />
           {error && <div className="small pink-text">{error}</div>}
@@ -376,18 +373,16 @@ function SourceEditor({ kind, text, onChange, error, own, onReset, vars }: {
       <div className="row between" style={{ marginBottom: 8, flexWrap: 'nowrap' }}>
         <div className="small text-2">
           {kind === 'inbound'
-            ? <>Полный inbound Xray, который получит каждая нода. Клиенты (<span className="mono">settings.clients</span>) добавляются сами.</>
-            : <>Как сервер выглядит в подписке: адрес, SNI, отпечаток, путь и клиентский <span className="mono">xhttp_client_extra</span> (там же <span className="mono">xmux</span>).</>}
+            ? <><Trans k="profiles.the_full_xray_inbound_each" /></>
+            : <><Trans k="profiles.how_the_server_looks_in" /></>}
         </div>
-        {own ? <Badge color="pink">свой</Badge> : <Badge>как в шаблоне</Badge>}
+        {own ? <Badge color="pink">{tr('profiles.own_2')}</Badge> : <Badge>{tr('profiles.as_in_the_template')}</Badge>}
       </div>
       <CodeEditor lang="json" value={text} onChange={onChange} height="calc(100vh - 420px)" />
       {error && <div className="small pink-text" style={{ marginTop: 6 }}>{error}</div>}
       <div className="row between" style={{ marginTop: 10, alignItems: 'flex-start', flexWrap: 'nowrap', gap: 14 }}>
-        <div className="small muted" style={{ minWidth: 0 }}>
-          Переменные: {[...vars.map((v) => v.name), ...builtinVars].map((n) => <code key={n} style={{ marginRight: 6, display: 'inline-block' }}>{'${' + n + '}'}</code>)}
-        </div>
-        <button className="btn sm" disabled={!own} onClick={onReset} title="Взять JSON из шаблона: профиль снова будет следовать шаблону и его обновлениям">Как в шаблоне</button>
+        <div className="small muted" style={{ minWidth: 0 }}><Trans k="profiles.variables" v={{ map: [...vars.map((v) => v.name), ...builtinVars].map((n) => <code key={n} style={{ marginRight: 6, display: 'inline-block' }}>{'${' + n + '}'}</code>) }} /></div>
+        <button className="btn sm" disabled={!own} onClick={onReset} title={tr('profiles.take_the_json_from_the')}>{tr('profiles.as_in_the_template_2')}</button>
       </div>
     </div>
   )
@@ -405,20 +400,20 @@ export function VariableTable({ vars, values, onChange, empty }: { vars: Variabl
           <div key={v.name} className="var-row">
             <div>
               <div className="mono small"><b>{v.name}</b>{v.description && <Info>{v.description}</Info>}</div>
-              <div className="small muted">{sourceLabel[v.source] || v.source}{v.validate ? ` · ${v.validate}` : ''}{v.optional ? ' · необязательная' : ''}</div>
+              <div className="small muted">{sourceLabel[v.source] || v.source}{v.validate ? ` · ${v.validate}` : ''}{v.optional ? tr('profiles.optional') : ''}</div>
             </div>
             <div>
               {derived ? <div className="small muted mono">= {v.from}</div> : v.options && v.options.length > 0 ? (
                 <select className="input" value={values[v.name] ?? ''} onChange={(e) => onChange({ ...values, [v.name]: e.target.value })}>
-                  <option value="">по умолчанию{v.default != null ? ` (${v.default})` : ''}</option>
+                  <option value=""><Trans k="common.default_2" v={{ v: v.default != null ? ` (${v.default})` : '' }} /></option>
                   {v.options.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               ) : (
                 <input className="input mono" value={values[v.name] ?? ''} disabled={secret}
                   onChange={(e) => onChange({ ...values, [v.name]: e.target.value })}
-                  placeholder={v.default != null ? `по умолчанию ${v.default}` : v.default_from ? `из ${v.default_from}` : v.source === 'generate' ? 'сгенерируется' : ''} />
+                  placeholder={v.default != null ? tr('common.default_3', { default: v.default }) : v.default_from ? tr('profiles.from', { default_from: v.default_from }) : v.source === 'generate' ? tr('profiles.will_be_generated') : ''} />
               )}
-              {secret && <div className="small muted" style={{ marginTop: 3 }}>Значение скрыто</div>}
+              {secret && <div className="small muted" style={{ marginTop: 3 }}>{tr('profiles.value_hidden')}</div>}
             </div>
           </div>
         )
@@ -450,7 +445,7 @@ function TemplateList() {
     const id = freeID(t.id.replace(/-copy(-\d+)?$/, '') + '-copy')
     const src = t.source
       .replace(/^id:.*$/m, `id: ${id}`)
-      .replace(/^title:(.*)$/m, (_m, title) => `title:${title} (копия)`)
+      .replace(/^title:(.*)$/m, (_m, title) => tr('profiles.title_copy', { title }))
       .replace(/^(# .*\n)+/, '')
     setEdit({ id: '', source: src, isNew: true, readOnly: false })
   }
@@ -458,7 +453,7 @@ function TemplateList() {
   return (
     <>
       <div className="row" style={{ marginBottom: 14, justifyContent: 'flex-end' }}>
-        <button className="btn primary" onClick={create}><Icon name="plus" /> Новый шаблон</button>
+        <button className="btn primary" onClick={create}><Icon name="plus" />{' '}{tr('common.new_template')}</button>
       </div>
       <div className="cards cols">
         {tpls.data.map((t) => (
@@ -468,31 +463,29 @@ function TemplateList() {
                 <h3>{t.title}</h3>
                 <div className="card-sub mono">{t.id} · v{t.version || '?'}</div>
               </div>
-              {t.custom ? <Badge color="pink">свой</Badge> : <Badge>встроенный</Badge>}
+              {t.custom ? <Badge color="pink">{tr('profiles.own_2')}</Badge> : <Badge>{tr('profiles.built_in')}</Badge>}
             </div>
             <div className="card-pad">
-              {t.broken && <div className="alert pink" style={{ marginBottom: 10 }}>Шаблон не разбирается: {t.broken}</div>}
+              {t.broken && <div className="alert pink" style={{ marginBottom: 10 }}><Trans k="profiles.the_template_cannot_be_parsed" v={{ broken: t.broken }} /></div>}
               <div className="small text-2">{t.summary}</div>
-              <div className="small muted" style={{ marginTop: 8 }}>
-                Переменные: {(t.variables || []).map((v) => v.name).join(', ') || '—'}
-              </div>
+              <div className="small muted" style={{ marginTop: 8 }}><Trans k="profiles.variables_2" v={{ v: (t.variables || []).map((v) => v.name).join(', ') || '—' }} /></div>
               <div className="small" style={{ marginTop: 8 }}>
-                <span className="muted">Профили: </span>{t.profiles.length ? t.profiles.join(', ') : <span className="muted">не используется</span>}
+                <span className="muted">{tr('profiles.profiles')}{' '}</span>{t.profiles.length ? t.profiles.join(', ') : <span className="muted">{tr('common.not_used')}</span>}
               </div>
               <div className="row" style={{ marginTop: 12, gap: 6 }}>
                 {t.custom ? (
                   <>
-                    <button className="btn sm primary" onClick={() => setEdit({ id: t.id, source: t.source, isNew: false, readOnly: false })}><Icon name="edit" /> Изменить</button>
-                    <button className="btn sm" onClick={() => copy(t)}><Icon name="copy" /> Копия</button>
-                    <button className="btn sm danger" disabled={t.profiles.length > 0} title={t.profiles.length ? 'Используется профилями' : ''} onClick={async () => {
-                      if (await confirm(<>Удалить шаблон <b>{t.title}</b>?</>, 'Удалить'))
-                        act(() => del(`profile-templates/${t.id}`), 'Шаблон удалён').then((r) => { if (r !== undefined) tpls.reload() })
+                    <button className="btn sm primary" onClick={() => setEdit({ id: t.id, source: t.source, isNew: false, readOnly: false })}><Icon name="edit" />{' '}{tr('common.edit')}</button>
+                    <button className="btn sm" onClick={() => copy(t)}><Icon name="copy" />{' '}{tr('profiles.copy')}</button>
+                    <button className="btn sm danger" disabled={t.profiles.length > 0} title={t.profiles.length ? tr('profiles.used_by_profiles') : ''} onClick={async () => {
+                      if (await confirm(<><Trans k="profiles.delete_the_template" v={{ title: t.title }} /></>, tr('common.delete')))
+                        act(() => del(`profile-templates/${t.id}`), tr('common.template_deleted')).then((r) => { if (r !== undefined) tpls.reload() })
                     }}><Icon name="trash" /></button>
                   </>
                 ) : (
                   <>
-                    <button className="btn sm" onClick={() => setEdit({ id: t.id, source: t.source, isNew: false, readOnly: true })}><Icon name="code" /> Посмотреть</button>
-                    <button className="btn sm primary" onClick={() => copy(t)}><Icon name="copy" /> Скопировать и изменить</button>
+                    <button className="btn sm" onClick={() => setEdit({ id: t.id, source: t.source, isNew: false, readOnly: true })}><Icon name="code" />{' '}{tr('profiles.view')}</button>
+                    <button className="btn sm primary" onClick={() => copy(t)}><Icon name="copy" />{' '}{tr('profiles.copy_and_edit')}</button>
                   </>
                 )}
               </div>
@@ -524,29 +517,29 @@ function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }:
 
   const save = async () => {
     const r = await act(() => (isNew ? post('profile-templates', { source: text }) : put(`profile-templates/${id}`, { source: text })),
-      isNew ? 'Шаблон создан — выберите его при создании профиля' : 'Шаблон сохранён — профили на нём обновятся на нодах')
+      isNew ? tr('profiles.template_created_choose_it') : tr('profiles.template_saved_profiles_on'))
     if (r !== undefined) onSaved()
   }
 
   return (
-    <Modal title={readOnly ? `Встроенный шаблон ${id}` : isNew ? 'Новый шаблон' : `Шаблон ${id}`} xl onClose={onClose}
-      footer={readOnly ? <><span className="muted small grow">Встроенные шаблоны не меняются — скопируйте и правьте копию</span><button className="btn primary" onClick={onClose}>Закрыть</button></> : <>
-        {check && !check.ok ? <span className="pink-text small grow">Шаблон с ошибкой не сохранится</span> : <span className="muted small grow">Проверяется пробной сборкой на тестовой ноде NL</span>}
-        <button className="btn ghost" onClick={onClose}>Отмена</button>
-        <button className="btn primary" disabled={!check?.ok} onClick={save}>Сохранить</button>
+    <Modal title={readOnly ? tr('profiles.built_in_template', { id }) : isNew ? tr('common.new_template') : tr('profiles.template', { id })} xl onClose={onClose}
+      footer={readOnly ? <><span className="muted small grow">{tr('profiles.built_in_templates_are_not')}</span><button className="btn primary" onClick={onClose}>{tr('common.close')}</button></> : <>
+        {check && !check.ok ? <span className="pink-text small grow">{tr('profiles.a_template_with_an_error')}</span> : <span className="muted small grow">{tr('profiles.checked_by_a_trial_build')}</span>}
+        <button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
+        <button className="btn primary" disabled={!check?.ok} onClick={save}>{tr('common.save')}</button>
       </>}>
       <div className="editor-split">
         <CodeEditor lang="yaml" value={text} onChange={setText} readOnly={readOnly} height="calc(100vh - 230px)" />
         <div className="preview-pane">
           <div className="seg" style={{ marginBottom: 10 }}>
-            <button className={side === 'check' ? 'on' : ''} onClick={() => setSide('check')}>Проверка{check && !check.ok && ' ✗'}</button>
-            <button className={side === 'help' ? 'on' : ''} onClick={() => setSide('help')}>Справка</button>
+            <button className={side === 'check' ? 'on' : ''} onClick={() => setSide('check')}><Trans k="profiles.check" v={{ v: check && !check.ok && ' ✗' }} /></button>
+            <button className={side === 'help' ? 'on' : ''} onClick={() => setSide('help')}>{tr('profiles.reference')}</button>
           </div>
           {side === 'check' ? (
             !check ? <Loading /> : check.ok ? (
               <>
-                <div className="alert green" style={{ marginBottom: 10 }}>✓ Шаблон в порядке: <b>{check.title}</b> <span className="mono">({check.id})</span></div>
-                <div className="label" style={{ marginBottom: 6 }}>Пример инбаунда (нода NL, сгенерированные ключи)</div>
+                <div className="alert green" style={{ marginBottom: 10 }}><Trans k="profiles.the_template_is_fine" v={{ title: check.title, id: check.id }} /></div>
+                <div className="label" style={{ marginBottom: 6 }}>{tr('profiles.an_inbound_example_node_nl')}</div>
                 <CodeEditor lang="json" value={pretty(check.sample)} readOnly height="calc(100vh - 380px)" />
               </>
             ) : <div className="alert pink" style={{ whiteSpace: 'pre-wrap' }}>{check.error}</div>
@@ -559,35 +552,35 @@ function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }:
 
 // What the built-in names from /profile-templates/reference mean; unknown names are listed bare.
 const refHelp: Record<string, string> = {
-  TAG: 'тег инбаунда по tag_pattern',
-  INBOUND_PORT: 'порт инбаунда на ноде (только в host)',
-  LISTEN_IP: 'IP, на котором слушает инбаунд (0.0.0.0, если IP не выбран)',
-  NODE_CODE: 'код ноды, например NL',
-  NODE_NAME: 'название ноды',
-  NODE_FLAG: 'флаг страны ноды',
-  NODE_COUNTRY: 'код страны, например NL',
-  XHTTP_EXTRA: 'содержимое xhttp_extra, только в xray_inbound и в кавычках: "${XHTTP_EXTRA}"',
-  hex16: 'случайная hex-строка (16 байт)',
-  path: 'путь: случайный из options или /xxxxxx',
-  shortid: 'shortId для Reality (8 байт hex)',
+  TAG: tr('profiles.the_inbound_tag_by_tag'),
+  INBOUND_PORT: tr('profiles.the_inbound_s_port_on'),
+  LISTEN_IP: tr('profiles.the_ip_the_inbound_listens'),
+  NODE_CODE: tr('profiles.the_node_code_e_g'),
+  NODE_NAME: tr('profiles.the_node_name'),
+  NODE_FLAG: tr('profiles.the_node_s_country_flag'),
+  NODE_COUNTRY: tr('profiles.the_country_code_e_g'),
+  XHTTP_EXTRA: tr('profiles.the_content_of_xhttp_extra'),
+  hex16: tr('profiles.a_random_hex_string_16'),
+  path: tr('profiles.a_path_random_from_options'),
+  shortid: tr('profiles.a_shortid_for_reality_8'),
   uuid: 'UUID',
-  x25519: 'приватный ключ Reality',
-  x25519_public: 'публичный ключ из приватного: x25519_public(REALITY_PRIVATE_KEY)',
-  xhttp_session_placement: 'где сессия XHTTP, по режиму маскировки: cookie или path',
-  xhttp_seq_placement: 'где номер пакета XHTTP, по режиму маскировки: query или path',
-  xhttp_padding_placement: 'где набивка XHTTP, по режиму маскировки: query или queryInHeader',
-  xhttp_padding_key: 'имя параметра набивки, по режиму маскировки: cb или x_padding',
-  xhttp_padding_obfs: 'включать ли маскировку набивки, по режиму маскировки',
-  domain: 'домен',
-  port: 'порт 1–65535',
-  ip: 'IP-адрес',
-  xhttp_no_nested_extra: 'в extra нет вложенного extra (частая ошибка при копировании)',
-  xhttp_cdn_get_only: 'uplinkHTTPMethod только GET',
-  xhttp_no_header_placement: 'ничего не кладётся в заголовки (CDN режет длинные заголовки)',
-  xhttp_server_max_header_bytes: 'serverMaxHeaderBytes не меньше 65536 (данные в куках)',
-  selfsteal: 'сайт-заглушка для Reality: domain, local_port, decoy',
-  reverse_proxy_xhttp: 'TLS на domain и проксирование path в upstream (Xray на 127.0.0.1)',
-  certificate: 'nginx только получает сертификат domain для инбаунда (Hysteria2)',
+  x25519: tr('profiles.the_reality_private_key'),
+  x25519_public: tr('profiles.the_public_key_from_the'),
+  xhttp_session_placement: tr('profiles.where_the_xhttp_session_goes'),
+  xhttp_seq_placement: tr('profiles.where_the_xhttp_packet_number'),
+  xhttp_padding_placement: tr('profiles.where_the_xhttp_padding_goes'),
+  xhttp_padding_key: tr('profiles.the_padding_parameter_name'),
+  xhttp_padding_obfs: tr('profiles.whether_padding_obfuscation'),
+  domain: tr('profiles.a_domain'),
+  port: tr('profiles.a_port_1_65535'),
+  ip: tr('profiles.an_ip_address'),
+  xhttp_no_nested_extra: tr('profiles.no_nested_extra_inside_extra'),
+  xhttp_cdn_get_only: tr('profiles.uplinkhttpmethod_is_get_only'),
+  xhttp_no_header_placement: tr('profiles.nothing_goes_into_headers_cdns'),
+  xhttp_server_max_header_bytes: tr('profiles.servermaxheaderbytes_is_at'),
+  selfsteal: tr('profiles.a_decoy_site_for_reality'),
+  reverse_proxy_xhttp: tr('profiles.tls_on_domain_and_proxying'),
+  certificate: tr('profiles.nginx_only_obtains_the_certificate'),
 }
 
 function TemplateHelp({ r }: { r?: Reference['reference'] }) {
@@ -598,54 +591,49 @@ function TemplateHelp({ r }: { r?: Reference['reference'] }) {
   )
   return (
     <div className="small text-2 template-help">
-      <p><b>Как добавить свой шаблон</b></p>
+      <p><b>{tr('profiles.how_to_add_your_own')}</b></p>
       <ol className="list-plain">
-        <li>«Новый шаблон» открывает рабочую заготовку (VLESS + XHTTP за nginx) с пояснениями прямо в тексте. Если схема похожа на встроенную, удобнее «Скопировать и изменить» её.</li>
-        <li>Задайте свой <code>id</code>, <code>title</code> и <code>tag_pattern</code> (префикс тега не должен совпадать с другими шаблонами).</li>
-        <li>Вставьте свой инбаунд Xray в <code>xray_inbound</code>. Всё, что отличается между нодами (домен, ключи, shortId), замените на <code>{'${ПЕРЕМЕННЫЕ}'}</code> и опишите их в <code>variables</code>. Список <code>clients</code> оставьте пустым: пользователи добавляются сами.</li>
-        <li>В <code>host</code> опишите, что уйдёт клиентам в подписку: адрес, порт, SNI, отпечаток.</li>
-        <li>Если инбаунд стоит за nginx (TLS на своём домене или сайт-заглушка), добавьте раздел <code>nginx</code>. Готовый конфиг nginx из инструкции вставляется в него как есть: <code>location: |</code> и <code>server: |</code>.</li>
-        <li>Смотрите вкладку «Проверка»: после каждой правки шаблон собирается на пробной ноде NL, ошибка показывается там же. Сохранить можно только рабочий шаблон.</li>
-        <li>Дальше: «Профили» → «Профиль» → выберите шаблон; потом в «Нодах» добавьте профиль на ноды. Переменные с <code>scope: node</code> вводятся при добавлении на ноду.</li>
+        <li>{tr('profiles.new_template_opens_a_working')}</li>
+        <li><Trans k="profiles.set_your_own_id_title" /></li>
+        <li><Trans k="profiles.put_your_xray_inbound_into" /></li>
+        <li><Trans k="profiles.in_host_describe_what_goes" /></li>
+        <li><Trans k="profiles.if_the_inbound_sits_behind" /></li>
+        <li>{tr('profiles.watch_the_check_tab_after')}</li>
+        <li><Trans k="profiles.next_profiles_profile_choose" /></li>
       </ol>
-      <p className="muted">Правка своего шаблона сразу пересобирает все инбаунды на нём. Если правка ломает хотя бы одну ноду, она не сохранится.</p>
+      <p className="muted">{tr('profiles.editing_your_template_rebuilds')}</p>
 
-      <p><b>Поля шаблона</b></p>
+      <p><b>{tr('profiles.template_fields')}</b></p>
       <ul className="list-plain">
-        <li><code>id</code> — латиница, цифры, дефис; пока на шаблоне есть профили, не меняется. <code>version</code> — число, увеличивайте при правках. <code>title</code>, <code>summary</code> — для людей.</li>
-        <li><code>tag_pattern</code> — тег инбаунда, обязательно с <code>{'${NODE_CODE}'}</code>: <code>MYX_{'${NODE_CODE}'}</code> → MYX_NL. <code>remark_pattern</code> — название подключения в приложениях.</li>
-        <li><code>protocol</code> — <code>vless</code> или <code>hysteria</code>. <code>client.flow</code> — flow клиентов (для Reality по TCP: <code>xtls-rprx-vision</code>, иначе пусто).</li>
-        <li><code>variables</code> — переменные, ниже подробно.</li>
-        <li><code>xray_inbound</code> — JSON инбаунда Xray с <code>{'${ПЕРЕМЕННЫМИ}'}</code>. Переменная, которая стоит в строке целиком, подставляется со своим типом: <code>"port": "{'${XRAY_PORT}'}"</code> станет числом. Пути к сертификатам на ноде — метками: <code>vynel:cert:домен</code>, <code>vynel:key:домен</code> (сертификат, который получает нода), <code>vynel:decoy:сайт</code>.</li>
-        <li><code>xhttp_extra</code> — extra для XHTTP, в инбаунде подставляется как <code>"{'${XHTTP_EXTRA}'}"</code>. Клиенты получают тот же extra, если в <code>host</code> не задано иное.</li>
-        <li><code>host</code> — точка подключения в подписке: <code>address</code>, <code>port</code> (можно <code>{'${INBOUND_PORT}'}</code>), <code>security</code> (tls, reality), <code>sni</code>, <code>host</code>, <code>path</code>, <code>alpn</code>, <code>fingerprint</code>, <code>public_key</code>, <code>short_id</code>, <code>flow</code>, <code>network</code>, <code>mode</code>.
-          Для XHTTP: <code>xhttp_client_extra</code> — полный клиентский extra вместо серверного (когда у сервера и клиента разные ключи), <code>xhttp_client_only</code> — ключи поверх серверного (например xmux). <code>mihomo: true</code> — отдавать XHTTP в Mihomo (1.19+).</li>
-        <li><code>nginx</code> — что поднять в nginx на ноде: <code>role</code> (ниже), <code>domain</code> (на него получается сертификат), <code>local_port</code> или <code>upstream</code>, <code>path</code>, <code>decoy</code>.
-          <code>server_names</code> — ещё имена этого сайта без своего сертификата (домен CDN, который тот пересылает в Host).
-          <code>location: |</code> — свои директивы внутри <code>location</code> пути вместо стандартного прокси (для роли reverse_proxy_xhttp), <code>server: |</code> — директивы уровня <code>server</code>.
-          Переменные nginx пишутся как обычно (<code>$host</code>), а <code>{'${ИМЯ}'}</code> — это переменные шаблона. Нельзя то, что трогает файлы ноды или подгружает код: <code>include</code>, <code>load_module</code>, <code>root</code>, <code>alias</code>, логи, сертификаты, директивы на <code>…_file</code>, сокеты <code>unix:</code>. Шаблон проверяется настоящим <code>nginx -t</code>.
-          Старое имя раздела <code>caddy</code> тоже работает.</li>
-        <li><code>node_requirements</code> — порты, DNS-записи и sysctl; попадают в чек-лист ноды.</li>
-        <li><code>lint</code> — дополнительные проверки готового инбаунда (ниже).</li>
+        <li><Trans k="profiles.id_latin_letters_digits_hyphen" /></li>
+        <li><Trans k="profiles.tag_pattern_the_inbound_tag" /></li>
+        <li><Trans k="profiles.protocol_vless_or_hysteria" /></li>
+        <li><Trans k="profiles.variables_variables_in_detail" /></li>
+        <li><Trans k="profiles.xray_inbound_the_xray_inbound" /></li>
+        <li><Trans k="profiles.xhttp_extra_the_extra_for" /></li>
+        <li><Trans k="profiles.host_the_connection_point_in" /></li>
+        <li><Trans k="profiles.nginx_what_to_set_up" /></li>
+        <li><Trans k="profiles.node_requirements_ports_dns" /></li>
+        <li><Trans k="profiles.lint_extra_checks_of_the" /></li>
       </ul>
 
-      <p><b>Переменные</b></p>
+      <p><b>{tr('profiles.variables_3')}</b></p>
       <ul className="list-plain">
-        <li><code>name</code> — имя заглавными: <code>DOMAIN</code> → в тексте <code>{'${DOMAIN}'}</code>.</li>
-        <li><code>scope</code>: <code>profile</code> — одно значение на профиль, <code>node</code> — своё на каждой ноде.</li>
-        <li><code>source</code>: <code>input</code> — вводит админ; <code>const</code> — константа из <code>default</code> (можно поменять в профиле); <code>generate</code> — генерируется один раз и хранится (<code>generator</code>); <code>derived</code> — вычисляется (<code>from: функция(ПЕРЕМЕННАЯ)</code>), не хранится.</li>
-        <li><code>default</code> — значение по умолчанию; <code>default_from: node.domain</code> — подставить домен ноды.</li>
-        <li><code>options</code> — список вариантов (выпадающий список; для генератора path — из чего выбирать).</li>
-        <li><code>validate</code> — проверка ввода; <code>optional: true</code> — можно не заполнять; <code>secret: true</code> — не показывать значение; <code>description</code> — подсказка под полем.</li>
+        <li><Trans k="profiles.name_the_name_in_capitals" /></li>
+        <li><Trans k="profiles.scope_profile_one_value_per" /></li>
+        <li><Trans k="profiles.source_input_typed_by_the" /></li>
+        <li><Trans k="profiles.default_the_default_value_default" /></li>
+        <li><Trans k="profiles.options_a_list_of_choices" /></li>
+        <li><Trans k="profiles.validate_input_check_optional" /></li>
       </ul>
 
-      <p><b>Встроенные переменные</b> (объявлять не нужно)</p>{list(r?.builtins)}
-      <p><b>Генераторы</b> (<code>source: generate</code>, <code>generator: …</code>)</p>{list(r?.generators)}
-      <p><b>Вычисления</b> (<code>source: derived</code>, <code>from: …</code>)</p>{list(r?.derivations)}
-      <p><b>Проверки значений</b> (<code>validate</code>)</p>{list(r?.validations)}
-      <p><b>Проверки инбаунда</b> (<code>lint</code>)</p>{list(r?.lint)}
-      <p><b>Роли nginx</b> (<code>nginx.role</code>)</p>{list(r?.webRoles)}
-      <p className="muted">Подробно — docs/PROFILES.md. При проверке ключи генерируются, а вводимые переменные получают примерные значения.</p>
+      <p><Trans k="profiles.built_in_variables_no_need" /></p>{list(r?.builtins)}
+      <p><b>{tr('profiles.generators')}</b> (<code>source: generate</code>, <code>generator: …</code>)</p>{list(r?.generators)}
+      <p><b>{tr('profiles.computations')}</b> (<code>source: derived</code>, <code>from: …</code>)</p>{list(r?.derivations)}
+      <p><b>{tr('profiles.value_checks')}</b> (<code>validate</code>)</p>{list(r?.validations)}
+      <p><b>{tr('profiles.inbound_checks')}</b> (<code>lint</code>)</p>{list(r?.lint)}
+      <p><b>{tr('profiles.nginx_roles')}</b> (<code>nginx.role</code>)</p>{list(r?.webRoles)}
+      <p className="muted">{tr('profiles.in_detail_docs_profiles_md')}</p>
     </div>
   )
 }

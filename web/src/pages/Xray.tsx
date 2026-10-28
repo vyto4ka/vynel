@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { get, post, put } from '../api'
 import { CodeEditor, pretty } from '../code'
 import { Badge, Icon, Info, Loading, PageInfo, useAction, useConfirm, useLoad } from '../ui'
+import { t, Trans } from '../i18n'
 
 // «Xray»: конфиг, общий для всех нод, одним JSON. Здесь можно сделать всё, что умеет Xray, без
 // формы под каждую настройку. Разделы — это те же данные, разрезанные по ключам верхнего уровня:
@@ -27,12 +28,12 @@ interface Check {
 type Tab = 'base' | 'outbounds' | 'routing' | 'dns' | 'rest' | 'result'
 
 const tabs: { id: Tab; title: string }[] = [
-  { id: 'base', title: 'Общий конфиг' },
+  { id: 'base', title: t('xray.common_config') },
   { id: 'outbounds', title: 'Outbounds' },
-  { id: 'routing', title: 'Маршрутизация' },
+  { id: 'routing', title: t('xray.routing') },
   { id: 'dns', title: 'DNS' },
-  { id: 'rest', title: 'Остальное' },
-  { id: 'result', title: 'Итог по ноде' },
+  { id: 'rest', title: t('xray.other') },
+  { id: 'result', title: t('xray.result_per_node') },
 ]
 
 const known = ['outbounds', 'routing', 'dns']
@@ -95,14 +96,14 @@ function XrayEditor({ info, reload }: { info: BaseInfo; reload: () => Promise<vo
     setBusy(true)
     // Отступы приводятся к одному виду: в базе лежит аккуратный JSON.
     const out = obj ? pretty(obj) : text
-    const r = await act(() => put('xray/base', { json: out }), 'Сохранено, ноды получат конфиг')
+    const r = await act(() => put('xray/base', { json: out }), t('xray.saved_nodes_get_the_config'))
     setBusy(false)
     if (r !== undefined) reload()
     else run() // что именно не так, видно в проверке
   }
 
   const reset = async () => {
-    if (!(await confirm('Вернуть стандартный конфиг? Свои outbounds, правила маршрутов и DNS из редактора пропадут (сохранить нужно отдельно).', 'Вернуть'))) return
+    if (!(await confirm(t('xray.restore_the_standard_config'), t('xray.restore')))) return
     edit(info.default)
   }
 
@@ -116,17 +117,13 @@ function XrayEditor({ info, reload }: { info: BaseInfo; reload: () => Promise<vo
             <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>{t.title}</button>
           ))}
         </div>
-        <PageInfo>
-          Общий конфиг — часть Xray на каждой ноде, кроме inbound’ов: исходящие подключения, правила маршрутов, DNS и всё остальное, что умеет Xray.
-          Inbound’ы собираются из профилей, а разделы <span className="mono">api</span>, <span className="mono">stats</span>, <span className="mono">policy</span> и уровень логов панель задаёт сама.
-          Разделы справа — те же данные, разрезанные по ключам: правка в любом месте меняет один и тот же конфиг.
-        </PageInfo>
+        <PageInfo><Trans k="xray.the_common_config_is_the" /></PageInfo>
       </div>
 
       {tab === 'base' && (
         <Pane
-          title="Общий конфиг Xray"
-          hint={<>JSON как в документации Xray: <span className="mono">outbounds</span>, <span className="mono">routing</span>, <span className="mono">dns</span>, <span className="mono">observatory</span>, <span className="mono">reverse</span> и любые другие ключи верхнего уровня. Подсказка по формату — <a href="https://xtls.github.io/en/config/" target="_blank" rel="noreferrer">документация Xray</a>.</>}
+          title={t('xray.xray_common_config')}
+          hint={<><Trans k="xray.json_as_in_the_xray" v={{ v: <a href="https://xtls.github.io/en/config/" target="_blank" rel="noreferrer">{t('xray.xray_documentation')}</a> }} /></>}
         >
           <CodeEditor lang="json" value={text} onChange={edit} onValidity={setSyntax} height="max(260px, calc(100vh - 440px))" />
         </Pane>
@@ -146,22 +143,22 @@ function XrayEditor({ info, reload }: { info: BaseInfo; reload: () => Promise<vo
             <div className="grow">
               {check ? <CheckView c={check} tester={info.tester} /> : (
                 <span className="small muted">
-                  {dirty ? 'Есть несохранённые изменения. ' : info.customized ? 'Свой конфиг сохранён. ' : 'Стандартный конфиг. '}
-                  {info.tester ? 'Проверка запускает Xray на этом сервере.' : 'Xray на этом сервере нет: проверяется структура, а Xray нод прочитает конфиг при применении.'}
+                  {dirty ? t('xray.there_are_unsaved_changes') : info.customized ? t('xray.your_own_config_is_saved') : t('xray.the_standard_config')}
+                  {info.tester ? t('xray.the_check_runs_xray_on') : t('xray.there_is_no_xray_on')}
                 </span>
               )}
             </div>
             <div className="row" style={{ gap: 8 }}>
-              {dirty && <Badge color="pink">не сохранено</Badge>}
-              <button className="btn" disabled={busy || sameText(text, info.default)} onClick={reset} title="Подставить стандартный конфиг панели">Стандартный</button>
-              <button className="btn" disabled={!dirty} onClick={() => { edit(info.json); setCheck(null) }}>Отменить</button>
-              <button className="btn" disabled={busy || blocked} onClick={run}>Проверить</button>
-              <button className="btn primary" disabled={busy || blocked || !dirty} onClick={save}><Icon name="check" /> Сохранить</button>
+              {dirty && <Badge color="pink">{t('xray.not_saved')}</Badge>}
+              <button className="btn" disabled={busy || sameText(text, info.default)} onClick={reset} title={t('xray.put_in_the_panel_s')}>{t('xray.standard')}</button>
+              <button className="btn" disabled={!dirty} onClick={() => { edit(info.json); setCheck(null) }}>{t('common.revert')}</button>
+              <button className="btn" disabled={busy || blocked} onClick={run}>{t('xray.check')}</button>
+              <button className="btn primary" disabled={busy || blocked || !dirty} onClick={save}><Icon name="check" />{' '}{t('common.save')}</button>
             </div>
           </div>
           {blocked && (
             <div className="card-pad small pink-text" style={{ paddingTop: 0 }}>
-              {syntax ? `Сохранить нельзя: ${syntax}` : 'Сохранить нельзя: нужен JSON-объект { … }'}
+              {syntax ? t('xray.cannot_save', { syntax }) : t('xray.cannot_save_a_json_object')}
             </div>
           )}
         </div>
@@ -183,15 +180,14 @@ function Pane({ title, hint, children }: { title: string; hint: React.ReactNode;
 }
 
 function Broken() {
-  return <div className="alert pink">В общем конфиге ошибка в JSON — раздел недоступен, пока её не исправить. Откройте вкладку «Общий конфиг»: ошибка подчёркнута, строка и столбец написаны под текстом.</div>
+  return <div className="alert pink">{t('xray.the_common_config_has_a')}</div>
 }
 
 function CheckView({ c, tester }: { c: Check; tester: boolean }) {
   if (c.error) return <div className="small pink-text">✗ {c.error}</div>
   if (!c.ok) return <div className="small pink-text">{(c.problems || []).map((p, i) => <div key={i}>✗ {p}</div>)}</div>
   return (
-    <div className="small code-ok">
-      ✓ Подходит {c.nodes ? `всем нодам (${c.nodes})` : 'для сборки'}{c.tested ? ', Xray прочитал конфиг' : tester ? '' : ', Xray на этом сервере нет — структура проверена, нода проверит ещё раз при применении'}
+    <div className="small code-ok">{t('xray.fits')}{' '}{c.nodes ? t('xray.all_nodes', { nodes: c.nodes }) : t('xray.building')}{c.tested ? t('xray.xray_read_the_config') : tester ? '' : t('xray.there_is_no_xray_on_2')}
     </div>
   )
 }
@@ -202,22 +198,22 @@ const sectionInfo: Record<string, { title: string; hint: React.ReactNode; empty:
   outbounds: {
     title: 'Outbounds',
     empty: [],
-    hint: <>Куда уходит трафик: <span className="mono">freedom</span> напрямую, <span className="mono">blackhole</span> в никуда, свой прокси, WARP, другой сервер. Тег <span className="mono">DIRECT</span> нужен нодам с отдельным выходным IP, первый в списке — выход по умолчанию. Массив <span className="mono">[ … ]</span>.</>,
+    hint: <><Trans k="xray.where_traffic_goes_freedom" /></>,
   },
   routing: {
-    title: 'Маршрутизация',
+    title: t('xray.routing'),
     empty: {},
-    hint: <>Правила в порядке сверху вниз: <span className="mono">rules</span>, <span className="mono">balancers</span>, <span className="mono">domainStrategy</span>. Правила каскадов и отдельных IP панель добавляет сама перед вашими.</>,
+    hint: <><Trans k="xray.rules_from_top_to_bottom" /></>,
   },
   dns: {
     title: 'DNS',
     empty: {},
-    hint: <>Серверы имён самого Xray: <span className="mono">servers</span>, <span className="mono">hosts</span>, <span className="mono">queryStrategy</span>. Пусто — DNS системы.</>,
+    hint: <><Trans k="xray.xray_s_own_name_servers" /></>,
   },
   rest: {
-    title: 'Остальное',
+    title: t('xray.other'),
     empty: {},
-    hint: <>Все остальные ключи верхнего уровня: <span className="mono">observatory</span>, <span className="mono">burstObservatory</span>, <span className="mono">reverse</span>, <span className="mono">fakedns</span>, <span className="mono">metrics</span> и другие. Объект <span className="mono">{'{ … }'}</span>.</>,
+    hint: <><Trans k="xray.all_other_top_level_keys" /></>,
   },
 }
 
@@ -250,8 +246,8 @@ function Section({ obj, id, onCommit }: { obj: Record<string, any>; id: string; 
   const wrongType = !syntax && (() => {
     try {
       const p = JSON.parse(draft)
-      if (id === 'outbounds') return !Array.isArray(p) && 'нужен массив [ … ]'
-      return (!p || typeof p !== 'object' || Array.isArray(p)) && 'нужен объект { … }'
+      if (id === 'outbounds') return !Array.isArray(p) && t('xray.an_array_is_needed')
+      return (!p || typeof p !== 'object' || Array.isArray(p)) && t('xray.an_object_is_needed')
     } catch {
       return false
     }
@@ -260,7 +256,7 @@ function Section({ obj, id, onCommit }: { obj: Record<string, any>; id: string; 
   return (
     <Pane title={meta.title} hint={meta.hint}>
       <CodeEditor lang="json" value={draft} onChange={change} onValidity={setSyntax} height="max(260px, calc(100vh - 440px))" />
-      {wrongType && <div className="small pink-text" style={{ marginTop: 6 }}>{wrongType}: изменение пока не попало в общий конфиг</div>}
+      {wrongType && <div className="small pink-text" style={{ marginTop: 6 }}><Trans k="xray.the_change_has_not_reached" v={{ wrongType: wrongType }} /></div>}
     </Pane>
   )
 }
@@ -281,15 +277,15 @@ function Result({ info, text, blocked }: { info: BaseInfo; text: string; blocked
     return () => { live = false }
   }, [node, text, blocked])
 
-  if (info.nodes.length === 0) return <div className="alert">Нод ещё нет: итоговый конфиг появится, когда добавите ноду.</div>
+  if (info.nodes.length === 0) return <div className="alert">{t('xray.no_nodes_yet_the_resulting')}</div>
   return (
-    <Pane title="Итог по ноде" hint={<>Конфиг, который нода запустит с вашим общим конфигом, как он сейчас в редакторе (не сохранённым тоже). Inbound’ы из профилей, <span className="mono">api</span>/<span className="mono">stats</span>/<span className="mono">policy</span> панели и выходные правила на месте; пользователи и ключи Reality скрыты. <Info>Так выглядит файл, который получит Xray ноды.</Info></>}>
+    <Pane title={t('xray.result_per_node')} hint={<><Trans k="xray.the_config_a_node_will" />{' '}<Info>{t('xray.this_is_the_file_the')}</Info></>}>
       <div className="row" style={{ marginBottom: 10 }}>
         <select className="input" style={{ maxWidth: 280 }} value={node ?? ''} onChange={(e) => setNode(+e.target.value)}>
           {info.nodes.map((n) => <option key={n.id} value={n.id}>{n.flag} {n.name} ({n.code})</option>)}
         </select>
       </div>
-      {blocked && <div className="alert pink">В общем конфиге ошибка — итог показать нельзя.</div>}
+      {blocked && <div className="alert pink">{t('xray.the_common_config_has_an')}</div>}
       {err && <div className="alert pink">{err}</div>}
       {out && (out.problems || []).length > 0 && <div className="alert amber" style={{ marginBottom: 10 }}>{(out.problems || []).map((p, i) => <div key={i}>{p}</div>)}</div>}
       {out && !blocked && <CodeEditor lang="json" value={pretty(out.config)} readOnly height="max(260px, calc(100vh - 460px))" />}

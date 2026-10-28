@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Day } from './api'
 import { fmtBytes, TimeChart } from './charts'
 import { bytes } from './format'
+import { t } from './i18n'
 
 // ---------- иконки ----------
 
@@ -138,7 +139,7 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = [], refreshMs
 
 export function Loading({ error }: { error?: string | null }) {
   if (error) return <div className="alert pink">{error}</div>
-  return <div className="empty">Загрузка…</div>
+  return <div className="empty">{t('common.loading')}</div>
 }
 
 // ---------- оверлеи ----------
@@ -154,7 +155,7 @@ export function Modal({ title, children, footer, onClose, wide, xl }: { title: R
       <div className={'modal' + (wide ? ' wide' : '') + (xl ? ' xl' : '')} role="dialog">
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="btn ghost icon sm" onClick={onClose} aria-label="Закрыть"><Icon name="close" /></button>
+          <button className="btn ghost icon sm" onClick={onClose} aria-label={t('common.close')}><Icon name="close" /></button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
@@ -176,7 +177,7 @@ export function Drawer({ title, children, onClose, actions }: { title: ReactNode
         <div className="drawer-head">
           <h2 className="grow ellipsis">{title}</h2>
           {actions}
-          <button className="btn ghost icon sm" onClick={onClose} aria-label="Закрыть"><Icon name="close" /></button>
+          <button className="btn ghost icon sm" onClick={onClose} aria-label={t('common.close')}><Icon name="close" /></button>
         </div>
         <div className="drawer-body">{children}</div>
       </aside>
@@ -190,7 +191,7 @@ export const useConfirm = () => useContext(ConfirmCtx)
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [st, setSt] = useState<ConfirmState>(null)
-  const ask = useCallback((text: ReactNode, ok = 'Да', danger = true) => new Promise<boolean>((resolve) => setSt({ text, ok, danger, resolve })), [])
+  const ask = useCallback((text: ReactNode, ok = t('common.yes'), danger = true) => new Promise<boolean>((resolve) => setSt({ text, ok, danger, resolve })), [])
   const close = (v: boolean) => {
     st?.resolve(v)
     setSt(null)
@@ -199,8 +200,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <ConfirmCtx.Provider value={ask}>
       {children}
       {st && (
-        <Modal title="Подтверждение" onClose={() => close(false)}
-          footer={<><button className="btn ghost" onClick={() => close(false)}>Отмена</button>
+        <Modal title={t('ui.confirmation')} onClose={() => close(false)}
+          footer={<><button className="btn ghost" onClick={() => close(false)}>{t('common.cancel')}</button>
             <button className={'btn ' + (st.danger ? 'pink' : 'primary')} autoFocus onClick={() => close(true)}>{st.ok}</button></>}>
           <div className="text-2">{st.text}</div>
         </Modal>
@@ -250,7 +251,7 @@ export function Badge({ color, children, dot }: { color?: string; children: Reac
 
 // Info — кнопка «i» с пояснением во всплывающем окне: что это такое и зачем. Короткие уточнения
 // («пусто — без лимита», «за сутки») остаются на виду, в подписи поля.
-export function Info({ children, label = 'Что это' }: { children: ReactNode; label?: string }) {
+export function Info({ children, label = t('ui.what_is_this') }: { children: ReactNode; label?: string }) {
   const [open, setOpen] = useState<'hover' | 'click' | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
@@ -295,7 +296,7 @@ export function Info({ children, label = 'Что это' }: { children: ReactNod
 
 // PageInfo — «О разделе» с пояснением во всплывающем окне, слева в панели инструментов.
 export function PageInfo({ children }: { children: ReactNode }) {
-  return <div className="grow page-info"><span className="muted small">О разделе</span><Info label="О разделе">{children}</Info></div>
+  return <div className="grow page-info"><span className="muted small">{t('ui.about_this_page')}</span><Info label={t('ui.about_this_page')}>{children}</Info></div>
 }
 
 export function Field({ label, help, info, children }: { label: ReactNode; help?: ReactNode; info?: ReactNode; children: ReactNode }) {
@@ -322,9 +323,8 @@ export function CopyField({ value, wrap }: { value: string; wrap?: boolean }) {
   return (
     <div className={'copy' + (wrap ? ' wrap' : '')}>
       <code title={value}>{value}</code>
-      <button className="btn sm" onClick={() => copyText(value).then(() => toast('Скопировано'))}>
-        <Icon name="copy" /> Копировать
-      </button>
+      <button className="btn sm" onClick={() => copyText(value).then(() => toast(t('ui.copied')))}>
+        <Icon name="copy" />{' '}{t('ui.copy')}</button>
     </div>
   )
 }
@@ -357,8 +357,8 @@ export function TrafficChart({ days }: { days: Day[] }) {
   return (
     <TimeChart times={days.map((d) => d.day)} bucket={86400} kind="bars" stacked unit="bytes" format={fmtBytes} height={190}
       series={[
-        { key: 'down', label: 'скачано', color: 'var(--s1)', values: days.map((d) => d.down) },
-        { key: 'up', label: 'отдано', color: 'var(--s2)', values: days.map((d) => d.up) },
+        { key: 'down', label: t('common.downloaded'), color: 'var(--s1)', values: days.map((d) => d.down) },
+        { key: 'up', label: t('common.uploaded'), color: 'var(--s2)', values: days.map((d) => d.up) },
       ]} />
   )
 }
@@ -366,8 +366,8 @@ export function TrafficChart({ days }: { days: Day[] }) {
 export function ChartLegend() {
   return (
     <div className="legend">
-      <span><i style={{ background: 'var(--s1)' }} />скачано</span>
-      <span><i style={{ background: 'var(--s2)' }} />отдано</span>
+      <span><i style={{ background: 'var(--s1)' }} />{t('common.downloaded')}</span>
+      <span><i style={{ background: 'var(--s2)' }} />{t('common.uploaded')}</span>
     </div>
   )
 }

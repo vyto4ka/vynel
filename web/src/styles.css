@@ -792,3 +792,9 @@ select.input.placeholder { color: var(--muted); }
 /* «Xray»: панель действий под редактором. */
 .xray-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .xray-bar .grow { min-width: 220px; }
+
+/* Переключатели в шапке: режим и язык. */
+.seg.sm button { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.seg.sm button:first-child { padding-left: 14px; }
+.seg.sm button:last-child { padding-right: 14px; }
+.topbar { gap: 10px; }

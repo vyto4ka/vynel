@@ -8,8 +8,9 @@ import { linter, lintGutter, Diagnostic } from '@codemirror/lint'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { yaml } from '@codemirror/lang-yaml'
 import { json, jsonLanguage } from '@codemirror/lang-json'
-import { tags as t } from '@lezer/highlight'
+import { tags as tg } from '@lezer/highlight'
 import { parseDocument } from 'yaml'
+import { Key, t } from './i18n'
 
 // Code editor in the panel palette: teal keys, pink strings, an inset mantle background.
 const theme = EditorView.theme({
@@ -30,13 +31,13 @@ const theme = EditorView.theme({
 }, { dark: true })
 
 const highlight = HighlightStyle.define([
-  { tag: [t.propertyName, t.definition(t.propertyName)], color: '#75e0d7' },
-  { tag: [t.string, t.special(t.string)], color: '#ff94ba' },
-  { tag: [t.number, t.bool, t.null, t.atom], color: '#f5c572' },
-  { tag: [t.keyword, t.operator], color: '#c2b1f8' },
-  { tag: [t.comment, t.lineComment, t.blockComment], color: '#778990', fontStyle: 'italic' },
-  { tag: [t.punctuation, t.separator, t.bracket], color: '#9eb2ba' },
-  { tag: t.invalid, color: '#fb8276' },
+  { tag: [tg.propertyName, tg.definition(tg.propertyName)], color: '#75e0d7' },
+  { tag: [tg.string, tg.special(tg.string)], color: '#ff94ba' },
+  { tag: [tg.number, tg.bool, tg.null, tg.atom], color: '#f5c572' },
+  { tag: [tg.keyword, tg.operator], color: '#c2b1f8' },
+  { tag: [tg.comment, tg.lineComment, tg.blockComment], color: '#778990', fontStyle: 'italic' },
+  { tag: [tg.punctuation, tg.separator, tg.bracket], color: '#9eb2ba' },
+  { tag: tg.invalid, color: '#fb8276' },
 ])
 
 export type CodeLang = 'yaml' | 'json'
@@ -44,22 +45,22 @@ export type CodeLang = 'yaml' | 'json'
 // SyntaxError is where a text stops being valid, 1-based; from/to are offsets into the text.
 export type SyntaxProblem = { message: string; from: number; to: number; line: number; col: number }
 
-const ru: [RegExp, string][] = [
-  [/unexpected end|end of (json|data)|unterminated/i, 'текст оборвался: не закрыта скобка или кавычка'],
-  [/double-quoted property name|property name/i, 'имя поля должно быть в двойных кавычках "…"; лишняя запятая перед закрывающей скобкой тоже ошибка'],
-  [/after property value|after array element|expected ','/i, 'пропущена запятая или закрывающая скобка'],
-  [/expected ':'|after property name/i, 'после имени поля нужно двоеточие'],
-  [/non-whitespace|after json/i, 'после конфига остался лишний текст'],
-  [/control character/i, 'в строке настоящий перенос: внутри кавычек он пишется как \\n'],
-  [/bad escaped|escape/i, 'неверная последовательность после обратной косой черты'],
+const jsonMessages: [RegExp, Key][] = [
+  [/unexpected end|end of (json|data)|unterminated/i, 'code.json_cut_off'],
+  [/double-quoted property name|property name/i, 'code.json_property_name'],
+  [/after property value|after array element|expected ','/i, 'code.json_missing_comma'],
+  [/expected ':'|after property name/i, 'code.json_missing_colon'],
+  [/non-whitespace|after json/i, 'code.json_trailing_text'],
+  [/control character/i, 'code.json_control_char'],
+  [/bad escaped|escape/i, 'code.json_bad_escape'],
 ]
 
 // ruJSONMessage words the engine's message for the admin; what it cannot place stays as it is.
 function ruJSONMessage(raw: string): string {
-  const hit = ru.find(([re]) => re.test(raw))
-  if (hit) return hit[1]
+  const hit = jsonMessages.find(([re]) => re.test(raw))
+  if (hit) return t(hit[1])
   const tok = /unexpected token '?([^'\s,]+)/i.exec(raw)
-  return tok ? `неожиданный символ «${tok[1]}»: лишняя запятая, скобка или кавычка` : raw
+  return tok ? t('code.json_unexpected', { token: tok[1] }) : raw
 }
 
 function lineCol(text: string, pos: number): { line: number; col: number } {
@@ -147,7 +148,7 @@ export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onVa
     const line = v.state.doc.lineAt(head)
     const problem = readOnly ? null : checkSyntax(lang, text)
     setSt({ line: line.number, col: head - line.from + 1, problem, size: text.length })
-    onValidityRef.current?.(problem ? `строка ${problem.line}, столбец ${problem.col}: ${problem.message}` : null)
+    onValidityRef.current?.(problem ? t('code.problem', { line: problem.line, col: problem.col, message: problem.message }) : null)
   }
 
   // Re-indent the whole text; the cursor stays on the same line. A text with an error is left alone.
@@ -241,15 +242,15 @@ export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onVa
     <div className="code-box">
       <div ref={host} className="code-editor" />
       <div className={'code-status' + (st.problem ? ' bad' : '')}>
-        {readOnly ? <span className="muted">только чтение</span> : st.problem ? (
-          <button type="button" className="code-problem" onClick={jump} title="Перейти к ошибке">
-            ✗ строка {st.problem.line}, столбец {st.problem.col}: {st.problem.message}
+        {readOnly ? <span className="muted">{t('code.read_only')}</span> : st.problem ? (
+          <button type="button" className="code-problem" onClick={jump} title={t('code.go_to_error')}>
+            {t('code.problem_marked', { line: st.problem.line, col: st.problem.col, message: st.problem.message })}
           </button>
-        ) : <span className="code-ok">{st.size === 0 ? 'пусто' : `✓ ${lang === 'json' ? 'JSON' : 'YAML'} корректен`}</span>}
+        ) : <span className="code-ok">{st.size === 0 ? t('code.empty') : t('code.valid', { lang: lang === 'json' ? 'JSON' : 'YAML' })}</span>}
         <span className="spacer" />
-        <span className="muted code-pos">стр. {st.line}, стлб. {st.col}</span>
-        {!readOnly && <button type="button" className="btn sm ghost" onClick={() => view.current && format(view.current)} title="Расставить отступы (Shift+Alt+F)">Выровнять</button>}
-        <button type="button" className="btn sm ghost" onClick={copy}>{copied ? 'Скопировано' : 'Копировать'}</button>
+        <span className="muted code-pos">{t('code.position', { line: st.line, col: st.col })}</span>
+        {!readOnly && <button type="button" className="btn sm ghost" onClick={() => view.current && format(view.current)} title={t('code.format_title')}>{t('code.format')}</button>}
+        <button type="button" className="btn sm ghost" onClick={copy}>{copied ? t('code.copied') : t('code.copy')}</button>
       </div>
     </div>
   )
@@ -265,7 +266,7 @@ export function parseObject(text: string): { value: Record<string, unknown> | nu
   if (!text.trim()) return { value: null }
   try {
     const v = JSON.parse(text)
-    if (v === null || typeof v !== 'object' || Array.isArray(v)) return { value: null, error: 'нужен JSON-объект: { … }' }
+    if (v === null || typeof v !== 'object' || Array.isArray(v)) return { value: null, error: t('code.need_object') }
     return { value: v as Record<string, unknown> }
   } catch (e: any) {
     return { value: null, error: e.message }

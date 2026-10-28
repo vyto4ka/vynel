@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react'
 import { Cascade, del, ExternalSub, get, GrantRow, Group, Node, patch, post, TemplateGrant, UserGrant } from './api'
 import { ago, date, fromDateInput } from './format'
 import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from './ui'
+import { t, Trans } from './i18n'
 
 // ================================================================ каскады
 
@@ -15,24 +16,21 @@ export function CascadeList() {
     <>
       <div className="toolbar">
         <PageInfo>
-          <p>Каскад: приложение подключается к ноде входа, а трафик выходит в интернет через ноду выхода. Для пользователя это отдельный сервер
-          в подписке («🇳🇱 Нидерланды → 🇩🇪 Германия»). Новых портов не нужно: на входе у пользователя свой ключ того же инбаунда, по нему
-          нода входа отправляет трафик на выход.</p>
-          <p>Группа с доступом «всё» (по умолчанию «Основная») получает каждый каскад сразу; другим — в «Группах» или в карточке пользователя
-          (там можно поставить свой срок).</p>
+          <p>{t('extras.a_cascade_the_app_connects')}</p>
+          <p>{t('extras.a_group_with_the_all')}</p>
         </PageInfo>
-        <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" /> Каскад</button>
+        <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{t('extras.cascade')}</button>
       </div>
-      {!cascades.data ? <Loading error={cascades.error} /> : cascades.data.length === 0 ? <div className="card"><Empty>Каскадов нет</Empty></div> : (
+      {!cascades.data ? <Loading error={cascades.error} /> : cascades.data.length === 0 ? <div className="card"><Empty>{t('extras.no_cascades')}</Empty></div> : (
         <div className="card">
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th /><th>Каскад</th><th className="hide-sm">Вход</th><th className="hide-sm">Выход</th><th /></tr></thead>
+              <thead><tr><th /><th>{t('extras.cascade')}</th><th className="hide-sm">{t('extras.entry')}</th><th className="hide-sm">{t('extras.exit')}</th><th /></tr></thead>
               <tbody>
                 {cascades.data.map((c) => (
                   <tr key={c.id}>
                     <td style={{ width: 50 }}>
-                      <Switch checked={c.enabled} onChange={(v) => act(() => patch(`cascades/${c.id}`, { ...c, enabled: v }), v ? 'Каскад включён' : 'Каскад выключен').then(() => cascades.reload())} />
+                      <Switch checked={c.enabled} onChange={(v) => act(() => patch(`cascades/${c.id}`, { ...c, enabled: v }), v ? t('extras.cascade_turned_on') : t('extras.cascade_turned_off')).then(() => cascades.reload())} />
                     </td>
                     <td>
                       <div>{c.name}</div><div className="muted small">{c.title}</div>
@@ -41,10 +39,10 @@ export function CascadeList() {
                     <td className="small hide-sm">{c.entry}</td>
                     <td className="small hide-sm">{c.exit}</td>
                     <td className="nowrap" style={{ width: 90 }}>
-                      <button className="btn ghost icon sm" title="Изменить" onClick={() => setEdit(c)}><Icon name="edit" /></button>
-                      <button className="btn ghost icon sm" title="Удалить" onClick={async () => {
-                        if (await confirm(<>Удалить каскад <b>{c.name}</b>? Он пропадёт из подписок у всех, кому выдан.</>, 'Удалить'))
-                          act(() => del(`cascades/${c.id}`), 'Каскад удалён').then(() => cascades.reload())
+                      <button className="btn ghost icon sm" title={t('common.edit')} onClick={() => setEdit(c)}><Icon name="edit" /></button>
+                      <button className="btn ghost icon sm" title={t('common.delete')} onClick={async () => {
+                        if (await confirm(<><Trans k="extras.delete_the_cascade_it_disappears" v={{ name: c.name }} /></>, t('common.delete')))
+                          act(() => del(`cascades/${c.id}`), t('extras.cascade_deleted')).then(() => cascades.reload())
                       }}><Icon name="trash" /></button>
                     </td>
                   </tr>
@@ -74,30 +72,30 @@ function CascadeForm({ c, nodes, onClose, onSaved }: { c: Cascade | null; nodes:
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const body = { name: name.trim() || auto, entryInboundId: entry, exitInboundId: exit, remark, enabled: c ? c.enabled : true }
-    const r = await act(() => (c ? patch(`cascades/${c.id}`, body) : post('cascades', body)), 'Сохранено — ноды получат изменения за несколько секунд')
+    const r = await act(() => (c ? patch(`cascades/${c.id}`, body) : post('cascades', body)), t('extras.saved_nodes_get_the_changes'))
     if (r !== undefined) onSaved()
   }
   return (
-    <Modal title={c ? 'Каскад' : 'Новый каскад'} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="cascade-form" disabled={!(name.trim() || auto) || !entry || !exit}>Сохранить</button></>}>
+    <Modal title={c ? t('extras.cascade') : t('extras.new_cascade')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="cascade-form" disabled={!(name.trim() || auto) || !entry || !exit}>{t('common.save')}</button></>}>
       <form id="cascade-form" onSubmit={submit}>
-        <Field label="Вход (нода 1)" info="Куда подключается приложение: адрес и ключи Reality этого инбаунда уйдут в подписку.">
+        <Field label={t('extras.entry_node_1')} info={t('extras.where_the_app_connects_the')}>
           <select className="input" value={entry} onChange={(e) => setEntry(Number(e.target.value))}>
-            <option value={0}>— выберите инбаунд —</option>
+            <option value={0}>{t('extras.choose_an_inbound')}</option>
             {inbounds.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
           </select>
         </Field>
-        <Field label="Выход (нода 2)" info="Через какой инбаунд другой ноды трафик выходит в интернет.">
+        <Field label={t('extras.exit_node_2')} info={t('extras.which_inbound_of_another_node')}>
           <select className="input" value={exit} onChange={(e) => setExit(Number(e.target.value))}>
-            <option value={0}>— выберите инбаунд —</option>
+            <option value={0}>{t('extras.choose_an_inbound')}</option>
             {inbounds.filter((i) => i.nodeId !== entryNode).map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
           </select>
         </Field>
-        <Field label="Название в панели" help="Пусто — из нод входа и выхода">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={auto || 'Нидерланды → Германия'} />
+        <Field label={t('extras.name_in_the_panel')} help={t('extras.empty_from_the_entry_and')}>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={auto || t('extras.netherlands_germany')} />
         </Field>
-        <Field label="Название сервера в приложениях" help="Пусто — «флаг вход → флаг выход»">
-          <input className="input" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="🇳🇱 Нидерланды → 🇩🇪 Германия" />
+        <Field label={t('common.server_name_in_apps')} help={t('extras.empty_entry_flag_exit_flag')}>
+          <input className="input" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder={t('extras.netherlands_germany_2')} />
         </Field>
       </form>
     </Modal>
@@ -115,38 +113,34 @@ export function ExternalList() {
     <>
       <div className="card">
         <div className="card-head">
-          <h3>Внешние подписки <Info>
-            <p>Чужая подписка — например, подписка друга или другой панели: ссылкой https://… или сами ссылки серверов (vless://, hysteria2://…).
-            Её серверы встают в подписку под основными у тех, кому она выдана: в «Группах», в шаблоне пользователя или в карточке пользователя
-            (там — со своим сроком).</p>
-            <p>Когда приложение обновляет подписку, панель скачивает внешнюю заново, если её копии больше минуты, а вложенные в неё подписки
-            другой панели vynel приходят тоже (до трёх уровней). Если источник недоступен, остаётся последняя удачная копия. Один и тот же
-            сервер попадает в подписку один раз.</p>
+          <h3>{t('extras.external_subscriptions')}{' '}<Info>
+            <p>{t('extras.someone_else_s_subscription')}</p>
+            <p>{t('extras.when_an_app_refreshes_the')}</p>
           </Info></h3>
-          <button className="btn sm" onClick={() => setEdit('new')}><Icon name="plus" /> Подписка</button>
+          <button className="btn sm" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{t('common.subscription')}</button>
         </div>
-        {!subs.data ? <Loading error={subs.error} /> : subs.data.length === 0 ? <Empty>Пока нет</Empty> : (
+        {!subs.data ? <Loading error={subs.error} /> : subs.data.length === 0 ? <Empty>{t('extras.none_yet')}</Empty> : (
           <div className="table-wrap">
             <table className="table">
               <tbody>
                 {subs.data.map((x) => (
                   <tr key={x.id}>
                     <td style={{ width: 50 }}>
-                      <Switch checked={x.enabled} onChange={(v) => act(() => patch(`externals/${x.id}`, { ...x, enabled: v }), v ? 'Включена' : 'Выключена').then(() => subs.reload())} />
+                      <Switch checked={x.enabled} onChange={(v) => act(() => patch(`externals/${x.id}`, { ...x, enabled: v }), v ? t('extras.on') : t('extras.off')).then(() => subs.reload())} />
                     </td>
                     <td>
-                      <div>{x.name} <Badge color={x.error ? 'pink' : 'green'}>{x.servers.length} серв.</Badge></div>
+                      <div>{x.name} <Badge color={x.error ? 'pink' : 'green'}><Trans k="extras.servers" v={{ length: x.servers.length }} /></Badge></div>
                       <div className="muted small ellipsis mono" style={{ maxWidth: 420 }}>{x.url}</div>
                       {x.error && <div className="small pink-text">{x.error}</div>}
                       {x.servers.length > 0 && <div className="small text-2 ellipsis" style={{ maxWidth: 520 }}>{x.servers.join(' · ')}</div>}
                     </td>
-                    <td className="small muted nowrap">{x.fetchedAt ? `обновлена ${ago(x.fetchedAt)}` : 'ещё не скачана'}</td>
+                    <td className="small muted nowrap">{x.fetchedAt ? t('extras.updated', { v: ago(x.fetchedAt) }) : t('extras.not_downloaded_yet')}</td>
                     <td className="nowrap" style={{ width: 120 }}>
-                      <button className="btn ghost icon sm" title="Скачать сейчас" onClick={() => act(() => post(`externals/${x.id}/refresh`), 'Обновлено').then(() => subs.reload())}>↻</button>
-                      <button className="btn ghost icon sm" title="Изменить" onClick={() => setEdit(x)}><Icon name="edit" /></button>
-                      <button className="btn ghost icon sm" title="Удалить" onClick={async () => {
-                        if (await confirm(<>Удалить подписку <b>{x.name}</b>? Её серверы пропадут у всех, кому она выдана.</>, 'Удалить'))
-                          act(() => del(`externals/${x.id}`), 'Удалено').then(() => subs.reload())
+                      <button className="btn ghost icon sm" title={t('extras.download_now')} onClick={() => act(() => post(`externals/${x.id}/refresh`), t('common.updated')).then(() => subs.reload())}>↻</button>
+                      <button className="btn ghost icon sm" title={t('common.edit')} onClick={() => setEdit(x)}><Icon name="edit" /></button>
+                      <button className="btn ghost icon sm" title={t('common.delete')} onClick={async () => {
+                        if (await confirm(<><Trans k="extras.delete_the_subscription_its" v={{ name: x.name }} /></>, t('common.delete')))
+                          act(() => del(`externals/${x.id}`), t('extras.deleted')).then(() => subs.reload())
                       }}><Icon name="trash" /></button>
                     </td>
                   </tr>
@@ -168,24 +162,24 @@ function ExternalForm({ x, onClose, onSaved }: { x: ExternalSub | null; onClose:
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const body = { name, url, enabled: x ? x.enabled : true }
-    const r = await act(() => (x ? patch(`externals/${x.id}`, body) : post('externals', body)), 'Сохранено')
+    const r = await act(() => (x ? patch(`externals/${x.id}`, body) : post('externals', body)), t('common.saved'))
     if (r !== undefined) onSaved()
   }
   return (
-    <Modal title={x ? 'Внешняя подписка' : 'Новая внешняя подписка'} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>Отмена</button><button className="btn primary" form="external-form" disabled={!url.trim()}>Сохранить</button></>}>
+    <Modal title={x ? t('extras.external_subscription') : t('extras.new_external_subscription')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="external-form" disabled={!url.trim()}>{t('common.save')}</button></>}>
       <form id="external-form" onSubmit={submit}>
-        <Field label="Ссылка" help={sourceHelp}>
+        <Field label={t('extras.link')} help={sourceHelp}>
           <textarea className="input mono" rows={3} autoFocus value={url} onChange={(e) => setURL(e.target.value)} placeholder={sourcePlaceholder} />
         </Field>
-        <Field label="Название" help="Пусто — по адресу или по первому серверу"><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Подписка Пети" /></Field>
+        <Field label={t('common.name')} help={t('extras.empty_by_address_or_by')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('extras.pete_s_subscription')} /></Field>
       </form>
     </Modal>
   )
 }
 
-const sourceHelp = 'Ссылка на подписку (https://…, как её добавляют в приложение) или сами ссылки серверов — vless://, hysteria2:// и другие, по одной в строке'
-const sourcePlaceholder = 'https://sub.example.com/s/…\nили vless://…'
+const sourceHelp = t('extras.a_subscription_link_https_the')
+const sourcePlaceholder = t('extras.https_sub_example_com_s')
 
 // PasteExternal — вставить чужую подписку или ссылки серверов прямо на месте: она создаётся
 // в общем списке «Внешних» и сразу отдаётся тому, кто вызвал (пользователю или шаблону).
@@ -194,7 +188,7 @@ function PasteExternal({ withDate, onAdded }: { withDate?: boolean; onAdded: (id
   const [until, setUntil] = useState('')
   const [open, setOpen] = useState(false)
   const act = useAction()
-  if (!open) return <button className="btn sm ghost" type="button" onClick={() => setOpen(true)}><Icon name="plus" /> Вставить подписку или ссылки</button>
+  if (!open) return <button className="btn sm ghost" type="button" onClick={() => setOpen(true)}><Icon name="plus" />{' '}{t('extras.paste_a_subscription_or_links')}</button>
   const add = async () => {
     const x = await act(() => post<ExternalSub>('externals', { name: '', url, enabled: true }))
     if (!x) return
@@ -204,11 +198,11 @@ function PasteExternal({ withDate, onAdded }: { withDate?: boolean; onAdded: (id
   return (
     <div className="paste-external">
       <textarea className="input mono" rows={3} autoFocus value={url} onChange={(e) => setURL(e.target.value)} placeholder={sourcePlaceholder} />
-      <div className="help">{sourceHelp}. Серверы встанут в подписку под основными; одинаковые — один раз.</div>
+      <div className="help"><Trans k="extras.the_servers_go_into_the" v={{ sourceHelp: sourceHelp }} /></div>
       <div className="row" style={{ marginTop: 8 }}>
-        {withDate && <input className="input" type="date" style={{ flex: 1, minWidth: 140 }} value={until} onChange={(e) => setUntil(e.target.value)} title="До какого числа (пусто — пока действует подписка)" />}
-        <button className="btn sm ghost" type="button" onClick={() => setOpen(false)}>Отмена</button>
-        <button className="btn sm primary" type="button" disabled={!url.trim()} onClick={add}>Добавить</button>
+        {withDate && <input className="input" type="date" style={{ flex: 1, minWidth: 140 }} value={until} onChange={(e) => setUntil(e.target.value)} title={t('extras.until_empty_as_long_as')} />}
+        <button className="btn sm ghost" type="button" onClick={() => setOpen(false)}>{t('common.cancel')}</button>
+        <button className="btn sm primary" type="button" disabled={!url.trim()} onClick={add}>{t('common.add')}</button>
       </div>
     </div>
   )
@@ -224,7 +218,7 @@ export function TemplateExtras({ value, onChange }: { value: TemplateGrant[]; on
         {value.map((g) => (
           <span key={g.kind + g.refId} className="chip">
             <span className="muted">{kindText[g.kind]}</span> {name(g.kind, g.refId)}
-            <button type="button" title="Убрать" onClick={() => onChange(value.filter((x) => !(x.kind === g.kind && x.refId === g.refId)))}>×</button>
+            <button type="button" title={t('common.remove')} onClick={() => onChange(value.filter((x) => !(x.kind === g.kind && x.refId === g.refId)))}>×</button>
           </span>
         ))}
       </div>
@@ -233,7 +227,7 @@ export function TemplateExtras({ value, onChange }: { value: TemplateGrant[]; on
           const o = options[Number(e.target.value)]
           if (o) onChange([...value, { kind: o.kind, refId: o.refId }])
         }}>
-          <option value="">+ каскад или подписка…</option>
+          <option value="">{t('extras.cascade_or_subscription')}</option>
           {options.map((o, i) => has(o.kind, o.refId) ? null : <option key={i} value={i}>{o.label}</option>)}
         </select>
       )}
@@ -250,15 +244,15 @@ function useExtras() {
   const cascades = useLoad(() => get<Cascade[]>('cascades'))
   const externals = useLoad(() => get<ExternalSub[]>('externals'))
   const name = (kind: string, id: number) =>
-    kind === 'cascade' ? cascades.data?.find((c) => c.id === id)?.title || `каскад #${id}` : externals.data?.find((x) => x.id === id)?.name || `подписка #${id}`
+    kind === 'cascade' ? cascades.data?.find((c) => c.id === id)?.title || t('extras.cascade_2', { id }) : externals.data?.find((x) => x.id === id)?.name || t('extras.subscription', { id })
   const options = [
-    ...(cascades.data || []).map((c) => ({ kind: 'cascade' as const, refId: c.id, label: `Каскад: ${c.title}` })),
-    ...(externals.data || []).map((x) => ({ kind: 'external' as const, refId: x.id, label: `Подписка: ${x.name}` })),
+    ...(cascades.data || []).map((c) => ({ kind: 'cascade' as const, refId: c.id, label: t('extras.cascade_3', { title: c.title }) })),
+    ...(externals.data || []).map((x) => ({ kind: 'external' as const, refId: x.id, label: t('extras.subscription_2', { name: x.name }) })),
   ]
   return { name, options, reload: externals.reload }
 }
 
-const kindText = { cascade: 'каскад', external: 'подписка' }
+const kindText = { cascade: t('common.cascade'), external: t('extras.subscription_3') }
 
 // GroupExtras — каскады и внешние подписки группы (без срока: срок ставится пользователю).
 export function GroupExtras({ group, grants, onChanged }: { group: Group; grants: GrantRow[]; onChanged: () => void }) {
@@ -268,20 +262,20 @@ export function GroupExtras({ group, grants, onChanged }: { group: Group; grants
   if (options.length === 0 && mine.length === 0) return null
   return (
     <>
-      <div className="label" style={{ margin: '14px 0 8px' }}>Каскады и подписки</div>
+      <div className="label" style={{ margin: '14px 0 8px' }}>{t('common.cascades_and_subscriptions')}</div>
       <div className="row" style={{ gap: 6 }}>
         {mine.map((g) => (
           <span key={g.id} className="chip">
             <span className="muted">{kindText[g.kind]}</span> {name(g.kind, g.refId)}
-            <button title="Убрать" onClick={() => act(() => del(`grants/${g.id}`), 'Убрано').then(onChanged)}>×</button>
+            <button title={t('common.remove')} onClick={() => act(() => del(`grants/${g.id}`), t('extras.removed')).then(onChanged)}>×</button>
           </span>
         ))}
       </div>
       <select className="input" style={{ marginTop: 10 }} value="" onChange={(e) => {
         const o = options[Number(e.target.value)]
-        if (o) act(() => post('grants', { groupId: group.id, kind: o.kind, refId: o.refId }), 'Добавлено').then(onChanged)
+        if (o) act(() => post('grants', { groupId: group.id, kind: o.kind, refId: o.refId }), t('extras.added')).then(onChanged)
       }}>
-        <option value="">+ каскад или подписка…</option>
+        <option value="">{t('extras.cascade_or_subscription')}</option>
         {options.map((o, i) => mine.some((g) => g.kind === o.kind && g.refId === o.refId) ? null : <option key={i} value={i}>{o.label}</option>)}
       </select>
     </>
@@ -297,41 +291,41 @@ export function UserExtras({ userId, grants, groups, onChanged }: { userId: numb
   const add = async () => {
     const o = options[Number(adding)]
     if (!o) return
-    const r = await act(() => post('grants', { userId, kind: o.kind, refId: o.refId, expireAt: fromDateInput(until) }), 'Выдано')
+    const r = await act(() => post('grants', { userId, kind: o.kind, refId: o.refId, expireAt: fromDateInput(until) }), t('extras.granted'))
     if (r !== undefined) { setAdding(''); setUntil(''); onChanged() }
   }
   return (
     <div className="card">
       <div className="card-head">
-        <div><h3>Каскады и подписки</h3><div className="card-sub">свои — со своим сроком; через группу — пока пользователь в ней</div></div>
+        <div><h3>{t('common.cascades_and_subscriptions')}</h3><div className="card-sub">{t('extras.own_ones_have_their_own')}</div></div>
       </div>
       <div className="card-pad">
-        {grants.length === 0 ? <div className="muted small">Нет</div> : grants.map((g) => (
+        {grants.length === 0 ? <div className="muted small">{t('extras.none')}</div> : grants.map((g) => (
           <div key={g.kind + g.refId} className="row between" style={{ marginBottom: 8 }}>
             <div>
               <span className="muted small">{kindText[g.kind]}</span> {name(g.kind, g.refId)}{' '}
               {g.problem && <div className="pink-text small">⚠ {g.problem}</div>}
-              {!g.active ? <Badge color="pink">закончился {date(g.expireAt)}</Badge> : g.expireAt ? <Badge>до {date(g.expireAt)}</Badge> : null}
-              {g.groups.length > 0 && <span className="muted small"> · через {g.groups.map((id) => groups.find((x) => x.id === id)?.name || id).join(', ')}</span>}
+              {!g.active ? <Badge color="pink"><Trans k="extras.ended" v={{ v: date(g.expireAt) }} /></Badge> : g.expireAt ? <Badge><Trans k="extras.until" v={{ v: date(g.expireAt) }} /></Badge> : null}
+              {g.groups.length > 0 && <span className="muted small">{' '}<Trans k="extras.via" v={{ join: g.groups.map((id) => groups.find((x) => x.id === id)?.name || id).join(', ') }} /></span>}
             </div>
             {g.grantId > 0 && (
-              <button className="btn ghost icon sm" title="Забрать свою выдачу" onClick={() => act(() => del(`grants/${g.grantId}`), 'Убрано').then(onChanged)}><Icon name="trash" /></button>
+              <button className="btn ghost icon sm" title={t('extras.take_back_their_own_grant')} onClick={() => act(() => del(`grants/${g.grantId}`), t('extras.removed')).then(onChanged)}><Icon name="trash" /></button>
             )}
           </div>
         ))}
         {options.length > 0 && (
           <div className="row" style={{ marginTop: 10 }}>
             <select className="input" style={{ flex: 2, minWidth: 180 }} value={adding} onChange={(e) => setAdding(e.target.value === '' ? '' : Number(e.target.value))}>
-              <option value="">+ выдать каскад или подписку…</option>
+              <option value="">{t('extras.grant_a_cascade_or_subscription')}</option>
               {options.map((o, i) => <option key={i} value={i}>{o.label}</option>)}
             </select>
-            <input className="input" type="date" style={{ flex: 1, minWidth: 140 }} value={until} onChange={(e) => setUntil(e.target.value)} title="До какого числа (пусто — пока действует подписка)" />
-            <button className="btn sm primary" disabled={adding === ''} onClick={add}>Выдать</button>
+            <input className="input" type="date" style={{ flex: 1, minWidth: 140 }} value={until} onChange={(e) => setUntil(e.target.value)} title={t('extras.until_empty_as_long_as')} />
+            <button className="btn sm primary" disabled={adding === ''} onClick={add}>{t('extras.grant')}</button>
           </div>
         )}
         <div style={{ marginTop: 10 }}>
           <PasteExternal withDate onAdded={async (id, until) => {
-            const r = await act(() => post('grants', { userId, kind: 'external', refId: id, expireAt: until }), 'Подписка добавлена')
+            const r = await act(() => post('grants', { userId, kind: 'external', refId: id, expireAt: until }), t('extras.subscription_added'))
             reload()
             if (r !== undefined) onChanged()
           }} />
