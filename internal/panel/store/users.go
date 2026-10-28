@@ -394,12 +394,14 @@ func GetUserByUsername(ctx context.Context, q DBTX, username string) (*User, err
 
 // UserFilter narrows ListUsers.
 type UserFilter struct {
-	Status string // '' = any
-	Search string // substring of username or note
-	Sort   string // a key of userSorts; '' = by id
-	Desc   bool
-	Limit  int
-	Offset int
+	Status     string  // '' = any
+	Search     string  // substring of username or note
+	TelegramID *int64  // exactly this Telegram account
+	ExternalID *string // exactly this id in the other system
+	Sort       string  // a key of userSorts; '' = by id
+	Desc       bool
+	Limit      int
+	Offset     int
 }
 
 // userSorts are the columns the users table sorts by. "Never" sorts last going up: no end date
@@ -437,6 +439,12 @@ func (f UserFilter) where() (string, []any) {
 		where = append(where, "(username LIKE ? OR note LIKE ?)")
 		like := "%" + f.Search + "%"
 		args = append(args, like, like)
+	}
+	if f.TelegramID != nil {
+		where, args = append(where, "telegram_id=?"), append(args, *f.TelegramID)
+	}
+	if f.ExternalID != nil {
+		where, args = append(where, "external_id=?"), append(args, *f.ExternalID)
 	}
 	return strings.Join(where, " AND "), args
 }

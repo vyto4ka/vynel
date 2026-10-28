@@ -254,12 +254,12 @@ func (s *Service) JoinToken(ctx context.Context, caFingerprint, secret string) (
 
 // UserDetailsInput changes the descriptive fields of a user. Nil fields stay as they are.
 type UserDetailsInput struct {
-	Note          *string
-	HWIDLimit     *int64 // <0 = back to the default limit
-	HWIDOff       *bool  // true = no HWID check for this user
-	IPLimit       *int64 // addresses at once; <0 = back to the default, 0 = unlimited
-	ClientType    *string
-	ResetStrategy *string
+	Note          *string `json:"note,omitempty"`
+	HWIDLimit     *int64  `json:"hwid_limit,omitempty"`  // <0 = back to the default limit
+	HWIDOff       *bool   `json:"hwid_off,omitempty"`    // true = no HWID check for this user
+	IPLimit       *int64  `json:"ip_limit,omitempty"`    // addresses at once; <0 = back to the default, 0 = unlimited
+	ClientType    *string `json:"client_type,omitempty"` // the audit log and API events list what was changed under these names
+	ResetStrategy *string `json:"reset_strategy,omitempty"`
 }
 
 // SetUserDetails updates note, HWID limit, client type and reset strategy.

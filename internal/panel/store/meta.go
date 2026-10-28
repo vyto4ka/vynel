@@ -40,7 +40,10 @@ func AddAudit(ctx context.Context, q DBTX, e AuditEntry) error {
 	}
 	_, err := q.ExecContext(ctx, `INSERT INTO audit_log (ts, actor, actor_id, action, entity, entity_id, diff) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		unix(), e.Actor, e.ActorID, e.Action, e.Entity, e.EntityID, e.Diff)
-	return err
+	if err != nil {
+		return err
+	}
+	return publishAudit(ctx, q, e)
 }
 
 // ListAudit returns the newest entries first.

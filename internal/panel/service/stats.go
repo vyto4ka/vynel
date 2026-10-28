@@ -199,6 +199,9 @@ func (s *Service) Maintenance(ctx context.Context, prune bool) error {
 		return err
 	}
 	if prune {
+		if err := s.pruneAPI(ctx); err != nil {
+			return err
+		}
 		return store.PruneStats(ctx, s.st.DB, s.now().Unix())
 	}
 	return nil

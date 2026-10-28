@@ -806,3 +806,22 @@ select.input.placeholder { color: var(--muted); }
 .origin-row:hover { background: color-mix(in srgb, var(--tertiary) 12%, transparent); }
 .amber-text { color: var(--warning, #f5c572); }
 @media (max-width: 900px) { .origins-split { grid-template-columns: 1fr; } }
+
+/* ---------- страница «API» ---------- */
+.snippet {
+  margin: 8px 0 0; padding: 12px 14px; overflow-x: auto; max-width: 100%;
+  background: var(--container-highest); border-radius: var(--shape-md);
+  font: 12.5px/1.55 "JetBrains Mono", "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; tab-size: 4;
+}
+.api-tester-grid { display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.api-ops { padding-bottom: 8px; position: sticky; top: 72px; max-height: calc(100vh - 96px); overflow-y: auto; }
+.api-op { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 6px 16px; border: 0; background: none; color: inherit; text-align: left; cursor: pointer; }
+.api-op:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+.api-op.on { background: color-mix(in srgb, var(--primary-container) 70%, transparent); color: var(--on-primary-container); }
+.api-method { display: inline-block; min-width: 46px; font: 600 10.5px/1 "JetBrains Mono", "Roboto Mono", ui-monospace, monospace; letter-spacing: .3px; color: var(--primary); }
+.api-method.amber { color: var(--warning); }
+.api-method.pink { color: var(--error); }
+@media (max-width: 860px) {
+  .api-tester-grid { grid-template-columns: minmax(0, 1fr); }
+  .api-ops { position: static; max-height: 260px; }
+}

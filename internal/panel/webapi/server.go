@@ -47,13 +47,14 @@ type Config struct {
 
 // Server is the web panel.
 type Server struct {
-	cfg   Config
-	svc   *service.Service
-	log   *slog.Logger
-	ui    fs.FS
-	api   *http.ServeMux
-	guard *loginGuard // sign-in attempts per address
-	upd   updates
+	cfg     Config
+	svc     *service.Service
+	log     *slog.Logger
+	ui      fs.FS
+	api     *http.ServeMux
+	guard   *loginGuard // sign-in attempts per address
+	upd     updates
+	v1State v1State // the public API's counters
 }
 
 const (

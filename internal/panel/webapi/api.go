@@ -88,6 +88,8 @@ func (s *Server) routes() {
 	s.insightRoutes()
 	s.billingRoutes()
 	s.botRoutes()
+	s.v1Routes()
+	s.integrationRoutes()
 
 	s.handle("GET /api/settings", s.settings)
 	s.handle("PUT /api/settings", s.setSetting)

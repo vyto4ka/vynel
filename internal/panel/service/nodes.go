@@ -138,8 +138,12 @@ func (s *Service) UpdateNode(ctx context.Context, actor Actor, id int64, in Node
 
 // DeleteNode removes a node, its inbounds and the access rules pointing at them.
 func (s *Service) DeleteNode(ctx context.Context, actor Actor, id int64) error {
-	return s.mutate(ctx, change{actor: actor, action: "node.delete", entity: "node", entityID: func() int64 { return id }, event: EvNodeDeleted},
+	diff := map[string]string{}
+	return s.mutate(ctx, change{actor: actor, action: "node.delete", entity: "node", entityID: func() int64 { return id }, event: EvNodeDeleted, diff: diff},
 		func(q store.DBTX) error {
+			if n, err := store.GetNode(ctx, q, id); err == nil {
+				diff["code"], diff["name"] = n.Code, n.Name // the event says which node went
+			}
 			inbounds, err := store.ListNodeInbounds(ctx, q, id, 0)
 			if err != nil {
 				return err

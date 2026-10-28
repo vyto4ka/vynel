@@ -562,3 +562,63 @@ export interface UserGrant {
   active: boolean
   problem?: string
 }
+
+// ---- интеграции: API-токены и вебхуки ----
+
+export interface ApiToken {
+  id: number
+  name: string
+  prefix: string
+  scopes: string[]
+  cidrs: string[]
+  rateLimit: number
+  expiresAt: number | null
+  createdBy: string
+  createdAt: number
+  lastUsedAt: number | null
+  lastUsedIp: string
+  uses: number
+  revokedAt: number | null
+  state: 'active' | 'expired' | 'revoked'
+}
+
+export interface Webhook {
+  id: number
+  name: string
+  url: string
+  events: string[]
+  enabled: boolean
+  allowPrivate: boolean
+  fails: number
+  offReason: string
+  createdAt: number
+  lastAt: number | null
+  lastStatus: number
+  secretHint: string
+  secret?: string // только сразу после создания и смены
+}
+
+export interface Delivery {
+  id: number
+  eventId: number
+  type: string
+  state: 'pending' | 'ok' | 'failed'
+  attempts: number
+  nextAt: number
+  createdAt: number
+  status: number
+  error: string
+  tookMs: number
+  body: string
+}
+
+export interface Integrations {
+  baseUrl: string
+  specUrl: string
+  scopes: string[]
+  events: string[]
+  defaultRate: number
+  tokens: ApiToken[]
+  webhooks: Webhook[]
+  headers: { signature: string; timestamp: string; event: string; delivery: string }
+}

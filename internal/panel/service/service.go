@@ -111,6 +111,9 @@ type Service struct {
 	grantCheck int64 // when Maintenance last looked for ended grants
 	cache      confCache
 	snapMu     sync.Mutex // one snapshot builder at a time
+	api        apiState   // public API: token touches, webhook dispatcher
+	// NodeConnected says whether a node has a live session; the API tells when that changes.
+	NodeConnected func(int64) bool
 }
 
 // New creates a service over a store.
