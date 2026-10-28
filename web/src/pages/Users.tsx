@@ -249,12 +249,12 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
 
 export function templateSummary(t: Template, groups: Group[]): string {
   const parts: string[] = []
-  if (t.expireMonths || t.expireDays) parts.push('срок ' + [t.expireMonths && tr('users.mo', { expireMonths: t.expireMonths }), t.expireDays && tr('users.d', { expireDays: t.expireDays })].filter(Boolean).join(' '))
+  if (t.expireMonths || t.expireDays) parts.push(tr('users.term_of', { v: [t.expireMonths && tr('users.mo', { expireMonths: t.expireMonths }), t.expireDays && tr('users.d', { expireDays: t.expireDays })].filter(Boolean).join(' ') }))
   else parts.push(tr('users.no_expiry'))
   parts.push(t.trafficLimit ? tr('users.reset', { v: bytes(t.trafficLimit), v2: resetLabels[t.resetStrategy] }) : tr('users.unlimited_traffic'))
   if (t.hwidLimit != null) parts.push(tr('users.devices_2', { v: t.hwidLimit || '∞' }))
   const g = t.groupIds.map((id) => groups.find((x) => x.id === id)?.name).filter(Boolean)
-  if (g.length) parts.push('группы: ' + g.join(', '))
+  if (g.length) parts.push(tr('users.groups_of', { v: g.join(', ') }))
   if (t.grants?.length) parts.push(tr('users.cascades_and_subscriptions', { length: t.grants.length }))
   return parts.join(' · ')
 }

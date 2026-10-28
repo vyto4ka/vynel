@@ -63,4 +63,5 @@ export default {
   origin_outbound_cascade: '{note} — cascade exit',
   origin_rule_egress: 'rule: inbounds → {note}',
   origin_rule_cascade: 'cascade rule → {note}',
+  origin_routing: 'routing — an empty section: without it the nodes’ API refuses rules',
 }

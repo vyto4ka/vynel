@@ -23,9 +23,10 @@ import templates from './templates'
 import ui from './ui'
 import updates from './updates'
 import users from './users'
+import api from './api'
 import format from './format'
 import code from './code'
 import xray from './xray'
 
-const en: Catalog = { account, audit, billing, charts, common, dashboard, extras, groups, insights, login, main, nodes, overview, profiles, routing, serverload, settings, stats, subscription, telegram, templates, ui, updates, users, format, code, xray }
+const en: Catalog = { account, audit, billing, charts, common, dashboard, extras, groups, insights, login, main, nodes, overview, profiles, routing, serverload, settings, stats, subscription, telegram, templates, ui, updates, users, format, code, api, xray }
 export default en

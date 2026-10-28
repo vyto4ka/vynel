@@ -63,4 +63,5 @@ export default {
   origin_outbound_cascade: '{note} — выход каскада',
   origin_rule_egress: 'правило: инбаунды → {note}',
   origin_rule_cascade: 'правило каскада → {note}',
+  origin_routing: 'routing — пустой раздел: без него API нод не принимает правила',
 }

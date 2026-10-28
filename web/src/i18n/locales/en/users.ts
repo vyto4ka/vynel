@@ -1,5 +1,4 @@
 export default {
-  addresses_at_once: 'Addresses at once',
   addresses_at_once_2: 'Addresses at once',
   and_days: 'and days {v}',
   auto_picks_the_format_by: '“Auto” picks the format by the app that requests the subscription (the “Clients” tab on the “Subscription” page).',
@@ -26,7 +25,6 @@ export default {
   edit: 'Edit {username}',
   empty_default_0_no_limit: 'Empty — default ({v}), 0 — no limit',
   empty_no_expiry: 'Empty — no expiry',
-  empty_random_it_cannot_be: 'Empty — random (it cannot be guessed). Your own: 8–64 characters, Latin letters, digits, _ and -. Short words are easy to guess.',
   enable: 'Enable',
   enabled: 'Enabled',
   expires: 'Expires',
@@ -67,7 +65,6 @@ export default {
   on_a_phone_the_link: 'On a phone the link opens a page with a QR code and app buttons. It can also be pasted into an app as a subscription.',
   open_the_page: 'Open the page',
   over_the_limit_blocked_on: 'over the limit — blocked on nodes',
-  paste_the_link_into_an: 'Paste the link into an app or open it on a phone',
   press_user_a_name_is: 'Press “User” — a name is enough.',
   random: 'random',
   reset: '{v}, reset: {v2}',
@@ -102,4 +99,6 @@ export default {
   valid_until: 'Valid until',
   link_help: 'Empty — random',
   link_info: 'A random link cannot be guessed. Your own: 8–64 characters, Latin letters, digits, _ and -. Short words are easy to guess.',
+  term_of: 'term {v}',
+  groups_of: 'groups: {v}',
 }

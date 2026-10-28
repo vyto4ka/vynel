@@ -31,4 +31,5 @@ export default {
   updating: 'обновляется',
   version_full_log_on_the: 'Версия: {v}. Полный лог на сервере: <code>/var/log/vynel-update.log</code>, ход по шагам: <code>journalctl -u vynel-update -f</code>',
   waiting_for_the_first_log: 'Ждём первые строки лога…',
+  command_sent_to: 'Команда обновления отправлена: {v}',
 }

@@ -31,4 +31,5 @@ export default {
   updating: 'updating',
   version_full_log_on_the: 'Version: {v}. Full log on the server: <code>/var/log/vynel-update.log</code>, step-by-step progress: <code>journalctl -u vynel-update -f</code>',
   waiting_for_the_first_log: 'Waiting for the first log lines…',
+  command_sent_to: 'Update command sent: {v}',
 }

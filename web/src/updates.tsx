@@ -37,7 +37,7 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void) {
     run: async (target: 'all' | 'panel' | 'node', id?: number) => {
       const r = await act(() => post<RunResult>('updates/run', { target, id }))
       if (!r) return
-      if (r.started.length) toast('Команда обновления отправлена: ' + r.started.join(', '))
+      if (r.started.length) toast(t('updates.command_sent_to', { v: r.started.join(', ') }))
       for (const [name, err] of Object.entries(r.failed)) toast(`${name}: ${err}`, true)
       if (r.started.length === 0 && Object.keys(r.failed).length === 0) toast(t('updates.nothing_to_update_everything'))
       if (r.started.includes(t('updates.panel'))) setWaiting(true)

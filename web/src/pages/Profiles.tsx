@@ -471,7 +471,7 @@ function TemplateList() {
     return id
   }
   const create = () => {
-    const src = templateStarter.replace(/^id:.*$/m, `id: ${freeID('my-xhttp')}`)
+    const src = templateStarter().replace(/^id:.*$/m, `id: ${freeID('my-xhttp')}`)
     setEdit({ id: '', source: src, isNew: true, readOnly: false, help: true })
   }
 
