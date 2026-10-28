@@ -773,3 +773,18 @@ select.input.placeholder { color: var(--muted); }
   .stats-head { flex-direction: column; align-items: stretch; }
   .stats-head .segmented { align-self: flex-start; }
 }
+
+/* Окно редактирования JSON и YAML: строка состояния под текстом. */
+.code-box { min-width: 0; }
+.code-box .code-editor .cm-editor { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.code-status { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 2px 8px 2px 14px; font-size: 12.5px;
+  background: var(--container-high); border-radius: 0 0 var(--shape-md) var(--shape-md); }
+.code-status .spacer { flex: 1; }
+.code-status .btn { height: 28px; padding: 0 10px; font-size: 12.5px; }
+.code-ok { color: var(--primary); }
+.code-problem { background: none; border: 0; padding: 0; color: var(--error); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.code-problem:hover { text-decoration: underline; }
+.code-pos { white-space: nowrap; }
+.cm-lintRange-error { background-image: none; text-decoration: underline wavy var(--error); text-underline-offset: 3px; }
+.cm-gutter-lint { width: 14px; }
+@media (max-width: 640px) { .code-pos { display: none; } }
