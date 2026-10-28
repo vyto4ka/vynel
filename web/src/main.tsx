@@ -13,6 +13,7 @@ import { Groups } from './pages/Groups'
 import { Templates } from './pages/Templates'
 import { Nodes } from './pages/Nodes'
 import { Profiles } from './pages/Profiles'
+import { Xray } from './pages/Xray'
 import { Settings } from './pages/Settings'
 import { Subscription } from './pages/Subscription'
 import { Audit } from './pages/Audit'
@@ -41,6 +42,7 @@ const sections: { title: string; pages: Page[] }[] = [
     pages: [
       { id: 'nodes', title: 'Ноды', icon: 'nodes', el: () => <Nodes /> },
       { id: 'profiles', title: 'Профили', icon: 'profiles', el: () => <Profiles /> },
+      { id: 'xray', title: 'Xray', icon: 'xray', el: () => <Xray /> },
       { id: 'billing', title: 'Биллинг', icon: 'wallet', el: () => <Billing /> },
     ],
   },

@@ -31,6 +31,8 @@ const paths: Record<string, ReactNode> = {
   link: <><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></>,
   telegram: <path d="M21 4 3 11l6 2.5M21 4l-4 16-8-6.5M21 4 9 13.5V19l3-3.5" />,
   code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
+  xray: <><path d="M12 2.5 20 7v10l-8 4.5L4 17V7z" /><path d="m9 9.5 6 5M15 9.5l-6 5" /></>,
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   chart: <><path d="M4 4v16h16" /><path d="m7 14 4-4 3 3 5-6" /></>,
   wallet: <><rect x="3" y="6" width="18" height="14" rx="2.5" /><path d="M3 10h18M16 15h2M6 6l9-3 2 3" /></>,
   external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></>,

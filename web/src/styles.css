@@ -788,3 +788,7 @@ select.input.placeholder { color: var(--muted); }
 .cm-lintRange-error { background-image: none; text-decoration: underline wavy var(--error); text-underline-offset: 3px; }
 .cm-gutter-lint { width: 14px; }
 @media (max-width: 640px) { .code-pos { display: none; } }
+
+/* «Xray»: панель действий под редактором. */
+.xray-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.xray-bar .grow { min-width: 220px; }
