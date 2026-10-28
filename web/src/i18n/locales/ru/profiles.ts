@@ -146,4 +146,8 @@ export default {
   xhttp_extra_the_extra_for: '<code>xhttp_extra</code> — extra для XHTTP, в инбаунде подставляется как <code>"${XHTTP_EXTRA}"</code>. Клиенты получают тот же extra, если в <code>host</code> не задано иное.',
   xray_inbound_the_xray_inbound: '<code>xray_inbound</code> — JSON инбаунда Xray с <code>${ПЕРЕМЕННЫМИ}</code>. Переменная, которая стоит в строке целиком, подставляется со своим типом: <code>"port": "${XRAY_PORT}"</code> станет числом. Пути к сертификатам на ноде — метками: <code>vynel:cert:домен</code>, <code>vynel:key:домен</code> (сертификат, который получает нода), <code>vynel:decoy:сайт</code>.',
   xray_json_only_keqdroid_happ: 'только Xray JSON: KeqDroid, Happ, v2RayTun',
+  preview_server: 'Сервер',
+  preview_subscription: 'Подписка',
+  remark_help: '${NODE_FLAG} ${NODE_NAME} → «🇳🇱 Нидерланды»',
+  remark_info: 'Можно добавить своё: ${NODE_FLAG} ${NODE_NAME} · Reality',
 }

@@ -212,7 +212,7 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
             <input className="input" inputMode="numeric" value={hwid} onChange={(e) => setHwid(e.target.value.replace(/\D/g, ''))}
               placeholder={tpl?.hwidLimit != null ? String(tpl.hwidLimit || '∞') : tr('users.shared', { v: session.data?.hwidDefault || '∞' })} />
           </Field>
-          <Field label={<>{tr('users.addresses_at_once')}{' '}{ip === '' && <span className="from-tpl">{tr('users.shared_limit')}</span>}</>} help={tr('users.n0_no_limit')}>
+          <Field label={<>{tr('users.ip_limit_at_once')}{' '}{ip === '' && <span className="from-tpl">{tr('users.shared_limit')}</span>}</>} help={tr('users.n0_no_limit')}>
             <input className="input" inputMode="numeric" value={ip} onChange={(e) => setIp(e.target.value.replace(/\D/g, ''))}
               placeholder={String(session.data?.ipDefault || '∞')} />
           </Field>
@@ -236,7 +236,7 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
         <Field label={tr('users.note')}>
           <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={tpl?.note || tr('users.e_g_telegram_vasya')} />
         </Field>
-        <Field label={tr('users.subscription_link')} help={<>{tr('users.empty_random_it_cannot_be')}</>}>
+        <Field label={tr('users.subscription_link')} help={tr('users.link_help')} info={tr('users.link_info')}>
           <div className="link-input">
             <span className="mono muted">{session.data?.subBase || '…/s/'}</span>
             <input className="input mono" value={subToken} onChange={(e) => setSubToken(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} placeholder={tr('users.random')} maxLength={64} />
@@ -284,7 +284,7 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
       actions={<button className="btn sm" onClick={() => setEditing(true)}><Icon name="edit" />{' '}{tr('common.edit')}</button>}>
 
       <div className="card card-pad">
-        <div className="label" style={{ marginBottom: 8 }}>{tr('users.subscription_link_send_it_to')}</div>
+        <div className="label" style={{ marginBottom: 8 }}>{tr('users.subscription_link_send_it_to')}<Info>{tr('users.on_a_phone_the_link')}</Info></div>
         {data.subUrl ? (
           <>
             <CopyField value={data.subUrl} />
@@ -307,8 +307,6 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
               <a className="btn sm" href={data.subUrl} target="_blank" rel="noreferrer"><Icon name="link" />{' '}{tr('users.open_the_page')}</a>
             </div>
             {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
-            <div className="muted small" style={{ marginTop: 10 }}>{tr('users.paste_the_link_into_an')}{' '}<Info>{tr('users.on_a_phone_the_link')}</Info>
-            </div>
           </>
         ) : <div className="alert amber"><Trans k="users.no_link_check_subscription" v={{ subError: data.subError }} /></div>}
       </div>

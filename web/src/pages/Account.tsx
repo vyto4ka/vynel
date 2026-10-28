@@ -53,7 +53,13 @@ function Sessions() {
         </div>
       </div>
       <div className="card card-pad">
-        <div style={{ marginBottom: 10 }}>{t('account.how_to_sign_in')}</div>
+        <div style={{ marginBottom: 10 }}>{t('account.how_to_sign_in')}
+          <Info>
+            {data.loginMode === 'password' && t('account.login_and_password_form_links')}
+            {data.loginMode === 'link' && <Trans k="account.no_password_a_one_time" />}
+            {data.loginMode === 'miniapp' && <Trans k="account.telegram_mini_app_only_the" />}
+          </Info>
+        </div>
         <div className="seg" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
           {([['password', t('account.login_and_password')], ['link', t('account.link_only')], ['miniapp', t('account.telegram_only')]] as const).map(([m, label]) => (
             <button key={m} className={data.loginMode === m ? 'on' : ''} disabled={m === 'miniapp' && !data.hasBot} onClick={async () => {
@@ -67,12 +73,7 @@ function Sessions() {
             }}>{label}</button>
           ))}
         </div>
-        <div className="help muted small">
-          {data.loginMode === 'password' && t('account.login_and_password_form_links')}
-          {data.loginMode === 'link' && <><Trans k="account.no_password_a_one_time" /></>}
-          {data.loginMode === 'miniapp' && <><Trans k="account.telegram_mini_app_only_the" /></>}
-          {!data.hasBot && t('account.telegram_only_becomes_available')}
-        </div>
+        {!data.hasBot && <div className="help muted small">{t('account.telegram_only_becomes_available')}</div>}
         {data.loginMode === 'link' && (
           <div className="row between" style={{ flexWrap: 'nowrap', marginTop: 14 }}>
             <div>

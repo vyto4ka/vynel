@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view'
-import { EditorState, Compartment } from '@codemirror/state'
+import { Decoration, DecorationSet, EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view'
+import { EditorState, Compartment, StateEffect, StateField } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput, foldGutter, indentUnit } from '@codemirror/language'
+import { HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput, foldGutter, indentUnit, ensureSyntaxTree } from '@codemirror/language'
+import type { SyntaxNode } from '@lezer/common'
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
 import { linter, lintGutter, Diagnostic } from '@codemirror/lint'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
@@ -19,6 +20,7 @@ const theme = EditorView.theme({
   '.cm-scroller': { fontFamily: '"JetBrains Mono", "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', lineHeight: '1.55' },
   '.cm-content': { caretColor: 'var(--primary)', padding: '10px 0' },
   '.cm-gutters': { backgroundColor: 'var(--crust)', color: 'var(--muted)', border: 'none' },
+  '.cm-linked': { backgroundColor: 'rgba(255, 148, 186, 0.15)', boxShadow: 'inset 3px 0 0 var(--tertiary)' },
   '.cm-activeLine': { backgroundColor: 'rgba(117, 224, 215, 0.06)' },
   '.cm-activeLineGutter': { backgroundColor: 'rgba(117, 224, 215, 0.10)', color: 'var(--primary)' },
   '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(255, 148, 186, 0.26) !important' },
@@ -121,9 +123,75 @@ function lintSource(lang: CodeLang) {
   }
 }
 
+// ---- lines linked to a form field: JSON paths ("streamSettings.realitySettings.serverNames") ----
+
+const linkEffect = StateEffect.define<string[]>()
+const linked = Decoration.line({ class: 'cm-linked' })
+
+const isValue = (n: SyntaxNode) => ['Object', 'Array', 'String', 'Number', 'True', 'False', 'Null'].includes(n.name)
+
+// jsonPathRanges maps every property path of a JSON text ("a.b", array items by index) to its span.
+function jsonPathRanges(state: EditorState): Map<string, [number, number]> {
+  const out = new Map<string, [number, number]>()
+  const tree = ensureSyntaxTree(state, state.doc.length, 100)
+  if (!tree) return out
+  const text = state.doc.toString()
+  const walk = (node: SyntaxNode, path: string) => {
+    if (node.name === 'Object') {
+      for (let c = node.firstChild; c; c = c.nextSibling) {
+        if (c.name !== 'Property') continue
+        const key = c.getChild('PropertyName')
+        if (!key) continue
+        let name = text.slice(key.from, key.to)
+        try { name = JSON.parse(name) } catch { /* ключ как есть */ }
+        const here = path ? `${path}.${name}` : String(name)
+        out.set(here, [c.from, c.to])
+        let val = key.nextSibling
+        while (val && !isValue(val)) val = val.nextSibling
+        if (val) walk(val, here)
+      }
+    } else if (node.name === 'Array') {
+      let i = 0
+      for (let c = node.firstChild; c; c = c.nextSibling) {
+        if (!isValue(c)) continue
+        const here = path ? `${path}.${i++}` : String(i - 1)
+        out.set(here, [c.from, c.to])
+        walk(c, here)
+      }
+    }
+  }
+  const root = tree.topNode.firstChild
+  if (root) walk(root, '')
+  return out
+}
+
+type LinkState = { paths: string[]; deco: DecorationSet; first: number | null }
+const linkField = StateField.define<LinkState>({
+  create: () => ({ paths: [], deco: Decoration.none, first: null }),
+  update(v, tr) {
+    let paths = v.paths
+    for (const e of tr.effects) if (e.is(linkEffect)) paths = e.value
+    if (paths === v.paths && !tr.docChanged) return v
+    if (!paths.length) return { paths, deco: Decoration.none, first: null }
+    const ranges = jsonPathRanges(tr.state)
+    const lines = new Set<number>()
+    let first: number | null = null
+    for (const p of paths) {
+      const r = ranges.get(p)
+      if (!r) continue
+      if (first === null || r[0] < first) first = r[0]
+      const a = tr.state.doc.lineAt(r[0]).number, b = tr.state.doc.lineAt(r[1]).number
+      for (let n = a; n <= b; n++) lines.add(n)
+    }
+    const deco = [...lines].sort((x, y) => x - y).map((n) => linked.range(tr.state.doc.line(n).from))
+    return { paths, deco: Decoration.set(deco), first }
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
+})
+
 type Status = { line: number; col: number; problem: SyntaxProblem | null; size: number }
 
-export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onValidity }: {
+export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onValidity, highlight: linkPaths }: {
   value: string
   onChange?: (v: string) => void
   lang: CodeLang
@@ -131,6 +199,8 @@ export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onVa
   readOnly?: boolean
   // Called with the reason when the text is not valid, null when it is: for a Save button.
   onValidity?: (error: string | null) => void
+  // JSON paths to light up (a form field's lines); the editor scrolls to the first one.
+  highlight?: string[]
 }) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
@@ -175,7 +245,7 @@ export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onVa
       extensions: [
         lineNumbers(), foldGutter(), history(), drawSelection(), indentOnInput(), bracketMatching(), closeBrackets(),
         highlightActiveLine(), highlightActiveLineGutter(), highlightSelectionMatches(),
-        indentUnit.of('  '),
+        indentUnit.of('  '), linkField,
         keymap.of([
           { key: 'Shift-Alt-f', run: format }, // как в VS Code
           indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap,
@@ -219,6 +289,15 @@ export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onVa
       v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } })
     }
   }, [value])
+
+  const hlKey = (linkPaths ?? []).join('\u0000')
+  useEffect(() => {
+    const v = view.current
+    if (!v || lang !== 'json') return
+    v.dispatch({ effects: linkEffect.of(hlKey ? hlKey.split('\u0000') : []) })
+    const first = v.state.field(linkField).first
+    if (first !== null) v.dispatch({ effects: EditorView.scrollIntoView(first, { y: 'nearest', yMargin: 24 }) })
+  }, [hlKey, value, lang])
 
   useEffect(() => {
     view.current?.dispatch({ effects: ro.current.reconfigure(EditorState.readOnly.of(!!readOnly)) })

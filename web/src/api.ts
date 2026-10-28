@@ -305,6 +305,8 @@ export interface InboundDetails {
   profile: { id: number; name: string }
   addresses: { id: number; ip: string; interface: string; onInterface: boolean; primary: boolean }[]
   variables?: Variable[]
+  inboundSource?: Record<string, any> // the profile's inbound with ${VARIABLES} in place
+  hostSource?: Record<string, any>
   rendered?: Record<string, any>
   error?: string
 }

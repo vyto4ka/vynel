@@ -167,30 +167,111 @@ func (s *Service) SaveBaseConfig(ctx context.Context, actor Actor, raw string) e
 		})
 }
 
+// ConfigOrigin says who put a part of a node's config there. Paths are JSON paths of the result
+// ("inbounds.0", "outbounds.2"); Kind is a code the page words itself.
+type ConfigOrigin struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+	Note string `json:"note,omitempty"` // the inbound's tag, the cascade's address…
+}
+
 // NodeConfigPreview is the whole Xray config a node would run, with raw as the base config (empty
-// = the stored one). Secrets are masked and the users left out: it is for reading.
-func (s *Service) NodeConfigPreview(ctx context.Context, nodeID int64, raw string) (map[string]any, []string, error) {
+// = the stored one). Secrets are masked and the users left out: it is for reading. Origins lists
+// what the panel added to the base config, so nothing in the result is a surprise.
+func (s *Service) NodeConfigPreview(ctx context.Context, nodeID int64, raw string) (map[string]any, []string, []ConfigOrigin, error) {
 	var base *string
 	if strings.TrimSpace(raw) != "" {
 		if err := parseBase(raw); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		base = &raw
+	} else {
+		info, err := s.BaseConfig(ctx)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		raw = info.JSON
 	}
 	all, err := s.desiredStates(ctx, base)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ds, ok := all[nodeID]
 	if !ok {
-		return nil, nil, ErrNotFound
+		return nil, nil, nil, ErrNotFound
 	}
 	var cfg map[string]any
 	if err := json.Unmarshal(ds.Config, &cfg); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	baseMap, err := xrayconf.ParseBase(raw)
+	if err != nil {
+		return nil, nil, nil, invalid("%v", err)
+	}
+	origins := configOrigins(cfg, baseMap)
 	maskConfig(cfg)
-	return cfg, ds.Problems, nil
+	return cfg, ds.Problems, origins, nil
+}
+
+// configOrigins finds the parts of the built config that the base config does not have.
+func configOrigins(cfg, base map[string]any) []ConfigOrigin {
+	var out []ConfigOrigin
+	for _, k := range xrayconf.SystemKeys {
+		if _, ok := cfg[k]; ok {
+			out = append(out, ConfigOrigin{Path: k, Kind: k})
+		}
+	}
+	if _, ok := cfg["log"]; ok {
+		out = append(out, ConfigOrigin{Path: "log", Kind: "log"})
+	}
+	if ins, ok := cfg["inbounds"].([]any); ok {
+		for i, in := range ins {
+			tag, _ := in.(map[string]any)["tag"].(string)
+			out = append(out, ConfigOrigin{Path: fmt.Sprintf("inbounds.%d", i), Kind: "inbound", Note: tag})
+		}
+	}
+	baseOut, _ := base["outbounds"].([]any)
+	if obs, ok := cfg["outbounds"].([]any); ok {
+		for i := len(baseOut); i < len(obs); i++ {
+			tag, _ := obs[i].(map[string]any)["tag"].(string)
+			kind := "outbound_cascade"
+			switch {
+			case tag == xrayconf.IPBlockTag:
+				kind = "outbound_block"
+			case strings.HasPrefix(tag, xrayconf.DirectTag+"@"):
+				kind = "outbound_egress"
+			}
+			out = append(out, ConfigOrigin{Path: fmt.Sprintf("outbounds.%d", i), Kind: kind, Note: tag})
+		}
+	}
+	// A rule is the panel's when the base config has no identical one: cascades go in front, egress
+	// rules before the first rule to DIRECT.
+	ownRules := map[string]int{}
+	if rt, ok := base["routing"].(map[string]any); ok {
+		rules, _ := rt["rules"].([]any)
+		for _, r := range rules {
+			b, _ := json.Marshal(r)
+			ownRules[string(b)]++
+		}
+	}
+	if rt, ok := cfg["routing"].(map[string]any); ok {
+		rules, _ := rt["rules"].([]any)
+		for i, r := range rules {
+			b, _ := json.Marshal(r)
+			if ownRules[string(b)] > 0 {
+				ownRules[string(b)]--
+				continue
+			}
+			m, _ := r.(map[string]any)
+			tag, _ := m["outboundTag"].(string)
+			kind := "rule_cascade"
+			if strings.HasPrefix(tag, xrayconf.DirectTag+"@") {
+				kind = "rule_egress"
+			}
+			out = append(out, ConfigOrigin{Path: fmt.Sprintf("routing.rules.%d", i), Kind: kind, Note: tag})
+		}
+	}
+	return out
 }
 
 // maskConfig hides the Reality private keys and the password of Hysteria in place.

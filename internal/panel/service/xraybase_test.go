@@ -56,4 +56,26 @@ func TestBaseConfigKeepsEgressWorking(t *testing.T) {
 	if a := must(store.ListAudit(f.ctx, f.s.Store().DB, 1)); len(a) != 1 || a[0].Action != "xray.base.save" {
 		t.Fatalf("audit: %+v", a)
 	}
+
+	// Everything the panel adds around the admin's config is listed as its own.
+	cfg, _, origins, err := f.s.NodeConfigPreview(f.ctx, nl.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	for _, o := range origins {
+		kinds[o.Kind] += o.Path + " "
+	}
+	for _, want := range []string{"api", "stats", "policy", "log", "inbound", "outbound_block", "outbound_egress", "rule_egress"} {
+		if kinds[want] == "" {
+			t.Errorf("no %q origin: %v", want, kinds)
+		}
+	}
+	// The admin's own outbounds and rules are not listed.
+	if strings.Contains(kinds["outbound_cascade"], "outbounds.0") || strings.Contains(kinds["outbound_block"], "outbounds.1 ") {
+		t.Errorf("own outbounds marked as the panel's: %v", kinds)
+	}
+	if _, ok := cfg["inbounds"].([]any); !ok {
+		t.Fatal("no inbounds in the preview")
+	}
 }

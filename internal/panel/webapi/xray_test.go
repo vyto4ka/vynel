@@ -86,7 +86,7 @@ func TestXrayBaseConfigAPI(t *testing.T) {
 	// The preview takes an unsaved base config; the stored one is untouched.
 	body, _ := json.Marshal(map[string]string{"json": `{"outbounds": [{"tag": "DIRECT", "protocol": "freedom"}, {"tag": "TRY", "protocol": "blackhole"}]}`})
 	w = c.do("POST", "/api/xray/nodes/"+itoa(n.ID)+"/config", string(body), true)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"TRY"`) || strings.Contains(w.Body.String(), `"WARP"`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"TRY"`) || strings.Contains(w.Body.String(), `"WARP"`) || !strings.Contains(w.Body.String(), `"kind":"api"`) {
 		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
 	}
 	if w := c.do("POST", "/api/xray/nodes/999/config", "", true); w.Code != 404 {

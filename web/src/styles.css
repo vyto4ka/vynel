@@ -798,3 +798,11 @@ select.input.placeholder { color: var(--muted); }
 .seg.sm button:first-child { padding-left: 14px; }
 .seg.sm button:last-child { padding-right: 14px; }
 .topbar { gap: 10px; }
+
+/* «Xray»: что панель добавила в итоговый конфиг. */
+.origins-split { grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); }
+.origins { min-width: 0; }
+.origin-row { display: grid; gap: 1px; padding: 8px 10px; border-radius: var(--shape-sm); cursor: default; }
+.origin-row:hover { background: color-mix(in srgb, var(--tertiary) 12%, transparent); }
+.amber-text { color: var(--warning, #f5c572); }
+@media (max-width: 900px) { .origins-split { grid-template-columns: 1fr; } }

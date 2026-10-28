@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Day } from './api'
 import { fmtBytes, TimeChart } from './charts'
 import { bytes } from './format'
+import { Link, useLinkHandlers } from './jsonlink'
 import { t } from './i18n'
 
 // ---------- иконки ----------
@@ -284,7 +285,7 @@ export function Info({ children, label = t('ui.what_is_this') }: { children: Rea
       <button type="button" ref={btn} className={'info-btn' + (open ? ' on' : '')} aria-label={label} aria-expanded={!!open}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(open === 'click' ? null : 'click') }}
         onMouseEnter={() => { if (!open && matchMedia('(hover: hover)').matches) setOpen('hover') }}
-        onMouseLeave={() => { if (open === 'hover') setOpen(null) }}>i</button>
+        onMouseLeave={() => { if (open === 'hover') setOpen(null) }}>?</button>
       {open && createPortal(
         <div ref={pop} className="info-pop" role="tooltip" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden', left: 0, top: 0 }}
           onClick={(e) => e.stopPropagation()}>{children}</div>,
@@ -299,9 +300,10 @@ export function PageInfo({ children }: { children: ReactNode }) {
   return <div className="grow page-info"><span className="muted small">{t('ui.about_this_page')}</span><Info label={t('ui.about_this_page')}>{children}</Info></div>
 }
 
-export function Field({ label, help, info, children }: { label: ReactNode; help?: ReactNode; info?: ReactNode; children: ReactNode }) {
+export function Field({ label, help, info, link, children }: { label: ReactNode; help?: ReactNode; info?: ReactNode; link?: Link; children: ReactNode }) {
+  const h = useLinkHandlers(link)
   return (
-    <div className="field">
+    <div className="field" {...h}>
       <label>{label}{info && <Info>{info}</Info>}</label>
       {children}
       {help && <div className="help">{help}</div>}

@@ -100,4 +100,6 @@ export default {
   usually_no_need_to_change: 'Usually no need to change',
   uuid_changed: 'UUID changed',
   valid_until: 'Valid until',
+  link_help: 'Empty — random',
+  link_info: 'A random link cannot be guessed. Your own: 8–64 characters, Latin letters, digits, _ and -. Short words are easy to guess.',
 }

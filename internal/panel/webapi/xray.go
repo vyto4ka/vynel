@@ -107,14 +107,17 @@ func (s *Server) xrayNodeConfig(r *http.Request) (any, error) {
 			return nil, err
 		}
 	}
-	cfg, problems, err := s.svc.NodeConfigPreview(r.Context(), id, in.JSON)
+	cfg, problems, origins, err := s.svc.NodeConfigPreview(r.Context(), id, in.JSON)
 	if err != nil {
 		return nil, err
 	}
 	if problems == nil {
 		problems = []string{}
 	}
-	return map[string]any{"config": cfg, "problems": problems}, nil
+	if origins == nil {
+		origins = []service.ConfigOrigin{}
+	}
+	return map[string]any{"config": cfg, "problems": problems, "origins": origins}, nil
 }
 
 // nodeCount counts real nodes: with none, the check builds a stand-in config of the base alone.

@@ -7,6 +7,8 @@ import { ProviderIcon } from './Billing'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
 import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
+import { useAdvanced } from '../mode'
+import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000)
@@ -211,7 +213,7 @@ function AddNode({ profiles, onClose, onAdded }: { profiles: Profile[]; onClose:
           <input className="input" autoFocus value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="de.example.com" />
         </Field>
         <div className="grid2">
-          <Field label={t('nodes.name_shown_in_apps')} help={t('nodes.empty_by_the_server_s')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('nodes.detected_during_installation')} /></Field>
+          <Field label={t('nodes.name_shown_in_apps')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('nodes.detected_during_installation')} /></Field>
           <Field label={t('nodes.country_code')} help={t('nodes.empty_detected_from_the_server')}><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder={t('nodes.auto')} /></Field>
         </div>
         <Field label={t('nodes.add_profiles_right_away')}>
@@ -333,7 +335,7 @@ function Attach({ node, profiles, onClose, onDone }: { node: Node; profiles: Pro
       footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="attach" disabled={!profileId}>{t('common.add')}</button></>}>
       {profiles.length === 0 ? <div className="muted">{t('nodes.first_create_a_profile_on')}</div> : (
         <form id="attach" onSubmit={submit}>
-          <Field label={t('common.profile')}>
+          <Field label={t('common.profile')} info={t('nodes.the_tag_reality_keys_and')}>
             <select className="input" value={profileId} onChange={(e) => { setProfileId(Number(e.target.value)); setValues({}) }}>
               {profiles.map((x) => <option key={x.id} value={x.id}>{x.name} — {x.templateTitle}</option>)}
             </select>
@@ -344,8 +346,7 @@ function Attach({ node, profiles, onClose, onDone }: { node: Node; profiles: Pro
                 placeholder={v.default != null ? String(v.default) : v.default_from ? t('nodes.by_default_from', { default_from: v.default_from }) : ''} />
             </Field>
           ))}
-          <Field label={t('nodes.port')} help={t('nodes.empty_from_the_profile')}><input className="input" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
-          <div className="muted small">{t('nodes.the_tag_reality_keys_and')}</div>
+          <Field label={t('nodes.port')} help={t('nodes.inbound_port_help')}><input className="input" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
         </form>
       )}
     </Modal>
@@ -365,6 +366,7 @@ function HostForm({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; on
   const [hidden, setHidden] = useState(!!o.hidden)
   const [maskText, setMaskText] = useState(o.finalmask ? pretty(o.finalmask) : '')
   const mask = parseObject(maskText)
+  const adv = useAdvanced()
   const act = useAction()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -380,20 +382,21 @@ function HostForm({ i, onClose, onSaved }: { i: Inbound; onClose: () => void; on
     <Modal title={t('nodes.connection_point_2', { tag: i.tag })} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="host-form">{t('common.save')}</button></>}>
       <form id="host-form" onSubmit={submit}>
-        <p className="muted small" style={{ marginTop: 0 }}>{t('nodes.empty_fields_are_filled_in')}{' '}<Info>{t('nodes.the_connection_point_is_how')}</Info></p>
-        <Field label={t('nodes.name_in_the_app')}><input className="input" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder={h?.remark} /></Field>
+        <Field label={t('nodes.name_in_the_app')} info={t('nodes.point_info')}><input className="input" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder={h?.remark} /></Field>
         <div className="grid2">
-          <Field label={t('nodes.address')}><input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={h?.address} /></Field>
-          <Field label={t('nodes.port')}><input className="input" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} placeholder={String(h?.port ?? '')} /></Field>
+          <Field label={t('nodes.address')} help={t('nodes.subscription_address_help')}><input className="input" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={h?.address} /></Field>
+          <Field label={t('nodes.port')} help={t('nodes.subscription_port_help')}><input className="input" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} placeholder={String(h?.port ?? '')} /></Field>
           <Field label="SNI"><input className="input" value={sni} onChange={(e) => setSni(e.target.value)} placeholder={h?.sni} /></Field>
           <Field label="Fingerprint"><input className="input" value={fp} onChange={(e) => setFp(e.target.value)} placeholder={h?.fingerprint} /></Field>
         </div>
         <label className="check"><input type="checkbox" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />{' '}{t('nodes.hide_from_subscriptions')}</label>
-        <Field label="Final Mask" info={t('nodes.streamsettings_finalmask_for')}
-          help={mask.error ? <span className="pink-text">{mask.error}</span> : t('nodes.a_json_object_tcp_udp')}>
-          <CodeEditor lang="json" value={maskText} onChange={setMaskText} height={140} />
-        </Field>
-        <button type="button" className="btn ghost sm" onClick={() => setMaskText(pretty(fragmentMask))}>{t('nodes.insert_clienthello_fragmentation')}</button>
+        {(adv || maskText) && <>
+          <Field label="Final Mask" info={t('nodes.streamsettings_finalmask_for')}
+            help={mask.error ? <span className="pink-text">{mask.error}</span> : t('nodes.a_json_object_tcp_udp')}>
+            <CodeEditor lang="json" value={maskText} onChange={setMaskText} height={140} />
+          </Field>
+          <button type="button" className="btn ghost sm" onClick={() => setMaskText(pretty(fragmentMask))}>{t('nodes.insert_clienthello_fragmentation')}</button>
+        </>}
       </form>
     </Modal>
   )
@@ -411,6 +414,7 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
   const [preview, setPreview] = useState<{ inbound?: Record<string, unknown>; error?: string } | null>(null)
   const act = useAction()
   const confirm = useConfirm()
+  const adv = useAdvanced()
 
   useEffect(() => {
     const d = loaded.data
@@ -457,18 +461,19 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
   }
 
   return (
-    <Modal title={<><Trans k="nodes.inbound" v={{ tag: d.tag, v: <span className="muted small" style={{ fontWeight: 400 }}><Trans k="nodes.profile" v={{ name: d.profile.name }} /></span> }} /></>} xl onClose={onClose}
+    <Modal title={<><Trans k="nodes.inbound" v={{ tag: d.tag, v: <span className="muted small" style={{ fontWeight: 400 }}><Trans k="nodes.profile" v={{ name: d.profile.name }} /></span> }} /></>} xl={adv} onClose={onClose}
       footer={<>
         {preview?.error ? <span className="pink-text small grow">{t('nodes.there_is_an_error_saving')}</span> : <span className="muted small grow"><Trans k="nodes.common_settings_are_in_the" v={{ name: d.profile.name }} /></span>}
         <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
         <button className="btn primary" disabled={!!override.error || !!preview?.error} onClick={save}>{t('common.save')}</button>
       </>}>
-      <div className="editor-split">
+      <LinkProvider>
+      <div className={adv ? 'editor-split' : ''}>
         <div>
           <div className="grid2">
-            <Field label={t('common.tag')}><input className="input mono" value={tag} onChange={(e) => setTag(e.target.value)} /></Field>
-            <Field label={t('nodes.port')} help={t('nodes.empty_from_the_profile')}><input className="input" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
-            <Field label={t('nodes.listen_ip')} help={t('nodes.all_on_all_the_server')}>
+            <Field label={t('common.tag')} link={{ inbound: ['tag'] }}><input className="input mono" value={tag} onChange={(e) => setTag(e.target.value)} /></Field>
+            <Field label={t('nodes.port')} help={t('nodes.inbound_port_help')} link={{ inbound: ['port'] }}><input className="input" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))} /></Field>
+            <Field label={t('nodes.listen_ip')} help={t('nodes.all_on_all_the_server')} link={{ inbound: ['listen'] }}>
               <select className="input" value={listen} onChange={(e) => setListen(Number(e.target.value))}>
                 <option value={0}>{t('common.all_addresses')}</option>
                 {d.addresses.map((a) => <option key={a.id} value={a.id}>{a.ip}{a.primary ? t('nodes.primary') : ''}</option>)}
@@ -482,23 +487,36 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
             </Field>
           </div>
           <div className="label" style={{ margin: '6px 0 8px' }}>{t('nodes.this_node_s_parameters')}</div>
-          <VariableTable vars={vars.filter((v) => v.scope === 'node')} values={values} onChange={setValues} empty={t('nodes.the_template_has_no_node')} />
+          <VariableTable vars={vars.filter((v) => v.scope === 'node')} values={values} onChange={setValues} empty={t('nodes.the_template_has_no_node')}
+            link={(name) => ({ inbound: pathsWith(d.inboundSource, name) })} />
           {vars.some((v) => v.scope === 'node' && v.source === 'generate') && (
             <label className="check" style={{ margin: '8px 0 14px' }}>
               <input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} />{' '}{t('nodes.generate_keys_and_other_values')}</label>
           )}
-          <Field label={t('nodes.manual_json_edit_for_this')} help={t('nodes.null_removes_the_field_empty')} info={t('nodes.the_json_is_laid_over')}>
-            <CodeEditor lang="json" value={overrideText} onChange={setOverrideText} height={160} />
-            {override.error && <div className="small pink-text" style={{ marginTop: 6 }}>{override.error}</div>}
-          </Field>
+          {(adv || overrideText) && (
+            <Field label={t('nodes.manual_json_edit_for_this')} help={t('nodes.null_removes_the_field_empty')} info={t('nodes.the_json_is_laid_over')}>
+              <CodeEditor lang="json" value={overrideText} onChange={setOverrideText} height={160} />
+              {override.error && <div className="small pink-text" style={{ marginTop: 6 }}>{override.error}</div>}
+            </Field>
+          )}
+          {!adv && preview?.error && <div className="alert pink">{preview.error}</div>}
         </div>
-        <div className="preview-pane">
-          <div className="label" style={{ marginBottom: 8 }}>{t('nodes.the_inbound_in_the_node')}</div>
-          {!preview ? <Loading /> : preview.error ? <div className="alert pink">{preview.error}</div> :
-            <CodeEditor lang="json" value={pretty(preview.inbound)} readOnly height="calc(100vh - 300px)" />}
-          <div className="muted small" style={{ marginTop: 6 }}>{t('nodes.without_users_the_private_key')}</div>
-        </div>
+        {adv && <InboundPreview preview={preview} />}
       </div>
+      </LinkProvider>
     </Modal>
+  )
+}
+
+// The inbound as it lands in the node's Xray config; the lines of the field under the pointer light up.
+function InboundPreview({ preview }: { preview: { inbound?: Record<string, unknown>; error?: string } | null }) {
+  const active = useActiveLink()
+  return (
+    <div className="preview-pane">
+      <div className="label" style={{ marginBottom: 8 }}>{t('nodes.the_inbound_in_the_node')}</div>
+      {!preview ? <Loading /> : preview.error ? <div className="alert pink">{preview.error}</div> :
+        <CodeEditor lang="json" value={pretty(preview.inbound)} readOnly highlight={active?.inbound} height="calc(100vh - 300px)" />}
+      <div className="muted small" style={{ marginTop: 6 }}>{t('nodes.without_users_the_private_key')}</div>
+    </div>
   )
 }

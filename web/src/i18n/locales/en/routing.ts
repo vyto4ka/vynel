@@ -18,4 +18,8 @@ export default {
   takes_priority_over_russia: 'Takes priority over “Russia direct” and the direct list',
   through_the_tunnel: 'through the tunnel',
   torrents: 'Torrents',
+  rule_lists: 'Rule lists',
+  one_per_line: 'One per line',
+  dns_info: 'localhost is the device DNS, an IP (77.88.8.8 is Yandex) or DoH https://…',
+  tunnel_dns_info: 'For everything else: an IP or DoH. Queries go through the server.',
 }

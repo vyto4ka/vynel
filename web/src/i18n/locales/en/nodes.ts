@@ -126,4 +126,8 @@ export default {
   without_users_the_private_key: 'Without users; the private key is hidden.',
   xray_agent: 'Xray {v} · agent {v2}{v3}',
   xray_restarted: 'Xray restarted',
+  inbound_port_help: 'The inbound’s port on the node. Empty — from the profile',
+  subscription_address_help: 'The address in the subscription. The IP the inbound listens on is under “Configure”',
+  subscription_port_help: 'The port in the subscription. The inbound’s port is under “Configure”',
+  point_info: 'The connection point is how the server looks in the subscription: name, address, port, SNI. It can be changed, for example so that apps go through another domain or a CDN. Empty fields are filled in automatically (shown in grey).',
 }

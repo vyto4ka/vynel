@@ -346,6 +346,8 @@ func (s *Server) inbound(r *http.Request) (any, error) {
 		"override": over, "profile": map[string]any{"id": prof.ID, "name": prof.Name}, "addresses": al}
 	if t != nil {
 		out["variables"] = t.Variables
+		// The profile's inbound with ${VARIABLES} in place: the page shows which lines a field fills.
+		out["inboundSource"], out["hostSource"] = service.ProfileSources(t, prof)
 	}
 	if rendered, err := s.svc.RenderNodeInbound(ctx, id); err == nil {
 		out["rendered"] = maskSecrets(rendered)

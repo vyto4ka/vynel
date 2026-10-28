@@ -18,4 +18,8 @@ export default {
   takes_priority_over_russia: 'Важнее «RU напрямую» и прямого списка',
   through_the_tunnel: 'через туннель',
   torrents: 'Торренты',
+  rule_lists: 'Списки правил',
+  one_per_line: 'По одному в строке',
+  dns_info: 'localhost — DNS устройства, IP (77.88.8.8 — Яндекс) или DoH https://…',
+  tunnel_dns_info: 'Для всего остального: IP или DoH. Запросы идут через сервер.',
 }

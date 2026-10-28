@@ -6,6 +6,8 @@ import { CodeEditor, parseObject, pretty } from '../code'
 import { templateStarter } from '../templateStarter'
 import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t as tr, Trans } from '../i18n'
+import { useAdvanced } from '../mode'
+import { Link, LinkProvider, Linked, pathsWith, useActiveLink } from '../jsonlink'
 
 const sourceLabel: Record<string, string> = {
   input: tr('profiles.typed_in'), const: tr('profiles.constant'), generate: tr('profiles.generated'), derived: tr('profiles.computed'),
@@ -14,12 +16,14 @@ const sourceLabel: Record<string, string> = {
 export function Profiles() {
   const [tab, setTab] = useState<'profiles' | 'templates' | 'cascades'>(() =>
     location.hash.includes('templates') ? 'templates' : location.hash.includes('cascades') ? 'cascades' : 'profiles')
+  const adv = useAdvanced()
+  useEffect(() => { if (!adv && tab === 'templates') setTab('profiles') }, [adv, tab])
   return (
     <>
       <div className="toolbar">
         <div className="seg">
           <button className={tab === 'profiles' ? 'on' : ''} onClick={() => setTab('profiles')}>{tr('common.profiles')}</button>
-          <button className={tab === 'templates' ? 'on' : ''} onClick={() => setTab('templates')}>{tr('profiles.profile_templates')}</button>
+          {adv && <button className={tab === 'templates' ? 'on' : ''} onClick={() => setTab('templates')}>{tr('profiles.profile_templates')}</button>}
           <button className={tab === 'cascades' ? 'on' : ''} onClick={() => setTab('cascades')}>{tr('profiles.cascades')}</button>
         </div>
         <PageInfo>
@@ -149,7 +153,6 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
             ))}
           </div>
         </Field>
-        <div className="muted small">{tr('profiles.the_rest_parameters_keys_json')}</div>
       </form>
     </Modal>
   )
@@ -177,6 +180,9 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
   const [selected, setSelected] = useState(0)
   const act = useAction()
   const confirm = useConfirm()
+  const adv = useAdvanced()
+  // The raw JSON tabs belong to the advanced mode.
+  useEffect(() => { if (!adv && (tab === 'inbound' || tab === 'host')) setTab('params') }, [adv, tab])
 
   useEffect(() => {
     const p = loaded.data
@@ -228,36 +234,38 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
       onClose()
     }
   }
-  const item = preview?.items[Math.min(selected, (preview?.items.length || 1) - 1)]
 
   return (
-    <Modal title={<><Trans k="profiles.profile" v={{ name: p.name, v: <span className="muted small" style={{ fontWeight: 400 }}>· {p.template?.title}</span> }} /></>} xl onClose={onClose}
+    <Modal title={<><Trans k="profiles.profile" v={{ name: p.name, v: <span className="muted small" style={{ fontWeight: 400 }}>· {p.template?.title}</span> }} /></>} xl={adv} onClose={onClose}
       footer={<>
         {failed ? <span className="pink-text small grow">{tr('profiles.there_are_errors_saving_is')}</span> : <span className="muted small grow">{tr('profiles.changes_apply_on_all_nodes')}</span>}
         <button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
         <button className="btn primary" disabled={!!jsonError || !!failed} onClick={save}>{tr('common.save')}</button>
       </>}>
+      <LinkProvider>
       <div className="seg" style={{ marginBottom: 14 }}>
         <button className={tab === 'params' ? 'on' : ''} onClick={() => setTab('params')}>{tr('profiles.parameters')}</button>
-        <button className={tab === 'inbound' ? 'on' : ''} onClick={() => setTab('inbound')}>{tr('profiles.server_json')}{ownInbound && <span className="dot-own" title={tr('profiles.own_not_as_in_the')} />}</button>
-        <button className={tab === 'host' ? 'on' : ''} onClick={() => setTab('host')}>{tr('profiles.subscription_json')}{ownHost && <span className="dot-own" title={tr('profiles.own_not_as_in_the')} />}</button>
+        {adv && <button className={tab === 'inbound' ? 'on' : ''} onClick={() => setTab('inbound')}>{tr('profiles.server_json')}{ownInbound && <span className="dot-own" title={tr('profiles.own_not_as_in_the')} />}</button>}
+        {adv && <button className={tab === 'host' ? 'on' : ''} onClick={() => setTab('host')}>{tr('profiles.subscription_json')}{ownHost && <span className="dot-own" title={tr('profiles.own_not_as_in_the')} />}</button>}
         <button className={tab === 'client' ? 'on' : ''} onClick={() => setTab('client')}>{tr('common.client')}{client.custom && <span className="dot-own" title={tr('profiles.custom_client_profile')} />}</button>
       </div>
-      <div className="editor-split">
+      {!adv && failed && <div className="alert pink" style={{ marginBottom: 12 }}>{preview?.error || preview?.items.find((i) => i.error)?.error}</div>}
+      <div className={adv ? 'editor-split' : ''}>
         {tab === 'params' ? <div>
           <div className="grid2">
             <Field label={tr('common.name')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            <Field label={tr('profiles.inbound_tag')} help={tr('profiles.is_the_node_code_vless')}>
+            <Field label={tr('profiles.inbound_tag')} help={tr('profiles.is_the_node_code_vless')} link={{ inbound: ['tag'] }}>
               <input className="input mono" value={tagPattern} onChange={(e) => setTagPattern(e.target.value)} />
             </Field>
           </div>
-          <Field label={tr('common.server_name_in_apps')} help={tr('profiles.netherlands_you_can_add_your')}>
+          <Field label={tr('common.server_name_in_apps')} help={tr('profiles.remark_help')} info={tr('profiles.remark_info')}>
             <input className="input mono" value={remarkPattern} onChange={(e) => setRemarkPattern(e.target.value)} />
           </Field>
 
           <div className="label" style={{ margin: '6px 0 8px' }}>{tr('profiles.profile_parameters')}</div>
           <VariableTable vars={vars.filter((v) => v.scope === 'profile')} values={values} onChange={setValues}
-            empty={tr('profiles.this_template_has_no_profile')} />
+            empty={tr('profiles.this_template_has_no_profile')}
+            link={(name) => ({ inbound: pathsWith(inboundSrc.value, name), host: pathsWith(hostSrc.value, name) })} />
           {vars.some((v) => v.scope === 'profile' && v.source === 'generate') && (
             <label className="check" style={{ margin: '8px 0 14px' }}>
               <input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} />{' '}{tr('profiles.generate_the_profile_values_2')}</label>
@@ -279,31 +287,56 @@ function ProfileEditor({ id, onClose, onSaved }: { id: number; onClose: () => vo
           />
         )}
 
-        <div className="preview-pane">
-          <div className="row between" style={{ marginBottom: 8 }}>
-            <span className="label">{tr('profiles.what_the_nodes_get')}</span>
-            {preview && preview.items.length > 1 && (
-              <select className="input" style={{ width: 'auto', height: 30 }} value={selected} onChange={(e) => setSelected(Number(e.target.value))}>
-                {preview.items.map((it, i) => <option key={it.id} value={i}>{it.tag}{it.error ? ' ⚠' : ''}</option>)}
-              </select>
-            )}
-          </div>
-          {!preview ? <Loading /> : preview.error ? <div className="alert pink">{preview.error}</div> : preview.items.length === 0 ? (
-            <div className="muted small">{tr('profiles.the_profile_is_not_on')}</div>
-          ) : item && (
-            <>
-              <div className="small text-2" style={{ marginBottom: 6 }}>
-                {item.node} · <span className="mono">{item.tag}</span> · {tab === 'host' ? tr('profiles.connection_point_for_the_subscription') : tr('profiles.inbound_on_the_node')}
-              </div>
-              {item.error ? <div className="alert pink">{item.error}</div>
-                : tab === 'host'
-                  ? (item.hostError ? <div className="alert pink">{item.hostError}</div> : <CodeEditor lang="json" value={pretty(item.host ?? {})} readOnly height="calc(100vh - 360px)" />)
-                  : <CodeEditor lang="json" value={pretty(item.inbound)} readOnly height="calc(100vh - 360px)" />}
-            </>
+        {adv && <PreviewPane preview={preview} selected={selected} onSelect={setSelected} tab={tab} />}
+      </div>
+      </LinkProvider>
+    </Modal>
+  )
+}
+
+// PreviewPane shows what the nodes get. Next to the parameters it follows the field under the
+// pointer: the lines the field fills light up, and the pane turns to the connection point when the
+// field belongs there.
+function PreviewPane({ preview, selected, onSelect, tab }: {
+  preview: { items: PreviewItem[]; error?: string } | null; selected: number; onSelect: (i: number) => void; tab: 'params' | 'inbound' | 'host' | 'client'
+}) {
+  const active = useActiveLink()
+  const [kind, setKind] = useState<'inbound' | 'host'>('inbound')
+  const linkedKind = active?.inbound?.length ? 'inbound' : active?.host?.length ? 'host' : null
+  const shown: 'inbound' | 'host' = tab === 'host' ? 'host' : tab === 'inbound' ? 'inbound' : linkedKind ?? kind
+  const item = preview?.items[Math.min(selected, (preview?.items.length || 1) - 1)]
+  return (
+    <div className="preview-pane">
+      <div className="row between" style={{ marginBottom: 8 }}>
+        <span className="label">{tr('profiles.what_the_nodes_get')}</span>
+        <div className="row" style={{ gap: 6 }}>
+          {tab === 'params' && (
+            <div className="seg sm">
+              <button className={shown === 'inbound' ? 'on' : ''} onClick={() => setKind('inbound')}>{tr('profiles.preview_server')}</button>
+              <button className={shown === 'host' ? 'on' : ''} onClick={() => setKind('host')}>{tr('profiles.preview_subscription')}</button>
+            </div>
+          )}
+          {preview && preview.items.length > 1 && (
+            <select className="input" style={{ width: 'auto', height: 30 }} value={selected} onChange={(e) => onSelect(Number(e.target.value))}>
+              {preview.items.map((it, i) => <option key={it.id} value={i}>{it.tag}{it.error ? ' ⚠' : ''}</option>)}
+            </select>
           )}
         </div>
       </div>
-    </Modal>
+      {!preview ? <Loading /> : preview.error ? <div className="alert pink">{preview.error}</div> : preview.items.length === 0 ? (
+        <div className="muted small">{tr('profiles.the_profile_is_not_on')}</div>
+      ) : item && (
+        <>
+          <div className="small text-2" style={{ marginBottom: 6 }}>
+            {item.node} · <span className="mono">{item.tag}</span> · {shown === 'host' ? tr('profiles.connection_point_for_the_subscription') : tr('profiles.inbound_on_the_node')}
+          </div>
+          {item.error ? <div className="alert pink">{item.error}</div>
+            : shown === 'host'
+              ? (item.hostError ? <div className="alert pink">{item.hostError}</div> : <CodeEditor lang="json" value={pretty(item.host ?? {})} readOnly highlight={active?.host} height="calc(100vh - 360px)" />)
+              : <CodeEditor lang="json" value={pretty(item.inbound)} readOnly highlight={active?.inbound} height="calc(100vh - 360px)" />}
+        </>
+      )}
+    </div>
   )
 }
 
@@ -334,6 +367,7 @@ function clientConfigError(text: string): string | undefined {
 
 // ClientEditor — «Кастомный профиль клиента»: свои маршруты или целый конфиг Xray для серверов профиля.
 function ClientEditor({ c, set, base, error }: { c: ProfileClient; set: (c: ProfileClient) => void; base?: ClientRouting; error?: string }) {
+  const adv = useAdvanced()
   const mode = c.mode || 'routing'
   return (
     <div>
@@ -347,7 +381,7 @@ function ClientEditor({ c, set, base, error }: { c: ProfileClient; set: (c: Prof
       {c.custom && <>
         <div className="seg" style={{ marginBottom: 12 }}>
           <button className={mode === 'routing' ? 'on' : ''} onClick={() => set({ ...c, mode: 'routing', routing: c.routing ?? base })}>{tr('common.settings')}</button>
-          <button className={mode === 'json' ? 'on' : ''} onClick={() => set({ ...c, mode: 'json', config: c.config || pretty(clientExample) })}>{tr('profiles.json_config')}</button>
+          {(adv || mode === 'json') && <button className={mode === 'json' ? 'on' : ''} onClick={() => set({ ...c, mode: 'json', config: c.config || pretty(clientExample) })}>{tr('profiles.json_config')}</button>}
         </div>
         {mode === 'routing' && c.routing && <RoutingForm r={c.routing} set={(r) => set({ ...c, routing: r })} />}
         {mode === 'json' && <>
@@ -389,7 +423,7 @@ function SourceEditor({ kind, text, onChange, error, own, onReset, vars }: {
 }
 
 // Таблица переменных: вводимые и константы правятся, генерируемые показываются (можно задать своё), выводимые — только для справки.
-export function VariableTable({ vars, values, onChange, empty }: { vars: Variable[]; values: Record<string, string>; onChange: (v: Record<string, string>) => void; empty: string }) {
+export function VariableTable({ vars, values, onChange, empty, link }: { vars: Variable[]; values: Record<string, string>; onChange: (v: Record<string, string>) => void; empty: string; link?: (name: string) => Link }) {
   if (vars.length === 0) return <div className="muted small" style={{ marginBottom: 14 }}>{empty}</div>
   return (
     <div className="var-table">
@@ -397,7 +431,7 @@ export function VariableTable({ vars, values, onChange, empty }: { vars: Variabl
         const derived = v.source === 'derived'
         const secret = v.secret && values[v.name] === '•••'
         return (
-          <div key={v.name} className="var-row">
+          <Linked key={v.name} className="var-row" link={link?.(v.name)}>
             <div>
               <div className="mono small"><b>{v.name}</b>{v.description && <Info>{v.description}</Info>}</div>
               <div className="small muted">{sourceLabel[v.source] || v.source}{v.validate ? ` · ${v.validate}` : ''}{v.optional ? tr('profiles.optional') : ''}</div>
@@ -415,7 +449,7 @@ export function VariableTable({ vars, values, onChange, empty }: { vars: Variabl
               )}
               {secret && <div className="small muted" style={{ marginTop: 3 }}>{tr('profiles.value_hidden')}</div>}
             </div>
-          </div>
+          </Linked>
         )
       })}
     </div>

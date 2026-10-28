@@ -146,4 +146,8 @@ export default {
   xhttp_extra_the_extra_for: '<code>xhttp_extra</code> — the extra for XHTTP, substituted in the inbound as <code>"${XHTTP_EXTRA}"</code>. Clients get the same extra unless <code>host</code> says otherwise.',
   xray_inbound_the_xray_inbound: '<code>xray_inbound</code> — the Xray inbound JSON with <code>${VARIABLES}</code>. A variable that makes up a whole string is substituted with its own type: <code>"port": "${XRAY_PORT}"</code> becomes a number. Certificate paths on the node are labels: <code>vynel:cert:domain</code>, <code>vynel:key:domain</code> (the certificate the node obtains), <code>vynel:decoy:site</code>.',
   xray_json_only_keqdroid_happ: 'Xray JSON only: KeqDroid, Happ, v2RayTun',
+  preview_server: 'Server',
+  preview_subscription: 'Subscription',
+  remark_help: '${NODE_FLAG} ${NODE_NAME} → “🇳🇱 Netherlands”',
+  remark_info: 'You can add your own text: ${NODE_FLAG} ${NODE_NAME} · Reality',
 }
