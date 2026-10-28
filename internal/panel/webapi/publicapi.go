@@ -257,7 +257,9 @@ func (s *Server) v1Serve(w http.ResponseWriter, r *http.Request, scope string, f
 			s.v1Fail(w, r, c, err)
 			return
 		}
-		if s.v1State.bans.fail(ip, now) {
+		// Only tokens that do not exist count towards a block: a revoked or expired one is a program
+		// that was not told, and blocking its address would shut out the others behind it.
+		if errors.Is(err, service.ErrTokenInvalid) && s.v1State.bans.fail(ip, now) {
 			s.log.Warn("api: address blocked for wrong tokens", "ip", ip)
 		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="vynel", error="invalid_token"`)
@@ -303,7 +305,7 @@ func (s *Server) v1Serve(w http.ResponseWriter, r *http.Request, scope string, f
 			return
 		}
 		h := sha256.Sum256(body)
-		fp := r.Method + " " + r.URL.Path + " " + hex.EncodeToString(h[:])
+		fp := r.Method + " " + r.URL.RequestURI() + " " + hex.EncodeToString(h[:])
 		kh := sha256.Sum256([]byte(strconv.FormatInt(tok.ID, 10) + ":" + key))
 		mu := &s.v1State.idem[int(kh[0])%len(s.v1State.idem)]
 		mu.Lock()

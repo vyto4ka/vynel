@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -258,4 +259,28 @@ func parseInt(s string) (int64, error) {
 	var n int64
 	err := json.Unmarshal([]byte(s), &n)
 	return n, err
+}
+
+func TestRunWebhooksDeliversEvents(t *testing.T) {
+	f := newFixture(t)
+	got := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Get(HeaderEvent)
+	}))
+	defer srv.Close()
+	must(f.s.CreateWebhook(f.ctx, ActorCLI, WebhookInput{Name: "h", URL: srv.URL, Enabled: true, AllowPrivate: true, Events: []string{"user.created"}}))
+	ctx, cancel := context.WithCancel(f.ctx)
+	done := make(chan struct{})
+	go func() { _ = f.s.RunWebhooks(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	must(f.s.CreateUser(f.ctx, ActorCLI, CreateUserInput{Username: "zed"}))
+	select {
+	case typ := <-got:
+		if typ != "user.created" {
+			t.Fatalf("event header %q", typ)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loop did not deliver the event")
+	}
 }

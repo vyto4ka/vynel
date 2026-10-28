@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -334,9 +335,11 @@ func (s *Service) RunWebhooks(ctx context.Context) error {
 	busy := map[int64]bool{}
 	done := make(chan int64, 64)
 	var lastNodes time.Time
+	var inflight sync.WaitGroup
 	for {
 		select {
 		case <-ctx.Done():
+			inflight.Wait() // the deliveries in progress end with the context
 			return nil
 		case id := <-done:
 			delete(busy, id)
@@ -363,7 +366,9 @@ func (s *Service) RunWebhooks(ctx context.Context) error {
 			}
 			_ = w
 			busy[id] = true
+			inflight.Add(1)
 			go func() {
+				defer inflight.Done()
 				for _, d := range ds {
 					if ctx.Err() != nil {
 						break
@@ -379,7 +384,10 @@ func (s *Service) RunWebhooks(ctx context.Context) error {
 					}
 					s.deliver(ctx, w, d, true)
 				}
-				done <- id
+				select {
+				case done <- id:
+				case <-ctx.Done():
+				}
 			}()
 		}
 	}
@@ -395,9 +403,13 @@ func (s *Service) pollNodes(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	type change struct {
+		node *store.Node
+		up   bool
+	}
+	var changes []change
 	a := &s.api
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.nodeSeen == nil {
 		a.nodeSeen, a.nodeSent, a.nodesUp = map[int64]bool{}, map[int64]bool{}, map[int64]int{}
 	}
@@ -418,13 +430,17 @@ func (s *Service) pollNodes(ctx context.Context) {
 			continue
 		}
 		a.nodeSent[n.ID] = now
+		changes = append(changes, change{n, now})
+	}
+	a.mu.Unlock()
+	for _, c := range changes {
 		typ := "node.offline"
-		if now {
+		if c.up {
 			typ = "node.online"
 		}
 		_ = s.st.Tx(ctx, func(q store.DBTX) error {
-			return store.PublishAPIEvent(ctx, q, &store.APIEvent{Type: typ, Entity: "node", EntityID: n.ID, Actor: "system",
-				Data: `{"code":` + jsonString(n.Code) + `,"name":` + jsonString(n.Name) + `}`})
+			return store.PublishAPIEvent(ctx, q, &store.APIEvent{Type: typ, Entity: "node", EntityID: c.node.ID, Actor: "system",
+				Data: `{"code":` + jsonString(c.node.Code) + `,"name":` + jsonString(c.node.Name) + `}`})
 		})
 	}
 }
