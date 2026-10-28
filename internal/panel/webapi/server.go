@@ -39,6 +39,9 @@ type Config struct {
 	NodeAction func(ctx context.Context, nodeID int64, action string) (detail string, err error)
 	// UpdateStatus is what a node last reported about its update; nil = never reports.
 	UpdateStatus func(nodeID int64) *update.Status
+	// XrayTest lets the Xray binary of this server read a config (`xray run -test`); nil = this
+	// server has none, and the «Xray» page checks the structure only.
+	XrayTest func(ctx context.Context, cfg []byte) error
 }
 
 // Server is the web panel.

@@ -80,6 +80,7 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/inbounds/{id}", s.detachInbound)
 	s.handle("GET /api/inbounds/{id}/config", s.inboundConfig)
 	s.editorRoutes()
+	s.xrayRoutes()
 
 	s.subscriptionRoutes()
 	s.extraRoutes()
