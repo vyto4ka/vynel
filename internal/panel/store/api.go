@@ -165,7 +165,7 @@ type APIEvent struct {
 
 // EventDoc is the JSON of an event, in the feed and in webhook deliveries.
 func EventDoc(e *APIEvent) []byte {
-	var data, entity json.RawMessage = json.RawMessage(e.Data), nil
+	data := json.RawMessage(e.Data)
 	if !json.Valid(data) {
 		data = json.RawMessage("{}")
 	}
@@ -180,7 +180,8 @@ func EventDoc(e *APIEvent) []byte {
 		}
 		data, _ = json.Marshal(d)
 	}
-	entity, _ = json.Marshal(ent)
+	entityJSON, _ := json.Marshal(ent)
+	entity := json.RawMessage(entityJSON)
 	actorKind, actorID, _ := strings.Cut(e.Actor, ":")
 	b, _ := json.Marshal(map[string]any{
 		"id": "evt_" + strconv.FormatInt(e.ID, 10), "type": e.Type, "created": e.TS,

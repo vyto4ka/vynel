@@ -443,7 +443,7 @@ func pathMatches(pattern, path string) bool {
 		return false
 	}
 	for i := range a {
-		if !(strings.HasPrefix(a[i], "{") || a[i] == b[i]) {
+		if !strings.HasPrefix(a[i], "{") && a[i] != b[i] {
 			return false
 		}
 	}

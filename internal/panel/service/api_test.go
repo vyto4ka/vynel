@@ -196,7 +196,7 @@ func TestWebhookDelivery(t *testing.T) {
 
 func TestWebhookSwitchesOff(t *testing.T) {
 	f := newFixture(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", 410) }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "no", http.StatusGone) }))
 	defer srv.Close()
 	w := must(f.s.CreateWebhook(f.ctx, ActorCLI, WebhookInput{Name: "h", URL: srv.URL, Enabled: true, AllowPrivate: true}))
 	for i := 0; i < webhookOffAfter; i++ {
