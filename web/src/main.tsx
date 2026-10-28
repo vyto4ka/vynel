@@ -18,6 +18,7 @@ import { Settings } from './pages/Settings'
 import { Subscription } from './pages/Subscription'
 import { Audit } from './pages/Audit'
 import { Telegram } from './pages/Telegram'
+import { Api } from './pages/Api'
 import { Account } from './pages/Account'
 import { languages, lang, setLang, t } from './i18n'
 import { ModeProvider, useMode } from './mode'
@@ -53,6 +54,7 @@ const sections: { title: string; pages: Page[] }[] = [
     pages: [
       { id: 'settings', title: t('common.settings'), icon: 'settings', el: () => <Settings /> },
       { id: 'telegram', title: 'Telegram', icon: 'telegram', el: () => <Telegram /> },
+      { id: 'api', title: t('integrations.title'), icon: 'plug', el: () => <Api /> },
       { id: 'audit', title: t('main.log'), icon: 'audit', el: () => <Audit /> },
       { id: 'account', title: t('main.account'), icon: 'account', el: () => <Account /> },
     ],

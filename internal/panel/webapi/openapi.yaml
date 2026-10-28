@@ -638,7 +638,7 @@ components:
         uuid: { type: string, format: uuid }
         online_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
-        subscription_url: { type: string, description: "The link to give to the user (not in lists unless include=subscription)" }
+        subscription_url: { type: string, nullable: true, description: "The link to give to the user; null while the subscription domain is not set up. Not in lists unless include=subscription" }
     CreateUser:
       type: object
       required: [username]

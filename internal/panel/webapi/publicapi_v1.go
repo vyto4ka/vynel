@@ -91,7 +91,7 @@ type v1User struct {
 	UUID              string  `json:"uuid"`
 	OnlineAt          *string `json:"online_at"`
 	CreatedAt         string  `json:"created_at"`
-	SubscriptionURL   *string `json:"subscription_url,omitempty"`
+	SubscriptionURL   any     `json:"subscription_url,omitempty"` // a link, or null while the subscription domain is not set; absent in lists
 }
 
 func (s *Server) v1UserDTO(r *http.Request, u *store.User, groups []int64, withURL bool) v1User {
@@ -104,6 +104,7 @@ func (s *Server) v1UserDTO(r *http.Request, u *store.User, groups []int64, withU
 		TelegramID: u.TelegramID, ExternalID: u.ExternalID, GroupIDs: groups, TemplateID: u.TemplateID, UUID: u.UUID,
 		OnlineAt: rfc3339(u.OnlineAt), CreatedAt: rfc3339v(u.CreatedAt)}
 	if withURL {
+		d.SubscriptionURL = (*string)(nil)
 		if url, err := s.svc.SubscriptionURL(r.Context(), u); err == nil {
 			d.SubscriptionURL = &url
 		}

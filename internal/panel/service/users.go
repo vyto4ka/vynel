@@ -609,7 +609,14 @@ func (s *Service) SetUserIdentity(ctx context.Context, actor Actor, id int64, in
 			in.ExternalID = &v
 		}
 	}
-	return s.updateUser(ctx, actor, id, "user.set_details", map[string]any{"telegram_id": in.TelegramID, "external_id": in.ExternalID}, func(q store.DBTX, u *store.User) error {
+	diff := map[string]any{}
+	if in.SetTelegramID {
+		diff["telegram_id"] = in.TelegramID
+	}
+	if in.SetExternalID {
+		diff["external_id"] = in.ExternalID
+	}
+	return s.updateUser(ctx, actor, id, "user.set_details", diff, func(q store.DBTX, u *store.User) error {
 		if in.SetTelegramID {
 			if in.TelegramID != nil {
 				if err := identityFree(ctx, q, u.ID, store.UserFilter{TelegramID: in.TelegramID}, "telegram_id"); err != nil {
