@@ -127,19 +127,19 @@ func (g *loginGuard) prune(now time.Time) {
 }
 
 // writeLoginError answers a refused attempt; blocked ones get Retry-After.
-func writeLoginError(w http.ResponseWriter, err error) {
+func writeLoginError(w http.ResponseWriter, r *http.Request, err error) {
 	var b *loginBlocked
 	if errors.As(err, &b) {
 		w.Header().Set("Retry-After", strconv.Itoa(int(b.wait.Seconds())+1))
-		writeError(w, &httpError{http.StatusTooManyRequests, b.Error()})
+		writeError(w, r, &httpError{http.StatusTooManyRequests, b.Error()})
 		return
 	}
 	var h *httpError
 	if errors.As(err, &h) {
-		writeError(w, h)
+		writeError(w, r, h)
 		return
 	}
-	writeError(w, &httpError{http.StatusInternalServerError, "internal error"})
+	writeError(w, r, &httpError{http.StatusInternalServerError, "internal error"})
 }
 
 // loginFailDelay keeps a failed attempt from answering at once. It runs after the slot is

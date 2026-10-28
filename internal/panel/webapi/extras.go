@@ -49,7 +49,7 @@ func (s *Server) cascades(r *http.Request) (any, error) {
 			"entry": label[c.EntryInboundID], "exit": label[c.ExitInboundID], "remark": c.Remark, "enabled": c.Enabled,
 			"title": s.svc.CascadeRemark(ctx, s.svc.Store().DB, c), "problem": s.svc.CascadeProblem(ctx, c.ID)})
 	}
-	return out, nil
+	return localize(r, out, "problem"), nil
 }
 
 func (s *Server) saveCascade(r *http.Request) (any, error) {

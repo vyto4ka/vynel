@@ -230,6 +230,11 @@ func configOrigins(cfg, base map[string]any) []ConfigOrigin {
 			out = append(out, ConfigOrigin{Path: fmt.Sprintf("inbounds.%d", i), Kind: "inbound", Note: tag})
 		}
 	}
+	if _, own := base["routing"]; !own {
+		if _, ok := cfg["routing"]; ok {
+			out = append(out, ConfigOrigin{Path: "routing", Kind: "routing"}) // an empty one: without it the API refuses rules
+		}
+	}
 	baseOut, _ := base["outbounds"].([]any)
 	if obs, ok := cfg["outbounds"].([]any); ok {
 		for i := len(baseOut); i < len(obs); i++ {

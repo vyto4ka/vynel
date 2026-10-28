@@ -18,6 +18,7 @@ import (
 type client struct {
 	t      *testing.T
 	srv    *Server
+	lang   string // sent as X-Lang when set
 	base   string
 	cookie *http.Cookie
 }
@@ -26,6 +27,9 @@ func (c *client) do(method, path, body string, csrf bool) *httptest.ResponseReco
 	r := httptest.NewRequest(method, c.base+path, strings.NewReader(body))
 	if csrf {
 		r.Header.Set(csrfHeader, "1")
+	}
+	if c.lang != "" {
+		r.Header.Set("X-Lang", c.lang)
 	}
 	if c.cookie != nil {
 		r.AddCookie(c.cookie)

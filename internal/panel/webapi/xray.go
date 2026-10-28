@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
@@ -49,7 +50,7 @@ func (s *Server) xrayCheck(r *http.Request) (any, error) {
 	}
 	chk, err := s.svc.CheckBaseConfig(r.Context(), in.JSON)
 	if err != nil {
-		return map[string]any{"ok": false, "error": strings.TrimPrefix(err.Error(), service.ErrInvalid.Error()+": ")}, nil
+		return map[string]any{"ok": false, "error": i18n.T(i18n.FromRequest(r), strings.TrimPrefix(i18n.Error(i18n.FromRequest(r), err), service.ErrInvalid.Error()+": "))}, nil
 	}
 	problems := chk.Problems
 	rejected, tested := s.xrayTest(r.Context(), chk.Nodes)

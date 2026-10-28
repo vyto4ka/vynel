@@ -37,7 +37,7 @@ func (s *Server) insightTraffic(r *http.Request) (any, error) {
 	for _, u := range t.Users {
 		users = append(users, map[string]any{"id": u.ID, "username": u.Username, "total": u.Total, "by": u.By})
 	}
-	return map[string]any{"range": t.Range, "days": t.Days, "profiles": profiles, "users": users}, nil
+	return localize(r, map[string]any{"range": t.Range, "days": t.Days, "profiles": profiles, "users": users}, "label"), nil
 }
 
 func pageArgs(r *http.Request) (search string, limit, offset int) {

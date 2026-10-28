@@ -32,17 +32,17 @@ func (s *Server) botRoutes() {
 // a session. The token travels in the URL fragment, so only the page itself can post it here.
 func (s *Server) magicLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get(csrfHeader) != "1" {
-		writeError(w, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
+		writeError(w, r, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
 		return
 	}
 	var in struct{ Token string }
 	if err := decode(r, &in); err != nil {
-		writeError(w, &httpError{http.StatusBadRequest, err.Error()})
+		writeError(w, r, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
 	done, err := s.guard.begin(clientIP(r))
 	if err != nil {
-		writeLoginError(w, err)
+		writeLoginError(w, r, err)
 		return
 	}
 	issuer, err := s.svc.UseLoginToken(r.Context(), strings.TrimSpace(in.Token), ownPath(r))
@@ -50,12 +50,12 @@ func (s *Server) magicLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		time.Sleep(loginFailDelay)
 		s.log.Warn("web magic login failed", "ip", clientIP(r))
-		writeError(w, &httpError{http.StatusUnauthorized, "ссылка недействительна: она живёт минуту и работает один раз — запросите новую"})
+		writeError(w, r, &httpError{http.StatusUnauthorized, "ссылка недействительна: она живёт минуту и работает один раз — запросите новую"})
 		return
 	}
 	login, err := s.startSession(w, r, service.LoginLink, issuer)
 	if err != nil {
-		writeError(w, &httpError{http.StatusInternalServerError, err.Error()})
+		writeError(w, r, &httpError{http.StatusInternalServerError, err.Error()})
 		return
 	}
 	s.log.Info("web login by one-time link", "ip", clientIP(r), "issued_by", issuer)
@@ -213,21 +213,21 @@ func (s *Server) downloadBackup(r *http.Request) (any, error) {
 // telegramLogin signs in an admin who opened the panel as a Telegram Mini App from the bot.
 func (s *Server) telegramLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get(csrfHeader) != "1" {
-		writeError(w, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
+		writeError(w, r, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
 		return
 	}
 	var in struct{ InitData string }
 	if err := decode(r, &in); err != nil {
-		writeError(w, &httpError{http.StatusBadRequest, err.Error()})
+		writeError(w, r, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
 	if ownPath(r) != "" {
-		writeError(w, &httpError{http.StatusForbidden, "откройте панель кнопкой в боте"})
+		writeError(w, r, &httpError{http.StatusForbidden, "откройте панель кнопкой в боте"})
 		return
 	}
 	done, err := s.guard.begin(clientIP(r))
 	if err != nil {
-		writeLoginError(w, err)
+		writeLoginError(w, r, err)
 		return
 	}
 	id, err := s.svc.TelegramAppLogin(r.Context(), in.InitData)
@@ -235,12 +235,12 @@ func (s *Server) telegramLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		time.Sleep(loginFailDelay)
 		s.log.Warn("web telegram login failed", "ip", clientIP(r), "err", err)
-		writeError(w, &httpError{http.StatusUnauthorized, "Telegram не подтвердил вход: " + strings.TrimPrefix(err.Error(), service.ErrInvalid.Error()+": ")})
+		writeError(w, r, &httpError{http.StatusUnauthorized, "Telegram не подтвердил вход: " + strings.TrimPrefix(err.Error(), service.ErrInvalid.Error()+": ")})
 		return
 	}
 	login, err := s.startSession(w, r, service.LoginTelegram, "bot:"+strconv.FormatInt(id, 10))
 	if err != nil {
-		writeError(w, &httpError{http.StatusInternalServerError, err.Error()})
+		writeError(w, r, &httpError{http.StatusInternalServerError, err.Error()})
 		return
 	}
 	s.log.Info("web login from telegram mini app", "ip", clientIP(r), "telegram_id", id)

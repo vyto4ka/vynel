@@ -11,15 +11,39 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
 // ErrInvalid marks input validation failures.
 var ErrInvalid = errors.New("invalid input")
 
-func invalid(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+// invalidError is an input error that keeps its format and arguments, so the web interface can
+// say it in the admin's language (internal/i18n); Error() is the Russian text, as before.
+type invalidError struct {
+	format string
+	args   []any
 }
+
+func invalid(format string, args ...any) error { return &invalidError{format, args} }
+
+func (e *invalidError) Is(target error) bool { return target == ErrInvalid }
+
+func (e *invalidError) text() string {
+	args := make([]any, len(e.args))
+	for i, a := range e.args {
+		if ie, ok := a.(*invalidError); ok {
+			a = ie.text()
+		}
+		args[i] = a
+	}
+	return fmt.Sprintf(e.format, args...)
+}
+
+func (e *invalidError) Error() string { return ErrInvalid.Error() + ": " + e.text() }
+
+// Localize is the message without the "invalid input" prefix, in lang.
+func (e *invalidError) Localize(lang string) string { return i18n.Sprintf(lang, e.format, e.args...) }
 
 // InField says where an input error is, as the panel names it ("«Маршруты»", "«Всегда
 // напрямую», строка 3"): the admin sees which field and line to fix. Other errors pass as they are.
@@ -27,11 +51,15 @@ func InField(where string, err error) error {
 	if err == nil || !errors.Is(err, ErrInvalid) {
 		return err
 	}
-	msg := strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": ")
-	if strings.HasPrefix(msg, "«") || strings.HasPrefix(msg, "строка ") {
-		return invalid("%s, %s", where, msg) // the message starts with a place inside this one
+	var inner *invalidError
+	if !errors.As(err, &inner) {
+		return invalid("%s: %s", where, strings.TrimPrefix(err.Error(), ErrInvalid.Error()+": "))
 	}
-	return invalid("%s: %s", where, msg)
+	msg := inner.text()
+	if strings.HasPrefix(msg, "«") || strings.HasPrefix(msg, "строка ") {
+		return invalid("%s, %s", where, inner) // the message starts with a place inside this one
+	}
+	return invalid("%s: %s", where, inner)
 }
 
 // Re-exported store errors so transports do not import store.

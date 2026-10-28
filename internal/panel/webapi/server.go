@@ -20,6 +20,7 @@ import (
 
 	"github.com/vyto4ka/vynel/internal/clientip"
 	"github.com/vyto4ka/vynel/internal/decoy"
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/update"
@@ -118,7 +119,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rest := strings.TrimPrefix(r.URL.Path, p)
 			if p != "" && strings.HasPrefix(rest, "api/") && r.Header.Get(csrfHeader) == "1" {
 				if why := s.svc.WebPathEnded(ctx, p); why != "" {
-					writeError(w, &httpError{http.StatusUnauthorized, why})
+					writeError(w, r, &httpError{http.StatusUnauthorized, why})
 					return
 				}
 			}
@@ -346,7 +347,7 @@ func (s *Server) handle(pattern string, fn apiFunc) {
 	s.api.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(cookieName)
 		if err != nil {
-			writeError(w, &httpError{http.StatusUnauthorized, "not logged in"})
+			writeError(w, r, &httpError{http.StatusUnauthorized, "not logged in"})
 			return
 		}
 		// Background requests (GET, the page's ping) keep the session alive but are not actions.
@@ -356,11 +357,11 @@ func (s *Server) handle(pattern string, fn apiFunc) {
 			if why != "bad" {
 				msg = service.EndReasonText(why, s.svc.WebIdleMinutes(r.Context()))
 			}
-			writeError(w, &httpError{http.StatusUnauthorized, msg})
+			writeError(w, r, &httpError{http.StatusUnauthorized, msg})
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get(csrfHeader) != "1" {
-			writeError(w, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
+			writeError(w, r, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
 			return
 		}
 		s.respond(w, r.WithContext(context.WithValue(r.Context(), writerKey{}, w)), fn)
@@ -378,13 +379,18 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, fn apiFunc) {
 			case errors.Is(err, service.ErrConflict):
 				he = &httpError{http.StatusConflict, "такое имя уже занято"}
 			case errors.Is(err, service.ErrInvalid):
-				he = &httpError{http.StatusBadRequest, strings.TrimPrefix(err.Error(), service.ErrInvalid.Error()+": ")}
+				var l i18n.Localizer
+				if errors.As(err, &l) {
+					he = &httpError{http.StatusBadRequest, l.Localize(i18n.FromRequest(r))}
+				} else {
+					he = &httpError{http.StatusBadRequest, strings.TrimPrefix(err.Error(), service.ErrInvalid.Error()+": ")}
+				}
 			default:
 				s.log.Error("web api", "path", r.URL.Path, "err", err)
 				he = &httpError{http.StatusInternalServerError, err.Error()}
 			}
 		}
-		writeError(w, he)
+		writeError(w, r, he)
 		return
 	}
 	if raw, ok := v.(rawResponse); ok {
@@ -404,10 +410,11 @@ type rawResponse struct {
 	body        []byte
 }
 
-func writeError(w http.ResponseWriter, e *httpError) {
+// writeError sends an error as {"error": text}; the text comes out in the language of the request.
+func writeError(w http.ResponseWriter, r *http.Request, e *httpError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(e.code)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": e.msg})
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": i18n.T(i18n.FromRequest(r), e.msg)})
 }
 
 func decode(r *http.Request, v any) error {
@@ -437,20 +444,20 @@ func clientIP(r *http.Request) string { return clientip.From(r) }
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Login, Password string }
 	if r.Header.Get(csrfHeader) != "1" {
-		writeError(w, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
+		writeError(w, r, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
 		return
 	}
 	if err := decode(r, &in); err != nil {
-		writeError(w, &httpError{http.StatusBadRequest, err.Error()})
+		writeError(w, r, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
 	if !s.svc.PasswordLoginEnabled(r.Context()) || ownPath(r) != "" {
-		writeError(w, &httpError{http.StatusForbidden, "вход по паролю выключен — войдите по одноразовой ссылке (/login в боте или vynel admin login-link)"})
+		writeError(w, r, &httpError{http.StatusForbidden, "вход по паролю выключен — войдите по одноразовой ссылке (/login в боте или vynel admin login-link)"})
 		return
 	}
 	done, err := s.guard.begin(clientIP(r))
 	if err != nil {
-		writeLoginError(w, err)
+		writeLoginError(w, r, err)
 		return
 	}
 	err = s.svc.CheckAdmin(r.Context(), strings.TrimSpace(in.Login), in.Password)
@@ -458,12 +465,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		time.Sleep(loginFailDelay)
 		s.log.Warn("web login failed", "ip", clientIP(r), "login", in.Login)
-		writeError(w, &httpError{http.StatusUnauthorized, "неверный логин или пароль"})
+		writeError(w, r, &httpError{http.StatusUnauthorized, "неверный логин или пароль"})
 		return
 	}
 	login, err := s.startSession(w, r, service.LoginPassword, strings.TrimSpace(in.Login))
 	if err != nil {
-		writeError(w, &httpError{http.StatusInternalServerError, err.Error()})
+		writeError(w, r, &httpError{http.StatusInternalServerError, err.Error()})
 		return
 	}
 	s.log.Info("web login", "ip", clientIP(r), "login", login)
