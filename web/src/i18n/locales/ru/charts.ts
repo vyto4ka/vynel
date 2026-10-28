@@ -1,0 +1,17 @@
+export default {
+  fri: 'пт',
+  hover_over_a_cell: 'Наведите на клетку',
+  less: 'меньше',
+  little_data_for_the_previous: 'мало данных за прошлый период',
+  mon: 'пн',
+  more: 'больше',
+  no_data_for_the_previous: 'нет данных за прошлый период',
+  no_data_for_this_period: 'Данных за этот период пока нет',
+  sat: 'сб',
+  sun: 'вс',
+  thu: 'чт',
+  total: 'всего<b>{v}</b>',
+  tue: 'вт',
+  vs_previous_period: 'к прошлому периоду',
+  wed: 'ср',
+}

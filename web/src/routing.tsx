@@ -1,5 +1,6 @@
 import { ClientRouting } from './api'
-import { Field, Switch } from './ui'
+import { Field, Info, Switch } from './ui'
+import { t, Trans } from './i18n'
 
 const lines = (v: string[]) => v.join('\n')
 const parse = (s: string) => s.split('\n').map((x) => x.trim())
@@ -16,48 +17,42 @@ export function RoutingForm({ r, set }: { r: ClientRouting; set: (r: ClientRouti
       <label className="row" style={{ gap: 10, marginBottom: 12 }}>
         <Switch checked={r.ruDirect} onChange={(v) => set({ ...r, ruDirect: v })} />
         <span>
-          <b>RU напрямую</b>
-          <div className="small text-2">Российские сайты (geosite:category-ru, .ru, .su, .рф) и адреса (geoip:ru) идут сразу с устройства, мимо туннеля</div>
+          <b>{t('routing.russia_direct')}<Info>{t('routing.russian_sites_geosite_category')}</Info></b>
         </span>
       </label>
       <div className="grid2">
-        <Field label="DNS для прямых сайтов" help="По одному в строке: localhost — DNS устройства, IP (77.88.8.8 — Яндекс) или DoH https://…">
+        <Field label={t('routing.dns_for_direct_sites')} help={t('routing.one_per_line')} info={t('routing.dns_info')}>
           <textarea className="input mono" rows={3} {...list('dnsDirect')} placeholder={'localhost\n77.88.8.8'} />
         </Field>
-        <Field label="DNS через туннель" help="Для всего остального: IP или DoH. Запросы идут через сервер">
+        <Field label={t('routing.dns_through_the_tunnel')} help={t('routing.one_per_line')} info={t('routing.tunnel_dns_info')}>
           <textarea className="input mono" rows={3} {...list('dnsProxy')} placeholder={'https://1.1.1.1/dns-query\nhttps://8.8.8.8/dns-query'} />
         </Field>
       </div>
       <div className="grid2">
-        <Field label="Торренты" help="BitTorrent: Mihomo не умеет его распознавать, там правило не действует">
+        <Field label={t('routing.torrents')} info={t('routing.bittorrent_mihomo_cannot_detect')}>
           <select className="input" value={r.torrent} onChange={(e) => set({ ...r, torrent: e.target.value as ClientRouting['torrent'] })}>
-            <option value="direct">напрямую</option>
-            <option value="block">блокировать</option>
-            <option value="proxy">через туннель</option>
+            <option value="direct">{t('routing.direct')}</option>
+            <option value="block">{t('routing.block')}</option>
+            <option value="proxy">{t('routing.through_the_tunnel')}</option>
           </select>
         </Field>
-        <Field label="Реклама" help="geosite:category-ads-all → блок">
+        <Field label={t('routing.ads')} help={t('routing.geosite_category_ads_all_block')}>
           <label className="row" style={{ gap: 10, height: 36 }}>
-            <Switch checked={r.blockAds} onChange={(v) => set({ ...r, blockAds: v })} /> <span>блокировать рекламу</span>
+            <Switch checked={r.blockAds} onChange={(v) => set({ ...r, blockAds: v })} /> <span>{t('routing.block_ads')}</span>
           </label>
         </Field>
       </div>
+      <div className="label" style={{ margin: '4px 0 8px' }}>{t('routing.rule_lists')}<Info><Trans k="routing.lists_take_one_entry_per" /></Info></div>
       <div className="grid3">
-        <Field label="Всегда напрямую">
+        <Field label={t('routing.always_direct')}>
           <textarea className="input mono" rows={4} {...list('direct')} placeholder={'domain:example.ru\ngeoip:by'} />
         </Field>
-        <Field label="Всегда через туннель" help="Важнее «RU напрямую» и прямого списка">
+        <Field label={t('routing.always_through_the_tunnel')} help={t('routing.takes_priority_over_russia')}>
           <textarea className="input mono" rows={4} {...list('proxy')} placeholder={'domain:youtube.com\ngeosite:telegram'} />
         </Field>
-        <Field label="Блокировать">
+        <Field label={t('routing.block_2')}>
           <textarea className="input mono" rows={4} {...list('block')} placeholder={'domain:ads.example.com'} />
         </Field>
-      </div>
-      <div className="small text-2">
-        Списки — по одной записи в строке, как в Xray: <span className="mono">domain:</span> (домен с поддоменами, можно без префикса), <span className="mono">full:</span>,{' '}
-        <span className="mono">keyword:</span>, <span className="mono">regexp:</span>, <span className="mono">geosite:</span>, <span className="mono">geoip:</span>, IP или подсеть.
-        Кириллические домены — в punycode (.рф → xn--p1ai). Приложение целиком — <span className="mono">process:</span> и имя файла
-        (<span className="mono">process:FortniteClient-Win64-Shipping.exe</span>) или пакета Android: так идёт и трафик без имени сайта, например матчи игр.
       </div>
     </>
   )

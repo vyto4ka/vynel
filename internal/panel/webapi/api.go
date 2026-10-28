@@ -13,6 +13,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
@@ -23,7 +24,7 @@ func (s *Server) routes() {
 	s.api.HandleFunc("POST /api/login", s.login)
 	s.api.HandleFunc("POST /api/logout", s.logout)
 	s.api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, &httpError{http.StatusNotFound, "unknown API endpoint"})
+		writeError(w, r, &httpError{http.StatusNotFound, "unknown API endpoint"})
 	})
 
 	s.handle("GET /api/session", s.session)
@@ -80,6 +81,7 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/inbounds/{id}", s.detachInbound)
 	s.handle("GET /api/inbounds/{id}/config", s.inboundConfig)
 	s.editorRoutes()
+	s.xrayRoutes()
 
 	s.subscriptionRoutes()
 	s.extraRoutes()
@@ -489,7 +491,7 @@ func (s *Server) user(r *http.Request) (any, error) {
 		links = append(links, map[string]any{"tag": h.Tag, "node": h.NodeCode, "remark": h.Remark, "hidden": h.Hidden, "link": subscription.Link(h, u.UUID)})
 	}
 	out["links"] = links
-	return out, nil
+	return localize(r, out, "problem"), nil
 }
 
 func (s *Server) updateUser(r *http.Request) (any, error) {
@@ -654,7 +656,7 @@ func (s *Server) groups(r *http.Request) (any, error) {
 		}
 		out = append(out, map[string]any{"id": g.ID, "name": g.Name, "description": g.Description, "users": counts[g.ID], "rules": rl})
 	}
-	return out, nil
+	return localize(r, out, "label"), nil
 }
 
 // refLabels names access rule targets: profile names, node codes, inbound tags.
@@ -1004,7 +1006,11 @@ func (s *Server) nodeChecklist(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.svc.NodeChecklist(r.Context(), id, s.cfg.Connected)
+	steps, err := s.svc.NodeChecklist(r.Context(), id, s.cfg.Connected)
+	if err != nil {
+		return nil, err
+	}
+	return localize(r, steps, "title", "detail"), nil
 }
 
 func (s *Server) nodeAction(r *http.Request) (any, error) {
@@ -1098,7 +1104,7 @@ func (s *Server) profiles(r *http.Request) (any, error) {
 		out = append(out, map[string]any{"id": p.ID, "name": p.Name, "templateId": p.TemplateID, "templateTitle": titles[p.TemplateID],
 			"values": publicValues(p.Values), "override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "inbounds": tags})
 	}
-	return out, nil
+	return localize(r, out, "templateTitle"), nil
 }
 
 type profileIn struct {
@@ -1195,6 +1201,7 @@ func (s *Server) settings(r *http.Request) (any, error) {
 		return nil, err
 	}
 	localIPs := s.localIPs(r)
+	lang := i18n.FromRequest(r)
 	known := map[string]bool{}
 	out := make([]map[string]any, 0, len(settingDefs)+len(stored))
 	for _, d := range settingDefs {
@@ -1207,7 +1214,7 @@ func (s *Server) settings(r *http.Request) (any, error) {
 				opts = append([]string{v}, opts...)
 			}
 		}
-		out = append(out, map[string]any{"key": d.Key, "section": d.Section, "title": d.Title, "hint": d.Hint, "help": d.Help, "type": d.Type,
+		out = append(out, map[string]any{"key": d.Key, "section": i18n.T(lang, d.Section), "title": i18n.T(lang, d.Title), "hint": i18n.T(lang, d.Hint), "help": i18n.T(lang, d.Help), "type": d.Type,
 			"options": opts, "default": d.Default, "value": v, "set": set, "movesPanel": movesPanel[d.Key]})
 	}
 	var extra []string
@@ -1218,7 +1225,7 @@ func (s *Server) settings(r *http.Request) (any, error) {
 	}
 	sort.Strings(extra)
 	for _, k := range extra {
-		out = append(out, map[string]any{"key": k, "section": "Прочее", "title": k, "type": "string", "value": stored[k], "set": true})
+		out = append(out, map[string]any{"key": k, "section": i18n.T(lang, "Прочее"), "title": k, "type": "string", "value": stored[k], "set": true})
 	}
 	return out, nil
 }
@@ -1306,5 +1313,9 @@ func (s *Server) stealth(r *http.Request) (any, error) {
 }
 
 func (s *Server) network(r *http.Request) (any, error) {
-	return s.svc.Network(r.Context())
+	n, err := s.svc.Network(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	return localize(r, n, "error"), nil
 }

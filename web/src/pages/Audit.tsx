@@ -1,18 +1,19 @@
 import { AuditEntry, get } from '../api'
 import { dateTime } from '../format'
 import { Empty, Loading, useLoad } from '../ui'
+import { t } from '../i18n'
 
-const actors: Record<string, string> = { admin: 'веб', cli: 'терминал', system: 'система', bot: 'бот', api: 'API' }
+const actors: Record<string, string> = { admin: t('audit.web'), cli: t('audit.terminal'), system: t('audit.system'), bot: t('audit.bot'), api: 'API' }
 
 export function Audit() {
   const { data, error } = useLoad(() => get<AuditEntry[]>('audit?limit=300'), [], 30000)
   if (!data) return <Loading error={error} />
   return (
     <div className="card">
-      {data.length === 0 ? <Empty>Изменений пока нет</Empty> : (
+      {data.length === 0 ? <Empty>{t('audit.no_changes_yet')}</Empty> : (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Объект</th><th>Подробности</th></tr></thead>
+            <thead><tr><th>{t('audit.when')}</th><th>{t('audit.who')}</th><th>{t('audit.what')}</th><th>{t('audit.object')}</th><th>{t('audit.details')}</th></tr></thead>
             <tbody>
               {data.map((e) => (
                 <tr key={e.id}>

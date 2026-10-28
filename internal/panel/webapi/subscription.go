@@ -40,13 +40,13 @@ func (s *Server) subConfig(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	return localize(r, map[string]any{
 		"routing": routing, "defaultRouting": service.DefaultClientRouting(),
 		"basics": s.svc.SubBasicsGet(ctx), "headers": hs, "page": page,
 		"headerCatalog": service.SubHeaderCatalog, "appCatalog": service.SubAppCatalog,
 		"defaultHeaders": service.DefaultSubHeaders(), "defaultPage": service.DefaultSubPage(),
 		"variables": service.SubVariables, "rules": rules, "defaultRules": service.DefaultSubRules(), "formats": service.SubFormats,
-	}, nil
+	}, "description", "example", "apps"), nil
 }
 
 type subDraft struct {

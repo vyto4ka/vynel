@@ -119,8 +119,20 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
 		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
-		UpdateStatus: rec.UpdateStatus})
+		UpdateStatus: rec.UpdateStatus, XrayTest: xrayTester(cfg.Xray)})
 	return p, func() { st.Close() }, nil
+}
+
+// xrayTester lets this server's Xray read a config before the panel hands it to nodes; nil when
+// the panel has no Xray of its own (a panel without a local node).
+func xrayTester(bin xray.Binary) func(ctx context.Context, cfg []byte) error {
+	if bin.Path == "" {
+		return nil
+	}
+	if _, err := os.Stat(bin.Path); err != nil {
+		return nil
+	}
+	return bin.Test
 }
 
 // nodeAction runs the panel's node actions through the node's live session.

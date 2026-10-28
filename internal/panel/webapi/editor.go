@@ -108,7 +108,11 @@ func dropMasked(v map[string]any) map[string]any {
 // ---- templates ----
 
 func (s *Server) profileTemplates(r *http.Request) (any, error) {
-	return s.svc.ProfileTemplates(r.Context())
+	ts, err := s.svc.ProfileTemplates(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	return localize(r, ts, "title", "summary", "description"), nil
 }
 
 func (s *Server) templateReference(*http.Request) (any, error) {
@@ -126,7 +130,7 @@ func (s *Server) checkTemplate(r *http.Request) (any, error) {
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}, nil
 	}
-	return map[string]any{"ok": true, "id": t.ID, "title": t.Title, "variables": t.Variables, "sample": maskSecrets(rendered)}, nil
+	return localize(r, map[string]any{"ok": true, "id": t.ID, "title": t.Title, "variables": t.Variables, "sample": maskSecrets(rendered)}, "title", "description"), nil
 }
 
 func (s *Server) saveProfileTemplate(r *http.Request) (any, error) {
@@ -212,7 +216,7 @@ func (s *Server) profile(r *http.Request) (any, error) {
 	}
 	for _, p := range ps {
 		if p.ID == id {
-			return s.profileDTO(r.Context(), p), nil
+			return localize(r, s.profileDTO(r.Context(), p), "title", "summary", "description", "templateTitle"), nil
 		}
 	}
 	return nil, service.ErrNotFound
@@ -346,13 +350,15 @@ func (s *Server) inbound(r *http.Request) (any, error) {
 		"override": over, "profile": map[string]any{"id": prof.ID, "name": prof.Name}, "addresses": al}
 	if t != nil {
 		out["variables"] = t.Variables
+		// The profile's inbound with ${VARIABLES} in place: the page shows which lines a field fills.
+		out["inboundSource"], out["hostSource"] = service.ProfileSources(t, prof)
 	}
 	if rendered, err := s.svc.RenderNodeInbound(ctx, id); err == nil {
 		out["rendered"] = maskSecrets(rendered)
 	} else {
 		out["error"] = err.Error()
 	}
-	return out, nil
+	return localize(r, out, "description"), nil
 }
 
 func (s *Server) updateInbound(r *http.Request) (any, error) {

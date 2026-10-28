@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/update"
 )
@@ -92,9 +93,7 @@ func (u *updates) dismiss(id int64) {
 }
 
 // silentNode explains an update the node never reported.
-const silentNode = "Нода не сообщила о начале обновления за 2 минуты. Скорее всего, на ней версия, которая ещё не умеет " +
-	"обновляться из панели: обновите её один раз установщиком (--mode update), дальше обновления из панели будут видны. " +
-	"Лог на ноде: /var/log/vynel-update.log"
+const silentNode = "Нода не сообщила о начале обновления за 2 минуты. Скорее всего, на ней версия, которая ещё не умеет обновляться из панели: обновите её один раз установщиком (--mode update), дальше обновления из панели будут видны. Лог на ноде: /var/log/vynel-update.log"
 
 // state decides what to show for one server from what the panel did (its job), what the server
 // reports (st; nil = nothing yet, or an agent too old to report) and the version it runs now.
@@ -240,11 +239,21 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 	return info, nil
 }
 
-func (s *Server) getUpdates(r *http.Request) (any, error) { return s.updateInfo(r.Context(), false) }
+func (s *Server) getUpdates(r *http.Request) (any, error) { return s.localUpdateInfo(r) }
 
 func (s *Server) checkUpdates(r *http.Request) (any, error) {
 	s.upd.check(r.Context(), true)
-	return s.updateInfo(r.Context(), false)
+	return s.localUpdateInfo(r)
+}
+
+// localUpdateInfo is updateInfo with the panel's own entry named in the language of the request.
+func (s *Server) localUpdateInfo(r *http.Request) (any, error) {
+	info, err := s.updateInfo(r.Context(), false)
+	if err != nil {
+		return nil, err
+	}
+	info.Panel.Name = i18n.T(i18n.FromRequest(r), info.Panel.Name)
+	return info, nil
 }
 
 // dismissUpdate is POST /api/updates/dismiss {"id": N}: hide a finished or failed update.

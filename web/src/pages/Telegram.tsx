@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react'
 import { del, get, post, put } from '../api'
 import { dateTime } from '../format'
 import { Badge, CopyField, Field, Icon, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { t, Trans } from '../i18n'
 
 interface BotInfo {
   hasToken: boolean
@@ -28,7 +29,7 @@ export function Telegram() {
 
   if (!info.data) return <Loading error={info.error} />
   const d = info.data
-  const save = async (body: Record<string, unknown>, ok = 'Сохранено') => {
+  const save = async (body: Record<string, unknown>, ok = t('common.saved')) => {
     const r = await act(() => put<BotInfo>('bot', body), ok)
     if (r) info.setData(r)
     return r
@@ -40,29 +41,29 @@ export function Telegram() {
       <div className="card">
         <div className="card-head">
           <div>
-            <h3>Бот <Info>Управление пользователями, вход в панель без пароля, бэкапы и уведомления о нодах — в личном чате с ботом.</Info></h3>
+            <h3>{t('telegram.bot')}{' '}<Info>{t('telegram.user_management_passwordless')}</Info></h3>
           </div>
-          {!d.hasToken ? <Badge>не настроен</Badge> : st.running ? <Badge color="green" dot>@{st.username}</Badge> : st.error ? <Badge color="pink" dot>ошибка</Badge> : <Badge color="amber" dot>запускается</Badge>}
+          {!d.hasToken ? <Badge>{t('telegram.not_set_up')}</Badge> : st.running ? <Badge color="green" dot>@{st.username}</Badge> : st.error ? <Badge color="pink" dot>{t('common.error')}</Badge> : <Badge color="amber" dot>{t('telegram.starting')}</Badge>}
         </div>
         <div className="card-pad">
           {st.error && <div className="alert pink" style={{ marginBottom: 14 }}>{st.error}</div>}
           {!d.hasToken && (
             <ol className="list-plain small text-2" style={{ marginTop: 0 }}>
-              <li>В Telegram откройте <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> → <code>/newbot</code> → имя и username бота.</li>
-              <li>Скопируйте токен вида <code>123456789:AA…</code> и вставьте ниже.</li>
-              <li>Затем привяжите свой аккаунт кодом — бот отвечает только привязанным админам.</li>
+              <li><Trans k="telegram.in_telegram_open_newbot_the" v={{ v: <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> }} /></li>
+              <li><Trans k="telegram.copy_the_token_that_looks" /></li>
+              <li>{t('telegram.then_link_your_account_with')}</li>
             </ol>
           )}
           <form className="row" style={{ flexWrap: 'nowrap' }} onSubmit={async (e: FormEvent) => {
             e.preventDefault()
-            if (await save({ token }, 'Токен сохранён — бот запустится через несколько секунд')) setToken('')
+            if (await save({ token }, t('telegram.token_saved_the_bot_will'))) setToken('')
           }}>
             <input className="input mono" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)}
-              placeholder={d.hasToken ? 'токен задан — вставьте новый, чтобы сменить' : '123456789:AA…'} />
-            <button className="btn primary" disabled={!token.trim()}>Сохранить</button>
+              placeholder={d.hasToken ? t('telegram.token_is_set_paste_a') : '123456789:AA…'} />
+            <button className="btn primary" disabled={!token.trim()}>{t('common.save')}</button>
             {d.hasToken && <button type="button" className="btn danger" onClick={async () => {
-              if (await confirm('Выключить бота? Уведомления и ночные бэкапы приходить перестанут.', 'Выключить')) save({ token: '' }, 'Бот выключен')
-            }}>Выключить</button>}
+              if (await confirm(t('telegram.turn_the_bot_off_notifications'), t('telegram.turn_off'))) save({ token: '' }, t('telegram.bot_turned_off'))
+            }}>{t('telegram.turn_off')}</button>}
           </form>
         </div>
       </div>
@@ -70,36 +71,36 @@ export function Telegram() {
       <div className="card">
         <div className="card-head">
           <div>
-            <h3>Администраторы</h3>
-            <div className="card-sub">Все с полными правами. Остальным бот не отвечает вовсе</div>
+            <h3>{t('telegram.administrators')}</h3>
+            <div className="card-sub">{t('telegram.all_have_full_rights_the')}</div>
           </div>
           <button className="btn sm" disabled={!d.hasToken} onClick={async () => {
             const r = await act(() => post<{ code: string; minutes: number; link?: string; username?: string }>('bot/code'))
             if (r) setCode(r)
-          }}><Icon name="plus" /> Привязать аккаунт</button>
+          }}><Icon name="plus" />{' '}{t('telegram.link_an_account')}</button>
         </div>
         <div className="card-pad">
           {code && (
             <div className="alert green" style={{ marginBottom: 14 }}>
-              {code.link ? <>Нажмите «Открыть бота» в том Telegram-аккаунте, который хотите привязать, и затем «Start»:</> : <>Отправьте боту сообщение:</>}
+              {code.link ? <>{t('telegram.press_open_bot_in_the')}</> : <>{t('telegram.send_the_bot_a_message')}</>}
               <div className="row" style={{ marginTop: 10 }}>
-                {code.link && <a className="btn primary" href={code.link} target="_blank" rel="noreferrer"><Icon name="telegram" /> Открыть бота</a>}
+                {code.link && <a className="btn primary" href={code.link} target="_blank" rel="noreferrer"><Icon name="telegram" />{' '}{t('telegram.open_bot')}</a>}
                 <div className="grow" style={{ minWidth: 200 }}><CopyField value={`/start ${code.code}`} /></div>
               </div>
-              <div className="small" style={{ marginTop: 8 }}>Код одноразовый и действует {code.minutes} минут. Список ниже обновится сам.</div>
+              <div className="small" style={{ marginTop: 8 }}><Trans k="telegram.the_code_is_single_use" v={{ minutes: code.minutes }} /></div>
             </div>
           )}
-          {d.admins.length === 0 ? <div className="muted small">Пока никого. Привязанный аккаунт будет получать уведомления и бэкапы.</div> : (
+          {d.admins.length === 0 ? <div className="muted small">{t('telegram.nobody_yet_a_linked_account')}</div> : (
             <table className="table">
               <tbody>
                 {d.admins.map((a) => (
                   <tr key={a.id}>
                     <td><b>{a.name || a.id}</b> {a.username && <span className="muted">@{a.username}</span>}<div className="small muted mono">id {a.id}</div></td>
-                    <td className="small muted nowrap">с {dateTime(a.boundAt)}</td>
+                    <td className="small muted nowrap"><Trans k="telegram.since" v={{ v: dateTime(a.boundAt) }} /></td>
                     <td style={{ width: 40 }}>
-                      <button className="btn ghost icon sm" title="Отвязать" onClick={async () => {
-                        if (await confirm(<>Отвязать <b>{a.name || a.id}</b>? Бот перестанет ему отвечать.</>, 'Отвязать'))
-                          act(() => del(`bot/admins/${a.id}`), 'Отвязан').then(() => info.reload())
+                      <button className="btn ghost icon sm" title={t('common.unlink')} onClick={async () => {
+                        if (await confirm(<><Trans k="telegram.unlink_the_bot_will_stop" v={{ v: a.name || a.id }} /></>, t('common.unlink')))
+                          act(() => del(`bot/admins/${a.id}`), t('telegram.unlinked')).then(() => info.reload())
                       }}><Icon name="trash" /></button>
                     </td>
                   </tr>
@@ -111,72 +112,67 @@ export function Telegram() {
       </div>
 
       <div className="card">
-        <div className="card-head"><div><h3>Бэкапы <Info>
-          Архив: база панели (пользователи, ноды, ключи, настройки, статистика) и внутренний CA, которому доверяют ноды. Из него поднимается новая панель —
-          установщик с <code>--restore файл</code> или <code>vynel restore файл</code>, ноды переподключаются сами.
-        </Info></h3><div className="card-sub">последние 7 ночных — ещё и на сервере, в <code>/var/lib/vynel/backups</code></div></div></div>
+        <div className="card-head"><div><h3>{t('telegram.backups')}{' '}<Info><Trans k="telegram.an_archive_the_panel_database" /></Info></h3><div className="card-sub"><Trans k="telegram.the_last_7_nightly_ones" /></div></div></div>
         <div className="card-pad">
           <div className="grid2">
-            <Field label="Каждый день в" help="Пусто — не присылать">
+            <Field label={t('telegram.every_day_at')} help={t('telegram.empty_do_not_send')}>
               <input className="input" type="time" defaultValue={d.backupTime === 'off' ? '' : d.backupTime}
                 onBlur={(e) => { if ((e.target.value || 'off') !== d.backupTime) save({ backupTime: e.target.value }) }} />
             </Field>
-            <Field label="Часовой пояс" info="Для расписания и времени в сообщениях бота.">
+            <Field label={t('telegram.time_zone')} info={t('telegram.for_the_schedule_and_the')}>
               <select className="input" value={d.timezone} onChange={(e) => save({ timezone: e.target.value })}>
                 {(zones.includes(d.timezone) ? zones : [d.timezone, ...zones]).map((z) => <option key={z} value={z}>{z}</option>)}
               </select>
             </Field>
           </div>
-          <Field label="Шифровать бэкапы паролем" help={d.backupEncrypted ? 'Включено: без пароля бэкап не открыть' : 'Необязательно'}
-            info="С паролем бэкапы (Telegram, скачивание, копии на сервере) — файлы .age; их открывает vynel restore (спросит пароль) или age -d. Telegram и так доверенное место, так что это по желанию.">
+          <Field label={t('telegram.encrypt_backups_with_a_password')} help={d.backupEncrypted ? t('telegram.on_a_backup_cannot_be') : t('common.optional')}
+            info={t('telegram.with_a_password_backups_telegram')}>
             <div className="row">
-              <input className="input" type="password" autoComplete="new-password" placeholder={d.backupEncrypted ? 'новый пароль' : 'не короче 8 символов'}
+              <input className="input" type="password" autoComplete="new-password" placeholder={d.backupEncrypted ? t('telegram.new_password') : t('telegram.at_least_8_characters')}
                 value={backupPw} onChange={(e) => setBackupPw(e.target.value)} />
               <button className="btn" disabled={backupPw.length < 8}
-                onClick={async () => { if (await save({ backupPassword: backupPw }, 'Бэкапы шифруются')) setBackupPw('') }}>
-                {d.backupEncrypted ? 'Сменить' : 'Включить'}
+                onClick={async () => { if (await save({ backupPassword: backupPw }, t('telegram.backups_are_encrypted'))) setBackupPw('') }}>
+                {d.backupEncrypted ? t('common.change') : t('telegram.turn_on')}
               </button>
-              {d.backupEncrypted && <button className="btn ghost" onClick={() => save({ backupPassword: '' }, 'Шифрование бэкапов выключено')}>Выключить</button>}
+              {d.backupEncrypted && <button className="btn ghost" onClick={() => save({ backupPassword: '' }, t('telegram.backup_encryption_is_off'))}>{t('telegram.turn_off')}</button>}
             </div>
           </Field>
           <div className="row">
-            <button className="btn" disabled={!st.running || d.admins.length === 0} onClick={() => act(() => post('bot/backup'), 'Бэкап отправлен в Telegram')}>
-              <Icon name="telegram" /> Отправить бэкап сейчас
-            </button>
-            <a className="btn" href="api/backup" download><Icon name="refresh" /> Скачать бэкап</a>
+            <button className="btn" disabled={!st.running || d.admins.length === 0} onClick={() => act(() => post('bot/backup'), t('telegram.backup_sent_to_telegram'))}>
+              <Icon name="telegram" />{' '}{t('telegram.send_a_backup_now')}</button>
+            <a className="btn" href="api/backup" download><Icon name="refresh" />{' '}{t('telegram.download_a_backup')}</a>
           </div>
-          <div className="small pink-text" style={{ marginTop: 10 }}>В бэкапе ключи всех нод и пользователей: храните его как пароль.</div>
+          <div className="small pink-text" style={{ marginTop: 10 }}>{t('telegram.a_backup_holds_the_keys')}</div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-head"><h3>Сводка и вход</h3></div>
+        <div className="card-head"><h3>{t('telegram.summary_and_sign_in')}</h3></div>
         <div className="card-pad">
-          <Field label="Сводка за сутки каждый день в" help="Пусто — не присылать. Сразу: /summary" info="Трафик, активные пользователи, у кого заканчивается подписка, состояние нод.">
+          <Field label={t('telegram.daily_summary_at')} help={t('telegram.empty_do_not_send_right')} info={t('telegram.traffic_active_users_whose')}>
             <input className="input" style={{ maxWidth: 160 }} type="time" defaultValue={d.summaryTime === 'off' ? '' : d.summaryTime}
               onBlur={(e) => { if ((e.target.value || 'off') !== d.summaryTime) save({ summaryTime: e.target.value }) }} />
           </Field>
-          <div className="muted small">
-            Сообщения о входах и кнопка «Панель» <Info>
-              <p>О каждом входе в веб-панель бот пишет сразу — с кнопкой «Завершить эту сессию». Все сессии: /sessions в боте или «Аккаунт» в панели.</p>
-              <p>Кнопка «Панель» у поля ввода в чате с ботом открывает панель прямо в Telegram — без пароля, только для привязанных админов.</p>
+          <div className="muted small">{t('telegram.sign_in_messages_and_the')}{' '}<Info>
+              <p>{t('telegram.the_bot_writes_about_every')}</p>
+              <p>{t('telegram.the_panel_button_next_to')}</p>
             </Info>
           </div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-head"><h3>Уведомления о нодах</h3></div>
+        <div className="card-head"><h3>{t('telegram.node_notifications')}</h3></div>
         <div className="card-pad">
           <div className="field">
             <div className="row between" style={{ flexWrap: 'nowrap' }}>
               <div>
-                <div>Сообщать, если нода недоступна <Info>Одно сообщение на сбой: оно обновляется (с какого времени, сколько уже, последняя проверка), а когда нода вернётся — превращается в «снова в строю». Об ошибке применения конфигурации бот пишет всегда.</Info></div>
+                <div>{t('telegram.report_when_a_node_is')}{' '}<Info>{t('telegram.one_message_per_outage_it')}</Info></div>
               </div>
               <Switch checked={d.alerts} onChange={(v) => save({ alerts: v })} />
             </div>
           </div>
-          <Field label="Через сколько секунд без связи сообщать" info="Короткие перезапуски нод не будут тревожить.">
+          <Field label={t('telegram.after_how_many_seconds_without')} info={t('telegram.short_node_restarts_will_not')}>
             <input className="input" style={{ maxWidth: 160 }} inputMode="numeric" defaultValue={d.alertDelay}
               onBlur={(e) => { if (e.target.value !== d.alertDelay) save({ alertDelay: Number(e.target.value) || 0 }) }} />
           </Field>

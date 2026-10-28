@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { get, post } from '../api'
 import { Logo } from '../ui'
+import { t, Trans } from '../i18n'
 
 export function Login({ onLogin, error: initialError }: { onLogin: () => void; error?: string }) {
   const [login, setLogin] = useState('')
@@ -31,37 +32,34 @@ export function Login({ onLogin, error: initialError }: { onLogin: () => void; e
           <Logo />
           <div className="brand-name">vyn<span>el</span></div>
         </div>
-        <h2>Вход в панель</h2>
+        <h2>{t('login.sign_in_to_the_panel')}</h2>
         {opts && !opts.password ? (
           <>
             {error && <div className="alert pink" style={{ marginBottom: 14 }}>{error}</div>}
             {opts.mode === 'miniapp' ? (
               <>
-                <p className="text-2">Панель открывается только из Telegram: кнопка «Панель» у поля ввода в боте{opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></>}.</p>
-                <p className="muted small" style={{ marginBottom: 0 }}>Нет доступа к боту — на сервере: <code>vynel admin web mode link</code>, затем <code>vynel admin login-link</code></p>
+                <p className="text-2"><Trans k="login.the_panel_opens_only_from" v={{ v: opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></> }} /></p>
+                <p className="muted small" style={{ marginBottom: 0 }}><Trans k="login.no_access_to_the_bot" /></p>
               </>
             ) : (
               <>
-                <p className="text-2">Вход по одноразовой ссылке. Откройте Telegram-бота панели{opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></>} и отправьте <code>/login</code> или нажмите кнопку «Панель» у поля ввода.</p>
-                <p className="muted small" style={{ marginBottom: 0 }}>Без бота — на сервере: <code>vynel admin login-link</code></p>
+                <p className="text-2"><Trans k="login.sign_in_by_one_time" v={{ v: opts.bot && <> <a href={`https://t.me/${opts.bot}`}>@{opts.bot}</a></> }} /></p>
+                <p className="muted small" style={{ marginBottom: 0 }}><Trans k="login.without_the_bot_on_the" /></p>
               </>
             )}
           </>
         ) : <>
         <div className="field">
-          <label htmlFor="login">Логин</label>
+          <label htmlFor="login">{t('common.login')}</label>
           <input id="login" className="input" autoComplete="username" autoFocus value={login} onChange={(e) => setLogin(e.target.value)} />
         </div>
         <div className="field">
-          <label htmlFor="password">Пароль</label>
+          <label htmlFor="password">{t('login.password')}</label>
           <input id="password" className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </div>
         {error && <div className="alert pink" style={{ marginBottom: 14 }}>{error}</div>}
-        <button className="btn primary" style={{ width: '100%' }} disabled={busy || !login || !password}>Войти</button>
-        <p className="muted small" style={{ marginBottom: 0 }}>
-          Без пароля: команда <code>/login</code> в Telegram-боте панели.<br />
-          Забыли пароль? На сервере: <code>vynel admin web password</code>
-        </p>
+        <button className="btn primary" style={{ width: '100%' }} disabled={busy || !login || !password}>{t('common.sign_in')}</button>
+        <p className="muted small" style={{ marginBottom: 0 }}><Trans k="login.without_a_password_the_login" /><br /><Trans k="login.forgot_the_password_on_the" /></p>
         </>}
       </form>
     </div>

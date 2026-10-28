@@ -32,7 +32,7 @@ func (s *Server) stats(r *http.Request) (any, error) {
 	for _, t := range st.TopUsers {
 		top = append(top, map[string]any{"id": t.UserID, "username": t.Username, "bytes": t.Bytes})
 	}
-	return map[string]any{
+	return localize(r, map[string]any{
 		"range": st.Range, "bucket": st.Bucket, "from": st.From, "to": st.To, "timeZone": st.TimeZone,
 		"traffic": traffic, "total": st.Total, "prevTotal": st.PrevTotal,
 		"activeUsers": st.ActiveUsers, "prevActive": st.PrevActive, "peakOnline": st.PeakOnline, "onlineNow": st.OnlineNow,
@@ -40,7 +40,7 @@ func (s *Server) stats(r *http.Request) (any, error) {
 		"platforms": countsDTO(st.Platforms), "apps": countsDTO(st.Apps), "metricsSince": st.MetricsSince, "metricsBucket": st.MetricsBucket,
 		"users": map[string]int{"active": st.UsersBy[store.StatusActive], "limited": st.UsersBy[store.StatusLimited],
 			"expired": st.UsersBy[store.StatusExpired], "disabled": st.UsersBy[store.StatusDisabled]},
-	}, nil
+	}, "label"), nil
 }
 
 // points encodes a series compactly: [t, value] or [t, null] where nothing was recorded.
