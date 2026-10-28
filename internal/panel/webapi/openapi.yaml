@@ -1,0 +1,762 @@
+openapi: 3.0.3
+info:
+  title: Vynel public API
+  version: "1.0.0"
+  description: |
+    Manage users, read nodes and statistics, follow events. For billing systems, Telegram bots,
+    other panels and anything else that talks HTTP.
+
+    **Authentication.** Create a token on the «API» page of the panel and send it in every
+    request: `Authorization: Bearer vyn_…`. A token has permissions (scopes), may be limited to
+    networks, may expire and has a rate limit.
+
+    **Errors.** `{"error": {"code": "…", "message": "…", "field": "…", "request_id": "…"}}`. Switch on `code`, not on `message`.
+
+    **Retries.** Send `Idempotency-Key: <unique value>` on every request that changes something:
+    a repeat with the same key and body returns the first answer instead of doing it twice.
+
+    **Times** are RFC 3339 (UTC). **Sizes** are bytes. Lists are `{items, total, limit, offset}`.
+  license:
+    name: AGPL-3.0
+servers:
+  - url: "{{server}}"
+    description: "This panel"
+tags:
+  - name: Account
+  - name: Users
+  - name: Groups and templates
+  - name: Nodes and statistics
+  - name: Events
+security:
+  - bearerAuth: []
+paths:
+  /me:
+    get:
+      tags: [Account]
+      operationId: getMe
+      summary: "The token in use and the server time"
+      description: "Works with any valid token. A good first call to check that a token works."
+      x-required-scope: ""
+      responses:
+        "200":
+          description: "The token and the server"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /openapi.json:
+    get:
+      tags: [Account]
+      operationId: getOpenAPIJSON
+      summary: "This specification (JSON)"
+      x-required-scope: "-"
+      security: []
+      responses:
+        "200": { description: The OpenAPI document, content: { application/json: { schema: { type: object } } } }
+  /openapi.yaml:
+    get:
+      tags: [Account]
+      operationId: getOpenAPIYAML
+      summary: "This specification (YAML)"
+      x-required-scope: "-"
+      security: []
+      responses:
+        "200": { description: The OpenAPI document, content: { application/yaml: { schema: { type: string } } } }
+
+  /users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: "List users"
+      description: "Filter by status, text, Telegram account or the id in your system. `include=subscription` adds `subscription_url` to every item (slower on big lists)."
+      x-required-scope: users:read
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled, limited, expired] } }
+        - { name: search, in: query, description: Part of the username or the note, schema: { type: string } }
+        - { name: username, in: query, description: Exact username, schema: { type: string } }
+        - { name: telegram_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: external_id, in: query, description: The user's id in your system, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [username, status, traffic, expire, groups, online, created] } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+        - { name: include, in: query, schema: { type: string, enum: [subscription] } }
+      responses:
+        "200":
+          description: "A page of users"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/User" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [Users]
+      operationId: createUser
+      summary: "Create a user"
+      description: "Only `username` is required; everything else comes from the template (`template_id`, the default one if omitted) unless you set it."
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUser" }
+            example: { username: "alice", external_id: "order-1042", telegram_id: 123456789, expire_at: "2026-12-31T23:59:59Z", traffic_limit_bytes: 107374182400 }
+      responses:
+        "201":
+          description: "Created"
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/UserID" }
+    get:
+      tags: [Users]
+      operationId: getUser
+      summary: "Get a user"
+      x-required-scope: users:read
+      responses:
+        "200": { description: The user, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    patch:
+      tags: [Users]
+      operationId: updateUser
+      summary: "Change a user"
+      description: "Send only what changes. `null` means \"none\" for `expire_at` and `traffic_limit_bytes`, \"the default\" for `hwid_limit` and `ip_limit`, and clears `telegram_id` and `external_id`."
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PatchUser" }
+            example: { enabled: true, expire_at: null, note: "paid until further notice" }
+      responses:
+        "200": { description: The user after the change, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    delete:
+      tags: [Users]
+      operationId: deleteUser
+      summary: "Delete a user"
+      description: "Needs its own permission, `users:delete`, so that a token which only extends subscriptions cannot remove people."
+      x-required-scope: users:delete
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/extend:
+    post:
+      tags: [Users]
+      operationId: extendUser
+      summary: "Extend the subscription"
+      description: "Adds months and days to the later of now and the current end date, so days that are already paid are never lost. A user with no end date gets one counted from now."
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                months: { type: integer, minimum: 0, maximum: 1200 }
+                days: { type: integer, minimum: 0, maximum: 36500 }
+            example: { months: 1 }
+      responses:
+        "200": { description: The user, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/reset-traffic:
+    post:
+      tags: [Users]
+      operationId: resetUserTraffic
+      summary: "Reset the traffic counter of the period"
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "200": { description: The user, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/enable:
+    post:
+      tags: [Users]
+      operationId: enableUser
+      summary: "Turn a user on"
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "200": { description: The user, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/disable:
+    post:
+      tags: [Users]
+      operationId: disableUser
+      summary: "Turn a user off"
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "200": { description: The user, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/reissue:
+    post:
+      tags: [Users]
+      operationId: reissueUser
+      summary: "Issue a new subscription link and/or UUID"
+      description: "Use it when a link leaked. The old link (or UUID) stops working at once. With no body the subscription link is reissued."
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscription_token: { type: boolean, default: true }
+                uuid: { type: boolean, default: false }
+      responses:
+        "200": { description: The user, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/Invalid" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/subscription:
+    get:
+      tags: [Users]
+      operationId: getUserSubscription
+      summary: "The subscription link and the share links of a user"
+      x-required-scope: users:read
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+      responses:
+        "200":
+          description: "Subscription"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, nullable: true, description: "null while the subscription domain is not set up" }
+                  links:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        remark: { type: string }
+                        node: { type: string }
+                        link: { type: string, example: "vless://…" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/traffic:
+    get:
+      tags: [Users]
+      operationId: getUserTraffic
+      summary: "Traffic of a user by node and by day"
+      x-required-scope: users:read
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 365, default: 30 } }
+      responses:
+        "200":
+          description: "Traffic"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  days: { type: integer }
+                  used_in_period_bytes: { type: integer, format: int64 }
+                  lifetime_bytes: { type: integer, format: int64 }
+                  by_node:
+                    type: array
+                    items: { type: object, properties: { node: { type: string }, bytes: { type: integer, format: int64 } } }
+                  by_day:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, format: date }
+                        upload_bytes: { type: integer, format: int64 }
+                        download_bytes: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/devices:
+    get:
+      tags: [Users]
+      operationId: listUserDevices
+      summary: "Devices that fetched the subscription"
+      x-required-scope: users:read
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+      responses:
+        "200":
+          description: "Devices"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Device" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /users/{id}/devices/{device_id}:
+    delete:
+      tags: [Users]
+      operationId: deleteUserDevice
+      summary: "Free a device slot"
+      x-required-scope: users:write
+      parameters:
+        - { $ref: "#/components/parameters/UserID" }
+        - { name: device_id, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /groups:
+    get:
+      tags: [Groups and templates]
+      operationId: listGroups
+      summary: "List groups"
+      description: "Groups say which servers a user may use. Give them to a user in `group_ids`."
+      x-required-scope: groups:read
+      responses:
+        "200":
+          description: "Groups"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Group" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /groups/{id}:
+    get:
+      tags: [Groups and templates]
+      operationId: getGroup
+      summary: "Get a group"
+      x-required-scope: groups:read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { description: The group, content: { application/json: { schema: { $ref: "#/components/schemas/Group" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /user-templates:
+    get:
+      tags: [Groups and templates]
+      operationId: listUserTemplates
+      summary: "List user templates (plans)"
+      description: "A template is the preset of a new user: term, traffic, groups. Pass its id as `template_id` to create a user from it."
+      x-required-scope: templates:read
+      responses:
+        "200":
+          description: "Templates"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/UserTemplate" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /nodes:
+    get:
+      tags: [Nodes and statistics]
+      operationId: listNodes
+      summary: "List nodes with their state and load"
+      x-required-scope: nodes:read
+      responses:
+        "200":
+          description: "Nodes"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Node" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /nodes/{id}:
+    get:
+      tags: [Nodes and statistics]
+      operationId: getNode
+      summary: "Get a node"
+      x-required-scope: nodes:read
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { description: The node, content: { application/json: { schema: { $ref: "#/components/schemas/Node" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /stats/overview:
+    get:
+      tags: [Nodes and statistics]
+      operationId: getOverview
+      summary: "Numbers of the dashboard"
+      x-required-scope: stats:read
+      responses:
+        "200":
+          description: "Overview"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                      limited: { type: integer }
+                      expired: { type: integer }
+                      disabled: { type: integer }
+                  online_now: { type: integer }
+                  today_bytes: { type: integer, format: int64 }
+                  last_30_days_bytes: { type: integer, format: int64 }
+                  nodes:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      online: { type: integer }
+                  top_users_30_days:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, format: int64 }
+                        username: { type: string }
+                        bytes: { type: integer, format: int64 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /events:
+    get:
+      tags: [Events]
+      operationId: listEvents
+      summary: "The feed of events"
+      description: |
+        Everything that happened, oldest first. Keep `next_cursor` and pass it as `after` next
+        time; `after=now` starts from the present. Webhooks deliver the same events as they
+        happen; this endpoint is for catching up and for programs that cannot receive calls.
+        Events are kept for 30 days.
+      x-required-scope: events:read
+      parameters:
+        - { name: after, in: query, description: "A cursor (evt_123) or `now`", schema: { type: string } }
+        - { name: types, in: query, description: "Comma-separated types or prefixes, e.g. `user.*,node.offline`", schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+      responses:
+        "200":
+          description: "Events"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Event" } }
+                  next_cursor: { type: string, example: evt_123 }
+                  has_more: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "A token from the «API» page of the panel: `vyn_…`"
+  parameters:
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: "A unique value (a UUID) per operation. A repeat with the same key and body within 24 hours returns the first answer, with the header `Idempotent-Replayed: true`."
+      schema: { type: string, maxLength: 128 }
+  responses:
+    BadRequest:
+      description: "The request cannot be read (`bad_json`, `unknown_field`, `bad_parameter`, `bad_id`)"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unauthorized:
+      description: "No or wrong token (`unauthenticated`, `invalid_token`, `token_expired`, `token_revoked`)"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Forbidden:
+      description: "The token may not do this (`insufficient_scope`, `ip_not_allowed`)"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    NotFound:
+      description: "Not found (`user_not_found`, `group_not_found`, `node_not_found`, `device_not_found`)"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Conflict:
+      description: "Already taken (`username_taken`, `telegram_id_taken`, `external_id_taken`, `subscription_token_taken`)"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Invalid:
+      description: "The values are not acceptable (`validation_failed`, `idempotency_key_reused`); `field` says which"
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    RateLimited:
+      description: "Too many requests (`rate_limited`, `too_many_failures`); wait for `Retry-After` seconds"
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: validation_failed }
+            message: { type: string }
+            field: { type: string }
+            request_id: { type: string, example: req_0a1b2c3d4e5f6071 }
+    Page:
+      type: object
+      properties:
+        total: { type: integer, description: All items matching the filter }
+        limit: { type: integer }
+        offset: { type: integer }
+    Me:
+      type: object
+      properties:
+        token:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            prefix: { type: string }
+            scopes: { type: array, items: { type: string } }
+            allowed_networks: { type: array, items: { type: string } }
+            rate_limit_per_minute: { type: integer }
+            expires_at: { type: string, format: date-time, nullable: true }
+            created_at: { type: string, format: date-time }
+        server:
+          type: object
+          properties:
+            version: { type: string }
+            time: { type: string, format: date-time }
+    User:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        status: { type: string, enum: [active, disabled, limited, expired] }
+        enabled: { type: boolean }
+        expire_at: { type: string, format: date-time, nullable: true, description: "null = never" }
+        traffic_limit_bytes: { type: integer, format: int64, nullable: true, description: "null = unlimited" }
+        traffic_used_bytes: { type: integer, format: int64, description: Used in the current period }
+        lifetime_traffic_bytes: { type: integer, format: int64 }
+        reset_strategy: { type: string, enum: [no, day, week, month] }
+        hwid_limit: { type: integer, format: int64, nullable: true, description: "null = the panel's default" }
+        hwid_off: { type: boolean }
+        ip_limit: { type: integer, format: int64, nullable: true, description: "Addresses at once; null = the default, 0 = unlimited" }
+        client_type: { type: string }
+        note: { type: string }
+        telegram_id: { type: integer, format: int64, nullable: true }
+        external_id: { type: string, nullable: true, description: The id of this user in your system }
+        group_ids: { type: array, items: { type: integer, format: int64 } }
+        template_id: { type: integer, format: int64, nullable: true }
+        uuid: { type: string, format: uuid }
+        online_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        subscription_url: { type: string, description: "The link to give to the user (not in lists unless include=subscription)" }
+    CreateUser:
+      type: object
+      required: [username]
+      additionalProperties: false
+      properties:
+        username: { type: string, maxLength: 64, description: "Letters, digits and _ . - @" }
+        template_id: { type: integer, format: int64, description: "0 or omitted = the default template" }
+        group_ids: { type: array, items: { type: integer, format: int64 } }
+        note: { type: string }
+        expire_at: { type: string, format: date-time }
+        never_expires: { type: boolean }
+        traffic_limit_bytes: { type: integer, format: int64, description: "0 or less = unlimited" }
+        reset_strategy: { type: string, enum: [no, day, week, month] }
+        hwid_limit: { type: integer, format: int64 }
+        ip_limit: { type: integer, format: int64 }
+        client_type: { type: string }
+        telegram_id: { type: integer, format: int64 }
+        external_id: { type: string, maxLength: 128 }
+        subscription_token: { type: string, description: "Your own end of the subscription link (8-64 letters, digits, _ -); random if omitted" }
+    PatchUser:
+      type: object
+      additionalProperties: false
+      properties:
+        note: { type: string }
+        enabled: { type: boolean }
+        expire_at: { type: string, format: date-time, nullable: true }
+        traffic_limit_bytes: { type: integer, format: int64, nullable: true }
+        reset_strategy: { type: string, enum: [no, day, week, month] }
+        hwid_limit: { type: integer, format: int64, nullable: true }
+        hwid_off: { type: boolean }
+        ip_limit: { type: integer, format: int64, nullable: true }
+        client_type: { type: string }
+        group_ids: { type: array, items: { type: integer, format: int64 } }
+        telegram_id: { type: integer, format: int64, nullable: true }
+        external_id: { type: string, nullable: true }
+        subscription_token: { type: string }
+    Device:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        hwid: { type: string }
+        platform: { type: string }
+        os_version: { type: string }
+        model: { type: string }
+        user_agent: { type: string }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        last_ip: { type: string }
+    Group:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        description: { type: string }
+        member_count: { type: integer }
+        created_at: { type: string, format: date-time }
+    UserTemplate:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        is_default: { type: boolean }
+        expire_months: { type: integer }
+        expire_days: { type: integer }
+        traffic_limit_bytes: { type: integer, format: int64, nullable: true }
+        reset_strategy: { type: string }
+        hwid_limit: { type: integer, format: int64, nullable: true }
+        client_type: { type: string }
+        group_ids: { type: array, items: { type: integer, format: int64 } }
+        note: { type: string }
+    Node:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string, example: NL }
+        name: { type: string }
+        country: { type: string, example: nl }
+        flag: { type: string }
+        domain: { type: string }
+        enabled: { type: boolean }
+        state: { type: string, enum: [disabled, pending, offline, in sync, syncing] }
+        online: { type: boolean, description: The node has a live connection to the panel }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        xray_version: { type: string }
+        agent_version: { type: string }
+        today_bytes: { type: integer, format: int64 }
+        problems: { type: array, items: { type: string } }
+        metrics:
+          type: object
+          nullable: true
+          properties:
+            at: { type: string, format: date-time }
+            cpu_percent: { type: number }
+            memory_used_bytes: { type: integer, format: int64 }
+            memory_total_bytes: { type: integer, format: int64 }
+            load1: { type: number }
+            rx_bytes_per_sec: { type: integer, format: int64 }
+            tx_bytes_per_sec: { type: integer, format: int64 }
+            uptime_seconds: { type: integer, format: int64 }
+            online_users: { type: integer, format: int64 }
+    Event:
+      type: object
+      description: "The same document is a webhook body. `data` depends on the type (see docs/API.md)."
+      properties:
+        id: { type: string, example: evt_123 }
+        type: { type: string, example: user.extended }
+        created: { type: integer, format: int64, description: Unix seconds }
+        actor:
+          type: object
+          properties:
+            kind: { type: string, enum: [admin, api, bot, cli, system] }
+            id: { type: string }
+        entity:
+          type: object
+          properties:
+            type: { type: string, example: user }
+            id: { type: integer, format: int64 }
+            username: { type: string }
+            code: { type: string }
+            name: { type: string }
+        data: { type: object, additionalProperties: true }
