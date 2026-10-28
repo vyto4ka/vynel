@@ -112,6 +112,7 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	}
 	rec := reconciler.New(svc, cfg.Log.With("component", "reconciler"))
 	svc.OnChange = rec.Notify
+	svc.NodeConnected = rec.Connected
 	p := &Panel{Service: svc, CA: authority, Reconciler: rec, SNI: sni,
 		Gateway:       gateway.New(svc, authority, rec, sni, cfg.Log.With("component", "gateway")),
 		Subscriptions: subscription.NewHandler(svc, cfg.Log.With("component", "subscriptions"))}
@@ -187,7 +188,7 @@ func Run(ctx context.Context, cfg Config) error {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	errs := make(chan error, 8) // one slot per runner: a failing runner never blocks
+	errs := make(chan error, 16) // one slot per runner: a failing runner never blocks
 	run := func(name string, fn func() error) {
 		wg.Add(1)
 		go func() {
@@ -198,6 +199,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}()
 	}
 	run("reconciler", func() error { return p.Reconciler.Run(ctx) })
+	run("webhooks", func() error { return p.Service.RunWebhooks(ctx) })
 	run("gateway", func() error { return p.Gateway.Serve(ctx, cfg.GatewayListen) })
 	subListen, err := p.Service.Setting(ctx, service.SettingSubListen, service.DefaultSubListen)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
@@ -32,8 +33,14 @@ func (s *Service) CreateGroup(ctx context.Context, actor Actor, name, descriptio
 
 // DeleteGroup removes a group.
 func (s *Service) DeleteGroup(ctx context.Context, actor Actor, id int64) error {
-	return s.mutate(ctx, change{actor: actor, action: "group.delete", entity: "group", entityID: func() int64 { return id }, event: EvGroupChanged},
-		func(q store.DBTX) error { return store.DeleteGroup(ctx, q, id) })
+	diff := map[string]string{}
+	return s.mutate(ctx, change{actor: actor, action: "group.delete", entity: "group", entityID: func() int64 { return id }, event: EvGroupChanged, diff: diff},
+		func(q store.DBTX) error {
+			if g, err := store.GetGroup(ctx, q, id); err == nil {
+				diff["name"] = g.Name // the event says which group went
+			}
+			return store.DeleteGroup(ctx, q, id)
+		})
 }
 
 // GrantAccess adds an access rule to a group (docs/INBOUNDS.md §1.5).
@@ -311,6 +318,25 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 				u.Note = tpl.Note
 			}
 			u.Status = computeStatus(u, now)
+			if u.TelegramID != nil {
+				if *u.TelegramID <= 0 {
+					return invalid("telegram_id — положительное число")
+				}
+				if err := identityFree(ctx, q, 0, store.UserFilter{TelegramID: u.TelegramID}, "telegram_id"); err != nil {
+					return err
+				}
+			}
+			if u.ExternalID != nil {
+				v := strings.TrimSpace(*u.ExternalID)
+				if len([]rune(v)) > 128 || strings.ContainsFunc(v, unicode.IsControl) {
+					return invalid("external_id: до 128 символов, без управляющих")
+				}
+				if u.ExternalID = &v; v == "" {
+					u.ExternalID = nil
+				} else if err := identityFree(ctx, q, 0, store.UserFilter{ExternalID: u.ExternalID}, "external_id"); err != nil {
+					return err
+				}
+			}
 			if err := store.CreateUser(ctx, q, u); err != nil {
 				return err
 			}
@@ -465,8 +491,14 @@ func (s *Service) ReissueUser(ctx context.Context, actor Actor, id int64, subTok
 
 // DeleteUser removes a user.
 func (s *Service) DeleteUser(ctx context.Context, actor Actor, id int64) error {
-	return s.mutate(ctx, change{actor: actor, action: "user.delete", entity: "user", entityID: func() int64 { return id }, event: EvUserDeleted},
-		func(q store.DBTX) error { return store.DeleteUser(ctx, q, id) })
+	diff := map[string]string{}
+	return s.mutate(ctx, change{actor: actor, action: "user.delete", entity: "user", entityID: func() int64 { return id }, event: EvUserDeleted, diff: diff},
+		func(q store.DBTX) error {
+			if u, err := store.GetUser(ctx, q, id); err == nil {
+				diff["username"] = u.Username // the event says which user went
+			}
+			return store.DeleteUser(ctx, q, id)
+		})
 }
 
 // RefreshStatuses recomputes statuses (expiry passes with time). It returns how many changed.
@@ -550,4 +582,69 @@ func nilIfNonPositive(p *int64) *int64 {
 		return nil
 	}
 	return p
+}
+
+// UserIdentityInput links a user to accounts in other systems. Only what is marked Set changes;
+// a nil value with Set clears the link.
+type UserIdentityInput struct {
+	SetTelegramID bool
+	TelegramID    *int64
+	SetExternalID bool
+	ExternalID    *string
+}
+
+// SetUserIdentity sets the Telegram account and the external id of a user (billing keeps its own
+// id for the customer there). Each is unique among users.
+func (s *Service) SetUserIdentity(ctx context.Context, actor Actor, id int64, in UserIdentityInput) (*store.User, error) {
+	if in.SetTelegramID && in.TelegramID != nil && *in.TelegramID <= 0 {
+		return nil, invalid("telegram_id — положительное число")
+	}
+	if in.SetExternalID && in.ExternalID != nil {
+		v := strings.TrimSpace(*in.ExternalID)
+		if v == "" {
+			in.ExternalID = nil
+		} else if len([]rune(v)) > 128 || strings.ContainsFunc(v, unicode.IsControl) {
+			return nil, invalid("external_id: до 128 символов, без управляющих")
+		} else {
+			in.ExternalID = &v
+		}
+	}
+	return s.updateUser(ctx, actor, id, "user.set_details", map[string]any{"telegram_id": in.TelegramID, "external_id": in.ExternalID}, func(q store.DBTX, u *store.User) error {
+		if in.SetTelegramID {
+			if in.TelegramID != nil {
+				if err := identityFree(ctx, q, u.ID, store.UserFilter{TelegramID: in.TelegramID}, "telegram_id"); err != nil {
+					return err
+				}
+			}
+			u.TelegramID = in.TelegramID
+		}
+		if in.SetExternalID {
+			if in.ExternalID != nil {
+				if err := identityFree(ctx, q, u.ID, store.UserFilter{ExternalID: in.ExternalID}, "external_id"); err != nil {
+					return err
+				}
+			}
+			u.ExternalID = in.ExternalID
+		}
+		return nil
+	})
+}
+
+// IdentityTakenError says which identifier is already some other user's.
+type IdentityTakenError struct{ Field string }
+
+func (e *IdentityTakenError) Error() string   { return e.Field + " is already used by another user" }
+func (e *IdentityTakenError) Is(t error) bool { return t == ErrConflict }
+
+func identityFree(ctx context.Context, q store.DBTX, self int64, f store.UserFilter, field string) error {
+	us, err := store.ListUsers(ctx, q, f)
+	if err != nil {
+		return err
+	}
+	for _, o := range us {
+		if o.ID != self {
+			return &IdentityTakenError{Field: field}
+		}
+	}
+	return nil
 }
