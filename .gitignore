@@ -9,6 +9,8 @@ web/dist/*
 *.db-wal
 coverage.out
 web/tsconfig.tsbuildinfo
+__pycache__/
+*.pyc
 
 # Notes for Claude Code live outside the repository
 CLAUDE.md
