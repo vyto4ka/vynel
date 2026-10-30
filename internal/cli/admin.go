@@ -57,7 +57,7 @@ func withService(fn func(ctx context.Context, s *service.Service, cmd *cobra.Com
 }
 
 func adminCmd() *cobra.Command {
-	c := &cobra.Command{Use: "admin", Short: "Manage the panel from the command line (until the web UI exists)"}
+	c := &cobra.Command{Use: "admin", Short: "Manage the panel, users, profiles and integrations"}
 	c.PersistentFlags().StringVar(&adminDataDir, "data-dir", DefaultPanelDataDir, "panel data directory")
 	c.AddCommand(adminNodeCmd(), adminProfileCmd(), adminInboundCmd(), adminGroupCmd(), adminTemplateCmd(), adminUserCmd(), adminAuditCmd(), adminSettingCmd(), adminStatsCmd(), adminSetupCmd(), adminWebCmd(), adminBotCmd(), adminLoginLinkCmd(), adminBackupCmd(), adminAPITokenCmd())
 	return c

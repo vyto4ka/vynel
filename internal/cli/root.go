@@ -15,15 +15,15 @@ import (
 	"github.com/vyto4ka/vynel/internal/buildinfo"
 )
 
-var logLevel string
-
-// Execute runs the CLI and returns the process exit code.
-func Execute() int {
+func newRootCommand() *cobra.Command {
+	var logLevel string
 	root := &cobra.Command{
 		Use:           "vynel",
 		Short:         "vynel: VPN panel and node (Xray + nginx)",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE:          runMenu,
 		PersistentPreRunE: func(*cobra.Command, []string) error {
 			var lvl slog.Level
 			if err := lvl.UnmarshalText([]byte(logLevel)); err != nil {
@@ -35,7 +35,12 @@ func Execute() int {
 	}
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "info", "debug|info|warn|error")
 	root.AddCommand(versionCmd(), panelCmd(), nodeCmd(), adminCmd(), installCmd(), restoreCmd(), firewallCmd(), netCmd(), setupTUICmd(), updateCmd())
+	return root
+}
 
+// Execute runs the CLI and returns the process exit code.
+func Execute() int {
+	root := newRootCommand()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := root.ExecuteContext(ctx); err != nil {
