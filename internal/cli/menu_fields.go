@@ -109,7 +109,7 @@ func requiredMenuFlag(f *pflag.Flag) bool {
 
 func (m *commandMenu) flags(cmd *cobra.Command) ([]string, error) {
 	var argv []string
-	var optional []huh.Option[string]
+	var optional []menuItem
 	var selected []string
 	flags := menuFlagsFor(cmd)
 	for _, f := range flags {
@@ -128,7 +128,7 @@ func (m *commandMenu) flags(cmd *cobra.Command) ([]string, error) {
 				selected = append(selected, f.Name)
 			} else {
 				t := menuFlags[f.Name]
-				optional = append(optional, huh.NewOption(m.label(t), f.Name))
+				optional = append(optional, menuItem{t, f.Name})
 			}
 		}
 	}
@@ -137,7 +137,7 @@ func (m *commandMenu) flags(cmd *cobra.Command) ([]string, error) {
 		_, height := m.size()
 		if err := m.form(huh.NewGroup(huh.NewMultiSelect[string]().Title("Дополнительные параметры").
 			Description("Отметьте нужные пробелом. Enter — оставить остальные по умолчанию.\nEsc — отменить действие · папки данных меняются в главном меню").
-			Options(optional...).Value(&changed).Height(max(6, min(len(optional)+3, height-4))).Filtering(false))); err != nil {
+			Options(m.options(optional)...).Value(&changed).Height(max(6, min(len(optional)+3, height-4))).Filtering(false))); err != nil {
 			return nil, err
 		}
 		selected = append(selected, changed...)

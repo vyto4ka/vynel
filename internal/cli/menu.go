@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"golang.org/x/term"
@@ -151,23 +152,41 @@ func (m *commandMenu) runForm(groups ...*huh.Group) error {
 	return err
 }
 
-func (m *commandMenu) label(t menuText) string {
+type menuItem struct {
+	text  menuText
+	value string
+}
+
+func (m *commandMenu) options(items []menuItem) []huh.Option[string] {
 	width, _ := m.size()
-	label := t.title + "  · " + t.description
-	// Keep one item per row on narrow SSH terminals; its full explanation remains above the list.
-	if lipgloss.Width(label) > width-6 {
-		return t.title
+	column := 0
+	for _, item := range items {
+		column = max(column, lipgloss.Width(item.text.title))
 	}
-	return label
+	column += 4
+	title := lipgloss.NewStyle().Bold(true)
+	comment := termui.Theme().Focused.Description.Bold(false)
+	options := make([]huh.Option[string], 0, len(items))
+	for _, item := range items {
+		label := title.Render(item.text.title)
+		// Leave room for the border, cursor and checkbox. Each explanation starts in the same
+		// column; on narrow terminals it is shortened, with the full text available above/in its form.
+		if available := width - 10 - column; available >= 12 && item.text.description != "" {
+			label += strings.Repeat(" ", column-lipgloss.Width(item.text.title)) +
+				comment.Render(ansi.Truncate(item.text.description, available, "…"))
+		}
+		options = append(options, huh.NewOption(label, item.value))
+	}
+	return options
 }
 
 func (m *commandMenu) browse(cmd *cobra.Command) error {
 	selected := ""
 	for {
 		children := menuChildren(cmd)
-		options := make([]huh.Option[string], 0, len(children)+3)
+		items := make([]menuItem, 0, len(children)+3)
 		for _, child := range children {
-			options = append(options, huh.NewOption(m.label(commandText(child)), child.Name()))
+			items = append(items, menuItem{commandText(child), child.Name()})
 		}
 		title := "vynel — управление"
 		description := "Выберите раздел · " + buildinfo.Version
@@ -175,16 +194,17 @@ func (m *commandMenu) browse(cmd *cobra.Command) error {
 			t := commandText(cmd)
 			title, description = "vynel › "+t.title, t.description
 			if cmd.Runnable() {
-				options = append([]huh.Option[string]{huh.NewOption(m.label(menuText{"Обзор", t.description}), ":run")}, options...)
+				items = append([]menuItem{{menuText{"Обзор", t.description}, ":run"}}, items...)
 			}
 		} else {
-			options = append(options, huh.NewOption(m.label(menuText{"Рабочие папки", "где искать данные панели и ноды"}), ":paths"))
+			items = append(items, menuItem{menuText{"Рабочие папки", "где искать данные панели и ноды"}, ":paths"})
 		}
 		back := "← Назад"
 		if cmd == m.root {
 			back = "Выход"
 		}
-		options = append(options, huh.NewOption(back, ":back"))
+		items = append(items, menuItem{menuText{title: back}, ":back"})
+		options := m.options(items)
 		if selected == "" {
 			selected = options[0].Value
 		}
