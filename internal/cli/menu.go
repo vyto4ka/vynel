@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -42,7 +43,11 @@ func runMenu(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		child := exec.CommandContext(cmd.Context(), exe, args...)
-		child.Stdin, child.Stdout, child.Stderr = in, out, cmd.ErrOrStderr()
+		var output io.Writer = &m.result
+		if len(args) > 1 && (args[0] == "restore" || args[0] == "net" && args[1] == "add-ip") {
+			output = io.MultiWriter(out, &m.result) // these commands ask for a password / connectivity check
+		}
+		child.Stdin, child.Stdout, child.Stderr = in, output, output
 		child.Cancel = func() error { return child.Process.Signal(os.Interrupt) }
 		child.WaitDelay = 10 * time.Second // let panel/node shut down their Xray and web processes
 		return child.Run()
@@ -57,6 +62,11 @@ type commandMenu struct {
 	panelDir, nodeDir string
 	form              func(...*huh.Group) error
 	execute           func([]string) error
+	selectItem        func(string, string, []menuItem, string) (string, error)
+	showText          func(string, string) error
+	host              func(string, ...string) (string, error)
+	result            bytes.Buffer
+	offsets           map[string]int
 }
 
 func commandKey(cmd *cobra.Command) string {
@@ -116,11 +126,6 @@ func (m *commandMenu) runForm(groups ...*huh.Group) error {
 	keys.Select.Down.SetHelp("↓", "ниже")
 	keys.Select.Submit.SetHelp("enter", "выбрать")
 	keys.Select.Filter.SetEnabled(false)
-	keys.MultiSelect.Filter.SetEnabled(false)
-	keys.MultiSelect.Up.SetHelp("↑", "выше")
-	keys.MultiSelect.Down.SetHelp("↓", "ниже")
-	keys.MultiSelect.Toggle.SetHelp("пробел", "отметить")
-	keys.MultiSelect.Submit.SetHelp("enter", "дальше")
 	keys.Input.Next.SetHelp("enter", "дальше")
 	keys.Input.Prev.SetHelp("shift+tab", "назад")
 	keys.Input.Submit.SetHelp("enter", "дальше")
@@ -133,7 +138,7 @@ func (m *commandMenu) runForm(groups ...*huh.Group) error {
 	keys.Note.Submit.SetHelp("enter", "назад")
 	err := huh.NewForm(groups...).WithTheme(termui.Theme()).WithKeyMap(keys).
 		WithWidth(width).WithShowHelp(true).
-		WithProgramOptions(tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+		WithProgramOptions(tea.WithAltScreen(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
 			if k, ok := msg.(tea.KeyMsg); ok && k.Type == tea.KeyEsc {
 				back = true
 				return tea.KeyMsg{Type: tea.KeyCtrlC}
@@ -157,8 +162,7 @@ type menuItem struct {
 	value string
 }
 
-func (m *commandMenu) options(items []menuItem) []huh.Option[string] {
-	width, _ := m.size()
+func menuLabels(items []menuItem, width int) []string {
 	column := 0
 	for _, item := range items {
 		column = max(column, lipgloss.Width(item.text.title))
@@ -166,26 +170,36 @@ func (m *commandMenu) options(items []menuItem) []huh.Option[string] {
 	column += 4
 	title := lipgloss.NewStyle().Bold(true)
 	comment := termui.Theme().Focused.Description.Bold(false)
-	options := make([]huh.Option[string], 0, len(items))
+	options := make([]string, 0, len(items))
 	for _, item := range items {
 		label := title.Render(item.text.title)
-		// Leave room for the border, cursor and checkbox. Each explanation starts in the same
+		// Leave room for the border and cursor. Each explanation starts in the same
 		// column; on narrow terminals it is shortened, with the full text available above/in its form.
 		if available := width - 10 - column; available >= 12 && item.text.description != "" {
 			label += strings.Repeat(" ", column-lipgloss.Width(item.text.title)) +
 				comment.Render(ansi.Truncate(item.text.description, available, "…"))
 		}
-		options = append(options, huh.NewOption(label, item.value))
+		options = append(options, label)
 	}
 	return options
 }
 
 func (m *commandMenu) browse(cmd *cobra.Command) error {
+	if commandKey(cmd) == "firewall" {
+		return m.firewallMenu(cmd)
+	}
 	selected := ""
 	for {
 		children := menuChildren(cmd)
 		items := make([]menuItem, 0, len(children)+3)
 		for _, child := range children {
+			if commandKey(cmd) == "admin user" && child.Name() == "enable" {
+				continue // both states are managed on the user's access page
+			}
+			if commandKey(child) == "admin user disable" {
+				items = append(items, menuItem{menuText{"Доступ пользователя", "состояние, включение и отключение"}, child.Name()})
+				continue
+			}
 			items = append(items, menuItem{commandText(child), child.Name()})
 		}
 		title := "vynel — управление"
@@ -204,29 +218,17 @@ func (m *commandMenu) browse(cmd *cobra.Command) error {
 			back = "Выход"
 		}
 		items = append(items, menuItem{menuText{title: back}, ":back"})
-		options := m.options(items)
 		if selected == "" {
-			selected = options[0].Value
+			selected = items[0].value
 		}
-		_, height := m.size()
-		choice := huh.NewSelect[string]().Title(title).Value(&selected).Options(options...).
-			Height(max(6, min(len(options)+3, height-4))).Filtering(false).
-			DescriptionFunc(func() string {
-				detail := description
-				for _, child := range children {
-					if child.Name() == selected {
-						detail = commandText(child).description
-					}
-				}
-				return detail + "\nEsc — назад · Ctrl+C — выход"
-			}, &selected)
-		if err := m.form(huh.NewGroup(choice)); err != nil {
+		choice, err := m.pick(title, description, items, selected)
+		if err != nil {
 			if errors.Is(err, errMenuBack) {
 				return nil
 			}
 			return err
 		}
-		var err error
+		selected = choice
 		switch selected {
 		case ":back":
 			return nil
@@ -266,10 +268,27 @@ func (m *commandMenu) paths() error {
 }
 
 func (m *commandMenu) note(title, description string) error {
-	return m.form(huh.NewGroup(huh.NewNote().Title(title).Description(description).Next(true).NextLabel("Назад")))
+	return m.outputPage(title, description)
 }
 
 func (m *commandMenu) action(cmd *cobra.Command) error {
+	switch commandKey(cmd) {
+	case "panel":
+		return m.servicePage("vynel.service", "Панель")
+	case "node run":
+		return m.servicePage("vynel-node.service", "VPN-нода")
+	case "update":
+		return m.updatesPage()
+	case "admin web mode":
+		return m.webAccessPage()
+	case "admin user enable", "admin user disable":
+		return m.userAccessPage(cmd)
+	}
+	if commandKey(cmd) == "restore" && m.panelDir == DefaultPanelDataDir {
+		if state, err := m.unitState("vynel.service"); err == nil && (state.active == "active" || state.active == "activating") {
+			return m.note("Панель работает", "Перед восстановлением остановите её в «Служба панели». Восстановление в работающую базу не запускается.")
+		}
+	}
 	if commandKey(cmd) == "install" {
 		return m.note("Мастер установки", "Установку, перенастройку и защиту сервера выполняет установщик:\n\nbash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/install.sh)")
 	}
@@ -303,19 +322,34 @@ func (m *commandMenu) action(cmd *cobra.Command) error {
 		argv = append(argv, "--")
 		argv = append(argv, args...)
 	}
-	fmt.Fprintln(m.out, "\n"+termui.Theme().Focused.Title.Render(commandText(cmd).title))
-	if commandKey(cmd) == "panel" || commandKey(cmd) == "node run" {
-		fmt.Fprintln(m.out, "Процесс работает в этом терминале. Ctrl+C — остановить и выйти.")
-	}
-	err = m.execute(argv)
-	if m.root.Context().Err() != nil {
-		return m.root.Context().Err()
+	return m.runCommand(commandText(cmd).title, argv)
+}
+
+func (m *commandMenu) runCommand(title string, argv []string) error {
+	body, err := m.commandResult(argv)
+	if errors.Is(err, context.Canceled) {
+		return err
 	}
 	if err != nil {
-		fmt.Fprintln(m.out, termui.Theme().Focused.ErrorMessage.Render(err.Error()))
-		return m.note("Не удалось выполнить команду", "Подробности выше. Можно вернуться и изменить параметры.")
+		return m.note("Не удалось выполнить: "+title, err.Error())
 	}
-	return m.note("Готово", "Результат команды выше. Enter — вернуться к разделу.")
+	if body == "" {
+		body = "Команда выполнена."
+	}
+	return m.note(title+" — готово", body)
+}
+
+func (m *commandMenu) commandResult(argv []string) (string, error) {
+	m.result.Reset()
+	err := m.execute(argv)
+	if m.root.Context().Err() != nil {
+		return "", m.root.Context().Err()
+	}
+	body := strings.TrimSpace(m.result.String())
+	if err != nil {
+		return "", fmt.Errorf("%s\n%w", body, err)
+	}
+	return body, nil
 }
 
 func menuFlagsFor(cmd *cobra.Command) []*pflag.Flag {
