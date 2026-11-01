@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"reflect"
 	"slices"
@@ -126,8 +125,13 @@ func TestMenuOnlyExecutesConfirmedChanges(t *testing.T) {
 	root.SetContext(context.Background())
 	calls := 0
 	m := &commandMenu{root: root, out: io.Discard, panelDir: t.TempDir(), nodeDir: t.TempDir(),
-		form:    func(...*huh.Group) error { return nil }, // keep the confirmation's default: cancel
-		execute: func([]string) error { calls++; return nil },
+		form:       func(...*huh.Group) error { return nil }, // keep the confirmation's default: cancel
+		execute:    func([]string) error { calls++; return nil },
+		showText:   func(string, string) error { return nil },
+		selectItem: func(string, string, []menuItem, string) (string, error) { return "", errMenuBack },
+		host: func(string, ...string) (string, error) {
+			return "LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n", nil
+		},
 	}
 	if err := m.action(menuTestCommand(t, root, "firewall off")); err != nil {
 		t.Fatal(err)
@@ -136,7 +140,7 @@ func TestMenuOnlyExecutesConfirmedChanges(t *testing.T) {
 		t.Fatal("unconfirmed firewall operation executed")
 	}
 	m.form = func(...*huh.Group) error { return errMenuBack }
-	if err := m.action(menuTestCommand(t, root, "panel")); !errors.Is(err, errMenuBack) {
+	if err := m.action(menuTestCommand(t, root, "panel")); err != nil {
 		t.Fatalf("cancelled input: %v", err)
 	}
 	if calls != 0 {

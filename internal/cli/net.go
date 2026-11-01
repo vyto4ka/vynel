@@ -207,6 +207,8 @@ func netCmd() *cobra.Command {
 					answer <- strings.TrimSpace(strings.ToLower(line))
 				}()
 				select {
+				case <-ctx.Done():
+					return rollback("connectivity check interrupted")
 				case a := <-answer:
 					if a != "yes" && a != "y" && a != "да" {
 						return rollback("not confirmed")
