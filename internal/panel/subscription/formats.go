@@ -20,7 +20,8 @@ type Format string
 const (
 	FormatBase64  Format = "base64"  // vless:// and hysteria2:// links, one per line, base64 (v2rayN/NG, Happ, v2RayTun, Streisand, Hiddify)
 	FormatMihomo  Format = "mihomo"  // Clash Meta / Mihomo / FlClash / Stash YAML
-	FormatSingBox Format = "singbox" // sing-box JSON (SFA/SFI/Karing)
+	FormatSingBox Format = "singbox" // full sing-box JSON (SFA/SFI)
+	FormatKaring  Format = "karing"  // sing-box outbounds + remote rule sets imported by Karing
 	FormatXray    Format = "xray"    // JSON array of full Xray client configs
 	FormatHTML    Format = "html"    // page for browsers
 )
@@ -34,6 +35,8 @@ func ParseFormat(s string) (Format, bool) {
 		return FormatMihomo, true
 	case "singbox", "sing-box", "sb":
 		return FormatSingBox, true
+	case "karing":
+		return FormatKaring, true
 	case "xray", "json", "xray-json":
 		return FormatXray, true
 	case "html":
@@ -52,6 +55,12 @@ func (f Format) Supports(h service.Host) bool {
 		return h.Raw == "" && (h.Network == "tcp" || h.Network == "hysteria" || (h.Network == "xhttp" && h.Mihomo))
 	case FormatSingBox:
 		return h.Raw == "" && (h.Network == "tcp" || h.Network == "hysteria")
+	case FormatKaring:
+		if h.Raw != "" {
+			_, ok := singBoxLink(h.Raw)
+			return ok
+		}
+		return h.Network == "tcp" || h.Network == "hysteria"
 	}
 	return h.Raw == "" || f == FormatBase64
 }
@@ -81,8 +90,11 @@ func Base64(hosts []service.Host, uuid string) []byte {
 // uniqueNames makes remarks unique (Mihomo and sing-box key proxies by name): a repeated name
 // gets the first free number, checked against every name given out, so "NL", "NL 2", "NL"
 // become "NL", "NL 2", "NL 3".
-func uniqueNames(hosts []service.Host) []string {
+func uniqueNames(hosts []service.Host, reserved ...string) []string {
 	taken := map[string]bool{}
+	for _, name := range reserved {
+		taken[name] = true
+	}
 	out := make([]string, len(hosts))
 	for i, h := range hosts {
 		base := h.Remark
@@ -287,6 +299,15 @@ func singBoxOutbounds(hosts []service.Host, uuid string) ([]map[string]any, []st
 				"utls":    map[string]any{"enabled": true, "fingerprint": h.Fingerprint},
 				"reality": map[string]any{"enabled": true, "public_key": h.PublicKey, "short_id": h.ShortID},
 			}
+		} else if h.Security == "tls" {
+			tls := map[string]any{"enabled": true, "server_name": h.SNI}
+			if h.Fingerprint != "" {
+				tls["utls"] = map[string]any{"enabled": true, "fingerprint": h.Fingerprint}
+			}
+			if len(h.ALPN) > 0 {
+				tls["alpn"] = h.ALPN
+			}
+			o["tls"] = tls
 		}
 		outbounds = append(outbounds, o)
 	}
@@ -321,4 +342,46 @@ func XrayJSON(hosts []service.Host, uuid string, r service.ClientRouting) ([]byt
 		configs = append(configs, xrayClient(h, uuid, r))
 	}
 	return json.MarshalIndent(configs, "", "  ")
+}
+
+func hasRawHosts(hosts []service.Host) bool {
+	for _, h := range hosts {
+		if !h.Hidden && h.Raw != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// KeqMixed preserves full client configs alongside external links KeqDroid can parse itself.
+// Each JSON config occupies one line, as required by its mixed subscription parser.
+func KeqMixed(hosts []service.Host, uuid string, r service.ClientRouting, template string) ([]byte, error) {
+	var base map[string]any
+	if template != "" {
+		var err error
+		base, err = service.ParseClientConfig(template)
+		if err != nil {
+			return nil, err
+		}
+		delete(base, "remnawave")
+	}
+	var lines []string
+	for _, h := range hosts {
+		if h.Raw != "" {
+			lines = append(lines, Link(h, uuid))
+			continue
+		}
+		var cfg map[string]any
+		if base != nil {
+			cfg = withProxy(base, XrayOutbound(h, uuid), h.Remark)
+		} else {
+			cfg = xrayClient(h, uuid, r)
+		}
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, string(b))
+	}
+	return []byte(strings.Join(lines, "\n")), nil
 }

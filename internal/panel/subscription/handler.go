@@ -21,6 +21,8 @@ import (
 // singBoxCore matches apps built on sing-box: they have no VLESS XHTTP, whatever format they get.
 var singBoxCore = regexp.MustCompile(`(?i)karing|sing-?box|\bSF[AIMT]\b`)
 
+var keqClient = regexp.MustCompile(`(?i)keqdroid|keqdis`)
+
 // ruleRes caches compiled rule patterns; rules change rarely and are few.
 var ruleRes sync.Map // pattern → *regexp.Regexp (nil when invalid)
 
@@ -155,6 +157,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.notFound(ctx, w)
 		return
 	}
+	if name, ok := strings.CutPrefix(explicit, "karing-rules/"); ok {
+		// Rule-set requests are metadata, not subscription/device registrations. No
+		// credentials are served here, but the token and user status must still be valid.
+		routing, err := h.svc.ClientRouting(ctx)
+		body, found := KaringRuleSet(name, routing)
+		if err != nil || !found || u.Status != store.StatusActive {
+			h.notFound(ctx, w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(body)
+		return
+	}
 	rules, err := h.svc.SubRules(ctx)
 	if err != nil {
 		h.log.Warn("subscription rules", "err", err)
@@ -181,7 +197,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// An app without HWID under no device limit gets links, unless the link or the user asks
-	// for a format.
+	// for a format, or Karing needs its rule-set import profile.
 	_, own := ParseFormat(explicit)
 	if _, set := ParseFormat(u.ClientType); set {
 		own = true
@@ -200,8 +216,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("subscription routing", "err", err)
 	}
 	hosts = service.WithFragment(hosts, routing.Fragment)
+	if LinkRouting(format, r.UserAgent(), hosts) {
+		hs, _ := h.svc.SubHeaders(ctx)
+		for _, hv := range RoutingHeaders(hs, nil, r.UserAgent(), h.svc.SubBasicsGet(ctx).Title, routing) {
+			w.Header().Set(hv.Name, hv.Value)
+		}
+	}
 	var body []byte
 	switch {
+	case format == FormatKaring:
+		subURL, urlErr := h.svc.SubscriptionURL(ctx, u)
+		if urlErr != nil {
+			err = urlErr
+		} else {
+			body, err = Karing(hosts, uuid, subURL, routing)
+		}
+		w.Header().Set("Content-Type", "application/json")
+	case format == FormatXray && keqClient.MatchString(r.UserAgent()) && hasRawHosts(hosts):
+		// KeqDroid accepts full configs and URI links in one text payload. Keeping the
+		// links avoids dropping external WS/gRPC, VMess, Trojan, SS, etc. servers.
+		body, err = KeqMixed(hosts, uuid, routing, tpl)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	case format == FormatMihomo && tpl != "":
 		body, err = MihomoFromTemplate(hosts, uuid, tpl)
 		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
@@ -275,7 +310,7 @@ func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.R
 	if !v.OK {
 		return nil, v.Reason
 	}
-	if v.Links && mayLink {
+	if v.Links && mayLink && *format != FormatKaring {
 		*format = FormatBase64
 	}
 	// A panel merging this subscription in says how deep it is (see DepthHeader).
@@ -285,9 +320,10 @@ func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.R
 		return nil, "Временная ошибка, обновите подписку позже"
 	}
 	noXHTTP := singBoxCore.MatchString(r.UserAgent())
+	mixed := mayLink && *format == FormatXray && keqClient.MatchString(r.UserAgent())
 	var out []service.Host
 	for _, host := range all {
-		if !host.Hidden && format.Supports(host) && (!noXHTTP || host.Network != "xhttp") {
+		if !host.Hidden && (format.Supports(host) || mixed && host.Raw != "") && (!noXHTTP || host.Network != "xhttp") {
 			out = append(out, host)
 		}
 	}

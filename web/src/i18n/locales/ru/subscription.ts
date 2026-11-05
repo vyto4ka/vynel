@@ -1,4 +1,5 @@
 export default {
+  karing_import_profile: 'Серверы sing-box и наборы правил Karing. В приложении включите сохранение и использование правил подписки; DNS задаётся в Karing, настройка торрентов не переносится.',
   a_browser_gets_the_page: 'Браузер получает страницу, всё остальное — ссылки vless:// в base64.',
   a_full_config_with_routes: 'полный конфиг с маршрутами и DNS (KeqDroid, Happ, v2RayTun)',
   a_page_with_qr_and: 'страница с QR и кнопками',
@@ -104,7 +105,7 @@ export default {
   reset_to_defaults: 'Возвращено по умолчанию',
   response: 'Ответ',
   routes: 'Маршруты',
-  routes_go_along_with_the: 'Маршруты уходят вместе с серверами в форматах с маршрутизацией: Xray JSON (KeqDroid, Happ, v2RayTun), Clash / Mihomo и sing-box. Ссылкам vless:// маршруты не передаются.',
+  routes_go_along_with_the: 'В Xray JSON, Mihomo и sing-box маршруты входят в конфиг. Happ, INCY и KeqDroid 0.34+ получают маршруты также через заголовок Routing вместе со ссылками. В профиле для ссылок не передаются process: и торренты; KeqDroid использует DNS приложения. Все параметры передаются в полном Xray JSON. Karing получает отдельный профиль с наборами правил; нужно включить правила подписки в приложении.',
   routes_in_apps: 'Маршруты в приложениях',
   rules_without_a_field_on: 'Правил без поля во вкладке «Маршруты»: {length} (в шаблоне они работают)',
   russia_direct: ', RU напрямую',
@@ -150,6 +151,6 @@ export default {
   where_to_download_optional: 'Где скачать (необязательно)',
   which_apps: 'Каким приложениям',
   with_unsaved_changes: 'С несохранёнными изменениями',
-  xray_json_mihomo_and_sing: 'Xray JSON, Mihomo и sing-box; не для ссылок vless://',
+  xray_json_mihomo_and_sing: 'Xray JSON, Mihomo, sing-box; для ссылок в Happ, INCY и KeqDroid 0.34+ — заголовок Routing',
   your_own_expression: 'своё выражение…',
 }

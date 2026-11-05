@@ -1,4 +1,5 @@
 export default {
+  karing_import_profile: 'sing-box servers and Karing rule sets. Enable keeping and using subscription rules in the app; configure DNS in Karing. Torrent policies are not imported.',
   a_browser_gets_the_page: 'A browser gets the page, everything else gets vless:// links in base64.',
   a_full_config_with_routes: 'a full config with routes and DNS (KeqDroid, Happ, v2RayTun)',
   a_page_with_qr_and: 'a page with QR and buttons',
@@ -104,7 +105,7 @@ export default {
   reset_to_defaults: 'Reset to defaults',
   response: 'Response',
   routes: 'Routes',
-  routes_go_along_with_the: 'Routes go along with the servers in formats that have routing: Xray JSON (KeqDroid, Happ, v2RayTun), Clash / Mihomo and sing-box. vless:// links carry no routes.',
+  routes_go_along_with_the: 'Xray JSON, Mihomo and sing-box include routes in the config. Happ, INCY and KeqDroid 0.34+ also receive routes through the Routing header alongside links. Link routing profiles cannot carry process: or torrent rules; KeqDroid uses app DNS settings. All settings travel in full Xray JSON. Karing receives a separate profile with rule sets; enable subscription rules in the app.',
   routes_in_apps: 'Routes in apps',
   rules_without_a_field_on: 'Rules without a field on the “Routes” tab: {length} (they work in the template)',
   russia_direct: ', Russia direct',
@@ -150,6 +151,6 @@ export default {
   where_to_download_optional: 'Where to download (optional)',
   which_apps: 'Which apps',
   with_unsaved_changes: 'With unsaved changes',
-  xray_json_mihomo_and_sing: 'Xray JSON, Mihomo and sing-box; not for vless:// links',
+  xray_json_mihomo_and_sing: 'Xray JSON, Mihomo, sing-box; links in Happ, INCY and KeqDroid 0.34+ use the Routing header',
   your_own_expression: 'your own expression…',
 }

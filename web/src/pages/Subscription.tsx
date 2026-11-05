@@ -19,7 +19,7 @@ const tabs: [string, string][] = [
 const platformNames: Record<string, string> = { android: 'Android', ios: 'iOS', windows: 'Windows', macos: 'macOS', linux: 'Linux' }
 
 const formatNames: Record<string, string> = {
-  base64: t('subscription.vless_links_base64'), mihomo: 'Clash / Mihomo YAML', singbox: 'sing-box JSON', xray: 'Xray JSON', html: t('subscription.browser_page'),
+  base64: t('subscription.vless_links_base64'), mihomo: 'Clash / Mihomo YAML', singbox: 'sing-box JSON', karing: 'Karing (sing-box)', xray: 'Xray JSON', html: t('subscription.browser_page'),
 }
 
 // base64url для черновика в адресе предпросмотра
@@ -106,7 +106,7 @@ export function Subscription() {
           {tab === 'rules' && <ClientsTab rules={rules} set={setRules} routing={routing} setRouting={setRouting} onReset={() => reset('rules')} />}
           {tab === 'externals' && <ExternalList />}
           {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} />}
-          {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
+          {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={rules} routing={routing} dirty={dirty} />}
         </div>
         {showPreview && (
           <div className="card sub-preview">
@@ -447,12 +447,12 @@ function HeaderForm({ h, onClose, onSave }: { h: SubHeader; onClose: () => void;
   )
 }
 
-function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[]; basics: SubBasics; users: User[]; rules: SubRule[]; dirty: boolean }) {
-  const uas = ['keqdroid/0.25.1', 'Happ/4.1.0', 'v2RayTun/5.25.82', 'Hiddify/4.1.1 (android)', 'INCY/3.6.5', 'clash-verge/v2.2.3', 'FlClashX/0.4.2', 'SFA/1.14.0', 'Streisand/1.6.76', 'v2rayNG/2.2.6']
+function TestTab({ headers, basics, users, rules, routing, dirty }: { headers: SubHeader[]; basics: SubBasics; users: User[]; rules: SubRule[]; routing: ClientRouting; dirty: boolean }) {
+  const uas = ['keqdroid/0.34.1', 'Happ/4.1.0', 'v2RayTun/5.25.82', 'Hiddify/4.1.1 (android)', 'INCY/3.6.5', 'clash-verge/v2.2.3', 'FlClashX/0.4.2', 'SFA/1.14.0', 'Streisand/1.6.76', 'v2rayNG/2.2.6']
   const [ua, setUa] = useState(uas[0])
   const [userId, setUserId] = useState(0)
-  const { data, error } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules }),
-    [ua, userId, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules)])
+  const { data, error } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules, routing }),
+    [ua, userId, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules), JSON.stringify(routing)])
   return (
     <>
       <div className="card card-pad">
@@ -510,6 +510,7 @@ const clientFormats: [string, string, string][] = [
   ['xray', 'Xray JSON', t('subscription.a_full_config_with_routes')],
   ['mihomo', 'Mihomo', 'Clash Meta YAML (FlClashX, Clash Verge, Koala)'],
   ['singbox', 'sing-box', t('subscription.json_for_sing_box_and')],
+  ['karing', 'Karing', t('subscription.karing_import_profile')],
   ['html', t('subscription.page'), t('subscription.a_page_with_qr_and')],
 ]
 const templateFormats = ['mihomo', 'singbox', 'xray']

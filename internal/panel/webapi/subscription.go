@@ -160,11 +160,12 @@ func (s *Server) subURLFor(r *http.Request, u *store.User) string {
 // subTest shows what a client gets: format and headers (no device is registered).
 func (s *Server) subTest(r *http.Request) (any, error) {
 	var in struct {
-		UserID    int64                `json:"userId"`
-		UserAgent string               `json:"userAgent"`
-		Headers   *[]service.SubHeader `json:"headers"` // unsaved draft
-		Basics    *service.SubBasics   `json:"basics"`
-		Rules     *[]service.SubRule   `json:"rules"`
+		UserID    int64                  `json:"userId"`
+		UserAgent string                 `json:"userAgent"`
+		Headers   *[]service.SubHeader   `json:"headers"` // unsaved draft
+		Basics    *service.SubBasics     `json:"basics"`
+		Rules     *[]service.SubRule     `json:"rules"`
+		Routing   *service.ClientRouting `json:"routing"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -196,6 +197,26 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	req.Header.Set("User-Agent", in.UserAgent)
 	format, rule := subscription.Pick(req, "", u.ClientType, rules)
 	headers := subscription.RenderHeaders(hs, subscription.UserVars(u, s.subURLFor(r, u), b, time.Now()), in.UserAgent)
+	hosts, err := s.svc.CurrentHosts(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	if _, own := subscription.ParseFormat(u.ClientType); own {
+		hosts = nil // an explicit format stays strict, without KeqDroid's mixed extension
+	}
+	if subscription.LinkRouting(format, in.UserAgent, hosts) {
+		routing, err := s.svc.ClientRouting(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if in.Routing != nil {
+			routing = *in.Routing
+			if err := service.CheckClientRouting(&routing); err != nil {
+				return nil, err
+			}
+		}
+		headers = subscription.RoutingHeaders(hs, headers, in.UserAgent, b.Title, routing)
+	}
 	if headers == nil {
 		headers = []subscription.HeaderValue{}
 	}

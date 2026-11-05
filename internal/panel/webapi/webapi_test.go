@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -164,6 +165,31 @@ func TestSubscriptionAPI(t *testing.T) {
 	w = c.do("POST", "/api/subscription/test", `{"userAgent":"Happ/4.1.0"}`, true)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"base64"`) {
 		t.Fatalf("test: %d %s", w.Code, w.Body.String())
+	}
+	// A routing draft must be visible before saving, even with an old saved header list.
+	w = c.do("POST", "/api/subscription/test", `{"userAgent":"Happ/4.1.0","routing":{"ruDirect":false,"proxy":["domain:draft.example.org"]}}`, true)
+	var preview struct {
+		Headers []struct{ Name, Value string }
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil || w.Code != 200 {
+		t.Fatalf("routing preview: %d %s", w.Code, w.Body.String())
+	}
+	found := false
+	for _, h := range preview.Headers {
+		if h.Name == "Routing" {
+			payload := strings.SplitN(h.Value, "/onadd/", 2)
+			if len(payload) != 2 {
+				t.Fatal("invalid Routing link")
+			}
+			raw, err := base64.StdEncoding.DecodeString(payload[1])
+			if err != nil || !strings.Contains(string(raw), "domain:draft.example.org") || strings.Contains(string(raw), "geoip:ru") {
+				t.Fatalf("preview lost routing draft: %s %v", raw, err)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("automatic Routing missing from preview")
 	}
 	w = c.do("POST", "/api/subscription/test", `{"userAgent":"clash-verge/2"}`, true)
 	if strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"mihomo"`) {

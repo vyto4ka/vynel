@@ -38,13 +38,13 @@ type SubRule struct {
 }
 
 // SubFormats are the formats a rule may pick.
-var SubFormats = []string{"base64", "mihomo", "singbox", "xray", "html"}
+var SubFormats = []string{"base64", "mihomo", "singbox", "karing", "xray", "html"}
 
 // DefaultSubRules are the built-in rules (docs/ARCHITECTURE.md §8.3).
 func DefaultSubRules() []SubRule {
 	return []SubRule{
 		{Pattern: `(?i)keqdroid|keqdis`, Format: "xray", Enabled: true, Note: "KeqDroid"},
-		{Pattern: `(?i)karing`, Format: "base64", Enabled: true, Note: "Karing"},
+		{Pattern: `(?i)karing`, Format: "karing", Enabled: true, Note: "Karing"},
 		{Pattern: `(?i)clash|mihomo|stash|flclash|koala`, Format: "mihomo", Enabled: true, Note: "Clash / Mihomo"},
 		{Pattern: `(?i)sing-?box|\bSF[AIMT]\b`, Format: "singbox", Enabled: true, Note: "sing-box"},
 		{Pattern: `(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, Format: "base64", Enabled: true, Note: "Xray-приложения"},
@@ -66,6 +66,7 @@ var oldRuleNotes = map[string]string{
 
 // migrateKeqDroidRule moves the KeqDroid rule saved with the old default (links) to Xray JSON,
 // which KeqDroid takes as a regular profile with routing. A rule the admin changed is left alone.
+// Karing's unchanged built-in links rule moves to its import format with remote rule sets.
 // The built-in rules' old notes become short client names.
 func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
 	raw, ok, err := store.GetSetting(ctx, q, SettingSubRules)
@@ -78,6 +79,10 @@ func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
 	}
 	changed := false
 	for i := range rs {
+		if rs[i].Pattern == `(?i)karing` && rs[i].Format == "base64" && rs[i].Template == "" &&
+			(rs[i].Note == "Karing" || rs[i].Note == "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся") {
+			rs[i].Format, changed = "karing", true
+		}
 		if rs[i].Pattern == `(?i)keqdroid|keqdis` && rs[i].Format == "base64" && rs[i].Note == oldKeqdroidNote {
 			rs[i].Format, changed = "xray", true
 		}
@@ -258,8 +263,8 @@ var SubHeaderCatalog = []SubHeaderPreset{
 		"v2RayTun", "Обновлять подписку при каждом открытии приложения"},
 	{SubHeader{Name: "Hide-Settings", Value: "1", Clients: uaHappI},
 		"Happ, INCY", "Скрыть настройки серверов (адрес, ключи) от пользователя"},
-	{SubHeader{Name: "Routing", Value: "happ://routing/onadd/…", Clients: uaHapp},
-		"Happ", "Профиль маршрутизации (ссылка из конструктора Happ)"},
+	{SubHeader{Name: "Routing", Value: "happ://routing/onadd/…", Clients: `(?i)\b(happ|incy|keqdroid|keqdis)\b`},
+		"Happ, INCY, KeqDroid 0.34+", "Свой профиль вместо маршрутов панели. Выключенная строка отключает автоматический Routing"},
 	{SubHeader{Name: "Routing-Enable", Value: "true", Clients: uaHapp},
 		"Happ", "Включить присланную маршрутизацию"},
 	{SubHeader{Name: "ProviderID", Value: "", Clients: uaHappI},
