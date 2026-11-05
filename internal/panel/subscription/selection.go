@@ -115,7 +115,7 @@ func selectHosts(ctx context.Context, svc *service.Service, u *store.User, r *ht
 			s.Excluded = "hidden"
 		case host.Network == "xhttp" && singBoxCore.MatchString(r.UserAgent()):
 			s.Excluded = "xhttp"
-		case host.Raw != "" && !(out.Format.Supports(host) || mixed):
+		case host.Raw != "" && !out.Format.Supports(host) && !mixed:
 			s.Excluded = "raw"
 		case !out.Format.Supports(host) && !mixed:
 			s.Excluded = "format"

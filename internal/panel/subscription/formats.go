@@ -293,13 +293,14 @@ func singBoxOutbounds(hosts []service.Host, uuid string) ([]map[string]any, []st
 		if h.Flow != "" {
 			o["flow"] = h.Flow
 		}
-		if h.Security == "reality" {
+		switch h.Security {
+		case "reality":
 			o["tls"] = map[string]any{
 				"enabled": true, "server_name": h.SNI,
 				"utls":    map[string]any{"enabled": true, "fingerprint": h.Fingerprint},
 				"reality": map[string]any{"enabled": true, "public_key": h.PublicKey, "short_id": h.ShortID},
 			}
-		} else if h.Security == "tls" {
+		case "tls":
 			tls := map[string]any{"enabled": true, "server_name": h.SNI}
 			if h.Fingerprint != "" {
 				tls["utls"] = map[string]any{"enabled": true, "fingerprint": h.Fingerprint}
