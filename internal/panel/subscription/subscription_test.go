@@ -205,11 +205,28 @@ func TestHWIDHeadersAndPerUserOff(t *testing.T) {
 	}
 }
 
-// Karing (sing-box core) gets links, without XHTTP points it cannot use.
+// Karing gets a profile with routing; XHTTP is excluded for its sing-box core.
 func TestKaring(t *testing.T) {
 	e := newEnv(t)
-	ls := links(t, e.get(e.path(), "karing/1.2.24.2704 android", "kr-1"))
-	if len(ls) != 1 || !strings.HasPrefix(ls[0], "vless://"+e.user.UUID) || strings.Contains(ls[0], "type=xhttp") {
+	w := e.get(e.path(), "karing/1.2.24.2704 android", "kr-1")
+	var profile struct {
+		Proxies []map[string]any `yaml:"proxies"`
+		Rules   []string         `yaml:"rules"`
+	}
+	if err := yaml.Unmarshal(w.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	if len(profile.Proxies) != 1 || len(profile.Rules) == 0 {
+		t.Fatalf("karing profile: %s", w.Body.String())
+	}
+	for _, proxy := range profile.Proxies {
+		if proxy["network"] == "xhttp" {
+			t.Fatal("XHTTP reached Karing")
+		}
+	}
+	// Explicit links remain available for compatibility.
+	ls := links(t, e.get(e.path()+"/base64", "karing/1.2.24.2704 android", "kr-1"))
+	if len(ls) != 1 || !strings.HasPrefix(ls[0], "vless://"+e.user.UUID) {
 		t.Fatalf("karing links: %v", ls)
 	}
 }

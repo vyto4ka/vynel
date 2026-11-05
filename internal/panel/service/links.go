@@ -254,21 +254,22 @@ type DeviceInfo struct {
 
 // DeviceVerdict is the HWID decision for a subscription request.
 type DeviceVerdict struct {
-	OK     bool
-	Off    bool   // HWID is not checked (globally or for this user)
-	NoHWID bool   // the client sent no x-hwid
-	Links  bool   // let in without x-hwid because devices are not limited: give it links
-	Full   bool   // refused: the device limit is reached
-	Reason string // shown to the user inside the stub subscription
-	Count  int
-	Limit  int
+	OK     bool   `json:"ok"`
+	Off    bool   `json:"off"`
+	NoHWID bool   `json:"noHwid"`
+	Links  bool   `json:"links"` // compatibility fallback is allowed; Karing retains its format
+	Full   bool   `json:"full"`
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
+	Limit  int    `json:"limit"`
 }
 
-// CheckDevice applies the HWID policy (docs/ARCHITECTURE.md §8.2) and registers new devices.
-func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) (DeviceVerdict, error) {
+// devicePolicy is shared by inspection and registration. A terminal verdict does not
+// need a lookup or a write; otherwise the caller checks the registered devices.
+func (s *Service) devicePolicy(ctx context.Context, u *store.User, d DeviceInfo) (DeviceVerdict, bool) {
 	enabled, _ := s.Setting(ctx, SettingHWIDEnabled, "true")
 	if enabled != "true" || u.HWIDOff {
-		return DeviceVerdict{OK: true, Off: true}, nil
+		return DeviceVerdict{OK: true, Off: true}, true
 	}
 	limit := 0
 	if v, _ := s.Setting(ctx, SettingHWIDLimit, "0"); v != "" {
@@ -281,19 +282,54 @@ func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) 
 		// No device limit: an app without HWID has nothing to count against, so it gets the
 		// servers as plain links, which any app can import.
 		if limit == 0 {
-			return DeviceVerdict{OK: true, NoHWID: true, Links: true}, nil
+			return DeviceVerdict{OK: true, NoHWID: true, Links: true}, true
 		}
 		allow, _ := s.Setting(ctx, SettingHWIDAllowNone, "false")
 		if allow == "true" {
-			return DeviceVerdict{OK: true, NoHWID: true, Limit: limit}, nil
+			return DeviceVerdict{OK: true, NoHWID: true, Limit: limit}, true
 		}
 		return DeviceVerdict{NoHWID: true, Limit: limit,
-			Reason: "Приложение не передаёт HWID: включите его в настройках профиля (Karing: X-HWID) или используйте Happ, v2RayTun, KeqDroid"}, nil
+			Reason: "Приложение не передаёт HWID: включите его в настройках профиля (Karing: X-HWID) или используйте Happ, v2RayTun, KeqDroid"}, true
 	}
+	return DeviceVerdict{Limit: limit}, false
+}
+
+// PreviewDevice evaluates access without registering or touching a device.
+func (s *Service) PreviewDevice(ctx context.Context, u *store.User, d DeviceInfo) (DeviceVerdict, error) {
+	v, done := s.devicePolicy(ctx, u, d)
+	if done {
+		return v, nil
+	}
+	devices, err := s.Devices(ctx, u.ID)
+	if err != nil {
+		return v, err
+	}
+	v.Count = len(devices)
+	for _, device := range devices {
+		if device.HWID == d.HWID {
+			v.OK = true
+			return v, nil
+		}
+	}
+	if v.Limit > 0 && v.Count >= v.Limit {
+		v.Full = true
+		v.Reason = fmt.Sprintf("Лимит устройств: %d/%d", v.Count, v.Limit)
+		return v, nil
+	}
+	v.OK = true
+	return v, nil
+}
+
+// CheckDevice applies the HWID policy (docs/ARCHITECTURE.md §8.2) and registers new devices.
+func (s *Service) CheckDevice(ctx context.Context, u *store.User, d DeviceInfo) (DeviceVerdict, error) {
+	v, done := s.devicePolicy(ctx, u, d)
+	if done {
+		return v, nil
+	}
+	limit := v.Limit
 	if count, ok := s.knownDevice(u.ID, d.HWID); ok {
 		return DeviceVerdict{OK: true, Limit: limit, Count: count}, nil // seen a moment ago: nothing to write
 	}
-	v := DeviceVerdict{Limit: limit}
 	err := s.st.Tx(ctx, func(q store.DBTX) error {
 		now := s.now().Unix()
 		dev := &store.Device{UserID: u.ID, HWID: d.HWID, Platform: d.Platform, OSVersion: d.OSVersion, Model: d.Model,

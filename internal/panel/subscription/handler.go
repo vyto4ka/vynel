@@ -3,7 +3,6 @@ package subscription
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -172,21 +171,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("touch subscription", "err", err)
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	for _, hv := range h.headersFor(ctx, u, r.UserAgent()) {
-		w.Header().Set(hv.Name, hv.Value)
+	routing, err := h.svc.ClientRouting(ctx)
+	if err != nil {
+		h.log.Warn("subscription routing", "err", err)
 	}
 	if format == FormatHTML {
+		for _, hv := range h.headersFor(ctx, u, r.UserAgent(), format, routing) {
+			w.Header().Set(hv.Name, hv.Value)
+		}
 		h.page(ctx, w, r, u)
 		return
 	}
 
-	// An app without HWID under no device limit gets links, unless the link or the user asks
-	// for a format.
-	_, own := ParseFormat(explicit)
-	if _, set := ParseFormat(u.ClientType); set {
-		own = true
+	selection, err := selectHosts(ctx, h.svc, u, r, format, mayUseLinks(explicit, u.ClientType), true)
+	format = selection.Format
+	hosts, reason := selection.Hosts, selection.Reason
+	if err != nil {
+		h.log.Error("subscription selection", "err", err)
+		reason = "Временная ошибка, обновите подписку позже"
 	}
-	hosts, reason := h.hostsFor(ctx, w, r, u, ip, &format, !own)
 	if format == FormatBase64 {
 		tpl = ""
 	}
@@ -195,9 +198,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A refused client gets no credentials at all, only a server named after the reason.
 		hosts, uuid = []service.Host{Stub("⛔ " + reason)}, StubUUID
 	}
-	routing, err := h.svc.ClientRouting(ctx)
-	if err != nil {
-		h.log.Warn("subscription routing", "err", err)
+	// Device policy may have changed the format to links.
+	for _, hv := range h.headersFor(ctx, u, r.UserAgent(), format, routing) {
+		w.Header().Set(hv.Name, hv.Value)
+	}
+	for _, header := range selection.Headers {
+		w.Header().Set(header.Name, header.Value)
 	}
 	hosts = service.WithFragment(hosts, routing.Fragment)
 	var body []byte
@@ -230,71 +236,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write(body)
-}
-
-// hostsFor returns the user's hosts for a format, or a reason why the user gets a stub. An app
-// without HWID let in as one that gets links switches format to links when mayLink.
-func (h *Handler) hostsFor(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User, ip string, format *Format, mayLink bool) ([]service.Host, string) {
-	switch u.Status {
-	case store.StatusExpired:
-		exp := ""
-		if u.ExpireAt != nil {
-			exp = " " + time.Unix(*u.ExpireAt, 0).Format("02.01.2006")
-		}
-		return nil, "Подписка истекла" + exp
-	case store.StatusLimited:
-		return nil, "Трафик исчерпан"
-	case store.StatusDisabled:
-		return nil, "Подписка отключена"
-	}
-	// An address over the user's limit of addresses at once: it got the servers once, then the
-	// nodes reported it and blocked it. The same header as the HWID limit tells the app why.
-	if blocked, count, limit := h.svc.IPs().Verdict(u.ID, ip); blocked {
-		w.Header().Set("x-hwid-max-devices-reached", "true")
-		return nil, fmt.Sprintf("Превышен лимит подключений: %d/%d — отключите лишние устройства", count, limit)
-	}
-	v, err := h.svc.CheckDevice(ctx, u, service.DeviceInfo{
-		HWID: r.Header.Get("x-hwid"), Platform: r.Header.Get("x-device-os"), OSVersion: r.Header.Get("x-ver-os"),
-		Model: r.Header.Get("x-device-model"), UserAgent: r.UserAgent(), IP: ip,
-	})
-	if err != nil {
-		h.log.Error("hwid check", "err", err)
-		return nil, "Временная ошибка, обновите подписку позже"
-	}
-	// The same response headers as Remnawave: clients such as Happ and Karing use them to
-	// turn on sending x-hwid by themselves.
-	if !v.Off {
-		w.Header().Set("x-hwid-active", "true")
-		if v.NoHWID && !v.Links {
-			w.Header().Set("x-hwid-not-supported", "true")
-		}
-		if v.Full {
-			w.Header().Set("x-hwid-max-devices-reached", "true")
-		}
-	}
-	if !v.OK {
-		return nil, v.Reason
-	}
-	if v.Links && mayLink {
-		*format = FormatBase64
-	}
-	// A panel merging this subscription in says how deep it is (see DepthHeader).
-	all, err := h.svc.SubscriptionHosts(ctx, u, service.RequestDepth(r.Header.Get(service.DepthHeader)))
-	if err != nil {
-		h.log.Error("user hosts", "err", err)
-		return nil, "Временная ошибка, обновите подписку позже"
-	}
-	noXHTTP := singBoxCore.MatchString(r.UserAgent())
-	var out []service.Host
-	for _, host := range all {
-		if !host.Hidden && format.Supports(host) && (!noXHTTP || host.Network != "xhttp") {
-			out = append(out, host)
-		}
-	}
-	if len(out) == 0 {
-		return nil, "Нет серверов для этого приложения"
-	}
-	return out, ""
 }
 
 func (h *Handler) notFound(ctx context.Context, w http.ResponseWriter) {
