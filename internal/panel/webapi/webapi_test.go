@@ -187,7 +187,7 @@ func TestSubscriptionAPI(t *testing.T) {
 		t.Fatalf("rules error: %d %s", w.Code, w.Body.String())
 	}
 	w = c.do("GET", "/api/subscription/preview", "", false)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || !strings.Contains(w.Body.String(), "Открыть сохранённую страницу") || !strings.Contains(w.Body.String(), `href="happ://add/https://example.com/s/demo-token" target="_blank"`) || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
 		t.Fatalf("preview: %d %q %.100s", w.Code, w.Header().Get("X-Frame-Options"), w.Body.String())
 	}
 	if w := c.do("POST", "/api/subscription/reset", `{"part":"headers"}`, true); w.Code != 200 || !strings.Contains(w.Body.String(), "Subscription-Userinfo") {

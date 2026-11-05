@@ -84,9 +84,10 @@ details .apps{margin-top:8px}
 .foot{text-align:center;color:var(--muted);font-size:13px;margin-top:20px;white-space:pre-line}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head><body class="{{.Theme}}"><main>
+{{if .Preview}}<aside class="card" aria-label="Предпросмотр подписки"><b>Предпросмотр</b><p class="muted">Ссылки открываются отдельно. Для добавления подписки приложение должно быть установлено.</p><a class="btn outlined wide" href="{{.URL}}" target="_blank" rel="noopener noreferrer">Открыть сохранённую страницу</a></aside>{{end}}
 <div class="card hero"><div class="avatar">{{.Initial}}</div><div><h1>{{.Heading}}</h1><div class="muted">{{.Username}}</div></div></div>
 {{if .Description}}<div class="card desc">{{.Description}}</div>{{end}}
-{{if .Announce}}{{if .AnnounceURL}}<a class="ann" href="{{.AnnounceURL}}"><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></a>{{else}}<div class="ann"><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></div>{{end}}{{end}}
+{{if .Announce}}{{if .AnnounceURL}}<a class="ann" href="{{.AnnounceURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></a>{{else}}<div class="ann"><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></div>{{end}}{{end}}
 {{if .ShowTraffic}}<div class="card">
 <div class="stat"><span>Статус</span><span class="chip{{if not .Active}} bad{{end}}">{{.Status}}</span></div>
 <div class="stat"><span>Трафик</span><span>{{.Used}} / {{.Limit}}</span></div>{{if .Percent}}<div class="bar"><i style="width:{{.Percent}}%"></i></div>{{end}}
@@ -97,10 +98,10 @@ details .apps{margin-top:8px}
 {{if .Apps}}<div class="card"><h2 id="mine-h">Приложения</h2><div class="apps" id="mine"></div>
 <details id="rest-box"><summary>Другие приложения <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary><div class="apps" id="rest">
 {{range .Apps}}<div class="app{{if .Recommended}} rec{{end}}" data-p="{{.Platforms}}"><b>{{.Name}}</b>{{if .Note}}<span class="note">{{.Note}}</span>{{end}}
-<a class="btn" href="{{.Link}}"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить</a>{{if .Download}}<a class="btn text dl" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>Скачать</a>{{end}}</div>
+<a class="btn" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить</a>{{if .Download}}<a class="btn text dl" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>Скачать</a>{{end}}</div>
 {{end}}</div></details></div>{{end}}
 {{if .Instructions}}<div class="card"><h2>Как подключиться</h2><div class="steps">{{.Instructions}}</div></div>{{end}}
-{{if .SupportURL}}<a class="btn outlined wide" href="{{.SupportURL}}"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>Поддержка</a>{{end}}
+{{if .SupportURL}}<a class="btn outlined wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>Поддержка</a>{{end}}
 {{if .Footer}}<div class="foot">{{.Footer}}</div>{{end}}
 </main>
 <script>
@@ -129,6 +130,9 @@ type pageApp struct {
 
 // PageData is everything the subscription page shows.
 type PageData struct {
+	// Preview opens links outside the panel's iframe; failed external protocol
+	// launches must not replace the preview with a browser error page.
+	Preview                               bool
 	Heading, Username, Description, Theme string
 	Initial                               string
 	Accent                                template.CSS

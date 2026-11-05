@@ -306,6 +306,7 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	d.Preview = true
 	var buf bytes.Buffer
 	if err := subscription.RenderPage(&buf, d); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
