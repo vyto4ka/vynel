@@ -117,7 +117,8 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 		Gateway:       gateway.New(svc, authority, rec, sni, cfg.Log.With("component", "gateway")),
 		Subscriptions: subscription.NewHandler(svc, cfg.Log.With("component", "subscriptions"))}
 	p.Bot = bot.New(bot.Config{Service: svc, DataDir: cfg.DataDir, Version: cfg.Version, Connected: rec.Connected,
-		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
+		DialTelegram: rec.DialTelegram,
+		Log:          cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // optional own Bot API server in direct mode
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
 		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
 		UpdateStatus: rec.UpdateStatus, XrayTest: xrayTester(cfg.Xray)})

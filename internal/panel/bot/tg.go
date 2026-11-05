@@ -29,7 +29,10 @@ type client struct {
 }
 
 func newClient(api, token string) *client {
-	return &client{base: api + "/bot" + token, token: token, http: &http.Client{Timeout: 70 * time.Second}}
+	return &client{base: api + "/bot" + token, token: token, http: &http.Client{Timeout: 70 * time.Second,
+		Transport:     http.DefaultTransport.(*http.Transport).Clone(),
+		CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("telegram API redirect refused") },
+	}}
 }
 
 // apiError is an error returned by Telegram.
