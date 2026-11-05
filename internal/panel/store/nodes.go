@@ -10,6 +10,8 @@ import (
 type Node struct {
 	ID              int64
 	Name            string
+	Note            string // private admin comment; never a subscription label
+	XrayRelease     string // target tag; empty follows latest (XrayVersion is actual)
 	Code            string
 	Country         string
 	Domain          string
@@ -49,7 +51,7 @@ func (n *Node) Can(capability string) bool {
 
 const nodeCols = `id, name, code, country, domain, base_config_id, tags, local, enabled, cert_serial,
 	agent_version, xray_version, last_seen_at, desired_revision, desired_hash, applied_hash, last_error, sort,
-	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities, peer_ips`
+	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities, peer_ips, note, xray_release`
 
 func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	n := &Node{}
@@ -57,7 +59,7 @@ func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	var tags, warnings, caps, peers string
 	err := sc.Scan(&n.ID, &n.Name, &n.Code, &n.Country, &n.Domain, &base, &tags, &n.Local, &n.Enabled, &n.CertSerial,
 		&n.AgentVersion, &n.XrayVersion, &seen, &n.DesiredRevision, &n.DesiredHash, &n.AppliedHash, &n.LastError, &n.Sort,
-		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps, &peers)
+		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps, &peers, &n.Note, &n.XrayRelease)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -76,9 +78,9 @@ func CreateNode(ctx context.Context, q DBTX, n *Node) error {
 	if n.Tags == nil {
 		n.Tags = []string{}
 	}
-	res, err := q.ExecContext(ctx, `INSERT INTO nodes (name, code, country, domain, base_config_id, tags, local, enabled, sort, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.Name, n.Code, n.Country, n.Domain, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Local, n.Enabled, n.Sort, now, now)
+	res, err := q.ExecContext(ctx, `INSERT INTO nodes (name, code, country, domain, base_config_id, tags, local, enabled, sort, created_at, updated_at, note, xray_release)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.Name, n.Code, n.Country, n.Domain, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Local, n.Enabled, n.Sort, now, now, n.Note, n.XrayRelease)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -92,8 +94,8 @@ func UpdateNode(ctx context.Context, q DBTX, n *Node) error {
 	if n.Tags == nil {
 		n.Tags = []string{}
 	}
-	return execOne(ctx, q, `UPDATE nodes SET name=?, code=?, country=?, domain=?, base_config_id=?, tags=?, enabled=?, sort=?, updated_at=?
-		WHERE id=?`, n.Name, n.Code, n.Country, n.Domain, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Enabled, n.Sort, n.UpdatedAt, n.ID)
+	return execOne(ctx, q, `UPDATE nodes SET name=?, code=?, country=?, domain=?, base_config_id=?, tags=?, enabled=?, sort=?, updated_at=?, note=?, xray_release=?
+		WHERE id=?`, n.Name, n.Code, n.Country, n.Domain, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Enabled, n.Sort, n.UpdatedAt, n.Note, n.XrayRelease, n.ID)
 }
 
 // GetNode loads a node by id.

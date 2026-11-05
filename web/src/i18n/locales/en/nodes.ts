@@ -1,4 +1,16 @@
 export default {
+  private_note: 'Admin note',
+  private_note_help: 'Only panel administrators can see this. Not included in subscriptions, client configurations or the public API. Up to 4000 characters.',
+  xray_release: 'Xray release',
+  xray_latest: 'Latest release',
+  xray_pinned: 'Pin a release',
+  xray_tag: 'Xray release tag',
+  xray_releases_link: 'Official Xray releases',
+  xray_apply_update: 'Applied by “Update vynel, Xray and nginx”. The update restarts services. The selected release is kept for subsequent updates.',
+  xray_apply_install: 'The installer uses the selected Xray release and keeps the selection for subsequent updates.',
+  xray_target: 'Xray update target: {version}',
+  xray_old_agent: 'This node agent does not support Xray selection yet. Update it once with the installer (--mode update), then apply the selected release from the panel.',
+
   a_json_object_tcp_udp: 'A JSON object: tcp, udp, quicParams. Empty — as in the subscription',
   add_a_server: 'Add a server',
   add_a_server_step_1: 'Add a server · step 1 of 2',

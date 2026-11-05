@@ -467,6 +467,10 @@ func (r *Reconciler) Command(ctx context.Context, nodeID int64, cmd *nodev1.Comm
 	id := hex.EncodeToString(b)
 	ch := make(chan *nodev1.CommandResult, 1)
 	s.mu.Lock()
+	if cmd.XrayRelease != nil && (s.hello == nil || !slices.Contains(s.hello.Capabilities, update.CapXrayRelease)) {
+		s.mu.Unlock()
+		return nil, errors.New("node agent does not support Xray release selection: update it with the installer (--mode update)")
+	}
 	if s.waiters == nil {
 		s.waiters = map[string]chan *nodev1.CommandResult{}
 	}

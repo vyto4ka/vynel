@@ -12,8 +12,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
@@ -34,15 +36,38 @@ var pendingCodeRe = regexp.MustCompile(`^N[0-9]*$`)
 
 // NodeInput creates or edits a node.
 type NodeInput struct {
-	Name    string
-	Code    string // optional; derived from Country
-	Country string // ISO alpha-2
-	Domain  string
-	Local   bool
+	Note        *string // nil preserves the private comment on update; empty clears it
+	XrayRelease *string // nil preserves the target; empty follows latest
+	Name        string
+	Code        string // optional; derived from Country
+	Country     string // ISO alpha-2
+	Domain      string
+	Local       bool
+}
+
+func normalizeNodePrivate(in *NodeInput) error {
+	if in.Note != nil {
+		note := strings.TrimSpace(*in.Note)
+		if utf8.RuneCountInString(note) > 4000 {
+			return invalid("node note must be at most 4000 characters")
+		}
+		in.Note = &note
+	}
+	if in.XrayRelease != nil {
+		release, err := update.NormalizeXrayRelease(*in.XrayRelease)
+		if err != nil {
+			return invalid("%s", err)
+		}
+		in.XrayRelease = &release
+	}
+	return nil
 }
 
 // CreateNode adds a node and returns it with a fresh install token (shown once).
 func (s *Service) CreateNode(ctx context.Context, actor Actor, in NodeInput) (*store.Node, string, error) {
+	if err := normalizeNodePrivate(&in); err != nil {
+		return nil, "", err
+	}
 	in.Name = strings.TrimSpace(in.Name)
 	in.Country = strings.ToUpper(strings.TrimSpace(in.Country))
 	in.Code = strings.ToUpper(strings.TrimSpace(in.Code))
@@ -56,6 +81,12 @@ func (s *Service) CreateNode(ctx context.Context, actor Actor, in NodeInput) (*s
 		}
 	}
 	n := &store.Node{Name: in.Name, Country: in.Country, Domain: strings.ToLower(strings.TrimSpace(in.Domain)), Local: in.Local, Enabled: true}
+	if in.Note != nil {
+		n.Note = *in.Note
+	}
+	if in.XrayRelease != nil {
+		n.XrayRelease = *in.XrayRelease
+	}
 	var token string
 	err := s.mutate(ctx, change{actor: actor, action: "node.create", entity: "node", entityID: idOf(&n.ID), event: EvNodeChanged, diff: in},
 		func(q store.DBTX) error {
@@ -106,6 +137,9 @@ func (s *Service) pickNodeCode(ctx context.Context, q store.DBTX, want, country 
 
 // UpdateNode edits a node.
 func (s *Service) UpdateNode(ctx context.Context, actor Actor, id int64, in NodeInput, enabled bool) (*store.Node, error) {
+	if err := normalizeNodePrivate(&in); err != nil {
+		return nil, err
+	}
 	var n *store.Node
 	err := s.mutate(ctx, change{actor: actor, action: "node.update", entity: "node", entityID: func() int64 { return id }, event: EvNodeChanged, diff: in},
 		func(q store.DBTX) error {
@@ -125,6 +159,12 @@ func (s *Service) UpdateNode(ctx context.Context, actor Actor, id int64, in Node
 				n.Country = strings.ToUpper(in.Country)
 			}
 			n.Domain = strings.ToLower(strings.TrimSpace(in.Domain))
+			if in.Note != nil {
+				n.Note = *in.Note
+			}
+			if in.XrayRelease != nil {
+				n.XrayRelease = *in.XrayRelease
+			}
 			if enabled && !n.Enabled {
 				if err := nodeSwitchedOn(ctx, q, id); err != nil {
 					return err

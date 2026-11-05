@@ -298,6 +298,18 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx := r.Context()
+	updatePanel := func() error {
+		nodes, err := s.svc.Nodes(ctx)
+		if err != nil {
+			return err
+		}
+		for _, n := range nodes {
+			if n.Local {
+				return update.StartFollowingXray(ctx, "", "", &n.XrayRelease)
+			}
+		}
+		return update.Start(ctx)
+	}
 	info, err := s.updateInfo(ctx, false)
 	if err != nil {
 		return nil, err
@@ -338,7 +350,7 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 			}
 		}
 	case "panel":
-		done("Панель", 0, update.Start(ctx))
+		done("Панель", 0, updatePanel())
 	case "all":
 		var wg sync.WaitGroup
 		for _, n := range info.Nodes {
@@ -350,7 +362,7 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		wg.Wait()
 		// The panel last: once it restarts, this request and the page go down with it.
 		if info.Panel.Available && !info.Panel.Updating {
-			done("Панель", 0, update.Start(ctx))
+			done("Панель", 0, updatePanel())
 		}
 	default:
 		return nil, badRequest("что обновлять: all, panel или node")

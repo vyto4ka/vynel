@@ -84,7 +84,7 @@ export function Nodes() {
                       'divider',
                       { label: updOf(n)?.available ? t('nodes.update_to', { latest: updates.data?.latest }) : t('nodes.update_vynel_xray_and_nginx'), icon: 'refresh', disabled: !online || !!updOf(n)?.updating,
                         onClick: async () => {
-                          if (await confirm(n.local ? t('nodes.update_the_panel_and_the') : <><Trans k="nodes.update_the_node_it_will" v={{ name: n.name }} /></>, t('nodes.update'), false))
+                          if (await confirm(<>{n.local ? t('nodes.update_the_panel_and_the') : <Trans k="nodes.update_the_node_it_will" v={{ name: n.name }} />}<p className="muted small">{t('nodes.xray_target', { version: n.xrayRelease || t('nodes.xray_latest') })}</p></>, t('nodes.update'), false))
                             upd.run(n.local ? 'panel' : 'node', n.id)
                         } },
                       { label: t('nodes.update_log'), icon: 'audit', onClick: () => setUpdLog({ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name }) },
@@ -135,6 +135,8 @@ export function Nodes() {
                         </>
                       ) : <div className="muted small">{t('nodes.no_metrics_yet')}</div>}
                       <div className="muted small" style={{ marginTop: 10 }}><Trans k="nodes.xray_agent" v={{ v: n.xrayVersion || '—', v2: n.agentVersion || '—', v3: n.nginxVersion ? ` · nginx ${n.nginxVersion}` : n.caddyVersion && ` · Caddy ${n.caddyVersion}` }} /></div>
+                      <div className="muted small" style={{ marginTop: 6 }}>{t('nodes.xray_target', { version: n.xrayRelease || t('nodes.xray_latest') })}</div>
+                      {n.note && <div className="small" style={{ marginTop: 10, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}><span className="muted">{t('nodes.private_note')}: </span>{n.note}</div>}
                       {n.addresses.length > 0 && (
                         <div className="row small" style={{ marginTop: 8, gap: 6 }}>
                           {n.addresses.map((a) => <span key={a.id} className="chip static">{a.ip}{a.primary && ' ★'}{!a.onInterface && t('nodes.not_on_the_interface')}</span>)}
@@ -197,11 +199,13 @@ function AddNode({ profiles, onClose, onAdded }: { profiles: Profile[]; onClose:
   const [name, setName] = useState('')
   const [country, setCountry] = useState('')
   const [domain, setDomain] = useState('')
+  const [note, setNote] = useState('')
+  const [xrayRelease, setXrayRelease] = useState('')
   const [profileIds, setProfileIds] = useState<number[]>(profiles.filter((p) => p.templateId === 'vless-reality-selfsteal').map((p) => p.id))
   const act = useAction()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    const j = await act(() => post<JoinInfo>('nodes', { name, country, domain, profileIds }), t('nodes.node_created'))
+    const j = await act(() => post<JoinInfo>('nodes', { name, country, domain, note, xrayRelease, profileIds }), t('nodes.node_created'))
     if (j) onAdded(j)
   }
   return (
@@ -216,6 +220,7 @@ function AddNode({ profiles, onClose, onAdded }: { profiles: Profile[]; onClose:
           <Field label={t('nodes.name_shown_in_apps')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('nodes.detected_during_installation')} /></Field>
           <Field label={t('nodes.country_code')} help={t('nodes.empty_detected_from_the_server')}><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} placeholder={t('nodes.auto')} /></Field>
         </div>
+        <NodePrivateFields note={note} setNote={setNote} xrayRelease={xrayRelease} setXrayRelease={setXrayRelease} />
         <Field label={t('nodes.add_profiles_right_away')}>
           <div className="row">
             {profiles.map((p) => (
@@ -282,13 +287,15 @@ function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSav
   const [name, setName] = useState(n.name)
   const [country, setCountry] = useState(n.country)
   const [domain, setDomain] = useState(n.domain)
+  const [note, setNote] = useState(n.note)
+  const [xrayRelease, setXrayRelease] = useState(n.xrayRelease)
   const [providerId, setProviderId] = useState(n.provider?.id || 0)
   const providers = useLoad(() => get<{ providers: Provider[] }>('billing'))
   const act = useAction()
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const r = await act(async () => {
-      await patch(`nodes/${n.id}`, { name, country, domain })
+      await patch(`nodes/${n.id}`, { name, country, domain, note, xrayRelease })
       if (providerId !== (n.provider?.id || 0)) await patch(`nodes/${n.id}/billing`, { providerId })
       return true
     }, t('common.saved'))
@@ -299,12 +306,14 @@ function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSav
       footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="edit-node">{t('common.save')}</button></>}>
       <form id="edit-node" onSubmit={submit}>
         <div className="grid2">
-          <Field label={t('common.name')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          <Field label={t('nodes.name_shown_in_apps')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
           <Field label={t('nodes.country_code')}><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} /></Field>
         </div>
         <Field label={t('nodes.domain')} info={t('nodes.changing_the_domain_changes')}>
           <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} />
         </Field>
+        <NodePrivateFields note={note} setNote={setNote} xrayRelease={xrayRelease} setXrayRelease={setXrayRelease} editing />
+        {!n.local && n.state !== 'pending' && !n.xrayReleaseSupported && <p className="small amber-text">{t('nodes.xray_old_agent')}</p>}
         <Field label={t('common.provider')} help={<><Trans k="nodes.price_payment_and_traffic_limit" v={{ v: <a href="#/billing" onClick={onClose}>{t('nodes.billing')}</a> }} /></>}>
           <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
             <option value={0}>{t('common.not_set')}</option>
@@ -314,6 +323,29 @@ function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSav
       </form>
     </Modal>
   )
+}
+
+function NodePrivateFields({ note, setNote, xrayRelease, setXrayRelease, editing = false }: {
+  note: string; setNote: (value: string) => void; xrayRelease: string; setXrayRelease: (value: string) => void; editing?: boolean
+}) {
+  const [pinned, setPinned] = useState(xrayRelease !== '')
+  return <>
+    <Field label={t('nodes.private_note')} help={t('nodes.private_note_help')}>
+      <textarea className="input" rows={3} maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} />
+    </Field>
+    <Field label={t('nodes.xray_release')} help={editing ? t('nodes.xray_apply_update') : t('nodes.xray_apply_install')}>
+      <select className="input" value={pinned ? 'pinned' : 'latest'} onChange={(e) => {
+        setPinned(e.target.value === 'pinned')
+        if (e.target.value === 'latest') setXrayRelease('')
+      }}>
+        <option value="latest">{t('nodes.xray_latest')}</option>
+        <option value="pinned">{t('nodes.xray_pinned')}</option>
+      </select>
+      {pinned && <input className="input mono" style={{ marginTop: 8 }} aria-label={t('nodes.xray_tag')} placeholder="v26.10.31" required
+        pattern="v?[0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}" value={xrayRelease} onChange={(e) => setXrayRelease(e.target.value.trim())} />}
+      <a className="small" href="https://github.com/XTLS/Xray-core/releases" target="_blank" rel="noreferrer">{t('nodes.xray_releases_link')}</a>
+    </Field>
+  </>
 }
 
 function Attach({ node, profiles, onClose, onDone }: { node: Node; profiles: Profile[]; onClose: () => void; onDone: () => void }) {

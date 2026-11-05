@@ -86,7 +86,7 @@ func TestAllInOneOneIPOneDomain(t *testing.T) {
 		Addresses: func() []*nodev1.Address { return nil }, MaxBackoff: 500 * time.Millisecond, StatsInterval: 200 * time.Millisecond,
 		Restart: func() { restarted <- "service" }, Reboot: func() error { restarted <- "reboot"; return nil },
 		// A fake update: it says it runs, logs two steps and finishes, as update.Run would.
-		Update: func(_ context.Context, release, ref string) error {
+		Update: func(_ context.Context, release, ref string, _ *string) error {
 			updFollow <- release + " " + ref
 			go func() {
 				now := time.Now().Unix()

@@ -17,6 +17,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
+	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
@@ -135,26 +136,29 @@ func userDTO(u *store.User, groups []int64) User {
 
 // Node is a node with live numbers.
 type Node struct {
-	ID           int64     `json:"id"`
-	Code         string    `json:"code"`
-	Name         string    `json:"name"`
-	Country      string    `json:"country"`
-	Flag         string    `json:"flag"`
-	Domain       string    `json:"domain"`
-	Local        bool      `json:"local"`
-	Enabled      bool      `json:"enabled"`
-	State        string    `json:"state"`
-	LastSeenAt   *int64    `json:"lastSeenAt"`
-	XrayVersion  string    `json:"xrayVersion"`
-	AgentVersion string    `json:"agentVersion"`
-	CaddyVersion string    `json:"caddyVersion"`
-	NginxVersion string    `json:"nginxVersion"`
-	Problems     []string  `json:"problems"`
-	TodayBytes   int64     `json:"todayBytes"`
-	Metrics      *Metrics  `json:"metrics"`
-	Inbounds     []Inbound `json:"inbounds"`
-	Addresses    []Address `json:"addresses"`
-	Provider     *Provider `json:"provider"` // where the node is rented, nil = not set
+	ID                   int64     `json:"id"`
+	Code                 string    `json:"code"`
+	Name                 string    `json:"name"`
+	Note                 string    `json:"note"`
+	XrayRelease          string    `json:"xrayRelease"`
+	XrayReleaseSupported bool      `json:"xrayReleaseSupported"`
+	Country              string    `json:"country"`
+	Flag                 string    `json:"flag"`
+	Domain               string    `json:"domain"`
+	Local                bool      `json:"local"`
+	Enabled              bool      `json:"enabled"`
+	State                string    `json:"state"`
+	LastSeenAt           *int64    `json:"lastSeenAt"`
+	XrayVersion          string    `json:"xrayVersion"`
+	AgentVersion         string    `json:"agentVersion"`
+	CaddyVersion         string    `json:"caddyVersion"`
+	NginxVersion         string    `json:"nginxVersion"`
+	Problems             []string  `json:"problems"`
+	TodayBytes           int64     `json:"todayBytes"`
+	Metrics              *Metrics  `json:"metrics"`
+	Inbounds             []Inbound `json:"inbounds"`
+	Addresses            []Address `json:"addresses"`
+	Provider             *Provider `json:"provider"` // where the node is rented, nil = not set
 }
 
 // Metrics are the latest host numbers of a node.
@@ -842,6 +846,7 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	for _, ns := range sts {
 		n := ns.Node
 		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain,
+			Note: n.Note, XrayRelease: n.XrayRelease, XrayReleaseSupported: n.Local || n.Can(update.CapXrayRelease),
 			Local: n.Local, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
 			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, NginxVersion: n.NginxVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
 			Inbounds: []Inbound{}, Addresses: []Address{}}
@@ -916,10 +921,12 @@ func publicValues(v map[string]any) map[string]any {
 }
 
 type nodeIn struct {
-	Name    string `json:"name"`
-	Country string `json:"country"`
-	Domain  string `json:"domain"`
-	Code    string `json:"code"`
+	Note        *string `json:"note"`
+	XrayRelease *string `json:"xrayRelease"`
+	Name        string  `json:"name"`
+	Country     string  `json:"country"`
+	Domain      string  `json:"domain"`
+	Code        string  `json:"code"`
 	// Attach these profiles to a new node right away.
 	ProfileIDs []int64 `json:"profileIds"`
 }
@@ -930,7 +937,7 @@ func (s *Server) createNode(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx, a := r.Context(), actor(r)
-	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, Code: in.Code})
+	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, Code: in.Code, Note: in.Note, XrayRelease: in.XrayRelease})
 	if err != nil {
 		return nil, err
 	}
@@ -955,7 +962,11 @@ func (s *Server) joinInfo(r *http.Request, n *store.Node, secret string, warning
 		return out, nil
 	}
 	out["token"] = tok
-	out["command"] = s.svc.NodeInstallCommand(r.Context(), tok)
+	command := s.svc.NodeInstallCommand(r.Context(), tok)
+	if n.XrayRelease != "" {
+		command += " --xray-version " + n.XrayRelease
+	}
+	out["command"] = command
 	return out, nil
 }
 
@@ -965,10 +976,12 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 		return nil, err
 	}
 	var in struct {
-		Name    string  `json:"name"`
-		Country string  `json:"country"`
-		Domain  *string `json:"domain"`
-		Enabled *bool   `json:"enabled"`
+		Name        string  `json:"name"`
+		Note        *string `json:"note"`
+		XrayRelease *string `json:"xrayRelease"`
+		Country     string  `json:"country"`
+		Domain      *string `json:"domain"`
+		Enabled     *bool   `json:"enabled"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -984,7 +997,7 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 	if in.Domain != nil {
 		domain = *in.Domain
 	}
-	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain}, enabled)
+	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain, Note: in.Note, XrayRelease: in.XrayRelease}, enabled)
 	return nil, err
 }
 
