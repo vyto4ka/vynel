@@ -58,7 +58,7 @@ func providerRouting(ua, title string, r service.ClientRouting) string {
 	bd, bi := split(r.Block)
 	if r.RUDirect {
 		dd = append(append([]string{}, ruDomains...), dd...)
-		di = append([]string{"geoip:ru"}, di...)
+		di = append(di, "geoip:ru")
 	}
 	di = append([]string{"geoip:private"}, di...)
 	if r.BlockAds {
