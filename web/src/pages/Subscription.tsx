@@ -106,7 +106,7 @@ export function Subscription() {
           {tab === 'rules' && <ClientsTab rules={rules} set={setRules} routing={routing} setRouting={setRouting} onReset={() => reset('rules')} />}
           {tab === 'externals' && <ExternalList />}
           {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} />}
-          {tab === 'test' && <TestTab headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
+          {tab === 'test' && <TestTab routing={routing} page={page} headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
         </div>
         {showPreview && (
           <div className="card sub-preview">
@@ -133,6 +133,10 @@ function RoutingTab({ r, set, onReset }: { r: ClientRouting; set: (r: ClientRout
         <div className="card-sub" style={{ marginBottom: 14 }}>{t('subscription.xray_json_mihomo_and_sing')}</div>
         <RoutingForm r={r} set={set} />
       </div>
+      <details className="card card-pad small"><summary>Happ / Karing</summary>
+        <p>{t('subscription.happ_routing_limits')}</p>
+        <p>{t('subscription.karing_routing_setup')}</p>
+      </details>
       <FragmentCard f={r.fragment ?? defaultFragment} set={(fragment) => set({ ...r, fragment })} />
       <div className="card card-pad small text-2 row">
         <button className="btn ghost sm" onClick={onReset}>{t('subscription.reset_the_routes_to_the_2')}</button>
@@ -447,12 +451,12 @@ function HeaderForm({ h, onClose, onSave }: { h: SubHeader; onClose: () => void;
   )
 }
 
-function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[]; basics: SubBasics; users: User[]; rules: SubRule[]; dirty: boolean }) {
-  const uas = ['keqdroid/0.25.1', 'Happ/4.1.0', 'v2RayTun/5.25.82', 'Hiddify/4.1.1 (android)', 'INCY/3.6.5', 'clash-verge/v2.2.3', 'FlClashX/0.4.2', 'SFA/1.14.0', 'Streisand/1.6.76', 'v2rayNG/2.2.6']
+function TestTab({ headers, basics, users, rules, dirty, routing, page }: { routing: ClientRouting; page: SubPage; headers: SubHeader[]; basics: SubBasics; users: User[]; rules: SubRule[]; dirty: boolean }) {
+  const uas = ['keqdroid/0.25.1', 'Happ/4.1.0', 'karing/1.2.24', 'v2RayTun/5.25.82', 'Hiddify/4.1.1 (android)', 'INCY/3.6.5', 'clash-verge/v2.2.3', 'FlClashX/0.4.2', 'SFA/1.14.0', 'Streisand/1.6.76', 'v2rayNG/2.2.6']
   const [ua, setUa] = useState(uas[0])
   const [userId, setUserId] = useState(0)
-  const { data, error } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules }),
-    [ua, userId, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules)])
+  const { data, error } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; routingProfile: unknown; appLinks: { name: string; value: string }[]; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules, routing, page }),
+    [ua, userId, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules), JSON.stringify(routing), JSON.stringify(page)])
   return (
     <>
       <div className="card card-pad">
@@ -487,6 +491,16 @@ function TestTab({ headers, basics, users, rules, dirty }: { headers: SubHeader[
           </pre>
         )}
       </div>
+      {/happ/i.test(ua) && <div className="card card-pad small">{t('subscription.happ_routing_limits')}</div>}
+      {/karing/i.test(ua) && <div className="card card-pad small">{t('subscription.karing_routing_setup')}</div>}
+      {data && data.appLinks.length > 0 && <div className="card card-pad">
+        <h3>{t('subscription.import_links')}</h3>
+        <pre className="code">{data.appLinks.map((a) => `${a.name}: ${a.value}`).join('\n')}</pre>
+      </div>}
+      {data?.routingProfile != null && <div className="card card-pad">
+        <h3>{t('subscription.happ_routing_profile')}</h3>
+        <pre className="code">{JSON.stringify(data.routingProfile, null, 2)}</pre>
+      </div>}
       <div className="card">
         <div className="card-head"><h3>{t('subscription.how_the_format_is_chosen')}</h3></div>
         <div className="card-pad small text-2">

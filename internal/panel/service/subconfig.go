@@ -44,7 +44,7 @@ var SubFormats = []string{"base64", "mihomo", "singbox", "xray", "html"}
 func DefaultSubRules() []SubRule {
 	return []SubRule{
 		{Pattern: `(?i)keqdroid|keqdis`, Format: "xray", Enabled: true, Note: "KeqDroid"},
-		{Pattern: `(?i)karing`, Format: "base64", Enabled: true, Note: "Karing"},
+		{Pattern: `(?i)karing`, Format: "mihomo", Enabled: true, Note: "Karing"},
 		{Pattern: `(?i)clash|mihomo|stash|flclash|koala`, Format: "mihomo", Enabled: true, Note: "Clash / Mihomo"},
 		{Pattern: `(?i)sing-?box|\bSF[AIMT]\b`, Format: "singbox", Enabled: true, Note: "sing-box"},
 		{Pattern: `(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, Format: "base64", Enabled: true, Note: "Xray-приложения"},
@@ -216,6 +216,8 @@ var SubVariables = []SubVariable{
 	{"url_enc", "Ссылка подписки, закодированная для ?url=", "https%3A%2F%2F…"},
 	{"url_b64", "Ссылка подписки в base64", "aHR0cHM6Ly9…"},
 	{"title_url", "Название, закодированное для URL", "VPN"},
+	{"title_query", "Название подписки для параметра URL", "VPN"},
+	{"happ_routing", "Профиль маршрутизации Happ", "happ://routing/onadd/…"},
 }
 
 // SubHeaderPreset is a header from the catalog with a hint where it works.
@@ -258,8 +260,8 @@ var SubHeaderCatalog = []SubHeaderPreset{
 		"v2RayTun", "Обновлять подписку при каждом открытии приложения"},
 	{SubHeader{Name: "Hide-Settings", Value: "1", Clients: uaHappI},
 		"Happ, INCY", "Скрыть настройки серверов (адрес, ключи) от пользователя"},
-	{SubHeader{Name: "Routing", Value: "happ://routing/onadd/…", Clients: uaHapp},
-		"Happ", "Профиль маршрутизации (ссылка из конструктора Happ)"},
+	{SubHeader{Name: "Routing", Value: "{happ_routing}", Clients: uaHapp, Enabled: true},
+		"Happ", "Маршруты Happ: {happ_routing} или своя ссылка happ://"},
 	{SubHeader{Name: "Routing-Enable", Value: "true", Clients: uaHapp},
 		"Happ", "Включить присланную маршрутизацию"},
 	{SubHeader{Name: "ProviderID", Value: "", Clients: uaHappI},
@@ -331,7 +333,7 @@ var SubAppCatalog = []SubApp{
 		Platforms: []string{"android"}, Enabled: true},
 	{ID: "flclashx", Name: "FlClashX", Link: "flclashx://install-config?url={url_enc}",
 		Platforms: []string{"android", "windows", "macos", "linux"}},
-	{ID: "karing", Name: "Karing", Link: "karing://install-config?url={url_enc}&name={title_url}", Download: "https://karing.app/",
+	{ID: "karing", Name: "Karing", Link: "karing://install-config?url={url_enc}&name={title_query}&x-hwid=true", Download: "https://karing.app/",
 		Platforms: []string{"android", "ios", "windows", "macos"}},
 	{ID: "singbox", Name: "sing-box", Link: "sing-box://import-remote-profile?url={url_enc}#{title_url}", Download: "https://sing-box.sagernet.org/",
 		Platforms: []string{"android", "ios", "macos"}},
@@ -426,7 +428,12 @@ func (s *Service) SubPage(ctx context.Context) (SubPage, error) {
 		return DefaultSubPage(), nil
 	}
 	have := map[string]bool{}
-	for _, a := range p.Apps {
+	for i := range p.Apps {
+		a := &p.Apps[i]
+		// Upgrade only the exact former built-in link; custom links stay untouched.
+		if a.ID == "karing" && (a.Link == "karing://install-config?url={url_enc}&name={title_url}" || a.Link == "karing://install-config?url={url_enc}&name={title_url}&x-hwid=true") {
+			a.Link = "karing://install-config?url={url_enc}&name={title_query}&x-hwid=true"
+		}
 		have[a.ID] = true
 	}
 	for _, a := range SubAppCatalog {

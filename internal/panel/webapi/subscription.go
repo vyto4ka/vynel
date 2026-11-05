@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
@@ -160,11 +161,13 @@ func (s *Server) subURLFor(r *http.Request, u *store.User) string {
 // subTest shows what a client gets: format and headers (no device is registered).
 func (s *Server) subTest(r *http.Request) (any, error) {
 	var in struct {
-		UserID    int64                `json:"userId"`
-		UserAgent string               `json:"userAgent"`
-		Headers   *[]service.SubHeader `json:"headers"` // unsaved draft
-		Basics    *service.SubBasics   `json:"basics"`
-		Rules     *[]service.SubRule   `json:"rules"`
+		UserID    int64                  `json:"userId"`
+		UserAgent string                 `json:"userAgent"`
+		Headers   *[]service.SubHeader   `json:"headers"` // unsaved draft
+		Basics    *service.SubBasics     `json:"basics"`
+		Rules     *[]service.SubRule     `json:"rules"`
+		Routing   *service.ClientRouting `json:"routing"`
+		Page      *service.SubPage       `json:"page"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -195,7 +198,43 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	req.Header.Set("User-Agent", in.UserAgent)
 	format, rule := subscription.Pick(req, "", u.ClientType, rules)
-	headers := subscription.RenderHeaders(hs, subscription.UserVars(u, s.subURLFor(r, u), b, time.Now()), in.UserAgent)
+	routing, err := s.svc.ClientRouting(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Routing != nil {
+		routing = *in.Routing
+	}
+	if err := service.CheckClientRouting(&routing); err != nil {
+		return nil, err
+	}
+	vars := subscription.UserVars(u, s.subURLFor(r, u), b, time.Now())
+	headers := subscription.RenderClientHeaders(hs, vars, in.UserAgent, format, routing)
+	page, err := s.svc.SubPage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Page != nil {
+		page = *in.Page
+	}
+	appLinks := []subscription.HeaderValue{}
+	for _, app := range page.Apps {
+		if (app.ID == "happ" || app.ID == "karing") && strings.Contains(strings.ToLower(in.UserAgent), app.ID) {
+			appLinks = append(appLinks, subscription.HeaderValue{Name: app.Name, Value: vars.Expand(app.Link)})
+		}
+	}
+	var routingProfile any
+	for _, h := range headers {
+		if strings.EqualFold(h.Name, "Routing") {
+			for _, prefix := range []string{"happ://routing/onadd/", "happ://routing/add/"} {
+				if raw, ok := strings.CutPrefix(h.Value, prefix); ok {
+					if data, err := base64.StdEncoding.DecodeString(raw); err == nil {
+						_ = json.Unmarshal(data, &routingProfile)
+					}
+				}
+			}
+		}
+	}
 	if headers == nil {
 		headers = []subscription.HeaderValue{}
 	}
@@ -208,7 +247,7 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 		}
 		ownTemplate = rule.Template != "" && rule.Format == string(format)
 	}
-	return map[string]any{"user": u.Username, "format": format, "headers": headers, "client": client, "ownTemplate": ownTemplate}, nil
+	return map[string]any{"user": u.Username, "format": format, "headers": headers, "client": client, "ownTemplate": ownTemplate, "routingProfile": routingProfile, "appLinks": appLinks}, nil
 }
 
 // subTemplate reads a pasted client template: what is in it and the routing it carries.

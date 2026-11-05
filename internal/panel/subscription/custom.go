@@ -55,7 +55,7 @@ func UserVars(u *store.User, subURL string, b service.SubBasics, now time.Time) 
 		"support_url": b.SupportURL, "announce": b.Announce, "announce_url": b.AnnounceURL,
 		"sub_url": subURL, "page_url": pageURL, "url": subURL,
 		"url_enc": url.QueryEscape(subURL), "url_b64": base64.StdEncoding.EncodeToString([]byte(subURL)),
-		"title_url": url.PathEscape(b.Title),
+		"title_url": url.PathEscape(b.Title), "title_query": url.QueryEscape(b.Title),
 	}
 }
 
@@ -123,7 +123,7 @@ func RenderHeaders(hs []service.SubHeader, vars Vars, userAgent string) []Header
 }
 
 // headersFor renders the configured headers for a request.
-func (h *Handler) headersFor(ctx context.Context, u *store.User, userAgent string) []HeaderValue {
+func (h *Handler) headersFor(ctx context.Context, u *store.User, userAgent string, format Format, routing service.ClientRouting) []HeaderValue {
 	subURL, err := h.svc.SubscriptionURL(ctx, u)
 	if err != nil {
 		subURL = ""
@@ -132,5 +132,5 @@ func (h *Handler) headersFor(ctx context.Context, u *store.User, userAgent strin
 	if err != nil {
 		h.log.Warn("subscription headers", "err", err)
 	}
-	return RenderHeaders(hs, UserVars(u, subURL, h.svc.SubBasicsGet(ctx), time.Now()), userAgent)
+	return RenderClientHeaders(hs, UserVars(u, subURL, h.svc.SubBasicsGet(ctx), time.Now()), userAgent, format, routing)
 }

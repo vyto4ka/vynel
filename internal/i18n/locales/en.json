@@ -1,4 +1,7 @@
 {
+ "Профиль маршрутизации Happ": "Happ routing profile",
+ "Название подписки для параметра URL": "Subscription title encoded for a query parameter",
+ "Маршруты Happ: {happ_routing} или своя ссылка happ://": "Happ routing: {happ_routing} or a custom happ:// link",
  " ещё не подключалась с тех пор, как панель запоминает адреса": " has not connected since the panel started to remember addresses",
  " и ещё %d": " and %d more",
  " мин": " min",

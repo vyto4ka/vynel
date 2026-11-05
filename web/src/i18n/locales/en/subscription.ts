@@ -1,4 +1,9 @@
 export default {
+  happ_routing_limits: "For links, enable the Routing header with {happ_routing}. The generated Happ profile carries domain and IP lists, RU bypass and ad blocking. It does not carry process rules, BitTorrent or fragmentation. Each direction uses the first supported DNS (IP or DoH with an IP, Cloudflare or Google hostname); localhost and unsupported DNS use Happ defaults. Reconnect after updating. Large Routing headers may exceed proxy limits. Xray JSON keeps its own routing.",
+  karing_routing_setup: "For Karing routes, choose Mihomo in Clients (or use /mihomo). When importing, keep the provider diversion rules, then enable them in Karing. Check that provider rules are not globally disabled. The import link can enable X-HWID with x-hwid=true; existing profiles may need a manual change. Confirm the update interval in Karing after importing.",
+  import_links: "Import links (including disabled app buttons)",
+  happ_routing_profile: "Happ routing profile",
+
   a_browser_gets_the_page: 'A browser gets the page, everything else gets vless:// links in base64.',
   a_full_config_with_routes: 'a full config with routes and DNS (KeqDroid, Happ, v2RayTun)',
   a_page_with_qr_and: 'a page with QR and buttons',
@@ -104,7 +109,7 @@ export default {
   reset_to_defaults: 'Reset to defaults',
   response: 'Response',
   routes: 'Routes',
-  routes_go_along_with_the: 'Routes go along with the servers in formats that have routing: Xray JSON (KeqDroid, Happ, v2RayTun), Clash / Mihomo and sing-box. vless:// links carry no routes.',
+  routes_go_along_with_the: 'Routes go along with the servers in formats that have routing: Xray JSON (KeqDroid, Happ, v2RayTun), Clash / Mihomo and sing-box. Happ link subscriptions carry routes separately in the Routing header.',
   routes_in_apps: 'Routes in apps',
   rules_without_a_field_on: 'Rules without a field on the “Routes” tab: {length} (they work in the template)',
   russia_direct: ', Russia direct',

@@ -172,10 +172,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("touch subscription", "err", err)
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	for _, hv := range h.headersFor(ctx, u, r.UserAgent()) {
-		w.Header().Set(hv.Name, hv.Value)
+	routing, err := h.svc.ClientRouting(ctx)
+	if err != nil {
+		h.log.Warn("subscription routing", "err", err)
 	}
 	if format == FormatHTML {
+		for _, hv := range h.headersFor(ctx, u, r.UserAgent(), format, routing) {
+			w.Header().Set(hv.Name, hv.Value)
+		}
 		h.page(ctx, w, r, u)
 		return
 	}
@@ -195,9 +199,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A refused client gets no credentials at all, only a server named after the reason.
 		hosts, uuid = []service.Host{Stub("⛔ " + reason)}, StubUUID
 	}
-	routing, err := h.svc.ClientRouting(ctx)
-	if err != nil {
-		h.log.Warn("subscription routing", "err", err)
+	// Device policy may have changed the format to links.
+	for _, hv := range h.headersFor(ctx, u, r.UserAgent(), format, routing) {
+		w.Header().Set(hv.Name, hv.Value)
 	}
 	hosts = service.WithFragment(hosts, routing.Fragment)
 	var body []byte
