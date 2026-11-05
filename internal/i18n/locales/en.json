@@ -1,4 +1,7 @@
 {
+ "выберите от 1 до 500 пользователей": "select between 1 and 500 users",
+ "действие: enable, disable, reset или delete": "action: enable, disable, reset or delete",
+ "ID пользователя должен быть положительным числом": "user ID must be a positive number",
  " ещё не подключалась с тех пор, как панель запоминает адреса": " has not connected since the panel started to remember addresses",
  " и ещё %d": " and %d more",
  " мин": " min",
