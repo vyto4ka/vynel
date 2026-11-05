@@ -46,8 +46,10 @@ func UserVars(u *store.User, subURL string, b service.SubBasics, now time.Time) 
 	if b.UpdateHours > 0 {
 		hours = strconv.Itoa(b.UpdateHours)
 	}
+	karingDNS, _ := service.KaringOutboundDNS(b.KaringDNS)
 	return Vars{
-		"title": b.Title, "username": u.Username,
+		"karing_dns": url.QueryEscape(strings.Join(karingDNS, ",")),
+		"title":      b.Title, "username": u.Username,
 		"upload": "0", "download": strconv.FormatInt(u.TrafficUsedBytes, 10),
 		"total": strconv.FormatInt(total, 10), "expire": strconv.FormatInt(expire, 10),
 		"used": human(u.TrafficUsedBytes), "limit": limit, "expire_date": expireDate, "days_left": daysLeft,

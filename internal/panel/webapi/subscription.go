@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -163,6 +164,9 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	var in struct {
 		UserID    int64                  `json:"userId"`
 		UserAgent string                 `json:"userAgent"`
+		HWID      string                 `json:"hwid"`
+		IP        string                 `json:"ip"`
+		Format    string                 `json:"format"`
 		Headers   *[]service.SubHeader   `json:"headers"` // unsaved draft
 		Basics    *service.SubBasics     `json:"basics"`
 		Rules     *[]service.SubRule     `json:"rules"`
@@ -197,7 +201,26 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	req.Header.Set("User-Agent", in.UserAgent)
-	format, rule := subscription.Pick(req, "", u.ClientType, rules)
+	if in.IP != "" && net.ParseIP(in.IP) == nil {
+		return nil, badRequest("«Проверка»: неверный IP запроса")
+	}
+	if in.Format != "" {
+		if _, ok := subscription.ParseFormat(in.Format); !ok {
+			return nil, badRequest("«Проверка»: неизвестный формат подписки")
+		}
+	}
+	req.RemoteAddr = net.JoinHostPort(in.IP, "0")
+	req.Header.Set("x-hwid", in.HWID)
+	format, rule := subscription.Pick(req, in.Format, u.ClientType, rules)
+	selection := subscription.Selection{Format: format, Allowed: true, Servers: []subscription.ServerSummary{}}
+	if format != subscription.FormatHTML {
+		var err error
+		selection, err = subscription.Inspect(ctx, s.svc, u, req, in.Format, format)
+		if err != nil {
+			return nil, err
+		}
+		format = selection.Format
+	}
 	routing, err := s.svc.ClientRouting(ctx)
 	if err != nil {
 		return nil, err
@@ -214,6 +237,7 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	headers = append(headers, selection.Headers...)
 	if in.Page != nil {
 		page = *in.Page
 	}
@@ -247,7 +271,7 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 		}
 		ownTemplate = rule.Template != "" && rule.Format == string(format)
 	}
-	return map[string]any{"user": u.Username, "format": format, "headers": headers, "client": client, "ownTemplate": ownTemplate, "routingProfile": routingProfile, "appLinks": appLinks}, nil
+	return localize(r, map[string]any{"user": u.Username, "format": format, "headers": headers, "client": client, "ownTemplate": ownTemplate, "routingProfile": routingProfile, "appLinks": appLinks, "selection": selection}, "reason"), nil
 }
 
 // subTemplate reads a pasted client template: what is in it and the routing it carries.

@@ -18,6 +18,7 @@ import (
 // Subscription look and response headers (docs/USER_GUIDE.md §5). Stored as JSON settings so
 // they are edited in the web panel and need no migrations.
 const (
+	SettingSubKaringDNS   = "sub.karing_dns"   // JSON resolvers for proxy node hostnames only
 	SettingSubHeaders     = "sub.headers"      // JSON []SubHeader; empty = DefaultSubHeaders
 	SettingSubPage        = "sub.page"         // JSON SubPage; empty = DefaultSubPage
 	SettingSubAnnounce    = "sub.announce"     // text shown by apps (announce header) and on the page
@@ -178,12 +179,13 @@ type SubPage struct {
 
 // SubBasics are the plain subscription settings used by headers and the page.
 type SubBasics struct {
-	Title       string `json:"title"`
-	UpdateHours int    `json:"updateHours"`
-	SupportURL  string `json:"supportUrl"`
-	Announce    string `json:"announce"`
-	AnnounceURL string `json:"announceUrl"`
-	PageURL     string `json:"pageUrl"`
+	KaringDNS   []string `json:"karingDns"`
+	Title       string   `json:"title"`
+	UpdateHours int      `json:"updateHours"`
+	SupportURL  string   `json:"supportUrl"`
+	Announce    string   `json:"announce"`
+	AnnounceURL string   `json:"announceUrl"`
+	PageURL     string   `json:"pageUrl"`
 }
 
 // SubVariable documents a {variable} for the UI.
@@ -217,6 +219,7 @@ var SubVariables = []SubVariable{
 	{"url_b64", "Ссылка подписки в base64", "aHR0cHM6Ly9…"},
 	{"title_url", "Название, закодированное для URL", "VPN"},
 	{"title_query", "Название подписки для параметра URL", "VPN"},
+	{"karing_dns", "DNS адресов серверов Karing (параметр URL)", "udp%3A%2F%2F8.8.8.8"},
 	{"happ_routing", "Профиль маршрутизации Happ", "happ://routing/onadd/…"},
 }
 
@@ -333,7 +336,7 @@ var SubAppCatalog = []SubApp{
 		Platforms: []string{"android"}, Enabled: true},
 	{ID: "flclashx", Name: "FlClashX", Link: "flclashx://install-config?url={url_enc}",
 		Platforms: []string{"android", "windows", "macos", "linux"}},
-	{ID: "karing", Name: "Karing", Link: "karing://install-config?url={url_enc}&name={title_query}&x-hwid=true", Download: "https://karing.app/",
+	{ID: "karing", Name: "Karing", Link: DefaultKaringLink, Download: "https://karing.app/",
 		Platforms: []string{"android", "ios", "windows", "macos"}},
 	{ID: "singbox", Name: "sing-box", Link: "sing-box://import-remote-profile?url={url_enc}#{title_url}", Download: "https://sing-box.sagernet.org/",
 		Platforms: []string{"android", "ios", "macos"}},
@@ -431,8 +434,8 @@ func (s *Service) SubPage(ctx context.Context) (SubPage, error) {
 	for i := range p.Apps {
 		a := &p.Apps[i]
 		// Upgrade only the exact former built-in link; custom links stay untouched.
-		if a.ID == "karing" && (a.Link == "karing://install-config?url={url_enc}&name={title_url}" || a.Link == "karing://install-config?url={url_enc}&name={title_url}&x-hwid=true") {
-			a.Link = "karing://install-config?url={url_enc}&name={title_query}&x-hwid=true"
+		if a.ID == "karing" {
+			a.Link = upgradeKaringLink(a.Link)
 		}
 		have[a.ID] = true
 	}
@@ -501,7 +504,10 @@ func CheckSubPage(p *SubPage) error {
 
 // SubBasicsGet reads the plain subscription settings.
 func (s *Service) SubBasicsGet(ctx context.Context) SubBasics {
-	b := SubBasics{}
+	b := SubBasics{KaringDNS: []string{}}
+	if raw, err := s.Setting(ctx, SettingSubKaringDNS, ""); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &b.KaringDNS)
+	}
 	b.Title, _ = s.Setting(ctx, SettingSubTitle, "VPN")
 	h, _ := s.Setting(ctx, SettingSubUpdateHours, "12")
 	b.UpdateHours, _ = strconv.Atoi(h)
@@ -517,7 +523,10 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 	if err := CheckSubBasics(b); err != nil {
 		return err
 	}
+	b.KaringDNS, _ = KaringOutboundDNS(b.KaringDNS)
 	cur := s.SubBasicsGet(ctx)
+	currentDNS, _ := json.Marshal(cur.KaringDNS)
+	nextDNS, _ := json.Marshal(b.KaringDNS)
 	set := func(key, old, val string) error {
 		if old == val {
 			return nil
@@ -525,6 +534,7 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 		return s.SetSetting(ctx, actor, key, val)
 	}
 	for _, x := range []struct{ key, old, val string }{
+		{SettingSubKaringDNS, string(currentDNS), string(nextDNS)},
 		{SettingSubTitle, cur.Title, strings.TrimSpace(b.Title)},
 		{SettingSubUpdateHours, strconv.Itoa(cur.UpdateHours), strconv.Itoa(b.UpdateHours)},
 		{SettingSubSupportURL, cur.SupportURL, strings.TrimSpace(b.SupportURL)},
@@ -541,6 +551,9 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 
 // CheckSubBasics validates the plain subscription settings.
 func CheckSubBasics(b SubBasics) error {
+	if _, err := KaringOutboundDNS(b.KaringDNS); err != nil {
+		return err
+	}
 	if b.UpdateHours < 0 || b.UpdateHours > 24*30 {
 		return invalid("«Обновлять, часов»: от 0 до 720")
 	}

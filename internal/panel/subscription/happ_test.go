@@ -125,6 +125,11 @@ func TestKaringImportHWID(t *testing.T) {
 		if u.Query().Get("x-hwid") != "true" || u.Query().Get("url") != vars["url"] || u.Query().Get("name") != "VPN & test" {
 			t.Fatalf("import: %s", u)
 		}
+		vars = UserVars(e.user, "https://sub.example/s/token", service.SubBasics{KaringDNS: []string{"8.8.8.8", "https://dns.google/dns-query"}}, time.Now())
+		u, err = url.Parse(vars.Expand(a.Link))
+		if err != nil || u.Query().Get("outbound-dns") != "udp://8.8.8.8,https://dns.google/dns-query" {
+			t.Fatalf("Karing DNS import: %s %v", u, err)
+		}
 	}
 }
 

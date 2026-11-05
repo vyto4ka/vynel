@@ -165,7 +165,7 @@ func TestSubscriptionAPI(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"base64"`) {
 		t.Fatalf("test: %d %s", w.Code, w.Body.String())
 	}
-	w = c.do("POST", "/api/subscription/test", `{"userAgent":"clash-verge/2"}`, true)
+	w = c.do("POST", "/api/subscription/test", `{"userAgent":"clash-verge/2","hwid":"preview-device"}`, true)
 	if strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"mihomo"`) {
 		t.Fatalf("clash test: %s", w.Body.String())
 	}

@@ -1,9 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { ClientFragment, ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
 import { ExternalList } from '../extras'
 import { RoutingForm } from '../routing'
 import { Badge, Field, Icon, Info, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
+import { useUnsavedChanges } from '../unsaved'
 
 const tabs: [string, string][] = [
   ['basics', t('subscription.general')],
@@ -45,14 +46,14 @@ export function Subscription() {
   const confirm = useConfirm()
 
   useEffect(() => {
-    if (cfg.data) {
+    if (cfg.data && basics === null) {
       setBasics(cfg.data.basics)
       setPage(cfg.data.page)
       setHeaders(cfg.data.headers)
       setRules(cfg.data.rules)
       setRouting(cfg.data.routing)
     }
-  }, [cfg.data])
+  }, [cfg.data, basics])
 
   const dirty = useMemo(() => {
     if (!cfg.data || !basics || !page || !headers || !rules || !routing) return false
@@ -60,6 +61,11 @@ export function Subscription() {
       JSON.stringify(headers) !== JSON.stringify(cfg.data.headers) || JSON.stringify(rules) !== JSON.stringify(cfg.data.rules) ||
       JSON.stringify(routing) !== JSON.stringify(cfg.data.routing)
   }, [cfg.data, basics, page, headers, rules, routing])
+
+  useUnsavedChanges(dirty)
+  const [saving, setSaving] = useState(false)
+  const draftRef = useRef('')
+  draftRef.current = JSON.stringify({ basics, page, headers, rules, routing })
 
   // Предпросмотр обновляется с небольшой задержкой после правок.
   const [previewSrc, setPreviewSrc] = useState('')
@@ -73,15 +79,31 @@ export function Subscription() {
   const c = cfg.data
 
   const save = async () => {
-    const r = await act(() => put<SubConfig>('subscription', { basics, page, headers, rules, routing }), t('subscription.saved_apps_pick_up_the'))
-    if (r) cfg.setData(r)
+    const submitted = draftRef.current
+    setSaving(true)
+    try {
+      const r = await act(() => put<SubConfig>('subscription', JSON.parse(submitted)), t('subscription.saved_apps_pick_up_the'))
+      if (r) {
+        cfg.setData(r)
+        // Keep edits typed while the request was in flight.
+        if (draftRef.current === submitted) {
+          setBasics(r.basics); setPage(r.page); setHeaders(r.headers); setRules(r.rules); setRouting(r.routing)
+        }
+      }
+    } finally { setSaving(false) }
   }
   const reset = async (part: 'headers' | 'page' | 'rules' | 'routing') => {
     const q = { headers: t('subscription.reset_the_headers_to_the'), page: t('subscription.reset_the_page_and_apps'), rules: t('subscription.reset_the_format_rules_to'),
       routing: t('subscription.reset_the_routes_to_the') }
     if (!(await confirm(q[part], t('subscription.reset')))) return
     const r = await act(() => post<SubConfig>('subscription/reset', { part }), t('subscription.reset_to_defaults'))
-    if (r) cfg.setData(r)
+    if (r) {
+      cfg.setData(r)
+      if (part === 'headers') setHeaders(r.headers)
+      if (part === 'page') setPage(r.page)
+      if (part === 'rules') setRules(r.rules)
+      if (part === 'routing') setRouting(r.routing)
+    }
   }
   const showPreview = tab === 'basics' || tab === 'page' || tab === 'apps'
 
@@ -94,7 +116,7 @@ export function Subscription() {
         <div className="grow" />
         {dirty && <span className="pink-text small">{t('subscription.there_are_unsaved_changes')}</span>}
         <button className="btn ghost" disabled={!dirty} onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers); setRules(c.rules); setRouting(c.routing) }}>{t('common.revert')}</button>
-        <button className="btn primary" disabled={!dirty} onClick={save}>{t('common.save')}</button>
+        <button className="btn primary" disabled={!dirty || saving} onClick={save}>{t('common.save')}</button>
       </div>
 
       <div className={showPreview ? 'sub-split' : ''}>
@@ -190,6 +212,9 @@ function BasicsTab({ b, set }: { b: SubBasics; set: (b: SubBasics) => void }) {
           <input className="input" value={b.supportUrl} onChange={f('supportUrl')} placeholder="https://t.me/your_support" />
         </Field>
       </div>
+      <Field label={t('subscription.karing_dns_label')} info={t('subscription.karing_dns_help')}>
+        <textarea className="input mono" rows={3} value={(b.karingDns || []).join('\n')} onChange={(e) => set({ ...b, karingDns: e.target.value.split('\n') })} placeholder={'udp://8.8.8.8\nhttps://dns.google/dns-query'} />
+      </Field>
       <Field label={t('subscription.announcement')} help={t('subscription.empty_not_shown')} info={t('subscription.the_announce_header_a_line')}>
         <textarea className="input" rows={2} value={b.announce} onChange={f('announce')} placeholder={t('subscription.e_g_maintenance_on_saturday')} />
       </Field>
@@ -455,8 +480,12 @@ function TestTab({ headers, basics, users, rules, dirty, routing, page }: { rout
   const uas = ['keqdroid/0.25.1', 'Happ/4.1.0', 'karing/1.2.24', 'v2RayTun/5.25.82', 'Hiddify/4.1.1 (android)', 'INCY/3.6.5', 'clash-verge/v2.2.3', 'FlClashX/0.4.2', 'SFA/1.14.0', 'Streisand/1.6.76', 'v2rayNG/2.2.6']
   const [ua, setUa] = useState(uas[0])
   const [userId, setUserId] = useState(0)
-  const { data, error } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; routingProfile: unknown; appLinks: { name: string; value: string }[]; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, headers, basics, rules, routing, page }),
-    [ua, userId, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules), JSON.stringify(routing), JSON.stringify(page)])
+  const [hwid, setHwid] = useState('')
+  const [requestIP, setRequestIP] = useState('')
+  const [explicitFormat, setExplicitFormat] = useState('')
+  const { data: result, error, loading } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; selection: { allowed: boolean; reason: string; hwid: { off: boolean; noHwid: boolean; count: number; limit: number }; servers: { name: string; node: string; protocol: string; network: string; excluded?: string }[] }; routingProfile: unknown; appLinks: { name: string; value: string }[]; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, hwid, ip: requestIP, format: explicitFormat, headers, basics, rules, routing, page }),
+    [ua, userId, hwid, requestIP, explicitFormat, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules), JSON.stringify(routing), JSON.stringify(page)])
+  const data = loading || error ? null : result
   return (
     <>
       <div className="card card-pad">
@@ -479,6 +508,17 @@ function TestTab({ headers, basics, users, rules, dirty, routing, page }: { rout
           </Field>
         </div>
       </div>
+      <div className="card card-pad">
+        <div className="grid3">
+          <Field label="HWID" help={t('subscription.hwid_preview_help')}><input className="input mono" value={hwid} onChange={(e) => setHwid(e.target.value)} /></Field>
+          <Field label={t('subscription.request_ip')} help={t('subscription.request_ip_help')}><input className="input mono" value={requestIP} onChange={(e) => setRequestIP(e.target.value)} /></Field>
+          <Field label={t('subscription.explicit_format')}><select className="input" value={explicitFormat} onChange={(e) => setExplicitFormat(e.target.value)}>
+            <option value="">{t('subscription.auto_format')}</option>
+            {Object.entries(formatNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </select></Field>
+        </div>
+        <p className="small muted">{t('subscription.inspection_cached')}</p>
+      </div>
       <div className="card">
         <div className="card-head">
           <div><h3>{t('subscription.response')}</h3>{data && <div className="card-sub">{data.client ? t('subscription.client', { client: data.client }) : t('subscription.client_not_recognised')}{data.ownTemplate ? t('subscription.own_template') : ''}</div>}</div>
@@ -491,6 +531,18 @@ function TestTab({ headers, basics, users, rules, dirty, routing, page }: { rout
           </pre>
         )}
       </div>
+      {data && data.format !== 'html' && <div className="card card-pad">
+        <h3>{t('subscription.delivery_diagnostics')}</h3>
+        <p role="status">{data.selection.allowed ? t('subscription.delivery_allowed') : data.selection.reason}</p>
+        <p className="small">{data.selection.hwid.off ? t('subscription.hwid_check_off') : hwid ? t('subscription.hwid_provided') : t('subscription.hwid_missing')}
+          {' · '}{t('subscription.server_counts', { available: data.selection.servers.filter((s) => !s.excluded).length, total: data.selection.servers.length })}</p>
+        <div className="table-wrap"><table className="table"><tbody>
+          {data.selection.servers.map((s, i) => <tr key={i}>
+            <td>{s.name}<div className="small muted">{s.node} · {s.protocol} · {s.network}</div></td>
+            <td>{s.excluded ? ({ hidden: t('subscription.excluded_hidden'), xhttp: t('subscription.excluded_xhttp'), raw: t('subscription.excluded_raw'), format: t('subscription.excluded_format') }[s.excluded as 'hidden' | 'xhttp' | 'raw' | 'format'] || s.excluded) : t('subscription.server_included')}</td>
+          </tr>)}
+        </tbody></table></div>
+      </div>}
       {/happ/i.test(ua) && <div className="card card-pad small">{t('subscription.happ_routing_limits')}</div>}
       {/karing/i.test(ua) && <div className="card card-pad small">{t('subscription.karing_routing_setup')}</div>}
       {data && data.appLinks.length > 0 && <div className="card card-pad">
