@@ -84,6 +84,65 @@ func TestSingBoxExternalLinkFields(t *testing.T) {
 	}
 }
 
+// Karing's Reality verification needs a complete TLS block for every VLESS server: own servers
+// get their public key, short id, SNI and uTLS fingerprint; external Reality links must not
+// lose pbk/sid either (Karing error «reality verification failed»).
+func TestKaringRealityFields(t *testing.T) {
+	const (
+		id  = "11111111-2222-4333-8444-555555555555"
+		pbk = "qGPTy8EZokn3hWp6hKBQ0MVvEuLRJCcv5UdWeP4TVhI"
+	)
+	own := []service.Host{{
+		Remark: "NL", Protocol: "vless", Network: "tcp", Address: "nl.example.com", Port: 443,
+		Security: "reality", SNI: "www.microsoft.com", PublicKey: pbk, ShortID: "ab12cd",
+		Fingerprint: "firefox", Flow: "xtls-rprx-vision",
+	}}
+	r := service.DefaultClientRouting()
+	b, err := Karing(own, id, "https://sub.example.com/s/t", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	check := func(ob map[string]any) {
+		tls, ok := ob["tls"].(map[string]any)
+		if !ok {
+			t.Fatalf("no tls block: %v", ob)
+		}
+		reality, _ := tls["reality"].(map[string]any)
+		utls, _ := tls["utls"].(map[string]any)
+		if reality["enabled"] != true || reality["public_key"] != pbk || reality["short_id"] == "" || reality["short_id"] == nil {
+			t.Fatalf("incomplete reality: %v", tls)
+		}
+		if utls["enabled"] != true || utls["fingerprint"] == "" || utls["fingerprint"] == nil {
+			t.Fatalf("incomplete utls: %v", tls)
+		}
+		if tls["server_name"] == "" || tls["server_name"] == nil {
+			t.Fatalf("no SNI: %v", tls)
+		}
+	}
+	var sawOwn bool
+	for _, ob := range cfg.Outbounds {
+		if ob["type"] == "vless" {
+			check(ob)
+			sawOwn = true
+		}
+	}
+	if !sawOwn {
+		t.Fatal("own vless server missing")
+	}
+	// An external Reality link converts to sing-box with the same fields kept.
+	p, ok := singBoxLink("vless://" + id + "@ext.example.org:443?type=tcp&security=reality&pbk=" + pbk + "&sid=ab&sni=www.microsoft.com#Ext")
+	if !ok {
+		t.Fatal("external Reality link refused")
+	}
+	check(p)
+}
+
 func TestKaringImportsExternalServersAndRules(t *testing.T) {
 	e := newEnv(t)
 	const ws = "vless://11111111-2222-4333-8444-555555555555@ws.example.org:443?type=ws&security=tls&host=cdn.example.org&path=%2Fws#direct"
