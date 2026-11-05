@@ -422,6 +422,7 @@ export interface SubPage {
 }
 
 export interface SubBasics {
+  karingDns?: string[]
   title: string
   updateHours: number
   supportUrl: string

@@ -278,11 +278,24 @@ func linkLines(body []byte) []string {
 	var out []string
 	for _, l := range strings.Split(text, "\n") {
 		l = strings.TrimSpace(l)
+		// A provider's routing profile is metadata, not a server. Merging it would
+		// override this panel's routing in clients that understand routing links.
+		if routingMetadata(l) {
+			continue
+		}
 		if i := strings.Index(l, "://"); i > 0 && !strings.HasPrefix(l, "http") && !strings.ContainsAny(l[:i], " \t") {
 			out = append(out, l)
 		}
 	}
 	return out
+}
+
+func routingMetadata(link string) bool {
+	u, err := url.Parse(link)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, "routing") || strings.EqualFold(u.Host, "autorouting")
 }
 
 // ParseLinks turns stored links into hosts. VLESS (raw/xhttp) and Hysteria2 links become full
@@ -291,7 +304,7 @@ func ParseLinks(text string) []Host {
 	var out []Host
 	for _, l := range strings.Split(text, "\n") {
 		l = strings.TrimSpace(l)
-		if l == "" {
+		if l == "" || routingMetadata(l) {
 			continue
 		}
 		if h, ok := parseLink(l); ok {
@@ -338,6 +351,9 @@ func parseLink(l string) (Host, bool) {
 		}
 		return h, true
 	case "vless":
+		if q.Get("allowInsecure") == "1" || q.Get("allowInsecure") == "true" || q.Get("insecure") == "1" || q.Get("insecure") == "true" || q.Get("pinSHA256") != "" || q.Get("ech") != "" {
+			return Host{}, false // preserve TLS verification options in the original link
+		}
 		h.Protocol, h.Security, h.Flow, h.Fingerprint = "vless", q.Get("security"), q.Get("flow"), q.Get("fp")
 		if h.Security == "" {
 			h.Security = "none"

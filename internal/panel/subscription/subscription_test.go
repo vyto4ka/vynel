@@ -205,12 +205,19 @@ func TestHWIDHeadersAndPerUserOff(t *testing.T) {
 	}
 }
 
-// Karing (sing-box core) gets links, without XHTTP points it cannot use.
+// Karing gets its import profile with remote routing rules, without XHTTP points it cannot use.
 func TestKaring(t *testing.T) {
 	e := newEnv(t)
-	ls := links(t, e.get(e.path(), "karing/1.2.24.2704 android", "kr-1"))
-	if len(ls) != 1 || !strings.HasPrefix(ls[0], "vless://"+e.user.UUID) || strings.Contains(ls[0], "type=xhttp") {
-		t.Fatalf("karing links: %v", ls)
+	rec := e.get(e.path(), "karing/1.2.25.2802 android", "kr-1")
+	var cfg struct {
+		Outbounds []map[string]any `json:"outbounds"`
+		Route     map[string]any   `json:"route"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Outbounds) != 4 || cfg.Outbounds[3]["uuid"] != e.user.UUID || cfg.Outbounds[3]["type"] != "vless" || cfg.Route["rule_set"] == nil {
+		t.Fatalf("karing profile: %s", rec.Body.String())
 	}
 }
 

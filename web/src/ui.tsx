@@ -115,28 +115,37 @@ export function useAction() {
 // ---------- загрузка данных ----------
 
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = [], refreshMs = 0) {
+  const [loading, setLoading] = useState(true)
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const requestId = useRef(0)
   const fnRef = useRef(fn)
   fnRef.current = fn
   const reload = useCallback(async () => {
+    const id = ++requestId.current
+    setLoading(true)
+    setError(null)
     try {
-      setData(await fnRef.current())
+      const result = await fnRef.current()
+      if (id !== requestId.current) return
+      setData(result)
       setError(null)
     } catch (e: any) {
-      setError(e?.message || String(e))
+      if (id === requestId.current) setError(e?.message || String(e))
+    } finally {
+      if (id === requestId.current) setLoading(false)
     }
   }, [])
   useEffect(() => {
     reload()
-    if (!refreshMs) return
+    if (!refreshMs) return () => { requestId.current++ }
     const t = setInterval(() => {
       if (!document.hidden) reload()
     }, refreshMs)
-    return () => clearInterval(t)
+    return () => { requestId.current++; clearInterval(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
-  return { data, error, reload, setData }
+  return { data, error, loading, reload, setData }
 }
 
 export function Loading({ error }: { error?: string | null }) {
