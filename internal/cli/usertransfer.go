@@ -18,7 +18,7 @@ import (
 func userTransferCmd() *cobra.Command {
 	c := &cobra.Command{Use: "transfer", Short: "Move users between panels (export and import without a backup)"}
 
-	var status, search string
+	var status, search, password string
 	export := &cobra.Command{
 		Use: "export [FILE]", Short: "Write the users as a JSON file (default: users-export.json)", Args: cobra.MaximumNArgs(1),
 		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
@@ -34,6 +34,11 @@ func userTransferCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if password != "" {
+				if b, err = usertransfer.Encrypt(b, password); err != nil {
+					return err
+				}
+			}
 			if err := os.WriteFile(path, b, 0o600); err != nil {
 				return err
 			}
@@ -44,14 +49,18 @@ func userTransferCmd() *cobra.Command {
 	}
 	export.Flags().StringVar(&status, "status", "", "only this status: active|disabled|limited|expired")
 	export.Flags().StringVar(&search, "search", "", "substring of username or note")
+	export.Flags().StringVar(&password, "password", "", "encrypt the file with this password (age; the file has tokens, so protect it)")
 
-	var mode string
+	var mode, importPassword string
 	var dryRun, reissue bool
 	importCmd := &cobra.Command{
 		Use: "import FILE", Short: "Read users from a vynel export file", Args: cobra.ExactArgs(1),
 		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
 			b, err := os.ReadFile(args[0])
 			if err != nil {
+				return err
+			}
+			if b, err = usertransfer.Decrypt(b, importPassword); err != nil {
 				return err
 			}
 			f, err := usertransfer.Unmarshal(b)
@@ -67,6 +76,7 @@ func userTransferCmd() *cobra.Command {
 		}),
 	}
 	importCmd.Flags().StringVar(&mode, "mode", "skip", "what to do with users already here: skip, upsert or rename")
+	importCmd.Flags().StringVar(&importPassword, "password", "", "password of an encrypted export file")
 	importCmd.Flags().BoolVar(&dryRun, "dry-run", false, "only report what would happen")
 	importCmd.Flags().BoolVar(&reissue, "reissue-tokens", false, "give imported users new subscription links and print them")
 
