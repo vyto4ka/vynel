@@ -122,6 +122,19 @@ export interface Group {
   description: string
   users: number
   rules: { kind: string; refId: number; label: string }[]
+  defaults: GroupDefaults | null
+}
+
+export interface GroupDefaults {
+  expiry: 'keep' | 'date' | 'period' | 'never'
+  expireAt: number | null
+  months: number
+  days: number
+  traffic: 'keep' | 'limit' | 'unlimited'
+  trafficLimit: number
+  reset: string
+  hwidLimit: number | null
+  ipLimit: number | null
 }
 
 export interface Template {
