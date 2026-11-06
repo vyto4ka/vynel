@@ -8,34 +8,35 @@ import (
 
 // Node is a server running the agent.
 type Node struct {
-	ID              int64
-	Name            string
-	Code            string
-	Country         string
-	Domain          string
-	BaseConfigID    *int64
-	Tags            []string
-	Local           bool
-	Enabled         bool
-	Manual          bool // the panel manages only Xray; nginx and the network are the admin's
-	CertSerial      string
-	AgentVersion    string
-	XrayVersion     string
-	LastSeenAt      *int64
-	DesiredRevision int64
-	DesiredHash     string
-	AppliedHash     string
-	LastError       string
-	Sort            int64
-	CreatedAt       int64
-	UpdatedAt       int64
-	StatsEpoch      string
-	StatsSeq        int64
-	Warnings        []string
-	CaddyVersion    string
-	NginxVersion    string
-	Capabilities    []string // what the agent understands beyond the original protocol ("nginx")
-	PeerIPs         []string // addresses the node connected to the gateway from, newest first
+	ID                      int64
+	Name                    string
+	Code                    string
+	Country                 string
+	Domain                  string
+	BaseConfigID            *int64
+	Tags                    []string
+	Local                   bool
+	Enabled                 bool
+	Manual                  bool // the panel manages only Xray; nginx and the network are the admin's
+	CertSerial              string
+	AgentVersion            string
+	XrayVersion             string
+	LastSeenAt              *int64
+	DesiredRevision         int64
+	DesiredHash             string
+	AppliedHash             string
+	LastError               string
+	Sort                    int64
+	CreatedAt               int64
+	UpdatedAt               int64
+	RequirementsConfirmedAt int64 // when the admin confirmed the node's wizard requirements; 0 = not yet
+	StatsEpoch              string
+	StatsSeq                int64
+	Warnings                []string
+	CaddyVersion            string
+	NginxVersion            string
+	Capabilities            []string // what the agent understands beyond the original protocol ("nginx")
+	PeerIPs                 []string // addresses the node connected to the gateway from, newest first
 }
 
 // Can reports whether the node's agent has a capability.
@@ -50,7 +51,7 @@ func (n *Node) Can(capability string) bool {
 
 const nodeCols = `id, name, code, country, domain, base_config_id, tags, local, enabled, manual, cert_serial,
 	agent_version, xray_version, last_seen_at, desired_revision, desired_hash, applied_hash, last_error, sort,
-	created_at, updated_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities, peer_ips`
+	created_at, updated_at, requirements_confirmed_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities, peer_ips`
 
 func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	n := &Node{}
@@ -58,7 +59,7 @@ func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	var tags, warnings, caps, peers string
 	err := sc.Scan(&n.ID, &n.Name, &n.Code, &n.Country, &n.Domain, &base, &tags, &n.Local, &n.Enabled, &n.Manual, &n.CertSerial,
 		&n.AgentVersion, &n.XrayVersion, &seen, &n.DesiredRevision, &n.DesiredHash, &n.AppliedHash, &n.LastError, &n.Sort,
-		&n.CreatedAt, &n.UpdatedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps, &peers)
+		&n.CreatedAt, &n.UpdatedAt, &n.RequirementsConfirmedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps, &peers)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -151,6 +152,11 @@ func SetNodeDesired(ctx context.Context, q DBTX, id, revision int64, hash string
 // SetNodeManual turns the node's manual mode on or off (manual: the panel manages only Xray).
 func SetNodeManual(ctx context.Context, q DBTX, id int64, manual bool) error {
 	return execOne(ctx, q, `UPDATE nodes SET manual=? WHERE id=?`, manual, id)
+}
+
+// SetNodeRequirementsConfirmed marks the node's wizard requirements confirmed (ts = 0 unconfirms).
+func SetNodeRequirementsConfirmed(ctx context.Context, q DBTX, id, ts int64) error {
+	return execOne(ctx, q, `UPDATE nodes SET requirements_confirmed_at=? WHERE id=?`, ts, id)
 }
 
 // NodeRuntime is what the gateway learns from a connected agent.
