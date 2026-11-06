@@ -241,6 +241,20 @@ func Run(o Options) (*Answers, error) {
 		return nil, err
 	}
 
+	// Pre-flight: a fresh aio/panel install puts vynel's own nginx on ports 80 and 443. If a
+	// system nginx or apache already holds them, the install would hang silently at the
+	// Let's Encrypt step, so stop here with a readable error instead. Reinstalls (state from
+	// a previous run, or update/reconfigure on top of an existing install) are exempt: there
+	// vynel-nginx itself is listening.
+	if (a.Mode == "aio" || a.Mode == "panel") && !installed && saved == nil {
+		if err := CheckPortsFree(); err != nil {
+			_ = run(huh.NewGroup(
+				huh.NewNote().Title("Порты 80 и/или 443 заняты").Next(true).Description(err.Error()),
+			))
+			return nil, err
+		}
+	}
+
 	switch a.Mode {
 	case "update":
 		ok := true
