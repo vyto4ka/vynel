@@ -39,6 +39,9 @@ REF_SET=0 CHANNEL="${VYNEL_CHANNEL:-}" LOCAL_BIN=""
 SRC=/opt/vynel-src
 DATA=/var/lib/vynel
 NODE_DATA=/var/lib/vynel-node
+XRAY_DIR=/usr/local/share/xray
+XRAY_BIN=/usr/local/bin/xray
+XRAY_VERSION="${VYNEL_XRAY_VERSION:-}" XRAY_VERSION_SET="${VYNEL_XRAY_VERSION+x}"
 PANEL_UNIT=/etc/systemd/system/vynel.service
 NODE_UNIT=/etc/systemd/system/vynel-node.service
 
@@ -98,6 +101,7 @@ Options:
   --channel CHANNEL      stable: the latest published release (default); dev: the build CI makes of a
                          branch from every push, to try a commit before it is released (see --ref)
   --ref BRANCH           the branch of the dev channel (implies --channel dev); "/" in the name is "-" in release names
+  --xray-version TAG     pin Xray to an official release tag (e.g. v26.10.31); latest removes the pin
   --binary FILE          install this vynel binary (e.g. from a CI run's artifacts) instead of downloading one
   --gh-proxy URL         prefix for github.com downloads when GitHub is slow or blocked,
                          e.g. https://ghfast.top/ (also VYNEL_GH_PROXY)
@@ -135,6 +139,7 @@ while [[ $# -gt 0 ]]; do
     --manual) MANUAL=1; shift ;;
     --ref) REF="${2:-}"; REF_SET=1; shift 2 ;;
     --channel) CHANNEL="${2:-}"; shift 2 ;;
+    --xray-version) [[ -n "${2:-}" ]] || die "--xray-version needs a tag or latest"; XRAY_VERSION="$2"; XRAY_VERSION_SET=1; shift 2 ;;
     --binary) LOCAL_BIN="${2:-}"; shift 2 ;;
     --gh-proxy) GH_PROXY="${2:-}"; shift 2 ;;
     --build-from-source) FROM_SOURCE=1; shift ;;
@@ -148,6 +153,16 @@ while [[ $# -gt 0 ]]; do
     *) usage; die "unknown option $1" ;;
   esac
 done
+
+# Preserve the pin on manual installer updates too; never source a file as shell code.
+if [[ -z "$XRAY_VERSION_SET" && -f /etc/vynel/install.env ]]; then
+  XRAY_VERSION="$(sed -n 's/^VYNEL_XRAY_VERSION=//p' /etc/vynel/install.env | tail -1)"
+fi
+case "$XRAY_VERSION" in
+  ""|latest) XRAY_VERSION="" ;;
+  *) [[ "$XRAY_VERSION" =~ ^v?[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || die "invalid Xray tag: use v26.10.31 or latest"
+     XRAY_VERSION="v${XRAY_VERSION#v}" ;;
+esac
 
 [[ $EUID -eq 0 ]] || die "run as root"
 
@@ -1040,6 +1055,7 @@ save_install_env() {
     echo "# written by scripts/install.sh; read by \`vynel update\`"
     printf 'VYNEL_REF=%s\n' "$REF"
     printf 'VYNEL_RELEASE=%s\n' "$RELEASE"
+    printf 'VYNEL_XRAY_VERSION=%s\n' "$XRAY_VERSION"
     [[ -n "${VYNEL_RELEASE_URL:-}" ]] && printf 'VYNEL_RELEASE_URL=%s\n' "$VYNEL_RELEASE_URL"
     [[ -n "$GH_PROXY" ]] && printf 'VYNEL_GH_PROXY=%s\n' "$GH_PROXY"
     true
@@ -1123,42 +1139,84 @@ xray_digest_ok() {
   fi
 }
 
+# Set only after a tested candidate replaces an existing installation.
+XRAY_CHANGED=0
+rollback_xray() {
+  [[ $XRAY_CHANGED -eq 1 && -x "$XRAY_DIR.prev/xray" ]] || return 1
+  rm -rf "$XRAY_DIR"
+  mv "$XRAY_DIR.prev" "$XRAY_DIR"
+  XRAY_CHANGED=0
+  red "  restored the previous Xray"
+}
+
+# Validate against the actual configs before touching the running installation. Testing both
+# paths also covers hosts with a panel's embedded node and a separately installed node.
+xray_candidate_ok() {
+  local dir="$1" want="$2" actual cfg
+  chmod 755 "$dir/xray" || return 1
+  actual="$("$dir/xray" version | awk 'NR==1 {print "v"$2}')" || return 1
+  [[ -n "$actual" && "$actual" != v ]] || return 1
+  if [[ -n "$want" && "$actual" != "$want" ]]; then
+    red "  Xray release mismatch: wanted $want, downloaded $actual"
+    return 1
+  fi
+  for cfg in "$DATA/node/xray.json" "$NODE_DATA/xray.json"; do
+    if [[ -f "$cfg" ]]; then
+      if ! XRAY_LOCATION_ASSET="$dir" "$dir/xray" run -test -config "$cfg"; then
+        red "  $actual cannot read $cfg; installed Xray was kept"
+        return 1
+      fi
+    fi
+  done
+}
+
 install_xray() {
-  if [[ -x /usr/local/share/xray/xray && "${1:-}" != force ]]; then
-    ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
+  if [[ -x "$XRAY_DIR/xray" && "${1:-}" != force && -z "$XRAY_VERSION" ]]; then
+    ln -sf "$XRAY_DIR/xray" "$XRAY_BIN"
     return 0
   fi
-  info "Xray: checking the latest release"
-  local asset tmp latest have
+  info "Xray: checking ${XRAY_VERSION:-the latest release}"
+  local asset tmp latest have dir f
   case "$GOARCH" in amd64) asset=Xray-linux-64.zip ;; arm64) asset=Xray-linux-arm64-v8a.zip ;; esac
-  latest="$(gh_latest XTLS/Xray-core "$asset")"
-  have="$(/usr/local/share/xray/xray version 2>/dev/null | awk 'NR==1 {print "v"$2}' || true)"
+  latest="$XRAY_VERSION"
+  [[ -n "$latest" ]] || latest="$(gh_latest XTLS/Xray-core "$asset")"
+  have="$("$XRAY_DIR/xray" version 2>/dev/null | awk 'NR==1 {print "v"$2}' || true)"
   if [[ -n "$latest" && "$latest" == "$have" ]]; then
-    ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
-    green "  already the latest: Xray ${have#v}"
+    ln -sf "$XRAY_DIR/xray" "$XRAY_BIN"
+    green "  Xray already at the selected release: ${have#v}"
     return 0
   fi
   tmp="$(mktemp)"
   local url="https://github.com/XTLS/Xray-core/releases/latest/download/$asset"
   [[ -n "$latest" ]] && url="https://github.com/XTLS/Xray-core/releases/download/$latest/$asset"
-  if fetch "$(gh "$url")" "$tmp" "Xray ${latest:-latest}" && unzip -tq "$tmp" >/dev/null 2>&1 && xray_digest_ok "$url" "$tmp"; then
-    # Unpack aside and swap files: writing over a running xray fails with "Text file busy".
-    local dir
-    dir="$(mktemp -d)"
-    unzip -o -q "$tmp" -d "$dir"
-    mkdir -p /usr/local/share/xray
-    local f
-    for f in "$dir"/*; do install -m "$([[ "$(basename "$f")" == xray ]] && echo 755 || echo 644)" "$f" /usr/local/share/xray/; done
-    rm -rf "$dir"
-  elif [[ -x /usr/local/share/xray/xray ]]; then
-    red "  Xray download failed, keeping the installed one"
-  else
+  if ! fetch "$(gh "$url")" "$tmp" "Xray ${latest:-latest}" || ! unzip -tq "$tmp" >/dev/null 2>&1 || ! xray_digest_ok "$url" "$tmp"; then
     rm -f "$tmp"
-    die "cannot download Xray (slow GitHub? try --gh-proxy https://ghfast.top/)"
+    if [[ -z "$XRAY_VERSION" && -x "$XRAY_DIR/xray" ]]; then
+      red "  Xray download failed, keeping the installed one"
+      return 0
+    fi
+    die "cannot download Xray ${XRAY_VERSION:-latest}; installed Xray was kept (check the tag and GitHub access)"
+  fi
+  mkdir -p "$(dirname "$XRAY_DIR")"
+  dir="$(mktemp -d "$XRAY_DIR.new.XXXXXX")"
+  if ! unzip -o -q "$tmp" -d "$dir" || ! xray_candidate_ok "$dir" "$latest"; then
+    rm -rf "$dir"; rm -f "$tmp"
+    die "Xray candidate failed validation; installed Xray was kept"
   fi
   rm -f "$tmp"
-  ln -sf /usr/local/share/xray/xray /usr/local/bin/xray
-  green "  $(/usr/local/bin/xray version 2>/dev/null | head -1)"
+  chmod 755 "$dir"
+  # Stage files on the same filesystem. Replacing the directory avoids Text file busy and
+  # keeps all old assets together for rollback, rather than mixing two releases' files.
+  for f in "$dir"/*; do [[ -f "$f" && "$(basename "$f")" != xray ]] && chmod 644 "$f"; done
+  rm -rf "$XRAY_DIR.prev"
+  [[ ! -d "$XRAY_DIR" ]] || mv "$XRAY_DIR" "$XRAY_DIR.prev"
+  if ! mv "$dir" "$XRAY_DIR"; then
+    [[ ! -d "$XRAY_DIR.prev" ]] || mv "$XRAY_DIR.prev" "$XRAY_DIR"
+    die "cannot install Xray; previous installation restored"
+  fi
+  XRAY_CHANGED=1
+  ln -sf "$XRAY_DIR/xray" "$XRAY_BIN"
+  green "  $("$XRAY_BIN" version | head -1)"
 }
 
 # install_nginx: nginx from the distribution with the stream module (SNI routing on a shared
@@ -1824,8 +1882,8 @@ do_update() {
   fi
   ensure_packages "${BASE_PKGS[@]}"
   backup_before_update
-  install_vynel || exit 1
   if [[ $PANEL_WITH_NODE -eq 1 || $NODE_INSTALLED -eq 1 ]]; then install_xray force; fi
+  install_vynel || { rollback_xray || true; exit 1; }
   # nginx replaces Caddy: the new agent switches as soon as it runs; Caddy's binary and
   # certificates stay for a rollback to the previous vynel.
   install_nginx
@@ -1845,9 +1903,14 @@ do_update() {
   if [[ ${#failed[@]} -gt 0 ]]; then
     red "  did not start: ${failed[*]}"
     journalctl -u "${failed[0]}" -n 15 --no-pager 2>/dev/null | sed 's/^/    /' || true
+    local restored=0
+    if rollback_xray; then restored=1; fi
     if [[ $VYNEL_CHANGED -eq 1 && -x /usr/local/bin/vynel.prev ]]; then
+      restored=1
       red "  rolling back to the previous vynel"
       cp -f /usr/local/bin/vynel.prev /usr/local/bin/vynel.new && mv -f /usr/local/bin/vynel.new /usr/local/bin/vynel
+    fi
+    if [[ $restored -eq 1 ]]; then
       for u in "${units[@]}"; do systemctl restart "$u" || true; done
       for u in "${units[@]}"; do wait_active "$u" 30 || die "$u does not start even with the previous version: journalctl -u $u -n 50"; done
       die "the new version did not start and was rolled back ($(vynel version 2>/dev/null)); send the log above"
