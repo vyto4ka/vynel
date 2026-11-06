@@ -18,6 +18,7 @@ import (
 // Subscription look and response headers (docs/USER_GUIDE.md §5). Stored as JSON settings so
 // they are edited in the web panel and need no migrations.
 const (
+	SettingSubKaringDNS   = "sub.karing_dns"   // JSON resolvers for proxy node hostnames only
 	SettingSubHeaders     = "sub.headers"      // JSON []SubHeader; empty = DefaultSubHeaders
 	SettingSubPage        = "sub.page"         // JSON SubPage; empty = DefaultSubPage
 	SettingSubAnnounce    = "sub.announce"     // text shown by apps (announce header) and on the page
@@ -38,13 +39,13 @@ type SubRule struct {
 }
 
 // SubFormats are the formats a rule may pick.
-var SubFormats = []string{"base64", "mihomo", "singbox", "xray", "html"}
+var SubFormats = []string{"base64", "mihomo", "singbox", "karing", "xray", "html"}
 
 // DefaultSubRules are the built-in rules (docs/ARCHITECTURE.md §8.3).
 func DefaultSubRules() []SubRule {
 	return []SubRule{
 		{Pattern: `(?i)keqdroid|keqdis`, Format: "xray", Enabled: true, Note: "KeqDroid"},
-		{Pattern: `(?i)karing`, Format: "base64", Enabled: true, Note: "Karing"},
+		{Pattern: `(?i)karing`, Format: "karing", Enabled: true, Note: "Karing"},
 		{Pattern: `(?i)clash|mihomo|stash|flclash|koala`, Format: "mihomo", Enabled: true, Note: "Clash / Mihomo"},
 		{Pattern: `(?i)sing-?box|\bSF[AIMT]\b`, Format: "singbox", Enabled: true, Note: "sing-box"},
 		{Pattern: `(?i)happ|v2raytun|v2rayn|v2rayng|streisand|hiddify|incy|shadowrocket|nekobox|nekoray|v2box|foxray`, Format: "base64", Enabled: true, Note: "Xray-приложения"},
@@ -66,6 +67,7 @@ var oldRuleNotes = map[string]string{
 
 // migrateKeqDroidRule moves the KeqDroid rule saved with the old default (links) to Xray JSON,
 // which KeqDroid takes as a regular profile with routing. A rule the admin changed is left alone.
+// Karing's unchanged built-in links rule moves to its import format with remote rule sets.
 // The built-in rules' old notes become short client names.
 func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
 	raw, ok, err := store.GetSetting(ctx, q, SettingSubRules)
@@ -78,6 +80,10 @@ func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
 	}
 	changed := false
 	for i := range rs {
+		if rs[i].Pattern == `(?i)karing` && rs[i].Format == "base64" && rs[i].Template == "" &&
+			(rs[i].Note == "Karing" || rs[i].Note == "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся") {
+			rs[i].Format, changed = "karing", true
+		}
 		if rs[i].Pattern == `(?i)keqdroid|keqdis` && rs[i].Format == "base64" && rs[i].Note == oldKeqdroidNote {
 			rs[i].Format, changed = "xray", true
 		}
@@ -178,12 +184,13 @@ type SubPage struct {
 
 // SubBasics are the plain subscription settings used by headers and the page.
 type SubBasics struct {
-	Title       string `json:"title"`
-	UpdateHours int    `json:"updateHours"`
-	SupportURL  string `json:"supportUrl"`
-	Announce    string `json:"announce"`
-	AnnounceURL string `json:"announceUrl"`
-	PageURL     string `json:"pageUrl"`
+	KaringDNS   []string `json:"karingDns"`
+	Title       string   `json:"title"`
+	UpdateHours int      `json:"updateHours"`
+	SupportURL  string   `json:"supportUrl"`
+	Announce    string   `json:"announce"`
+	AnnounceURL string   `json:"announceUrl"`
+	PageURL     string   `json:"pageUrl"`
 }
 
 // SubVariable documents a {variable} for the UI.
@@ -216,6 +223,9 @@ var SubVariables = []SubVariable{
 	{"url_enc", "Ссылка подписки, закодированная для ?url=", "https%3A%2F%2F…"},
 	{"url_b64", "Ссылка подписки в base64", "aHR0cHM6Ly9…"},
 	{"title_url", "Название, закодированное для URL", "VPN"},
+	{"title_query", "Название подписки для параметра URL", "VPN"},
+	{"karing_dns", "DNS адресов серверов Karing (параметр URL)", "udp%3A%2F%2F8.8.8.8"},
+	{"happ_routing", "Профиль маршрутизации Happ", "happ://routing/onadd/…"},
 }
 
 // SubHeaderPreset is a header from the catalog with a hint where it works.
@@ -258,8 +268,8 @@ var SubHeaderCatalog = []SubHeaderPreset{
 		"v2RayTun", "Обновлять подписку при каждом открытии приложения"},
 	{SubHeader{Name: "Hide-Settings", Value: "1", Clients: uaHappI},
 		"Happ, INCY", "Скрыть настройки серверов (адрес, ключи) от пользователя"},
-	{SubHeader{Name: "Routing", Value: "happ://routing/onadd/…", Clients: uaHapp},
-		"Happ", "Профиль маршрутизации (ссылка из конструктора Happ)"},
+	{SubHeader{Name: "Routing", Value: "happ://routing/onadd/…", Clients: `(?i)\b(happ|incy|keqdroid|keqdis)\b`},
+		"Happ, INCY, KeqDroid 0.34+", "Свой профиль вместо маршрутов панели. Выключенная строка отключает автоматический Routing"},
 	{SubHeader{Name: "Routing-Enable", Value: "true", Clients: uaHapp},
 		"Happ", "Включить присланную маршрутизацию"},
 	{SubHeader{Name: "ProviderID", Value: "", Clients: uaHappI},
@@ -331,7 +341,7 @@ var SubAppCatalog = []SubApp{
 		Platforms: []string{"android"}, Enabled: true},
 	{ID: "flclashx", Name: "FlClashX", Link: "flclashx://install-config?url={url_enc}",
 		Platforms: []string{"android", "windows", "macos", "linux"}},
-	{ID: "karing", Name: "Karing", Link: "karing://install-config?url={url_enc}&name={title_url}", Download: "https://karing.app/",
+	{ID: "karing", Name: "Karing", Link: DefaultKaringLink, Download: "https://karing.app/",
 		Platforms: []string{"android", "ios", "windows", "macos"}},
 	{ID: "singbox", Name: "sing-box", Link: "sing-box://import-remote-profile?url={url_enc}#{title_url}", Download: "https://sing-box.sagernet.org/",
 		Platforms: []string{"android", "ios", "macos"}},
@@ -426,7 +436,12 @@ func (s *Service) SubPage(ctx context.Context) (SubPage, error) {
 		return DefaultSubPage(), nil
 	}
 	have := map[string]bool{}
-	for _, a := range p.Apps {
+	for i := range p.Apps {
+		a := &p.Apps[i]
+		// Upgrade only the exact former built-in link; custom links stay untouched.
+		if a.ID == "karing" {
+			a.Link = upgradeKaringLink(a.Link)
+		}
 		have[a.ID] = true
 	}
 	for _, a := range SubAppCatalog {
@@ -494,7 +509,10 @@ func CheckSubPage(p *SubPage) error {
 
 // SubBasicsGet reads the plain subscription settings.
 func (s *Service) SubBasicsGet(ctx context.Context) SubBasics {
-	b := SubBasics{}
+	b := SubBasics{KaringDNS: []string{}}
+	if raw, err := s.Setting(ctx, SettingSubKaringDNS, ""); err == nil && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &b.KaringDNS)
+	}
 	b.Title, _ = s.Setting(ctx, SettingSubTitle, "VPN")
 	h, _ := s.Setting(ctx, SettingSubUpdateHours, "12")
 	b.UpdateHours, _ = strconv.Atoi(h)
@@ -510,7 +528,10 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 	if err := CheckSubBasics(b); err != nil {
 		return err
 	}
+	b.KaringDNS, _ = KaringOutboundDNS(b.KaringDNS)
 	cur := s.SubBasicsGet(ctx)
+	currentDNS, _ := json.Marshal(cur.KaringDNS)
+	nextDNS, _ := json.Marshal(b.KaringDNS)
 	set := func(key, old, val string) error {
 		if old == val {
 			return nil
@@ -518,6 +539,7 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 		return s.SetSetting(ctx, actor, key, val)
 	}
 	for _, x := range []struct{ key, old, val string }{
+		{SettingSubKaringDNS, string(currentDNS), string(nextDNS)},
 		{SettingSubTitle, cur.Title, strings.TrimSpace(b.Title)},
 		{SettingSubUpdateHours, strconv.Itoa(cur.UpdateHours), strconv.Itoa(b.UpdateHours)},
 		{SettingSubSupportURL, cur.SupportURL, strings.TrimSpace(b.SupportURL)},
@@ -534,6 +556,9 @@ func (s *Service) SetSubBasics(ctx context.Context, actor Actor, b SubBasics) er
 
 // CheckSubBasics validates the plain subscription settings.
 func CheckSubBasics(b SubBasics) error {
+	if _, err := KaringOutboundDNS(b.KaringDNS); err != nil {
+		return err
+	}
 	if b.UpdateHours < 0 || b.UpdateHours > 24*30 {
 		return invalid("«Обновлять, часов»: от 0 до 720")
 	}

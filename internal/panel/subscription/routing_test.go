@@ -37,7 +37,7 @@ func TestXrayJSONRouting(t *testing.T) {
 	}
 	cfg := configs[0]
 	rs := rulesOf(t, cfg)
-	if last := rs[len(rs)-1]; last["outboundTag"] != "proxy" || last["network"] != "tcp,udp" {
+	if last := rs[len(rs)-1]; last["outboundTag"] != "proxy" || last["network"] != nil || len(last["ip"].([]any)) != 2 {
 		t.Fatalf("last rule %v", last)
 	}
 	text, _ := json.Marshal(rs)
