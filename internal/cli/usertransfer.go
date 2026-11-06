@@ -98,7 +98,30 @@ func userTransferCmd() *cobra.Command {
 	importRn.Flags().BoolVar(&rnDryRun, "dry-run", false, "only report what would happen")
 	importRn.Flags().BoolVar(&rnReissue, "reissue-tokens", true, "give imported users new subscription links and print them")
 
-	c.AddCommand(export, importCmd, importRn)
+	var xuiMode string
+	var xuiDryRun, xuiReissue bool
+	importXUI := &cobra.Command{
+		Use: "import-3xui DB", Short: "Pull users from a 3x-ui database file", Args: cobra.ExactArgs(1),
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+			f, err := usertransfer.FetchXUI(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			// 3x-ui subscription ids are not vynel tokens: everyone gets a fresh link.
+			xuiReissue = true
+			rep, err := importFile(ctx, s, f, usertransfer.ImportOptions{Mode: xuiMode, DryRun: xuiDryRun, ReissueTokens: xuiReissue, Actor: "cli"})
+			if err != nil {
+				return err
+			}
+			printImportReport(cmd.OutOrStdout(), f, rep, xuiDryRun)
+			return nil
+		}),
+	}
+	importXUI.Flags().StringVar(&xuiMode, "mode", "skip", "what to do with users already here: skip, upsert or rename")
+	importXUI.Flags().BoolVar(&xuiDryRun, "dry-run", false, "only report what would happen")
+	importXUI.Flags().BoolVar(&xuiReissue, "reissue-tokens", true, "give imported users new subscription links and print them")
+
+	c.AddCommand(export, importCmd, importRn, importXUI)
 	return c
 }
 
