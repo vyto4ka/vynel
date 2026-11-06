@@ -47,10 +47,10 @@ func TestManualNodeSkipsWeb(t *testing.T) {
 	ctx := context.Background()
 	apiPort := xraytest.FreePort(t)
 	cfg := map[string]any{
-		"inbounds": []any{},
+		"inbounds":  []any{},
 		"outbounds": []any{xraytest.Direct()},
-		"api":      map[string]any{"tag": "api", "listen": "127.0.0.1:" + strconv.Itoa(apiPort), "services": []any{"HandlerService", "StatsService"}},
-		"stats":    map[string]any{},
+		"api":       map[string]any{"tag": "api", "listen": "127.0.0.1:" + strconv.Itoa(apiPort), "services": []any{"HandlerService", "StatsService"}},
+		"stats":     map[string]any{},
 	}
 	raw, _ := json.Marshal(cfg)
 	s := &nodev1.Snapshot{Revision: 1, Hash: "h1", XrayConfig: raw, NginxConfig: "# a rogue panel's nginx config"}
