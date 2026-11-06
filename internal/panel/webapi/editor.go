@@ -14,13 +14,17 @@ import (
 func (s *Server) editorRoutes() {
 	s.handle("GET /api/profile-templates/reference", s.templateReference)
 	s.handle("POST /api/profile-templates/check", s.checkTemplate)
+	s.handle("POST /api/profile-templates/preview", s.previewTemplate)
 	s.handle("POST /api/profile-templates", s.saveProfileTemplate)
 	s.handle("PUT /api/profile-templates/{id}", s.saveProfileTemplate)
 	s.handle("DELETE /api/profile-templates/{id}", s.deleteProfileTemplate)
 	s.handle("GET /api/profiles/{id}", s.profile)
 	s.handle("POST /api/profiles/{id}/preview", s.previewProfile)
+	s.handle("POST /api/profiles/{id}/duplicate", s.duplicateProfile)
+	s.handle("POST /api/profiles/{id}/apply", s.applyProfile)
 	s.handle("GET /api/inbounds/{id}", s.inbound)
 	s.handle("POST /api/inbounds/{id}/preview", s.previewInbound)
+	s.handle("POST /api/inbounds/{id}/duplicate", s.duplicateInbound)
 }
 
 const masked = "•••"
@@ -95,6 +99,54 @@ func maskValues(vals map[string]any, secret map[string]bool) map[string]any {
 	return out
 }
 
+// maskTree masks a rendered tree wherever a secret variable's value appears (the host
+// section expands the same values the inbound used).
+func maskTree(tree map[string]any, secrets map[string]bool) map[string]any {
+	if len(secrets) == 0 {
+		return tree
+	}
+	var walk func(any) any
+	walk = func(x any) any {
+		switch t := x.(type) {
+		case map[string]any:
+			out := make(map[string]any, len(t))
+			for k, v := range t {
+				out[k] = walk(v)
+			}
+			return out
+		case []any:
+			out := make([]any, len(t))
+			for i, v := range t {
+				out[i] = walk(v)
+			}
+			return out
+		case string:
+			if secrets[t] {
+				return masked
+			}
+		}
+		return x
+	}
+	m, _ := walk(tree).(map[string]any)
+	return m
+}
+
+// secretValues collects the rendered values of a template's secret variables.
+func secretValues(t *xrayconf.Template, vals map[string]any) map[string]bool {
+	out := map[string]bool{}
+	if t == nil {
+		return out
+	}
+	for _, v := range t.Variables {
+		if v.Secret {
+			if s, ok := vals[v.Name].(string); ok && s != "" {
+				out[s] = true
+			}
+		}
+	}
+	return out
+}
+
 // dropMasked removes values the UI sent back unchanged as "•••".
 func dropMasked(v map[string]any) map[string]any {
 	for k, x := range v {
@@ -131,6 +183,33 @@ func (s *Server) checkTemplate(r *http.Request) (any, error) {
 		return map[string]any{"ok": false, "error": err.Error()}, nil
 	}
 	return localize(r, map[string]any{"ok": true, "id": t.ID, "title": t.Title, "variables": t.Variables, "sample": maskSecrets(rendered)}, "title", "description"), nil
+}
+
+// previewTemplate renders a template as SampleRender would (a trial node NL, generated keys),
+// without the save-oriented checks: a draft with a bad id or tag_pattern still gets a preview.
+// The response carries the rendered inbound, the expanded host section (what the subscription
+// gets) and which ${VAR} the editor should highlight as unresolved.
+func (s *Server) previewTemplate(r *http.Request) (any, error) {
+	var in struct {
+		Source string `json:"source"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	t, rendered, host, unresolved, err := xrayconf.PreviewRender([]byte(in.Source))
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}, nil
+	}
+	m := &xrayconf.RenderedInbound{Tag: rendered.Tag, Protocol: rendered.Protocol, Flow: rendered.Flow,
+		Inbound: rendered.Inbound, Values: rendered.Values, Template: t}
+	out := map[string]any{"ok": true, "id": t.ID, "title": t.Title, "inbound": maskSecrets(m)}
+	if host != nil {
+		out["host"] = maskTree(host, secretValues(t, rendered.Values))
+	}
+	if len(unresolved) > 0 {
+		out["unresolved"] = unresolved
+	}
+	return localize(r, out, "title"), nil
 }
 
 func (s *Server) saveProfileTemplate(r *http.Request) (any, error) {
@@ -281,6 +360,65 @@ func (s *Server) previewProfile(r *http.Request) (any, error) {
 
 // ---- node inbounds ----
 
+// duplicateProfile copies a profile without its node bindings.
+func (s *Server) duplicateProfile(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	p, err := s.svc.DuplicateProfile(r.Context(), actor(r), id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": p.ID, "name": p.Name}, nil
+}
+
+// applyProfile attaches a profile to the nodes listed in the body; the result says what
+// happened on each node (created, skipped, error) instead of failing as a whole.
+func (s *Server) applyProfile(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		NodeIDs []int64 `json:"nodeIds"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	res, err := s.svc.ApplyProfileToNodes(r.Context(), actor(r), id, in.NodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(res))
+	for _, x := range res {
+		item := map[string]any{"nodeId": x.NodeID, "nodeName": x.NodeName}
+		switch {
+		case x.Skipped:
+			item["skipped"] = true
+		case x.Err != nil:
+			item["error"] = x.Err.Error()
+		default:
+			item["tag"] = x.Tag
+		}
+		out = append(out, item)
+	}
+	return map[string]any{"results": out}, nil
+}
+
+// duplicateInbound copies a node inbound with fresh node keys and a suffixed tag.
+func (s *Server) duplicateInbound(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	ni, err := s.svc.DuplicateInbound(r.Context(), actor(r), id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": ni.ID, "tag": ni.Tag}, nil
+}
+
 type inboundEdit struct {
 	Enabled         *bool          `json:"enabled"`
 	Port            *int           `json:"port"`
@@ -355,6 +493,17 @@ func (s *Server) inbound(r *http.Request) (any, error) {
 	}
 	if rendered, err := s.svc.RenderNodeInbound(ctx, id); err == nil {
 		out["rendered"] = maskSecrets(rendered)
+	} else {
+		out["error"] = err.Error()
+	}
+	if final, levels, sources, err := s.svc.NodeInboundSources(ctx, id); err == nil {
+		// The panel owns tag and clients: no override can be the source of truth for them.
+		delete(sources, "tag")
+		if st, ok := sources["settings"].(map[string]any); ok {
+			delete(st, "clients")
+		}
+		out["sources"] = sources
+		out["levels"] = map[string]any{"template": levels["template"], "profile": levels["profile"], "node": final}
 	} else {
 		out["error"] = err.Error()
 	}

@@ -3,6 +3,7 @@ package subscription
 import (
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
@@ -128,7 +129,10 @@ func xrayRules(r service.ClientRouting) []any {
 	}
 	dd, di := split(r.Direct)
 	add("direct", dd, di, processes(r.Direct)...)
-	return append(rules, field("proxy", "network", "tcp,udp"))
+	// A network catch-all would match a domain on the first pass and prevent
+	// IPIfNonMatch from resolving it. An IP catch-all runs after the IP rules on
+	// the second pass, so geoip and explicit CIDRs also work for domain requests.
+	return append(rules, field("proxy", "ip", []string{"0.0.0.0/0", "::/0"}))
 }
 
 // xrayClient is the full Xray client config of one server.
@@ -363,6 +367,10 @@ func (s *singRoute) match(entries []string) []map[string]any {
 			put("rule_set", s.set(r.Kind, r.Value))
 		case "process":
 			put("process_name", r.Value)
+			// Android's package ID is matched by package_name, not process_name.
+			if strings.Count(r.Value, ".") >= 2 && !strings.HasSuffix(strings.ToLower(r.Value), ".exe") && !strings.ContainsAny(r.Value, " /\\") {
+				put("package_name", r.Value)
+			}
 		case "ip":
 			v := r.Value
 			if !strings.Contains(v, "/") {
@@ -401,7 +409,8 @@ func singDNSServer(d, tag, detour string) map[string]any {
 		u, _ := url.Parse(d)
 		m = map[string]any{"type": "https", "tag": tag, "server": u.Hostname()}
 		if u.Port() != "" {
-			m["server_port"] = u.Port()
+			port, _ := strconv.Atoi(u.Port())
+			m["server_port"] = port
 		}
 		if u.Path != "" && u.Path != "/dns-query" {
 			m["path"] = u.Path

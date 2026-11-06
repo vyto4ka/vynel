@@ -89,6 +89,7 @@ export const clientTypes: Record<string, string> = {
   get base64() { return t('format.client_base64') },
   mihomo: 'Clash / Mihomo',
   singbox: 'sing-box',
+  karing: 'Karing',
   xray: 'Xray JSON',
 }
 

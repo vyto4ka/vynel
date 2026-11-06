@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -165,7 +166,32 @@ func TestSubscriptionAPI(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"base64"`) {
 		t.Fatalf("test: %d %s", w.Code, w.Body.String())
 	}
-	w = c.do("POST", "/api/subscription/test", `{"userAgent":"clash-verge/2"}`, true)
+	// A routing draft must be visible before saving, even with an old saved header list.
+	w = c.do("POST", "/api/subscription/test", `{"userAgent":"Happ/4.1.0","routing":{"ruDirect":false,"proxy":["domain:draft.example.org"]}}`, true)
+	var preview struct {
+		Headers []struct{ Name, Value string }
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil || w.Code != 200 {
+		t.Fatalf("routing preview: %d %s", w.Code, w.Body.String())
+	}
+	found := false
+	for _, h := range preview.Headers {
+		if h.Name == "Routing" {
+			payload := strings.SplitN(h.Value, "/onadd/", 2)
+			if len(payload) != 2 {
+				t.Fatal("invalid Routing link")
+			}
+			raw, err := base64.StdEncoding.DecodeString(payload[1])
+			if err != nil || !strings.Contains(string(raw), "domain:draft.example.org") || strings.Contains(string(raw), "geoip:ru") {
+				t.Fatalf("preview lost routing draft: %s %v", raw, err)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("automatic Routing missing from preview")
+	}
+	w = c.do("POST", "/api/subscription/test", `{"userAgent":"clash-verge/2","hwid":"preview-device"}`, true)
 	if strings.Contains(w.Body.String(), `"Hide-Settings"`) || !strings.Contains(w.Body.String(), `"format":"mihomo"`) {
 		t.Fatalf("clash test: %s", w.Body.String())
 	}
@@ -187,7 +213,7 @@ func TestSubscriptionAPI(t *testing.T) {
 		t.Fatalf("rules error: %d %s", w.Code, w.Body.String())
 	}
 	w = c.do("GET", "/api/subscription/preview", "", false)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || !strings.Contains(w.Body.String(), "Открыть сохранённую страницу") || !strings.Contains(w.Body.String(), `href="happ://add/https://example.com/s/demo-token" target="_blank"`) || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
 		t.Fatalf("preview: %d %q %.100s", w.Code, w.Header().Get("X-Frame-Options"), w.Body.String())
 	}
 	if w := c.do("POST", "/api/subscription/reset", `{"part":"headers"}`, true); w.Code != 200 || !strings.Contains(w.Body.String(), "Subscription-Userinfo") {
@@ -217,6 +243,22 @@ func TestTemplateEditorAPI(t *testing.T) {
 	bad, _ := json.Marshal(map[string]string{"source": "id: x\nxray_inbound: '{'"})
 	if w := c.do("POST", "/api/profile-templates/check", string(bad), true); !strings.Contains(w.Body.String(), `"ok":false`) {
 		t.Fatalf("bad check: %s", w.Body.String())
+	}
+	// Live preview: the inbound and the host section with sample values, secrets masked.
+	if w := c.do("POST", "/api/profile-templates/preview", string(body), true); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), `"ok":true`) || !strings.Contains(w.Body.String(), `"host"`) ||
+		strings.Contains(w.Body.String(), "PRIVATE_KEY\":\"") || strings.Contains(w.Body.String(), `${`) {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	// A draft with an unresolved ${VAR} still previews; the name is reported.
+	draftSrc := strings.Replace(list[0].Source, "id: "+list[0].ID, "id: draft", 1)
+	draft, _ := json.Marshal(map[string]string{"source": strings.Replace(draftSrc, `"${TAG}"`, `"${TAGX}"`, 1)})
+	if w := c.do("POST", "/api/profile-templates/preview", string(draft), true); !strings.Contains(w.Body.String(), `"ok":true`) ||
+		!strings.Contains(w.Body.String(), `"unresolved":["TAGX"]`) {
+		t.Fatalf("draft preview: %s", w.Body.String())
+	}
+	if w := c.do("POST", "/api/profile-templates/preview", string(bad), true); !strings.Contains(w.Body.String(), `"ok":false`) {
+		t.Fatalf("bad preview: %s", w.Body.String())
 	}
 	if w := c.do("POST", "/api/profile-templates", string(body), true); w.Code != 200 {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())

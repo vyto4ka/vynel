@@ -22,6 +22,7 @@ import { Api } from './pages/Api'
 import { Account } from './pages/Account'
 import { languages, lang, setLang, t } from './i18n'
 import { ModeProvider, useMode } from './mode'
+import { confirmPageLeave } from './unsaved'
 
 // short is the label under the icon when the menu is collapsed into a rail.
 type Page = { id: string; title: string; short?: string; icon: string; advanced?: boolean; el: () => ReactElement }
@@ -127,13 +128,18 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
   }, [])
 
   useEffect(() => {
-    const h = () => {
-      setPage(currentPage())
+    const h = (event: HashChangeEvent) => {
+      const next = currentPage()
+      if (next !== page && !confirmPageLeave()) {
+        history.replaceState(null, '', event.oldURL)
+        return
+      }
+      setPage(next)
       setMobileOpen(false)
     }
     window.addEventListener('hashchange', h)
     return () => window.removeEventListener('hashchange', h)
-  }, [])
+  }, [page])
 
   const { mode } = useMode()
   const p = allPages.find((x) => x.id === page)!
@@ -172,7 +178,7 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
         </nav>
         <div className="side-foot">
           <div className="side-foot-text">{login} · {version}</div>
-          <button className="nav-item" onClick={onLogout} title={t('main.log_out')}>
+          <button className="nav-item" onClick={() => { if (confirmPageLeave()) onLogout() }} title={t('main.log_out')}>
             <Icon name="logout" />
             <span className="nav-label">{t('main.log_out')}</span>
             <span className="nav-short">{t('main.log_out')}</span>

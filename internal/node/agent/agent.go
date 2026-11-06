@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"slices"
 	"sync"
-	"syscall"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -62,6 +61,7 @@ type Config struct {
 	WWWDir         string        // decoys, ACME webroot and temp files nginx workers use; "" = <DataDir>/web/www
 	NginxUser      string        // nginx worker user; "" = www-data (tests use root)
 	TuneSysctl     bool          // apply BBR/fq/TFO on start (needs root)
+	Manual         bool          // manual node: no nginx/certs (the admin runs the web server); only Xray is managed
 	CertInterval   time.Duration // how often certificates are renewed and copied for Xray, default 1m
 	// Firewall keeps nftables in step with what this node serves (when `vynel firewall on`);
 	// nil = never touch the firewall (tests).
@@ -138,7 +138,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg.CertInterval = time.Minute
 	}
 	if cfg.Restart == nil {
-		cfg.Restart = func() { _ = syscall.Kill(os.Getpid(), syscall.SIGTERM) }
+		cfg.Restart = selfTerm
 	}
 	if cfg.Update == nil {
 		cfg.Update = update.StartFollowing
@@ -169,15 +169,20 @@ func New(cfg Config) (*Agent, error) {
 		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, Log: cfg.Log.With("component", "nginx"),
 			CaddyStorage: filepath.Join(web, "caddy", "caddy")},
 		statsCh: make(chan struct{}, 1), certKick: make(chan struct{}, 1)}
-	if err := a.nginx.Init(); err != nil {
-		st.Close()
-		return nil, err
-	}
-	a.certs = newCertBridge(cfg.DataDir, a.nginx.Certs.Dir, a.nginx.DecoyDir())
-	a.nginx.OnCerts = func() {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		a.syncCertsLocked(context.Background())
+	if !cfg.Manual {
+		if err := a.nginx.Init(); err != nil {
+			st.Close()
+			return nil, err
+		}
+		a.certs = newCertBridge(cfg.DataDir, a.nginx.Certs.Dir, a.nginx.DecoyDir())
+		a.nginx.OnCerts = func() {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			a.syncCertsLocked(context.Background())
+		}
+	} else {
+		// A manual node runs no web server of its own: nginx and certificates are the admin's.
+		a.caddy, a.nginx = nil, nil
 	}
 	if a.cur, err = st.Load(); err != nil {
 		st.Close()
@@ -189,8 +194,12 @@ func New(cfg Config) (*Agent, error) {
 // Close stops Xray and closes the state.
 func (a *Agent) Close() {
 	a.proc.Close()
-	a.caddy.Close()
-	a.nginx.Close()
+	if a.caddy != nil {
+		a.caddy.Close()
+	}
+	if a.nginx != nil {
+		a.nginx.Close()
+	}
 	a.mu.Lock()
 	if a.api != nil {
 		a.api.Close()
@@ -217,10 +226,14 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.log.Warn("cannot get xray version", "err", err)
 	}
 	a.warnings = sysctl.Tune(a.cfg.TuneSysctl)
-	a.caddyVer = a.caddy.Version(ctx)
-	a.nginxVer = a.nginx.Version(ctx)
-	if a.nginxVer == "" {
-		a.warnings = append(a.warnings, "nginx is not installed: apt install nginx libnginx-mod-stream")
+	if a.caddy != nil {
+		a.caddyVer = a.caddy.Version(ctx)
+	}
+	if a.nginx != nil {
+		a.nginxVer = a.nginx.Version(ctx)
+		if a.nginxVer == "" {
+			a.warnings = append(a.warnings, "nginx is not installed: apt install nginx libnginx-mod-stream")
+		}
 	}
 	a.mu.Lock()
 	if a.cur != nil {
@@ -236,7 +249,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.mu.Unlock()
 	go a.collectLoop(ctx)
 	go a.onlineLoop(ctx)
-	go a.certLoop(ctx)
+	if a.certs != nil {
+		go a.certLoop(ctx)
+	}
 	if a.cfg.Firewall != nil {
 		go a.cfg.Firewall.Loop(ctx, 15*time.Second, a.FirewallPorts)
 	}
@@ -280,7 +295,7 @@ func (a *Agent) session(ctx context.Context) error {
 		CaddyVersion: a.caddyVer, Warnings: a.warnings, NginxVersion: a.nginxVer,
 	}
 	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit)
-	if a.nginxVer != "" {
+	if !a.cfg.Manual && a.nginxVer != "" {
 		hello.Capabilities = append(hello.Capabilities, CapNginx)
 	}
 	if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Hello{Hello: hello}}); err != nil {
@@ -478,9 +493,12 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 		}
 		a.mu.Unlock()
 	case nodev1.Command_ACTION_RESTART_CADDY: // the web server: nginx, or Caddy for an old panel
-		if a.nginx.Running() {
+		switch {
+		case a.cfg.Manual:
+			err = errors.New("a manual node runs no managed web server")
+		case a.nginx.Running():
 			err = a.nginx.Restart()
-		} else {
+		default:
 			err = a.caddy.Restart()
 		}
 	case nodev1.Command_ACTION_RESTART_AGENT:
@@ -520,6 +538,11 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.cfg.Manual {
+		// A manual node applies only the Xray part; the panel sends no web config for it, and
+		// anything that slips through (a mixed-version panel) is ignored rather than applied.
+		next.Caddy, next.Nginx = nil, ""
+	}
 	// The web server first: the Reality target must exist before clients arrive. A failure does
 	// not stop the VPN config from applying, but the state is saved as "not fully applied" so the
 	// panel keeps retrying and shows the error.
@@ -574,6 +597,11 @@ const CapNginx = "nginx"
 // config, Caddy when an older panel sent a Caddy one. Only one runs (both want :80 and :443).
 // When the new one fails to start, the old one comes back: Reality needs its target.
 func (a *Agent) applyWebLocked(ctx context.Context, caddyCfg []byte, nginxCfg string) error {
+	if a.cfg.Manual {
+		// A manual node's nginx is the admin's: the snapshot's web part is ignored, and the
+		// running web config (none of ours) is left alone.
+		return nil
+	}
 	if nginxCfg != "" {
 		if a.caddyCfg != nil {
 			_ = a.caddy.Apply(ctx, nil)
@@ -735,11 +763,13 @@ func (a *Agent) restartLocked(ctx context.Context, st *state.State) error {
 	if err != nil {
 		return err
 	}
-	full, doms, err := a.certs.resolve(full)
-	if err != nil {
-		return err
+	if a.certs != nil {
+		resolved, doms, rerr := a.certs.resolve(full)
+		if rerr != nil {
+			return rerr
+		}
+		full, a.certDoms = resolved, doms
 	}
-	a.certDoms = doms
 	if a.api != nil && a.proc.Running() {
 		// Xray counters live in memory: collect them before the restart drops them.
 		a.collectLocked(ctx)

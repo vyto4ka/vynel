@@ -410,7 +410,8 @@ limit = user.hwid_limit ?? settings.hwid_default_limit   (0 = без лимит�
 
   | Клиент | Формат |
   |--------|--------|
-  | KeqDroid | Xray JSON с маршрутами и DNS (+ заголовки приложений) |
+  | KeqDroid | Xray JSON с маршрутами и DNS; при наличии внешних ссылок — текст: JSON-конфиг на строку + исходные ссылки, Routing для ссылок (0.34+) |
+  | Karing | Профиль импорта sing-box: outbounds + remote rule_set/outbound; source-наборы по /s/<token>/karing-rules/<name>, без ключей серверов |
   | другие приложения на ядре Xray | base64 (+ заголовки приложений) |
   | приложения на ядре Mihomo | Mihomo YAML |
   | приложения на ядре sing-box | sing-box JSON |
