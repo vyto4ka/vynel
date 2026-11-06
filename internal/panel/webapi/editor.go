@@ -15,6 +15,7 @@ func (s *Server) editorRoutes() {
 	s.handle("GET /api/profile-templates/reference", s.templateReference)
 	s.handle("POST /api/profile-templates/check", s.checkTemplate)
 	s.handle("POST /api/profile-templates/preview", s.previewTemplate)
+	s.handle("POST /api/profile-templates/import-remnawave", s.importRemnawave)
 	s.handle("POST /api/profile-templates", s.saveProfileTemplate)
 	s.handle("PUT /api/profile-templates/{id}", s.saveProfileTemplate)
 	s.handle("DELETE /api/profile-templates/{id}", s.deleteProfileTemplate)
@@ -183,6 +184,27 @@ func (s *Server) checkTemplate(r *http.Request) (any, error) {
 		return map[string]any{"ok": false, "error": err.Error()}, nil
 	}
 	return localize(r, map[string]any{"ok": true, "id": t.ID, "title": t.Title, "variables": t.Variables, "sample": maskSecrets(rendered)}, "title", "description"), nil
+}
+
+// importRemnawave converts a Remnawave-style Xray config (plus optional subscription host and
+// nginx configs) into a template source the editor opens. It does not save anything: the user
+// reviews the produced template and saves it like any other.
+func (s *Server) importRemnawave(r *http.Request) (any, error) {
+	var in struct {
+		Xray      string `json:"xray"`
+		Host      string `json:"host"`
+		Nginx     string `json:"nginx"`
+		WithNginx bool   `json:"withNginx"`
+		Title     string `json:"title"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	res, err := xrayconf.ImportRemnawave(xrayconf.RemnawaveImport{Xray: in.Xray, Host: in.Host, Nginx: in.Nginx, WithNginx: in.WithNginx}, in.Title)
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}, nil
+	}
+	return map[string]any{"ok": true, "source": res.Source, "id": res.ID, "notes": res.Notes}, nil
 }
 
 // previewTemplate renders a template as SampleRender would (a trial node NL, generated keys),

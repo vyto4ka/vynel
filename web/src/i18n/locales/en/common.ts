@@ -17,6 +17,7 @@ export default {
   default: 'default',
   default_2: 'default{v}',
   default_3: 'default {default}',
+  import: 'Import',
   delete: 'Delete',
   device_limit: 'Device limit',
   devices: 'Devices',
