@@ -39,6 +39,7 @@ func (s *Server) routes() {
 
 	s.handle("GET /api/users", s.users)
 	s.handle("POST /api/users", s.createUser)
+	s.handle("POST /api/users/bulk", s.bulkUsers)
 	s.handle("GET /api/users/{id}", s.user)
 	s.handle("PATCH /api/users/{id}", s.updateUser)
 	s.handle("POST /api/users/{id}/{action}", s.userAction)
