@@ -46,7 +46,7 @@ type Options struct {
 // Answers go back to the script as shell variables.
 type Answers struct {
 	Mode, Domain, SubDomain, Email, Name, Country, PublicIP, VPNIP, SubIP string
-	GatewayListen, AdminLogin, BotToken, Restore, Token                   string
+	GatewayListen, AdminLogin, BotToken, Restore, UsersFile, Token       string
 	SubPath, PanelPath                                                    string
 	LoginMode, SessionPaths                                               string // password | link | miniapp; "yes" = random path per session
 	Manual                                                                bool
@@ -483,6 +483,15 @@ func Run(o Options) (*Answers, error) {
 						}
 					}
 					return nil
+				}),
+			huh.NewInput().Title("Перенести пользователей").Placeholder("путь к users-export.json, обычно пусто").Value(&a.UsersFile).
+				Validate(func(s string) error {
+					if s = strings.TrimSpace(s); s != "" {
+						if _, err := os.Stat(s); err != nil {
+							return errors.New("файла нет")
+						}
+					}
+					return nil
 				}))
 		groups = append(groups, huh.NewGroup(fields...).Title("Панель"))
 		groups = append(groups, huh.NewGroup(
@@ -569,7 +578,7 @@ func Run(o Options) (*Answers, error) {
 			a.SSHPort = "random"
 		}
 	}
-	a.BotToken, a.Restore, a.Token = strings.TrimSpace(a.BotToken), strings.TrimSpace(a.Restore), strings.TrimSpace(a.Token)
+	a.BotToken, a.Restore, a.UsersFile, a.Token = strings.TrimSpace(a.BotToken), strings.TrimSpace(a.Restore), strings.TrimSpace(a.UsersFile), strings.TrimSpace(a.Token)
 	a.SubPath, a.PanelPath = cleanPath(a.SubPath), cleanPath(a.PanelPath)
 	return a, nil
 }
@@ -603,6 +612,9 @@ func summary(a *Answers, domain string, nodes bool, sec []string, cache *dnsCach
 		line("Бот", map[bool]string{true: "настроен", false: "потом, в панели"}[a.BotToken != ""])
 		if a.Restore != "" {
 			line("Бэкап", a.Restore)
+		}
+		if a.UsersFile != "" {
+			line("Пользователи", a.UsersFile)
 		}
 	case "node", "node-manual":
 		line("Токен", trim(a.Token, 24))
@@ -638,7 +650,7 @@ func (a *Answers) Shell(w io.Writer) error {
 	vals := map[string]string{
 		"MODE": a.Mode, "DOMAIN": a.Domain, "SUB_DOMAIN": a.SubDomain, "EMAIL": a.Email, "NAME": a.Name, "COUNTRY": a.Country,
 		"PUBLIC_IP": a.PublicIP, "VPN_IP": a.VPNIP, "SUB_IP": a.SubIP, "GATEWAY_LISTEN": a.GatewayListen,
-		"ADMIN_LOGIN": a.AdminLogin, "BOT_TOKEN": a.BotToken, "RESTORE": a.Restore, "TOKEN": a.Token,
+		"ADMIN_LOGIN": a.AdminLogin, "BOT_TOKEN": a.BotToken, "RESTORE": a.Restore, "USERS_FILE": a.UsersFile, "TOKEN": a.Token,
 		"FIREWALL": a.Firewall, "SSH_KEYS_ONLY": a.SSHKeysOnly, "SSH_PORT": a.SSHPort, "PURGE": "0",
 		"MANUAL":   map[bool]string{true: "1", false: "0"}[a.Manual],
 		"SUB_PATH": a.SubPath, "PANEL_PATH": a.PanelPath, "LOGIN_MODE": a.LoginMode, "SESSION_PATHS": a.SessionPaths,
