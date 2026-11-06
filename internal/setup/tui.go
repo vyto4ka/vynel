@@ -46,7 +46,7 @@ type Options struct {
 // Answers go back to the script as shell variables.
 type Answers struct {
 	Mode, Domain, SubDomain, Email, Name, Country, PublicIP, VPNIP, SubIP string
-	GatewayListen, AdminLogin, BotToken, Restore, UsersFile, Token       string
+	GatewayListen, AdminLogin, BotToken, Restore, UsersFile, Token        string
 	SubPath, PanelPath                                                    string
 	LoginMode, SessionPaths                                               string // password | link | miniapp; "yes" = random path per session
 	Manual                                                                bool
