@@ -49,6 +49,7 @@ type Answers struct {
 	GatewayListen, AdminLogin, BotToken, Restore, Token                   string
 	SubPath, PanelPath                                                    string
 	LoginMode, SessionPaths                                               string // password | link | miniapp; "yes" = random path per session
+	Manual                                                                bool
 	Firewall, SSHKeysOnly, SSHPort                                        string
 	Purge                                                                 bool
 }
@@ -213,7 +214,8 @@ func Run(o Options) (*Answers, error) {
 		modes = append(modes,
 			huh.NewOption("Всё на этом сервере: панель + VPN   · проще всего начать с этого", "aio"),
 			huh.NewOption("Только панель                       · VPN-ноды на других серверах", "panel"),
-			huh.NewOption("Только VPN-нода                     · нужен токен из панели", "node"))
+			huh.NewOption("Только VPN-нода                     · нужен токен из панели", "node"),
+			huh.NewOption("Нода (ручная)                       · nginx и сеть вы настраиваете сами", "node-manual"))
 	} else {
 		modes = append(modes,
 			huh.NewOption("Обновить                            · данные сохранятся", "update"),
@@ -239,6 +241,20 @@ func Run(o Options) (*Answers, error) {
 		huh.NewSelect[string]().Title("vynel — установка").Description(header).Options(modes...).Value(&a.Mode),
 	)); err != nil {
 		return nil, err
+	}
+
+	// Pre-flight: a fresh aio/panel install puts vynel's own nginx on ports 80 and 443. If a
+	// system nginx or apache already holds them, the install would hang silently at the
+	// Let's Encrypt step, so stop here with a readable error instead. Reinstalls (state from
+	// a previous run, or update/reconfigure on top of an existing install) are exempt: there
+	// vynel-nginx itself is listening.
+	if (a.Mode == "aio" || a.Mode == "panel") && !installed && saved == nil {
+		if err := CheckPortsFree(); err != nil {
+			_ = run(huh.NewGroup(
+				huh.NewNote().Title("Порты 80 и/или 443 заняты").Next(true).Description(err.Error()),
+			))
+			return nil, err
+		}
 	}
 
 	switch a.Mode {
@@ -369,7 +385,8 @@ func Run(o Options) (*Answers, error) {
 			Description("Enter — оставить подсказку. На него Let's Encrypt пишет о проблемах с сертификатами"))
 		groups = append(groups, huh.NewGroup(fields...).Title("Сервер и домены").
 			Description("Tab / ↓ — следующее поле, Shift+Tab — назад, Enter — дальше"))
-	case "node":
+	case "node", "node-manual":
+		a.Manual = a.Mode == "node-manual"
 		groups = append(groups, huh.NewGroup(
 			huh.NewInput().Title("Токен подключения").Placeholder("vyn1.…").Value(&a.Token).
 				Description("Панель → «Ноды» → «Добавить сервер». Одноразовый, действует 24 часа").
@@ -379,7 +396,7 @@ func Run(o Options) (*Answers, error) {
 					}
 					return nil
 				}),
-		).Title("VPN-нода"))
+		).Title(map[bool]string{true: "VPN-нода (ручная)", false: "VPN-нода"}[a.Manual]))
 	}
 
 	// 3. Panel, VPN name, bot.
@@ -475,37 +492,41 @@ func Run(o Options) (*Answers, error) {
 		).Title("Вход по ссылке").WithHideFunc(func() bool { return a.LoginMode != "link" }))
 	}
 
-	// 4. Security: check boxes.
-	keys, password, sshPorts := sshFacts()
-	if sec == nil {
-		sec = []string{"firewall"}
-		if keys && password {
-			sec = append(sec, "keys")
-		}
-	}
-	secOpts := []huh.Option[string]{huh.NewOption("Файрвол: открыты только SSH и то, что обслуживает vynel; сканеры портов блокируются", "firewall")}
-	switch {
-	case keys && password:
-		secOpts = append(secOpts, huh.NewOption("SSH только по ключу (пароль выключить) — ключи на сервере есть", "keys"))
-	case !keys && password:
-		secOpts = append(secOpts, huh.NewOption("SSH только по ключу — недоступно: на сервере нет ключей (ssh-copy-id)", "nokeys"))
-	}
-	portNow := fmt.Sprint(sshPorts)
-	secOpts = append(secOpts, huh.NewOption("SSH на случайный порт вместо "+strings.Trim(portNow, "[]")+" — старый закроется после проверки входа", "port"))
-	sec = slices.DeleteFunc(sec, func(v string) bool {
-		return !slices.ContainsFunc(secOpts, func(o huh.Option[string]) bool { return o.Value == v })
-	})
-	groups = append(groups, huh.NewGroup(
-		huh.NewMultiSelect[string]().Title("Защита сервера").Description("Пробел или x — отметить, Enter — дальше").
-			Options(secOpts...).Value(&sec).Validate(func(v []string) error {
-			for _, x := range v {
-				if x == "nokeys" {
-					return errors.New("сначала добавьте SSH-ключ на сервер (ssh-copy-id root@сервер)")
-				}
+	// 4. Security: check boxes. A manual node keeps the admin's firewall untouched.
+	if a.Mode != "node-manual" {
+		keys, password, sshPorts := sshFacts()
+		if sec == nil {
+			sec = []string{"firewall"}
+			if keys && password {
+				sec = append(sec, "keys")
 			}
-			return nil
-		}),
-	).Title("Безопасность"))
+		}
+		secOpts := []huh.Option[string]{huh.NewOption("Файрвол: открыты только SSH и то, что обслуживает vynel; сканеры портов блокируются", "firewall")}
+		switch {
+		case keys && password:
+			secOpts = append(secOpts, huh.NewOption("SSH только по ключу (пароль выключить) — ключи на сервере есть", "keys"))
+		case !keys && password:
+			secOpts = append(secOpts, huh.NewOption("SSH только по ключу — недоступно: на сервере нет ключей (ssh-copy-id)", "nokeys"))
+		}
+		portNow := fmt.Sprint(sshPorts)
+		secOpts = append(secOpts, huh.NewOption("SSH на случайный порт вместо "+strings.Trim(portNow, "[]")+" — старый закроется после проверки входа", "port"))
+		sec = slices.DeleteFunc(sec, func(v string) bool {
+			return !slices.ContainsFunc(secOpts, func(o huh.Option[string]) bool { return o.Value == v })
+		})
+		groups = append(groups, huh.NewGroup(
+			huh.NewMultiSelect[string]().Title("Защита сервера").Description("Пробел или x — отметить, Enter — дальше").
+				Options(secOpts...).Value(&sec).Validate(func(v []string) error {
+				for _, x := range v {
+					if x == "nokeys" {
+						return errors.New("сначала добавьте SSH-ключ на сервер (ssh-copy-id root@сервер)")
+					}
+				}
+				return nil
+			}),
+		).Title("Безопасность"))
+	} else {
+		sec = nil
+	}
 
 	// 5. Summary.
 	ok := true
@@ -527,7 +548,7 @@ func Run(o Options) (*Answers, error) {
 	if a.LoginMode != "link" {
 		a.SessionPaths = ""
 	}
-	if a.Email = strings.TrimSpace(a.Email); a.Email == "" && a.Domain != "" && a.Mode != "node" {
+	if a.Email = strings.TrimSpace(a.Email); a.Email == "" && a.Domain != "" && a.Mode != "node" && a.Mode != "node-manual" {
 		a.Email = "admin@" + a.Domain
 	}
 	a.Country = strings.ToUpper(a.Country)
@@ -583,14 +604,17 @@ func summary(a *Answers, domain string, nodes bool, sec []string, cache *dnsCach
 		if a.Restore != "" {
 			line("Бэкап", a.Restore)
 		}
-	case "node":
+	case "node", "node-manual":
 		line("Токен", trim(a.Token, 24))
+		if a.Manual {
+			line("Режим", "ручная нода: nginx и сеть не настраиваются")
+		}
 	}
 	var s []string
 	for _, x := range sec {
 		s = append(s, map[string]string{"firewall": "файрвол", "keys": "SSH по ключу", "port": "SSH на другой порт"}[x])
 	}
-	line("Защита", or(strings.Join(s, ", "), "ничего"))
+	line("Защита", or(strings.Join(s, ", "), map[bool]string{true: "не трогаем (ручная нода)", false: "ничего"}[a.Manual]))
 	return b.String()
 }
 
@@ -616,6 +640,7 @@ func (a *Answers) Shell(w io.Writer) error {
 		"PUBLIC_IP": a.PublicIP, "VPN_IP": a.VPNIP, "SUB_IP": a.SubIP, "GATEWAY_LISTEN": a.GatewayListen,
 		"ADMIN_LOGIN": a.AdminLogin, "BOT_TOKEN": a.BotToken, "RESTORE": a.Restore, "TOKEN": a.Token,
 		"FIREWALL": a.Firewall, "SSH_KEYS_ONLY": a.SSHKeysOnly, "SSH_PORT": a.SSHPort, "PURGE": "0",
+		"MANUAL":   map[bool]string{true: "1", false: "0"}[a.Manual],
 		"SUB_PATH": a.SubPath, "PANEL_PATH": a.PanelPath, "LOGIN_MODE": a.LoginMode, "SESSION_PATHS": a.SessionPaths,
 	}
 	if a.Purge {

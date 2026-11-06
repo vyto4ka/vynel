@@ -214,3 +214,85 @@ node_requirements:
 `
 
 export const templateStarter = () => (lang() === 'en' ? starterEn : starterRu)
+
+// «Пустой» шаблон: минимальный каркас (id, protocol, порт) с комментариями. Пресет диалога
+// «Новый шаблон» — один из встроенных или этот.
+const blankRu = `# Пустой шаблон: только каркас. Заполните остальное по справке справа.
+# id: латиница, цифры, дефис; tag_pattern обязан содержать \${NODE_CODE}.
+id: my-template
+version: 1
+title: Мой шаблон
+summary: Пустой шаблон — опишите его в одном предложении.
+# Тег инбаунда на ноде (\${NODE_CODE} обязателен — у каждой ноды свой тег).
+tag_pattern: MYTPL_\${NODE_CODE}
+# Как подключение называется в приложениях.
+remark_pattern: \${NODE_FLAG} \${NODE_NAME}
+protocol: vless
+client:
+  flow: ""
+
+# Переменные: всё, что отличается между профилями и нодами, в тексте ниже — \${ИМЯ}.
+variables:
+  - name: PORT
+    scope: profile
+    source: const
+    default: 443
+    validate: port
+    description: Порт инбаунда на ноде.
+
+# Инбаунд Xray с \${ПЕРЕМЕННЫМИ}. Пользователи в clients добавляются сами.
+xray_inbound: |
+  {
+    "tag": "\${TAG}",
+    "port": "\${PORT}",
+    "listen": "0.0.0.0",
+    "protocol": "vless",
+    "settings": { "clients": [], "decryption": "none" }
+  }
+
+# Точка подключения — что уходит клиентам в подписку (необязательно).
+host:
+  address: \${NODE_CODE}
+  port: \${INBOUND_PORT}
+`
+
+const blankEn = `# A blank template: just the frame. Fill in the rest with the reference on the right.
+# id: Latin letters, digits, hyphens; tag_pattern must contain \${NODE_CODE}.
+id: my-template
+version: 1
+title: My template
+summary: A blank template — describe it in one sentence.
+# The inbound tag on the node (\${NODE_CODE} is required: each node has its own tag).
+tag_pattern: MYTPL_\${NODE_CODE}
+# What the connection is called in apps.
+remark_pattern: \${NODE_FLAG} \${NODE_NAME}
+protocol: vless
+client:
+  flow: ""
+
+# Variables: everything that differs between profiles and nodes; in the text below as \${NAME}.
+variables:
+  - name: PORT
+    scope: profile
+    source: const
+    default: 443
+    validate: port
+    description: The inbound's port on the node.
+
+# The Xray inbound with \${VARIABLES}. Users in clients are added automatically.
+xray_inbound: |
+  {
+    "tag": "\${TAG}",
+    "port": "\${PORT}",
+    "listen": "0.0.0.0",
+    "protocol": "vless",
+    "settings": { "clients": [], "decryption": "none" }
+  }
+
+# The connection point — what clients get in the subscription (optional).
+host:
+  address: \${NODE_CODE}
+  port: \${INBOUND_PORT}
+`
+
+export const blankStarter = () => (lang() === 'en' ? blankEn : blankRu)

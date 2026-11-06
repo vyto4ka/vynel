@@ -240,7 +240,7 @@ func (m *Manager) issueACME(ctx context.Context, domain, email string) error {
 		}
 		_ = os.Remove(file)
 		if err != nil {
-			return fmt.Errorf("http-01 for %s (is port 80 reachable and the A record right?): %w", domain, err)
+			return fmt.Errorf("http-01 for %s (is port 80 reachable, free of another web server, and the A record right? another nginx/apache holding port 80 is a common cause): %w", domain, err)
 		}
 	}
 	m.log().Info("certificate: domain confirmed, waiting for the certificate", "domain", domain)

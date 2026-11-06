@@ -2,8 +2,13 @@ package xrayconf
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 )
+
+// unknownVarRe matches the "unknown variable ${NAME}" error of the resolver.
+var unknownVarRe = regexp.MustCompile(`unknown variable \$\{(\w+)\}`)
 
 // SampleContext is the made-up node a template is checked against.
 var SampleContext = NodeContext{Code: "NL", Name: "Нидерланды", Country: "NL", Domain: "nl.example.com"}
@@ -70,7 +75,106 @@ func SampleRender(t *Template) (*RenderedInbound, error) {
 	return r, nil
 }
 
-// TemplateReference lists what a template may use, for the editor's help.
+// PreviewRender is SampleRender for the editor's live preview: it parses the YAML, resolves
+// variables the same way (input variables get their defaults or sample values, generate
+// variables are generated once in memory), renders the inbound and expands the host section,
+// but it does not fail on an unusable id or tag_pattern, and it reports ${VAR} placeholders it
+// could not resolve instead of erroring, so the editor can highlight them.
+func PreviewRender(raw []byte) (*Template, *RenderedInbound, map[string]any, []string, error) {
+	t, err := ParseTemplate(raw)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("YAML: %w", err)
+	}
+	if t.TagPattern == "" {
+		t.TagPattern = "PREVIEW_${NODE_CODE}"
+	}
+	profile, node := map[string]any{}, map[string]any{}
+	unknown := map[string]bool{}
+	for _, v := range t.Variables {
+		if v.Default != nil || v.DefaultFrom != "" {
+			continue
+		}
+		switch v.Source {
+		case SourceInput, SourceConst:
+			if v.Scope == ScopeNode {
+				node[v.Name] = sampleValue(v)
+			} else {
+				profile[v.Name] = sampleValue(v)
+			}
+		}
+	}
+	for scope, vals := range map[Scope]map[string]any{ScopeProfile: profile, ScopeNode: node} {
+		gen, err := t.GenerateValues(scope, vals)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("generate: %w", err)
+		}
+		for k, v := range gen {
+			vals[k] = v
+		}
+	}
+	r, err := RenderInbound(InboundSpec{Template: t, ProfileValues: profile, NodeValues: node, Context: SampleContext})
+	if err != nil {
+		// An unknown ${VAR} is a template being half-written, not a dead end: render the rest
+		// with every declared variable filled (placeholders stay where a value is still unknown)
+		// and report the names the editor highlights.
+		if !strings.Contains(err.Error(), "unknown variable") {
+			return nil, nil, nil, nil, err
+		}
+		for _, name := range unknownVars(err.Error()) {
+			unknown[name] = true
+		}
+		vals, _ := t.ResolveValuesLoose(profile, node, SampleContext)
+		for _, v := range t.Variables {
+			if _, ok := vals[v.Name]; !ok {
+				vals[v.Name] = "${" + v.Name + "}"
+			}
+		}
+		if vals == nil {
+			vals = map[string]any{}
+		}
+		if in, inErr := substitute(t.inbound, vals); inErr != nil {
+			for _, name := range unknownVars(inErr.Error()) {
+				unknown[name] = true
+			}
+		} else if m, ok := in.(map[string]any); ok {
+			normalizeTree(m)
+		}
+		tag, _ := vals["TAG"].(string)
+		r = &RenderedInbound{Tag: tag, Protocol: "vless", Inbound: t.inbound, Values: vals, Template: t}
+	}
+	vals := map[string]any{}
+	for k, v := range r.Values {
+		vals[k] = v
+	}
+	vals["INBOUND_PORT"], _ = r.Inbound["port"].(int)
+	var host map[string]any
+	if t.Host != nil {
+		h, err := ExpandTree(t.Host, vals)
+		if err != nil {
+			for _, name := range unknownVars(err.Error()) {
+				unknown[name] = true
+			}
+		} else {
+			host = h
+		}
+	}
+	names := make([]string, 0, len(unknown))
+	for name := range unknown {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return t, r, host, names, nil
+}
+
+// unknownVars pulls ${NAME} names out of "unknown variable ${NAME}" messages.
+func unknownVars(msg string) []string {
+	out := []string{}
+	for _, m := range unknownVarRe.FindAllStringSubmatch(msg, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
 type TemplateReference struct {
 	Builtins    []string `json:"builtins"`
 	Generators  []string `json:"generators"`

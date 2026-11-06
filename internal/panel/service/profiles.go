@@ -477,6 +477,164 @@ func (s *Service) RenderNodeInbound(ctx context.Context, id int64) (*xrayconf.Re
 	return s.renderNodeInbound(ctx, s.st.DB, ni)
 }
 
+// NodeInboundSources renders the same inbound at each level of docs/INBOUNDS.md §1.4 and
+// labels each key of the final render with where it comes from: "system" (tag, clients),
+// "node" (the node inbound's merge patch, port included), "profile" (the profile's patch)
+// or "template" (everything else). Lint runs only on the full render; level renders skip
+// port (nil there), so a level with lint rules is checked without port checks.
+func (s *Service) NodeInboundSources(ctx context.Context, id int64) (final, levels, sources map[string]any, err error) {
+	if err = s.syncTemplates(ctx); err != nil {
+		return nil, nil, nil, err
+	}
+	ni, err := store.GetNodeInbound(ctx, s.st.DB, id)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	r, err := s.renderNodeInbound(ctx, s.st.DB, ni)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	spec, err := s.inboundSpec(ctx, s.st.DB, ni)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	final = deepCopyAny(r.Inbound).(map[string]any)
+	levels = map[string]any{
+		"template": renderLevel(spec, func(s2 *xrayconf.InboundSpec) { s2.ProfileOverride, s2.NodeOverride = nil, nil }),
+		"profile":  renderLevel(spec, func(s2 *xrayconf.InboundSpec) { s2.NodeOverride = nil }),
+		"node":     deepCopyAny(r.Inbound),
+	}
+	sources = map[string]any{}
+	annotateSources(sources, final, asObj(levels["profile"]), asObj(levels["template"]))
+	return final, levels, sources, nil
+}
+
+// inboundSpec assembles the render spec of a node inbound (NodeOverride, PortOverride, context).
+func (s *Service) inboundSpec(ctx context.Context, q store.DBTX, ni *store.NodeInbound) (*xrayconf.InboundSpec, error) {
+	node, err := store.GetNode(ctx, q, ni.NodeID)
+	if err != nil {
+		return nil, err
+	}
+	p, err := store.GetProfile(ctx, q, ni.ProfileID)
+	if err != nil {
+		return nil, err
+	}
+	nctx := xrayconf.NodeContext{Code: node.Code, Name: node.Name, Country: node.Country, Domain: node.Domain, Tag: ni.Tag}
+	var egress string
+	if ni.ListenAddressID != nil {
+		a, err := store.GetAddress(ctx, q, *ni.ListenAddressID)
+		if err != nil {
+			return nil, fmt.Errorf("listen address: %w", err)
+		}
+		nctx.ListenIP = a.IP
+	}
+	if ni.EgressAddressID != nil {
+		a, err := store.GetAddress(ctx, q, *ni.EgressAddressID)
+		if err != nil {
+			return nil, fmt.Errorf("egress address: %w", err)
+		}
+		egress = a.IP
+	}
+	tpl, err := s.template(ctx, p.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if tpl, err = tpl.WithSources(p.Inbound, p.Host); err != nil {
+		return nil, invalid("profile %s: %v", p.Name, err)
+	}
+	return &xrayconf.InboundSpec{TemplateID: p.TemplateID, Template: tpl, ProfileValues: p.Values, NodeValues: ni.Values,
+		ProfileOverride: p.Override, NodeOverride: ni.Override, PortOverride: ni.PortOverride,
+		EgressIP: egress, Context: nctx}, nil
+}
+
+// renderLevel renders one inheritance level of the spec; nil when the level does not
+// render (the final error is reported separately, levels are advisory).
+func renderLevel(spec *xrayconf.InboundSpec, trim func(*xrayconf.InboundSpec)) map[string]any {
+	s := *spec
+	s.NodeOverride, s.PortOverride = nil, 0
+	s.Context.Tag = "" // the level's own tag pattern, not the unique one picked for the node
+	trim(&s)
+	r, err := xrayconf.RenderInbound(s)
+	if err != nil {
+		return nil
+	}
+	m, _ := deepCopyAny(r.Inbound).(map[string]any)
+	return m
+}
+
+// deepCopyAny clones a decoded JSON tree of any shape.
+func deepCopyAny(v any) any {
+	b, _ := json.Marshal(v)
+	var out any
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+// annotateSources labels every key of "higher": "node" where the final render differs from
+// the profile level, "profile" where the profile level differs from the template level, and
+// "template" everywhere else. The comparison walks the level trees: a key absent (or set to a
+// non-object value) in the lower level means that whole subtree was set by the upper level.
+func annotateSources(src, final, profile, template map[string]any) {
+	for k, fv := range final {
+		pv, pHas := lookupChild(profile, k)
+		tv, tHas := lookupChild(template, k)
+		if fm, ok := fv.(map[string]any); ok {
+			sm, _ := src[k].(map[string]any)
+			if sm == nil {
+				if _, labeled := src[k].(string); labeled {
+					continue
+				}
+				sm = map[string]any{}
+				src[k] = sm
+			}
+			if pHas && !tHas || !isObj(pv) && !isObj(tv) {
+				continue // a whole-object override at the upper level: every key keeps the outer label
+			}
+			annotateSources(sm, fm, asObj(pv), asObj(tv))
+			continue
+		}
+		if pHas && !equalJSON(fv, pv) {
+			src[k] = "node"
+		} else if pHas != tHas || !equalJSON(pv, tv) {
+			src[k] = "profile"
+		} else {
+			src[k] = "template"
+		}
+	}
+}
+
+// lookupChild returns k of a possibly nil level; absent and null are the same (an RFC 7386
+// merge patch deletes keys with null).
+func lookupChild(m map[string]any, k string) (any, bool) {
+	if m == nil {
+		return nil, false
+	}
+	v, ok := m[k]
+	if v == nil {
+		return nil, false
+	}
+	return v, ok
+}
+
+// isObj reports whether v is a JSON object.
+func isObj(v any) bool {
+	_, ok := v.(map[string]any)
+	return ok
+}
+
+// asObj casts to a JSON object, nil when it is not one.
+func asObj(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+// equalJSON compares two decoded JSON values by their marshalled form.
+func equalJSON(a, b any) bool {
+	ab, _ := json.Marshal(a)
+	bb, _ := json.Marshal(b)
+	return string(ab) == string(bb)
+}
+
 func (s *Service) renderNodeInbound(ctx context.Context, q store.DBTX, ni *store.NodeInbound) (*xrayconf.RenderedInbound, error) {
 	return s.renderNodeInboundWith(ctx, q, ni, nil)
 }

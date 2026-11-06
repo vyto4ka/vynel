@@ -171,14 +171,16 @@ func (s *Service) desiredStates(ctx context.Context, baseJSON *string) (map[int6
 			}
 		}
 		// The web server first: it changes Reality inbounds that front it or sit behind its SNI
-		// router. Agents that can run nginx get nginx; older ones keep getting Caddy.
+		// router. Agents that can run nginx get nginx; older ones keep getting Caddy. A manual
+		// node gets neither: its nginx and certificates are the admin's.
 		var caddySpec caddyconf.Spec
 		var nginxSpec nginxconf.Spec
 		var problems []string
-		useNginx := n.Can(CapNginx)
+		useNginx := !n.Manual && n.Can(CapNginx)
+		useCaddy := !n.Manual && !useNginx
 		if useNginx {
 			nginxSpec, problems, err = s.nginxSpec(ctx, n, rendered)
-		} else {
+		} else if useCaddy {
 			caddySpec, problems, err = s.caddySpec(ctx, n, rendered)
 		}
 		if err != nil {
@@ -205,9 +207,11 @@ func (s *Service) desiredStates(ctx context.Context, baseJSON *string) (map[int6
 				ds.Problems = append(ds.Problems, "nginx: "+err.Error())
 				ds.Nginx = ""
 			}
-		} else if ds.Caddy, err = caddyconf.Build(caddySpec); err != nil {
-			ds.Problems = append(ds.Problems, "caddy: "+err.Error())
-			ds.Caddy = nil
+		} else if useCaddy {
+			if ds.Caddy, err = caddyconf.Build(caddySpec); err != nil {
+				ds.Problems = append(ds.Problems, "caddy: "+err.Error())
+				ds.Caddy = nil
+			}
 		}
 		ds.Hash = hashState(ds)
 		out[n.ID] = ds

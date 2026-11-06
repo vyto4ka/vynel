@@ -85,7 +85,7 @@ func (p *Process) Close() {
 func (p *Process) startLocked() error {
 	cmd := p.Bin.command(context.Background(), "run", "-c", p.ConfigPath)
 	cmd.Stdout, cmd.Stderr = p.tail, p.tail
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processGroup()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start xray: %w", err)
 	}
@@ -133,7 +133,7 @@ func (p *Process) stopLocked() {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		killGroup(cmd.Process.Pid, syscall.SIGKILL)
 		<-done
 	}
 	p.mu.Lock()

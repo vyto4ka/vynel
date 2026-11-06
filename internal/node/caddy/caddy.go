@@ -164,7 +164,7 @@ func (m *Manager) startLocked(path, admin string) error {
 	cmd := exec.Command(m.Bin, "run", "--config", path)
 	cmd.Env = m.env()
 	cmd.Stdout, cmd.Stderr = &m.tail, &m.tail
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processGroup()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start caddy: %w", err)
 	}
@@ -226,7 +226,7 @@ func (m *Manager) stopLocked() {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		killGroup(cmd.Process.Pid)
 		<-done
 	}
 	m.mu.Lock()

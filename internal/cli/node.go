@@ -37,7 +37,7 @@ func nodeCmd() *cobra.Command {
 	join.Flags().StringVar(&country, "country", "", "2-letter country of this server; the panel names the node by it if the admin did not")
 
 	var token, caddyBin, nginxBin, wwwDir string
-	var tune, fw bool
+	var tune, fw, manual bool
 	var bin xray.Binary
 	run := &cobra.Command{
 		Use: "run", Short: "Run the node agent",
@@ -62,7 +62,7 @@ func nodeCmd() *cobra.Command {
 				fwm = &firewall.Manager{Log: slog.Default().With("component", "firewall")}
 			}
 			a, err := agent.New(agent.Config{DataDir: dataDir, Xray: bin, Version: buildinfo.Version, Dial: dial, Log: slog.Default(),
-				CaddyBin: caddyBin, NginxBin: nginxBin, WWWDir: wwwDir, TuneSysctl: tune, Firewall: fwm})
+				CaddyBin: caddyBin, NginxBin: nginxBin, WWWDir: wwwDir, TuneSysctl: tune, Firewall: fwm, Manual: manual})
 			if err != nil {
 				return err
 			}
@@ -80,6 +80,7 @@ func nodeCmd() *cobra.Command {
 	run.Flags().StringVar(&wwwDir, "www-dir", "/var/www/vynel-node", "decoy sites, ACME webroot and temp files of nginx")
 	run.Flags().BoolVar(&tune, "tune-sysctl", true, "apply BBR/fq/TCP Fast Open (needs root)")
 	run.Flags().BoolVar(&fw, "firewall", true, "keep the nftables firewall in step with what the node serves once `vynel firewall on`")
+	run.Flags().BoolVar(&manual, "manual", false, "manual node: the panel manages only the Xray config; nginx, certificates and the network are the admin's")
 
 	setPanel := &cobra.Command{
 		Use: "set-panel HOST:PORT", Short: "Point the node to a moved panel (same CA)", Args: cobra.ExactArgs(1),

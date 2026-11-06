@@ -244,6 +244,22 @@ func TestTemplateEditorAPI(t *testing.T) {
 	if w := c.do("POST", "/api/profile-templates/check", string(bad), true); !strings.Contains(w.Body.String(), `"ok":false`) {
 		t.Fatalf("bad check: %s", w.Body.String())
 	}
+	// Live preview: the inbound and the host section with sample values, secrets masked.
+	if w := c.do("POST", "/api/profile-templates/preview", string(body), true); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), `"ok":true`) || !strings.Contains(w.Body.String(), `"host"`) ||
+		strings.Contains(w.Body.String(), "PRIVATE_KEY\":\"") || strings.Contains(w.Body.String(), `${`) {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	// A draft with an unresolved ${VAR} still previews; the name is reported.
+	draftSrc := strings.Replace(list[0].Source, "id: "+list[0].ID, "id: draft", 1)
+	draft, _ := json.Marshal(map[string]string{"source": strings.Replace(draftSrc, `"${TAG}"`, `"${TAGX}"`, 1)})
+	if w := c.do("POST", "/api/profile-templates/preview", string(draft), true); !strings.Contains(w.Body.String(), `"ok":true`) ||
+		!strings.Contains(w.Body.String(), `"unresolved":["TAGX"]`) {
+		t.Fatalf("draft preview: %s", w.Body.String())
+	}
+	if w := c.do("POST", "/api/profile-templates/preview", string(bad), true); !strings.Contains(w.Body.String(), `"ok":false`) {
+		t.Fatalf("bad preview: %s", w.Body.String())
+	}
 	if w := c.do("POST", "/api/profile-templates", string(body), true); w.Code != 200 {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}

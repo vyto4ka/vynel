@@ -1,9 +1,10 @@
 // Checks the interface catalogs: every key is used somewhere in src, and no catalog of another
 // language keeps Russian text. (That a language has exactly the keys of Russian is checked by tsc.)
 import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { join, basename } from 'node:path'
 
-const src = new URL('../src/', import.meta.url).pathname
+const src = fileURLToPath(new URL('../src/', import.meta.url))
 const localesDir = join(src, 'i18n/locales')
 
 function walk(dir) {
