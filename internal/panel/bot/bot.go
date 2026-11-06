@@ -34,6 +34,7 @@ type Status struct {
 	Running  bool   `json:"running"`
 	Username string `json:"username,omitempty"`
 	Error    string `json:"error,omitempty"`
+	Issue    string `json:"issue,omitempty"` // network | token | conflict | telegram | route
 }
 
 // Bot is the Telegram bot.
@@ -47,10 +48,11 @@ type Bot struct {
 	api         *client
 	offsetToken string // route changes preserve the update offset for the same bot
 	offset      int64
-	pending     map[int64]pendingInput // chat -> what the next text message means
-	menuSet     map[int64]string       // chat -> Mini App URL its menu button opens
-	loginMsg    map[int64]int64        // chat -> the latest sign-in link message (the older one is deleted)
-	quickMu     sync.Mutex             // one quick-buttons check-and-send at a time
+	pending     map[int64]pendingInput    // chat -> what the next text message means
+	menuSet     map[int64]string          // chat -> Mini App URL its menu button opens
+	loginMsg    map[int64]int64           // chat -> the latest sign-in link message (the older one is deleted)
+	quickMu     sync.Mutex                // one quick-buttons check-and-send at a time
+	paymentSent map[int64]paymentDelivery // partial delivery progress across route reconnects
 
 	alerts  alertState
 	backup  backupState
@@ -137,6 +139,9 @@ func (b *Bot) Run(ctx context.Context) error {
 		}
 		if next != cur {
 			stop()
+			if next.token != cur.token {
+				b.paymentSent = nil
+			}
 			stop, cur = func() {}, next
 			b.mu.Lock()
 			b.api = nil
@@ -144,7 +149,7 @@ func (b *Bot) Run(ctx context.Context) error {
 			b.setStatus(Status{})
 			if next.token != "" {
 				if next.err != "" {
-					b.setStatus(Status{Error: next.err})
+					b.setStatus(Status{Error: next.err, Issue: "route"})
 				} else {
 					stop = start(next.token, next.nodeID)
 				}
@@ -162,7 +167,7 @@ func (b *Bot) Run(ctx context.Context) error {
 func (b *Bot) runWith(ctx context.Context, token string, nodeID int64) {
 	api, err := b.makeClient(token, nodeID)
 	if err != nil {
-		b.setStatus(Status{Error: err.Error()})
+		b.setStatus(Status{Error: err.Error(), Issue: ConnectionIssue(err)})
 		return
 	}
 	defer api.http.CloseIdleConnections()
@@ -175,7 +180,7 @@ func (b *Bot) runWith(ctx context.Context, token string, nodeID int64) {
 		if me, err = api.getMe(ctx); err == nil {
 			break
 		}
-		b.setStatus(Status{Error: err.Error()})
+		b.setStatus(Status{Error: err.Error(), Issue: ConnectionIssue(err)})
 		b.log.Warn("telegram bot: cannot start", "err", err)
 		if !sleep(ctx, 30*time.Second) {
 			return
@@ -213,12 +218,12 @@ func (b *Bot) runWith(ctx context.Context, token string, nodeID int64) {
 			}
 			var ae *apiError
 			if errors.As(err, &ae) && ae.Code == 401 {
-				b.setStatus(Status{Error: "Telegram не принял токен (401): проверьте его в @BotFather"})
+				b.setStatus(Status{Error: "Telegram не принял токен (401): проверьте его в @BotFather", Issue: "token"})
 				<-ctx.Done()
 				return
 			}
 			b.log.Warn("telegram getUpdates", "err", err)
-			b.setStatus(Status{Username: me.Username, Error: err.Error()})
+			b.setStatus(Status{Username: me.Username, Error: err.Error(), Issue: ConnectionIssue(err)})
 			if !sleep(ctx, 5*time.Second) {
 				return
 			}
@@ -281,7 +286,7 @@ func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
 			case n.Kind == "ip-limit":
 				b.onIPLimit(ctx, n)
 			case n.Kind == "billing":
-				b.toAdmins(ctx, n.Text)
+				b.onBilling(ctx, n)
 			}
 		case <-tick:
 			return true

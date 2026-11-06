@@ -39,6 +39,10 @@ func TestBotRouteAPIAndConnectionProbe(t *testing.T) {
 	var calls atomic.Int64
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if r.Method == http.MethodHead && r.URL.Path == "/" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		if r.URL.Path != "/bot"+secret+"/getMe" {
 			t.Errorf("probe called %q", r.URL.Path)
 		}
@@ -82,5 +86,15 @@ func TestBotRouteAPIAndConnectionProbe(t *testing.T) {
 	}
 	if id, _ := svc.BotNodeID(t.Context()); id != n.ID || svc.BotToken(t.Context()) != secret {
 		t.Fatal("partial update changed route or token")
+	}
+	if err := svc.SetBotToken(t.Context(), service.ActorCLI, ""); err != nil {
+		t.Fatal(err)
+	}
+	w = c.do("POST", "/api/bot/test", `{"nodeId":0}`, true)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"networkOnly":true`) || !strings.Contains(w.Body.String(), `"ok":true`) {
+		t.Fatalf("tokenless probe: %d %s", w.Code, w.Body.String())
+	}
+	if id, _ := svc.BotNodeID(t.Context()); id != n.ID {
+		t.Fatal("tokenless probe changed saved route")
 	}
 }

@@ -10,7 +10,7 @@ interface BotInfo {
   nodeId: number
   routeNodes: RouteNode[]
   hasToken: boolean
-  status: { running: boolean; username?: string; error?: string }
+  status: { running: boolean; username?: string; error?: string; issue?: string }
   admins: { id: number; name: string; username?: string; boundAt: number }[]
   backupTime: string
   summaryTime: string
@@ -50,7 +50,7 @@ export function Telegram() {
           {!d.hasToken ? <Badge>{t('telegram.not_set_up')}</Badge> : st.running ? <Badge color="green" dot>@{st.username}</Badge> : st.error ? <Badge color="pink" dot>{t('common.error')}</Badge> : <Badge color="amber" dot>{t('telegram.starting')}</Badge>}
         </div>
         <div className="card-pad">
-          {st.error && <div className="alert pink" style={{ marginBottom: 14 }}>{st.error}</div>}
+          {st.error && <div className="alert pink" style={{ marginBottom: 14 }}>{st.error}{st.issue === 'token' && <p>{t('telegram.token_issue')}</p>}{st.issue === 'conflict' && <p>{t('telegram.conflict_issue')}</p>}</div>}
           {!d.hasToken && (
             <ol className="list-plain small text-2" style={{ marginTop: 0 }}>
               <li><Trans k="telegram.in_telegram_open_newbot_the" v={{ v: <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> }} /></li>
@@ -73,6 +73,11 @@ export function Telegram() {
       </div>
 
       <BotConnection d={d} onSaved={info.setData} />
+
+      <div className="card">
+        <div className="card-head"><h3>{t('telegram.renewal_title')}</h3></div>
+        <div className="card-pad"><p className="small text-2" style={{ marginTop: 0 }}>{t('telegram.renewal_help')}</p><a className="btn" href="#/billing"><Icon name="wallet" /> {t('telegram.open_billing')}</a></div>
+      </div>
 
       <div className="card">
         <div className="card-head">
@@ -193,7 +198,7 @@ function BotConnection({ d, onSaved }: { d: BotInfo; onSaved: (info: BotInfo) =>
   const [nodeId, setNodeId] = useState(d.nodeId)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; username?: string; error?: string } | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; username?: string; error?: string; issue?: string; networkOnly?: boolean } | null>(null)
   const act = useAction()
   useEffect(() => { if (!dirty) setNodeId(d.nodeId) }, [d.nodeId, dirty])
   const selected = d.routeNodes.find((n) => n.id === nodeId)
@@ -210,7 +215,7 @@ function BotConnection({ d, onSaved }: { d: BotInfo; onSaved: (info: BotInfo) =>
     setBusy(true)
     setResult(null)
     try {
-      const checked = await act(() => post<{ ok: boolean; username?: string; error?: string }>('bot/test', { nodeId }))
+      const checked = await act(() => post<{ ok: boolean; username?: string; error?: string; issue?: string; networkOnly?: boolean }>('bot/test', { nodeId }))
       if (checked) setResult(checked)
     } finally { setBusy(false) }
   }
@@ -218,6 +223,8 @@ function BotConnection({ d, onSaved }: { d: BotInfo; onSaved: (info: BotInfo) =>
     <div className="card-head"><h3>{t('telegram.connection')}</h3></div>
     <form className="card-pad" onSubmit={apply}>
       <p className="small text-2" style={{ marginTop: 0 }}>{t('telegram.route_current', { name: d.nodeId === 0 ? t('telegram.route_direct') : d.routeNodes.find((n) => n.id === d.nodeId)?.name || t('telegram.route_missing') })}</p>
+      <p className="small text-2">{t('telegram.route_when_needed')}</p>
+      {d.status.issue === 'network' && d.nodeId === 0 && <div className="alert amber">{t('telegram.route_network_help')}</div>}
       <Field label={t('telegram.route_label')} help={t('telegram.route_help')}>
         <select className="input" value={nodeId} disabled={busy} onChange={(e) => { setNodeId(Number(e.target.value)); setDirty(true); setResult(null) }}>
           <option value={0}>{t('telegram.route_direct')}</option>
@@ -232,13 +239,13 @@ function BotConnection({ d, onSaved }: { d: BotInfo; onSaved: (info: BotInfo) =>
       {d.routeNodes.some((n) => !n.supported) && <p className="muted small">{t('telegram.route_upgrade_help')}</p>}
       <div className="row">
         <button className="btn primary" disabled={busy || !dirty || !valid}>{t('common.save')}</button>
-        <button type="button" className="btn" disabled={busy || !d.hasToken || !valid} onClick={test}>
+        <button type="button" className="btn" disabled={busy || !valid} onClick={test}>
           <Icon name="plug" /> {busy ? t('common.loading') : t('telegram.test_connection')}
         </button>
       </div>
-      <p className="muted small">{d.hasToken ? t('telegram.route_test_unsaved') : t('telegram.test_needs_token')}</p>
+      <p className="muted small">{d.hasToken ? t('telegram.route_test_unsaved') : t('telegram.test_without_token')}</p>
       {result && <div className={'alert ' + (result.ok ? 'green' : 'pink')} style={{ marginTop: 14 }} role="status">
-        {result.ok ? t('telegram.connection_ok', { username: result.username || '—' }) : result.error}
+        {result.ok ? result.networkOnly ? t('telegram.network_ok') : t('telegram.connection_ok', { username: result.username || '—' }) : <>{result.error}{result.issue === 'network' && nodeId === 0 && <p>{t('telegram.route_network_help')}</p>}{result.issue === 'token' && <p>{t('telegram.token_issue')}</p>}{result.issue === 'conflict' && <p>{t('telegram.conflict_issue')}</p>}</>}
       </div>}
     </form>
   </div>

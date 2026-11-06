@@ -73,14 +73,14 @@ func (c *client) do(req *http.Request, out any) error {
 		// *url.Error prints the URL, which holds the token: keep only the cause.
 		var ue *url.Error
 		if errors.As(err, &ue) {
-			return fmt.Errorf("telegram %s: %w", path.Base(req.URL.Path), ue.Err)
+			return &networkError{fmt.Errorf("telegram %s: %w", path.Base(req.URL.Path), ue.Err)}
 		}
-		return errors.New("telegram: request failed")
+		return &networkError{errors.New("telegram: request failed")}
 	}
 	defer resp.Body.Close()
 	var r response
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&r); err != nil {
-		return fmt.Errorf("telegram: bad response (HTTP %d)", resp.StatusCode)
+		return &apiError{Code: resp.StatusCode, Description: "bad response"}
 	}
 	if !r.OK {
 		return &apiError{Code: r.ErrorCode, Description: r.Description, RetryAfter: r.Parameters.RetryAfter}

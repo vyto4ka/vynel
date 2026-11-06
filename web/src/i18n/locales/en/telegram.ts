@@ -1,4 +1,13 @@
 export default {
+  route_when_needed: 'Checks run from the panel server. Keep a direct connection if Telegram is reachable. If it is blocked, for example in Russia, choose an overseas node. No separate VPN installation on the panel is needed.',
+  route_network_help: 'The panel server cannot connect to Telegram. Choose an available overseas node and test it. Save the route after a successful check.',
+  test_without_token: 'HTTPS reachability can be tested without a token. After saving a token, the check also validates it via getMe. No messages are sent and the selected route is not saved.',
+  network_ok: 'Telegram is reachable over HTTPS through the selected route. Save a token to check the bot itself.',
+  token_issue: 'Telegram responded but rejected the token. Check it in @BotFather; changing the route will not fix this.',
+  conflict_issue: 'Another process or webhook is receiving this bot’s updates. Stop the second instance or check its settings.',
+  renewal_title: 'Server renewal reminders',
+  renewal_help: 'Five days before payment is due, linked administrators receive a reminder with the time left and renewal cost. Set the date, cost, currency, period and provider in Billing. Add the provider’s account URL to include a sign-in button. Undelivered reminders are retried when connectivity returns.',
+  open_billing: 'Open billing',
   connection: 'Telegram connection',
   route_label: 'Bot connection route',
   route_help: 'Select an overseas node if the panel server cannot reach the Telegram API. This applies to commands, notifications and backup uploads.',
@@ -15,7 +24,6 @@ export default {
   route_test_unsaved: 'Tests the selected route without saving it or sending messages.',
   connection_ok: 'Connected. Bot: @{username}',
   test_connection: 'Test connection',
-  test_needs_token: 'Save the bot token before testing the connection.',
 
   a_backup_holds_the_keys: 'A backup holds the keys of all nodes and users: keep it like a password.',
   administrators: 'Administrators',

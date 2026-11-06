@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/backup"
+	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/telegramrelay"
 )
@@ -202,9 +203,15 @@ func (s *Server) botTest(r *http.Request) (any, error) {
 	if s.cfg.Bot == nil {
 		return nil, badRequest("проверка Telegram недоступна: бот не запущен в панели")
 	}
+	if s.svc.BotToken(r.Context()) == "" {
+		if err := s.cfg.Bot.CheckNetwork(r.Context(), id); err != nil {
+			return localize(r, map[string]any{"ok": false, "error": err.Error(), "issue": bot.ConnectionIssue(err)}, "error"), nil
+		}
+		return map[string]any{"ok": true, "networkOnly": true}, nil
+	}
 	username, err := s.cfg.Bot.CheckConnection(r.Context(), id)
 	if err != nil {
-		return localize(r, map[string]any{"ok": false, "error": err.Error()}, "error"), nil
+		return localize(r, map[string]any{"ok": false, "error": err.Error(), "issue": bot.ConnectionIssue(err)}, "error"), nil
 	}
 	return map[string]any{"ok": true, "username": username}, nil
 }

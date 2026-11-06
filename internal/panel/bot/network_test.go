@@ -43,6 +43,56 @@ func TestNodeRouteNeverUsesDirectAPIOrEnvironmentProxy(t *testing.T) {
 	}
 }
 
+func TestTokenlessNetworkProbeAndErrorKinds(t *testing.T) {
+	st, err := store.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	svc := service.New(st)
+	var calls atomic.Int64
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Method != http.MethodHead || r.URL.Path != "/" {
+			t.Errorf("unexpected tokenless probe: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Location", "https://must-not-follow.example/")
+		w.WriteHeader(http.StatusFound)
+	}))
+	b := New(Config{Service: svc, API: api.URL})
+	if err := b.CheckNetwork(t.Context(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 || svc.BotToken(t.Context()) != "" {
+		t.Fatal("probe sent a token or followed a redirect")
+	}
+	api.Close()
+	if err := b.CheckNetwork(t.Context(), 0); err == nil || ConnectionIssue(err) != "network" {
+		t.Fatalf("network failure: %v", err)
+	}
+	for _, c := range []struct {
+		err  error
+		want string
+	}{{&apiError{Code: 401}, "token"}, {&apiError{Code: 409}, "conflict"}, {&apiError{Code: 503}, "telegram"}, {errors.New("bad route"), "route"}, {context.DeadlineExceeded, "network"}} {
+		if got := ConnectionIssue(c.err); got != c.want {
+			t.Fatalf("issue %v: %s", c.err, got)
+		}
+	}
+	// The tokenless probe must use the selected node too, without direct fallback.
+	n, _, err := svc.CreateNode(t.Context(), service.ActorCLI, service.NodeInput{Name: "DE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodeFacts(t.Context(), st.DB, n.ID, store.NodeFacts{Capabilities: []string{telegramrelay.Capability}}); err != nil {
+		t.Fatal(err)
+	}
+	var routed atomic.Int64
+	b.cfg.DialTelegram = func(context.Context, int64) (net.Conn, error) { routed.Add(1); return nil, errors.New("node offline") }
+	if err := b.CheckNetwork(t.Context(), n.ID); err == nil || ConnectionIssue(err) != "network" || routed.Load() == 0 {
+		t.Fatalf("node probe: %v / %d", err, routed.Load())
+	}
+}
+
 func TestRouteSwitchAndConnectionCheck(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
