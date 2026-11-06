@@ -365,7 +365,7 @@ func (m *Manager) startLocked() error {
 	cmd := exec.Command(m.bin(), "-p", m.runDir(), "-c", m.confPath(), "-g", "daemon off;")
 	tail := &lineLog{log: m.Log}
 	cmd.Stdout, cmd.Stderr = tail, tail
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processGroup()
 	off := fileSize(errLog)
 	pidFile := filepath.Join(m.stateDir(), "nginx.pid")
 	_ = os.Remove(pidFile)
@@ -479,7 +479,7 @@ func (m *Manager) stopLocked() {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		killGroup(cmd.Process.Pid)
 		<-done
 	}
 	m.mu.Lock()

@@ -20,7 +20,7 @@ func TestNodePrivateFieldsAdminOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.srv.cfg.CAFingerprint = func() string { return "test-ca" }
-	w := c.do("POST", "/api/nodes", `{"name":"Public name","note":"private-rack-729","xrayRelease":"26.9.30"}`, true)
+	w := c.do("POST", "/api/nodes", `{"name":"Public name","manual":true,"note":"private-rack-729","xrayRelease":"26.9.30"}`, true)
 	if w.Code != 200 {
 		t.Fatalf("create: %d %s", w.Code, w.Body.String())
 	}
@@ -43,7 +43,7 @@ func TestNodePrivateFieldsAdminOnly(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &nodes); err != nil || len(nodes) != 1 {
 		t.Fatalf("nodes: %s %v", w.Body.String(), err)
 	}
-	if nodes[0].Note != "private-rack-729" || nodes[0].XrayRelease != "v26.9.30" || nodes[0].Enabled {
+	if nodes[0].Note != "private-rack-729" || nodes[0].XrayRelease != "v26.9.30" || nodes[0].Enabled || !nodes[0].Manual {
 		t.Fatalf("PATCH cleared fields: %+v", nodes[0])
 	}
 	tok := apiToken(t, svc, service.ScopeNodesRead, service.ScopeEventsRead)
@@ -57,7 +57,7 @@ func TestNodePrivateFieldsAdminOnly(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	n, err := svc.Node(t.Context(), joined.ID)
-	if err != nil || n.Note != "" || n.XrayRelease != "" {
+	if err != nil || n.Note != "" || n.XrayRelease != "" || !n.Manual {
 		t.Fatalf("clear: %+v %v", n, err)
 	}
 	c.cookie = nil

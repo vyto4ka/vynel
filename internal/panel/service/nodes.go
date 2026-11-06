@@ -43,6 +43,7 @@ type NodeInput struct {
 	Country     string // ISO alpha-2
 	Domain      string
 	Local       bool
+	Manual      bool // the panel manages only Xray; nginx and the network are the admin's
 }
 
 func normalizeNodePrivate(in *NodeInput) error {
@@ -80,7 +81,7 @@ func (s *Service) CreateNode(ctx context.Context, actor Actor, in NodeInput) (*s
 			in.Name = PendingNodeName
 		}
 	}
-	n := &store.Node{Name: in.Name, Country: in.Country, Domain: strings.ToLower(strings.TrimSpace(in.Domain)), Local: in.Local, Enabled: true}
+	n := &store.Node{Name: in.Name, Country: in.Country, Domain: strings.ToLower(strings.TrimSpace(in.Domain)), Local: in.Local, Manual: in.Manual, Enabled: true}
 	if in.Note != nil {
 		n.Note = *in.Note
 	}
@@ -165,6 +166,7 @@ func (s *Service) UpdateNode(ctx context.Context, actor Actor, id int64, in Node
 			if in.XrayRelease != nil {
 				n.XrayRelease = *in.XrayRelease
 			}
+			n.Manual = in.Manual
 			if enabled && !n.Enabled {
 				if err := nodeSwitchedOn(ctx, q, id); err != nil {
 					return err
