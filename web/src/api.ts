@@ -321,7 +321,13 @@ export interface InboundDetails {
   hostSource?: Record<string, any>
   rendered?: Record<string, any>
   error?: string
+  // Inheritance of each key of the final render: 'template' | 'profile' | 'node' (docs/INBOUNDS.md §1.4).
+  sources?: SourceMap
+  levels?: { template?: Record<string, any>; profile?: Record<string, any>; node?: Record<string, any> }
 }
+
+// SourceMap labels each key: a level name, or a subtree when the value is an object.
+export type SourceMap = { [key: string]: string | SourceMap }
 
 export interface Profile {
   id: number

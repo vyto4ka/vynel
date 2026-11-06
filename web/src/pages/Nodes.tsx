@@ -1,12 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate, Provider, SelfHost } from '../api'
+import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap } from '../api'
 import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ProviderIcon } from './Billing'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
 import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
-import { t, Trans } from '../i18n'
+import { t, Trans, Key } from '../i18n'
 import { useAdvanced } from '../mode'
 import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
 
@@ -459,6 +459,8 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
   const [egress, setEgress] = useState(0)
   const [values, setValues] = useState<Record<string, string>>({})
   const [overrideText, setOverrideText] = useState('')
+  const [overrideObj, setOverrideObj] = useState<Record<string, unknown>>({})
+  const [mode, setMode] = useState<'tree' | 'json'>('tree')
   const [regenerate, setRegenerate] = useState(false)
   const [preview, setPreview] = useState<{ inbound?: Record<string, unknown>; error?: string } | null>(null)
   const act = useAction()
@@ -474,23 +476,26 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
     setEgress(d.egressAddressId || 0)
     setValues(Object.fromEntries(Object.entries(d.values).map(([k, v]) => [k, v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)])))
     setOverrideText(Object.keys(d.override).length ? pretty(d.override) : '')
+    setOverrideObj(d.override || {})
   }, [loaded.data])
 
-  const override = parseObject(overrideText)
+  const parsedJson = parseObject(overrideText)
+  const overrideValue: Record<string, unknown> = mode === 'json' ? (parsedJson.value ?? {}) : overrideObj
+  const overrideError = mode === 'json' ? parsedJson.error : undefined
   const vars = loaded.data?.variables || []
   const body = useMemo(() => {
     const vals: Record<string, string> = {}
     for (const v of vars) if (v.scope === 'node' && v.source !== 'derived' && values[v.name] !== undefined) vals[v.name] = values[v.name]
     return {
-      tag, port: Number(port) || 0, values: vals, override: override.value ?? {}, regenerateKeys: regenerate,
+      tag, port: Number(port) || 0, values: vals, override: overrideValue, regenerateKeys: regenerate,
       // Адреса задаются целиком: сначала сбросить, потом выставить выбранные ("как у входа" = IP входа).
       clearAddresses: true,
       ...(listen ? { listenAddressId: listen } : {}), ...(egress || listen ? { egressAddressId: egress || listen } : {}),
     }
-  }, [tag, port, values, overrideText, regenerate, listen, egress, vars])
+  }, [tag, port, values, overrideValue, regenerate, listen, egress, vars])
 
   useEffect(() => {
-    if (!loaded.data || override.error) return
+    if (!loaded.data || overrideError) return
     const t = setTimeout(() => {
       post<{ inbound?: Record<string, unknown>; error?: string }>(`inbounds/${i.id}/preview`, body).then(setPreview).catch((e) => setPreview({ error: e.message }))
     }, 500)
@@ -499,6 +504,10 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
 
   if (!loaded.data) return <Modal title={i.tag} onClose={onClose}><Loading error={loaded.error} /></Modal>
   const d = loaded.data
+
+  const tree = preview?.inbound ?? d.levels?.node ?? d.rendered ?? {}
+  const setAt = (path: (string | number)[], v: unknown) => setOverrideObj((o) => writeOverride(o, path, v, tree))
+  const resetAt = (path: (string | number)[]) => setOverrideObj((o) => clearOverride(o, path))
 
   const save = async () => {
     if (regenerate && !(await confirm(t('nodes.new_reality_keys_and_shortid'), t('nodes.generate')))) return
@@ -514,7 +523,7 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
       footer={<>
         {preview?.error ? <span className="pink-text small grow">{t('nodes.there_is_an_error_saving')}</span> : <span className="muted small grow"><Trans k="nodes.common_settings_are_in_the" v={{ name: d.profile.name }} /></span>}
         <button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button>
-        <button className="btn primary" disabled={!!override.error || !!preview?.error} onClick={save}>{t('common.save')}</button>
+        <button className="btn primary" disabled={!!overrideError || !!preview?.error} onClick={save}>{t('common.save')}</button>
       </>}>
       <LinkProvider>
       <div className={adv ? 'editor-split' : ''}>
@@ -542,10 +551,35 @@ function InboundEditor({ i, onClose, onSaved }: { i: Inbound; onClose: () => voi
             <label className="check" style={{ margin: '8px 0 14px' }}>
               <input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} />{' '}{t('nodes.generate_keys_and_other_values')}</label>
           )}
-          {(adv || overrideText) && (
+          <div className="label" style={{ margin: '14px 0 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {t('nodes.final_inbound_config')}
+            <span className="grow" />
+            <div className="seg sm">
+              <button type="button" className={mode === 'tree' ? 'on' : ''} onClick={() => { setMode('tree') }}>{t('nodes.as_a_tree')}</button>
+              <button type="button" className={mode === 'json' ? 'on' : ''} onClick={() => { setOverrideText(Object.keys(overrideValue).length ? pretty(overrideValue) : ''); setMode('json') }}>{t('nodes.as_json')}</button>
+            </div>
+          </div>
+          <div className="muted small" style={{ margin: '0 0 8px' }}>
+            <Badge color="green">{t('nodes.from_the_template')}</Badge>{' '}
+            <Badge color="pink">{t('nodes.from_the_profile')}</Badge>{' '}
+            <Badge color="amber">{t('nodes.from_this_node')}</Badge>
+          </div>
+          {mode === 'tree' ? (
+            <div className="json-tree">
+              {Object.keys(tree).length === 0 && <div className="muted small">{preview?.error || t('nodes.nothing_to_show')}</div>}
+              <SourceTree
+                value={tree}
+                sources={d.sources}
+                override={overrideObj}
+                preview={preview}
+                onSet={setAt}
+                onReset={resetAt}
+              />
+            </div>
+          ) : (
             <Field label={t('nodes.manual_json_edit_for_this')} help={t('nodes.null_removes_the_field_empty')} info={t('nodes.the_json_is_laid_over')}>
               <CodeEditor lang="json" value={overrideText} onChange={setOverrideText} height={160} />
-              {override.error && <div className="small pink-text" style={{ marginTop: 6 }}>{override.error}</div>}
+              {overrideError && <div className="small pink-text" style={{ marginTop: 6 }}>{overrideError}</div>}
             </Field>
           )}
           {!adv && preview?.error && <div className="alert pink">{preview.error}</div>}
@@ -566,6 +600,140 @@ function InboundPreview({ preview }: { preview: { inbound?: Record<string, unkno
       {!preview ? <Loading /> : preview.error ? <div className="alert pink">{preview.error}</div> :
         <CodeEditor lang="json" value={pretty(preview.inbound)} readOnly highlight={active?.inbound} height="calc(100vh - 300px)" />}
       <div className="muted small" style={{ marginTop: 6 }}>{t('nodes.without_users_the_private_key')}</div>
+    </div>
+  )
+}
+
+// ---------- the final inbound config as a tree with inheritance badges ----------
+
+// A source badge color per level (docs/INBOUNDS.md §1.4: template ⊕ profile ⊕ node).
+const SOURCE_COLORS: Record<string, string> = { template: 'green', profile: 'pink', node: 'amber' }
+const SOURCE_KEYS: Record<string, Key> = {
+  template: 'nodes.from_the_template',
+  profile: 'nodes.from_the_profile',
+  node: 'nodes.from_this_node',
+}
+
+// atPath walks a decoded JSON tree along path.
+function atPath(v: unknown, path: (string | number)[]): unknown {
+  let cur: unknown = v
+  for (const k of path) {
+    if (cur == null) return undefined
+    cur = (cur as Record<string, unknown>)[k as string]
+  }
+  return cur
+}
+
+// hasOverrideKey reports whether the node's override carries a value at path (a whole-object
+// override covers every key below it).
+function hasOverrideKey(o: Record<string, unknown>, path: (string | number)[]): boolean {
+  let cur: Record<string, unknown> = o
+  for (let i = 0; i < path.length; i++) {
+    if (cur == null) return false
+    const v = cur[path[i] as string]
+    if (v === undefined) return false
+    if (i === path.length - 1) return true
+    if (v == null || typeof v !== 'object' || Array.isArray(v)) return true // a scalar above covers this key
+    cur = v as Record<string, unknown>
+  }
+  return false
+}
+
+// toScalar renders a leaf for the input; JSON round-trip keeps arrays compact.
+function toScalar(v: unknown): string {
+  if (Array.isArray(v)) return JSON.stringify(v)
+  return String(v)
+}
+
+// fromScalar parses an input value back into the JSON value it names (numbers, bools, null…).
+function fromScalar(text: string, cur: unknown): unknown {
+  const s = text.trim()
+  if (Array.isArray(cur) || (s.startsWith('[') && s.endsWith(']'))) {
+    try { return JSON.parse(s) } catch { return text }
+  }
+  if (s === '') return ''
+  if (s === 'true' || s === 'false') return s === 'true'
+  if (s === 'null') return null
+  if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s)
+  return text
+}
+
+// writeOverride stores v at path in a copy of the node's override; the value stays a JSON
+// string until it parses cleanly ("" clears the key, matching RFC 7386 null).
+function writeOverride(o: Record<string, unknown>, path: (string | number)[], v: unknown, full: unknown): Record<string, unknown> {
+  const out = structuredCopy(o) as Record<string, unknown>
+  let cur: Record<string, unknown> = out
+  for (let i = 0; i < path.length - 1; i++) {
+    const k = path[i] as string
+    if (cur[k] == null || typeof cur[k] !== 'object' || Array.isArray(cur[k])) cur[k] = {}
+    cur = cur[k] as Record<string, unknown>
+  }
+  const key = path[path.length - 1] as string
+  if (v === '' || v === null || v === undefined) delete cur[key]
+  else if (typeof v === 'string') cur[key] = fromScalar(v, atPath(full, path))
+  else cur[key] = v
+  return out
+}
+
+// clearOverride removes path from a copy of the node's override ("reset to profile/inherit").
+function clearOverride(o: Record<string, unknown>, path: (string | number)[]): Record<string, unknown> {
+  const out = structuredCopy(o) as Record<string, unknown>
+  let cur: Record<string, unknown> = out
+  for (let i = 0; i < path.length - 1; i++) {
+    const k = path[i] as string
+    if (cur[k] == null || typeof cur[k] !== 'object' || Array.isArray(cur[k])) return out
+    cur = cur[k] as Record<string, unknown>
+  }
+  delete cur[path[path.length - 1] as string]
+  return out
+}
+
+// structuredCopy deep-copies a decoded JSON tree.
+function structuredCopy<T>(v: T): T {
+  return v == null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)) as T
+}
+
+// SourceTree renders the final inbound config: keys with an inheritance badge, overridden
+// leaves as inputs (edits go into the node's override), everything else read-only.
+function SourceTree({ value, sources, override, preview, onSet, onReset, path = [] }: {
+  value: unknown
+  sources?: SourceMap
+  override: Record<string, unknown>
+  preview: { inbound?: Record<string, unknown>; error?: string } | null
+  onSet: (path: (string | number)[], v: unknown) => void
+  onReset: (path: (string | number)[]) => void
+  path?: (string | number)[]
+}) {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return <div className="json-leaf mono">{preview?.error ? '—' : pretty(value)}</div>
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  return (
+    <div className="json-node">
+      {entries.map(([k, v]) => {
+        const childPath = [...path, k]
+        const label = sources?.[k]
+        const childSources = typeof label === 'string' ? undefined : label
+        const isOverridden = hasOverrideKey(override, childPath)
+        return (
+          <div key={k} className="json-row">
+            <span className="json-key mono">{k}:</span>
+            {v != null && typeof v === 'object' && !Array.isArray(v) ? (
+              <SourceTree value={v} sources={childSources} override={override} preview={preview}
+                onSet={onSet} onReset={onReset} path={childPath} />
+            ) : isOverridden ? (
+              <span className="json-edit">
+                <input className="input mono sm" value={toScalar(v)} onChange={(e) => onSet(childPath, e.target.value)} />
+                <button type="button" className="btn sm ghost" title={t('nodes.reset_to_profile')}
+                  onClick={() => onReset(childPath)}>↺</button>
+              </span>
+            ) : (
+              <span className="json-leaf mono" title={k}>{preview?.error ? '—' : pretty(v)}</span>
+            )}
+            {typeof label === 'string' && <Badge color={SOURCE_COLORS[label] || ''}>{t(SOURCE_KEYS[label] || 'nodes.from_the_template')}</Badge>}
+          </div>
+        )
+      })}
     </div>
   )
 }

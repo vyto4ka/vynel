@@ -434,6 +434,17 @@ func (s *Server) inbound(r *http.Request) (any, error) {
 	} else {
 		out["error"] = err.Error()
 	}
+	if final, levels, sources, err := s.svc.NodeInboundSources(ctx, id); err == nil {
+		// The panel owns tag and clients: no override can be the source of truth for them.
+		delete(sources, "tag")
+		if st, ok := sources["settings"].(map[string]any); ok {
+			delete(st, "clients")
+		}
+		out["sources"] = sources
+		out["levels"] = map[string]any{"template": levels["template"], "profile": levels["profile"], "node": final}
+	} else {
+		out["error"] = err.Error()
+	}
 	return localize(r, out, "description"), nil
 }
 
