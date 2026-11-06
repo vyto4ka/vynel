@@ -27,6 +27,20 @@ func adminBotCmd() *cobra.Command {
 			} else {
 				fmt.Fprintln(w, "token    set")
 			}
+			nodeID, routeErr := s.BotNodeID(ctx)
+			if routeErr != nil {
+				return routeErr
+			}
+			if nodeID == 0 {
+				fmt.Fprintln(w, "route    direct")
+			} else {
+				n, err := s.Node(ctx, nodeID)
+				if err != nil {
+					fmt.Fprintf(w, "route    node %d (missing: choose another with vynel admin bot route)\n", nodeID)
+				} else {
+					fmt.Fprintf(w, "route    node %d %s %s\n", n.ID, n.Code, n.Name)
+				}
+			}
 			as, err := s.BotAdmins(ctx)
 			if err != nil {
 				return err
@@ -71,7 +85,29 @@ func adminBotCmd() *cobra.Command {
 			return s.RemoveBotAdmin(ctx, service.ActorCLI, id)
 		}),
 	}
-	c.AddCommand(token, code, unbind)
+	route := &cobra.Command{
+		Use: "route NODE|direct", Short: "Connect the bot through an existing remote node, or directly", Args: cobra.ExactArgs(1),
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+			var id int64
+			if args[0] != "direct" {
+				var err error
+				id, err = strconv.ParseInt(args[0], 10, 64)
+				if err != nil {
+					n, err := s.NodeByCode(ctx, args[0])
+					if err != nil {
+						return err
+					}
+					id = n.ID
+				}
+			}
+			if err := s.SetBotNode(ctx, service.ActorCLI, id); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "saved; the bot switches its connection within a few seconds")
+			return nil
+		}),
+	}
+	c.AddCommand(token, code, unbind, route)
 	return c
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/telegramrelay"
 )
 
 // Server implements NodeGateway.
@@ -133,6 +134,49 @@ func (g *Server) Connect(stream grpc.BidiStreamingServer[nodev1.NodeMessage, nod
 	}
 	g.notePeer(stream.Context(), node.ID)
 	return g.rec.Serve(node.ID, stream)
+}
+
+// TelegramTunnel accepts only an authenticated, enabled node answering a live one-use ticket.
+// There is no target address in the protocol: the agent can dial only Telegram's HTTPS API.
+func (g *Server) TelegramTunnel(stream grpc.BidiStreamingServer[nodev1.TelegramFrame, nodev1.TelegramFrame]) error {
+	node, err := g.authenticate(stream.Context())
+	if err != nil {
+		return err
+	}
+	if !node.Enabled || node.Local {
+		return status.Error(codes.PermissionDenied, "Telegram routing requires an enabled remote node")
+	}
+	type handshake struct {
+		frame *nodev1.TelegramFrame
+		err   error
+	}
+	first := make(chan handshake, 1)
+	go func() { f, err := stream.Recv(); first <- handshake{f, err} }()
+	var f *nodev1.TelegramFrame
+	select {
+	case h := <-first:
+		if h.err != nil {
+			return h.err
+		}
+		f = h.frame
+	case <-stream.Context().Done():
+		return stream.Context().Err()
+	case <-time.After(20 * time.Second):
+		return status.Error(codes.DeadlineExceeded, "Telegram tunnel handshake timed out")
+	}
+	if f == nil || len(f.Data) != 0 || f.Eof {
+		return status.Error(codes.InvalidArgument, "invalid Telegram tunnel handshake")
+	}
+	local, wire := net.Pipe()
+	defer local.Close()
+	defer wire.Close()
+	if err := g.rec.AcceptTelegram(node.ID, f.Ticket, local, f.Error); err != nil {
+		return status.Error(codes.PermissionDenied, err.Error())
+	}
+	if f.Error != "" {
+		return nil
+	}
+	return telegramrelay.Bridge(stream.Context(), stream, wire)
 }
 
 func (g *Server) authenticate(ctx context.Context) (*store.Node, error) {

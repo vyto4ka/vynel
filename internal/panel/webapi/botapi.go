@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/backup"
+	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
+	"github.com/vyto4ka/vynel/internal/telegramrelay"
 )
 
 func (s *Server) botRoutes() {
@@ -22,6 +24,7 @@ func (s *Server) botRoutes() {
 	s.handle("PUT /api/account/login-mode", s.loginMode)
 	s.handle("GET /api/bot", s.botInfo)
 	s.handle("PUT /api/bot", s.botSave)
+	s.handle("POST /api/bot/test", s.botTest)
 	s.handle("POST /api/bot/code", s.botCode)
 	s.handle("DELETE /api/bot/admins/{id}", s.botUnbind)
 	s.handle("POST /api/bot/backup", s.botBackup)
@@ -69,7 +72,21 @@ func (s *Server) botInfo(r *http.Request) (any, error) {
 		return nil, err
 	}
 	get := func(k, def string) string { v, _ := s.svc.Setting(ctx, k, def); return v }
+	nodeID, _ := s.svc.BotNodeID(ctx)
+	nodes, err := s.svc.Nodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	routes := []map[string]any{}
+	for _, n := range nodes {
+		if n.Local {
+			continue
+		}
+		online := s.cfg.Connected != nil && s.cfg.Connected(n.ID)
+		routes = append(routes, map[string]any{"id": n.ID, "name": n.Name, "country": n.Country, "enabled": n.Enabled, "online": online, "supported": n.Can(telegramrelay.Capability)})
+	}
 	out := map[string]any{
+		"nodeId": nodeID, "routeNodes": routes,
 		"hasToken": s.svc.BotToken(ctx) != "", "admins": admins,
 		"backupTime":  get(service.SettingBotBackupTime, service.DefaultBackupTime),
 		"summaryTime": get(service.SettingBotSummaryTime, service.DefaultSummaryTime),
@@ -83,11 +100,12 @@ func (s *Server) botInfo(r *http.Request) (any, error) {
 	if s.cfg.Bot != nil {
 		out["status"] = s.cfg.Bot.Status()
 	}
-	return out, nil
+	return localize(r, out, "error"), nil
 }
 
 func (s *Server) botSave(r *http.Request) (any, error) {
 	var in struct {
+		NodeID      *int64  `json:"nodeId"`
 		Token       *string `json:"token"`
 		BackupTime  *string `json:"backupTime"`
 		SummaryTime *string `json:"summaryTime"`
@@ -101,6 +119,11 @@ func (s *Server) botSave(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx, a := r.Context(), actor(r)
+	if in.NodeID != nil {
+		if err := s.svc.SetBotNode(ctx, a, *in.NodeID); err != nil {
+			return nil, err
+		}
+	}
 	if in.BackupPassword != nil {
 		if err := s.svc.SetBackupPassword(ctx, a, *in.BackupPassword); err != nil {
 			return nil, err
@@ -161,6 +184,36 @@ func (s *Server) botSave(r *http.Request) (any, error) {
 		}
 	}
 	return s.botInfo(r)
+}
+
+func (s *Server) botTest(r *http.Request) (any, error) {
+	var in struct {
+		NodeID *int64 `json:"nodeId"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	id, err := s.svc.BotNodeID(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	if in.NodeID != nil {
+		id = *in.NodeID
+	}
+	if s.cfg.Bot == nil {
+		return nil, badRequest("проверка Telegram недоступна: бот не запущен в панели")
+	}
+	if s.svc.BotToken(r.Context()) == "" {
+		if err := s.cfg.Bot.CheckNetwork(r.Context(), id); err != nil {
+			return localize(r, map[string]any{"ok": false, "error": err.Error(), "issue": bot.ConnectionIssue(err)}, "error"), nil
+		}
+		return map[string]any{"ok": true, "networkOnly": true}, nil
+	}
+	username, err := s.cfg.Bot.CheckConnection(r.Context(), id)
+	if err != nil {
+		return localize(r, map[string]any{"ok": false, "error": err.Error(), "issue": bot.ConnectionIssue(err)}, "error"), nil
+	}
+	return map[string]any{"ok": true, "username": username}, nil
 }
 
 func (s *Server) botCode(r *http.Request) (any, error) {

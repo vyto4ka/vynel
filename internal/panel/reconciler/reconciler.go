@@ -23,6 +23,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/telegramrelay"
 	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
@@ -36,8 +37,9 @@ type Stream interface {
 
 // Reconciler pushes desired state to nodes.
 type Reconciler struct {
-	svc *service.Service
-	log *slog.Logger
+	telegram telegramrelay.Broker
+	svc      *service.Service
+	log      *slog.Logger
 
 	// Tunables (tests shorten them).
 	Debounce      time.Duration // coalesce bursts of changes

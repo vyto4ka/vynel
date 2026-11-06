@@ -138,6 +138,15 @@ func TestPaymentReminder(t *testing.T) {
 	if ns := drainNotices(f.s); len(ns) != 0 {
 		t.Fatal("reminded twice")
 	}
+	if got := must(store.GetNodeBilling(f.ctx, f.s.st.DB, nl.ID)); got.RemindedFor != 0 {
+		t.Fatal("queueing was mistaken for delivery")
+	}
+	must0(t, f.s.MarkPaymentReminderSent(f.ctx, nl.ID, until))
+	f.now = f.now.Add(10 * time.Minute)
+	must0(t, f.s.Maintenance(f.ctx, false))
+	if ns := drainNotices(f.s); len(ns) != 0 {
+		t.Fatal("successful delivery retried")
+	}
 	later := until + 30*86400
 	must(f.s.SetNodeBilling(f.ctx, ActorCLI, nl.ID, NodeBillingInput{PaidUntil: &later}))
 	f.now = time.Unix(later, 0).Add(-2 * 24 * time.Hour)

@@ -11,6 +11,9 @@ service NodeGateway {
   rpc Join(JoinRequest) returns (JoinResponse);
   // Main channel (mTLS with the certificate obtained from Join).
   rpc Connect(stream NodeMessage) returns (stream PanelMessage);
+  // A node opens this on request over Connect. mTLS + a one-use ticket bind it to the
+  // selected node. Carries an end-to-end TLS connection to api.telegram.org:443 only.
+  rpc TelegramTunnel(stream TelegramFrame) returns (stream TelegramFrame);
 }
 
 message JoinRequest {
@@ -98,6 +101,7 @@ message PanelMessage {
     StatsAck stats_ack = 3;
     Command command = 4;
     IPBlocks ip_blocks = 5;
+    TelegramConnect telegram_connect = 6;
   }
 }
 
@@ -227,4 +231,18 @@ message UserOp {
   string tag = 2;
   User user = 3;
   string flow = 4;
+}
+
+// A request to open a separate stream, so bot uploads cannot block config/stats messages.
+message TelegramConnect {
+  string ticket = 1;
+}
+
+// First node frame: ticket and optional connection error, no data. Later frames: data or EOF.
+// The panel performs Telegram TLS itself; these bytes never expose the bot token to the node.
+message TelegramFrame {
+  string ticket = 1;
+  bytes data = 2;
+  string error = 3;
+  bool eof = 4;
 }

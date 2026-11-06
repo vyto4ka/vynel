@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/node/state"
 	"github.com/vyto4ka/vynel/internal/node/sysctl"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
+	"github.com/vyto4ka/vynel/internal/telegramrelay"
 	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/internal/xray"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
@@ -45,6 +47,8 @@ type Dialer func(ctx context.Context) (Conn, error)
 
 // Config configures an agent.
 type Config struct {
+	// TelegramDial replaces the fixed Telegram TCP dial in tests; nil always dials api.telegram.org:443.
+	TelegramDial  func(context.Context) (net.Conn, error)
 	DataDir       string // state.db and xray config live here
 	Xray          xray.Binary
 	Version       string
@@ -298,6 +302,10 @@ func (a *Agent) session(ctx context.Context) error {
 	if !a.cfg.Manual && a.nginxVer != "" {
 		hello.Capabilities = append(hello.Capabilities, CapNginx)
 	}
+	opener, canRelay := conn.(telegramOpener)
+	if canRelay {
+		hello.Capabilities = append(hello.Capabilities, telegramrelay.Capability)
+	}
 	if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Hello{Hello: hello}}); err != nil {
 		return err
 	}
@@ -368,6 +376,7 @@ func (a *Agent) session(ctx context.Context) error {
 	defer onlineTick.Stop()
 	var lastOnline *nodev1.OnlineIPs
 	var lastOnlineAt time.Time
+	telegramSlots := make(chan struct{}, telegramrelay.MaxTunnels)
 	for {
 		select {
 		case <-ctx.Done():
@@ -407,6 +416,12 @@ func (a *Agent) session(ctx context.Context) error {
 				return err
 			}
 		case m := <-msgs:
+			if c, ok := m.Msg.(*nodev1.PanelMessage_TelegramConnect); ok {
+				if canRelay {
+					go a.telegramConnect(ctx, opener, c.TelegramConnect.Ticket, telegramSlots)
+				}
+				continue
+			}
 			if c, ok := m.Msg.(*nodev1.PanelMessage_Command); ok {
 				res, after := a.command(ctx, c.Command)
 				if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Result{Result: res}}); err != nil {

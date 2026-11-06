@@ -101,18 +101,20 @@ type Service struct {
 	// OnChange is called after every committed change (the reconciler hooks in here for instant pushes).
 	OnChange func()
 
-	noticeOnce sync.Once
-	notices    chan Notice
-	ipOnce     sync.Once
-	ips        *IPTracker
-	ipLog      ipLog // addresses written for the «Аналитика» page
-	bindMu     sync.Mutex
-	bindFor    string // the bind code the wrong tries are counted for
-	bindFails  int
-	grantCheck int64 // when Maintenance last looked for ended grants
-	cache      confCache
-	snapMu     sync.Mutex // one snapshot builder at a time
-	api        apiState   // public API: token touches, webhook dispatcher
+	noticeOnce      sync.Once
+	notices         chan Notice
+	paymentMu       sync.Mutex
+	paymentAttempts map[int64]paymentAttempt
+	ipOnce          sync.Once
+	ips             *IPTracker
+	ipLog           ipLog // addresses written for the «Аналитика» page
+	bindMu          sync.Mutex
+	bindFor         string // the bind code the wrong tries are counted for
+	bindFails       int
+	grantCheck      int64 // when Maintenance last looked for ended grants
+	cache           confCache
+	snapMu          sync.Mutex // one snapshot builder at a time
+	api             apiState   // public API: token touches, webhook dispatcher
 	// NodeConnected says whether a node has a live session; the API tells when that changes.
 	NodeConnected func(int64) bool
 	// SelfCertStatus reads the certificate of a panel domain (app.go wires the panel's nginx

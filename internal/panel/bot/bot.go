@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -15,15 +16,17 @@ import (
 
 // Config configures the bot.
 type Config struct {
-	Service   *service.Service
-	DataDir   string           // panel data directory (backups)
-	Version   string           // goes into backups
-	Connected func(int64) bool // live node sessions (reconciler)
-	Log       *slog.Logger
-	API       string        // Bot API endpoint; tests use a fake one
-	Poll      time.Duration // long poll timeout (default 25 s)
-	Tick      time.Duration // alert/backup check interval (default 20 s)
-	Now       func() time.Time
+	DialTelegram func(context.Context, int64) (net.Conn, error) // selected node -> encrypted Telegram TCP
+	ReloadEvery  time.Duration                                  // settings check interval; default 5s
+	Service      *service.Service
+	DataDir      string           // panel data directory (backups)
+	Version      string           // goes into backups
+	Connected    func(int64) bool // live node sessions (reconciler)
+	Log          *slog.Logger
+	API          string        // direct-mode Bot API endpoint; tests use a fake one
+	Poll         time.Duration // long poll timeout (default 25 s)
+	Tick         time.Duration // alert/backup check interval (default 20 s)
+	Now          func() time.Time
 }
 
 // Status is what the web panel shows about the bot.
@@ -31,6 +34,7 @@ type Status struct {
 	Running  bool   `json:"running"`
 	Username string `json:"username,omitempty"`
 	Error    string `json:"error,omitempty"`
+	Issue    string `json:"issue,omitempty"` // network | token | conflict | telegram | route
 }
 
 // Bot is the Telegram bot.
@@ -39,13 +43,16 @@ type Bot struct {
 	svc *service.Service
 	log *slog.Logger
 
-	mu       sync.Mutex
-	status   Status
-	api      *client
-	pending  map[int64]pendingInput // chat -> what the next text message means
-	menuSet  map[int64]string       // chat -> Mini App URL its menu button opens
-	loginMsg map[int64]int64        // chat -> the latest sign-in link message (the older one is deleted)
-	quickMu  sync.Mutex             // one quick-buttons check-and-send at a time
+	mu          sync.Mutex
+	status      Status
+	api         *client
+	offsetToken string // route changes preserve the update offset for the same bot
+	offset      int64
+	pending     map[int64]pendingInput    // chat -> what the next text message means
+	menuSet     map[int64]string          // chat -> Mini App URL its menu button opens
+	loginMsg    map[int64]int64           // chat -> the latest sign-in link message (the older one is deleted)
+	quickMu     sync.Mutex                // one quick-buttons check-and-send at a time
+	paymentSent map[int64]paymentDelivery // partial delivery progress across route reconnects
 
 	alerts  alertState
 	backup  backupState
@@ -74,6 +81,9 @@ func New(cfg Config) *Bot {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.ReloadEvery == 0 {
+		cfg.ReloadEvery = 5 * time.Second
+	}
 	return &Bot{cfg: cfg, svc: cfg.Service, log: cfg.Log, pending: map[int64]pendingInput{}}
 }
 
@@ -96,29 +106,53 @@ func (b *Bot) client() *client {
 	return b.api
 }
 
-// Run runs the bot until ctx ends. It follows the token setting: no token = idle, a new token =
-// restart with it.
+// Run follows the token and route settings until ctx ends. Changing either cancels the old
+// polling session and switches the bot transport without restarting the panel.
 func (b *Bot) Run(ctx context.Context) error {
-	start := func(tok string) func() {
+	start := func(tok string, nodeID int64) func() {
 		rctx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			b.runWith(rctx, tok)
+			b.runWith(rctx, tok, nodeID)
 		}()
 		return func() { cancel(); <-done }
 	}
-	cur, stop := "", func() {}
+	type key struct {
+		token  string
+		nodeID int64
+		err    string
+	}
+	cur, stop := key{}, func() {}
 	defer func() { stop() }()
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(b.cfg.ReloadEvery)
 	defer t.Stop()
 	for {
-		if tok := b.svc.BotToken(ctx); tok != cur {
+		next := key{token: b.svc.BotToken(ctx)}
+		nodeID, err := b.svc.BotNodeID(ctx)
+		next.nodeID = nodeID
+		if err == nil {
+			err = b.svc.ValidateBotNode(ctx, nodeID)
+		}
+		if err != nil {
+			next.err = strings.TrimPrefix(err.Error(), service.ErrInvalid.Error()+": ")
+		}
+		if next != cur {
 			stop()
-			stop, cur = func() {}, tok
+			if next.token != cur.token {
+				b.paymentSent = nil
+			}
+			stop, cur = func() {}, next
+			b.mu.Lock()
+			b.api = nil
+			b.mu.Unlock()
 			b.setStatus(Status{})
-			if tok != "" {
-				stop = start(tok)
+			if next.token != "" {
+				if next.err != "" {
+					b.setStatus(Status{Error: next.err, Issue: "route"})
+				} else {
+					stop = start(next.token, next.nodeID)
+				}
 			}
 		}
 		select {
@@ -130,8 +164,13 @@ func (b *Bot) Run(ctx context.Context) error {
 }
 
 // runWith runs one bot session with a token until ctx ends, retrying on errors.
-func (b *Bot) runWith(ctx context.Context, token string) {
-	api := newClient(b.cfg.API, token)
+func (b *Bot) runWith(ctx context.Context, token string, nodeID int64) {
+	api, err := b.makeClient(token, nodeID)
+	if err != nil {
+		b.setStatus(Status{Error: err.Error(), Issue: ConnectionIssue(err)})
+		return
+	}
+	defer api.http.CloseIdleConnections()
 	b.mu.Lock()
 	b.api = api
 	b.mu.Unlock()
@@ -141,7 +180,7 @@ func (b *Bot) runWith(ctx context.Context, token string) {
 		if me, err = api.getMe(ctx); err == nil {
 			break
 		}
-		b.setStatus(Status{Error: err.Error()})
+		b.setStatus(Status{Error: err.Error(), Issue: ConnectionIssue(err)})
 		b.log.Warn("telegram bot: cannot start", "err", err)
 		if !sleep(ctx, 30*time.Second) {
 			return
@@ -165,7 +204,12 @@ func (b *Bot) runWith(ctx context.Context, token string) {
 	}()
 	defer wg.Wait()
 
-	var offset int64
+	b.mu.Lock()
+	if b.offsetToken != token {
+		b.offsetToken, b.offset = token, 0
+	}
+	offset := b.offset
+	b.mu.Unlock()
 	for ctx.Err() == nil {
 		ups, err := api.getUpdates(ctx, offset, int(b.cfg.Poll/time.Second))
 		if err != nil {
@@ -174,11 +218,12 @@ func (b *Bot) runWith(ctx context.Context, token string) {
 			}
 			var ae *apiError
 			if errors.As(err, &ae) && ae.Code == 401 {
-				b.setStatus(Status{Error: "Telegram не принял токен (401): проверьте его в @BotFather"})
+				b.setStatus(Status{Error: "Telegram не принял токен (401): проверьте его в @BotFather", Issue: "token"})
 				<-ctx.Done()
 				return
 			}
 			b.log.Warn("telegram getUpdates", "err", err)
+			b.setStatus(Status{Username: me.Username, Error: err.Error(), Issue: ConnectionIssue(err)})
 			if !sleep(ctx, 5*time.Second) {
 				return
 			}
@@ -188,6 +233,9 @@ func (b *Bot) runWith(ctx context.Context, token string) {
 		for _, u := range ups {
 			offset = u.UpdateID + 1
 			b.handle(ctx, api, u)
+			b.mu.Lock()
+			b.offset = offset
+			b.mu.Unlock()
 		}
 	}
 }
@@ -238,7 +286,7 @@ func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
 			case n.Kind == "ip-limit":
 				b.onIPLimit(ctx, n)
 			case n.Kind == "billing":
-				b.toAdmins(ctx, n.Text)
+				b.onBilling(ctx, n)
 			}
 		case <-tick:
 			return true
