@@ -64,6 +64,8 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/nodes/{id}", s.deleteNode)
 	s.handle("POST /api/nodes/{id}/token", s.nodeToken)
 	s.handle("GET /api/nodes/{id}/checklist", s.nodeChecklist)
+	s.handle("GET /api/nodes/{id}/wizard", s.nodeWizard)
+	s.handle("POST /api/nodes/{id}/confirm-requirements", s.confirmRequirements)
 	s.handle("POST /api/nodes/{id}/action", s.nodeAction)
 	s.handle("GET /api/updates", s.getUpdates)
 	s.handle("POST /api/updates/check", s.checkUpdates)
@@ -156,7 +158,10 @@ type Node struct {
 	Metrics      *Metrics  `json:"metrics"`
 	Inbounds     []Inbound `json:"inbounds"`
 	Addresses    []Address `json:"addresses"`
-	Provider     *Provider `json:"provider"` // where the node is rented, nil = not set
+	// SetupStep is the node's place in the setup wizard: 0 = finished, 2 = choose profiles,
+	// 3 = node variables, 4 = requirements. -1 = unknown (the step could not be computed).
+	SetupStep int       `json:"setupStep"`
+	Provider  *Provider `json:"provider"` // where the node is rented, nil = not set
 }
 
 // Metrics are the latest host numbers of a node.
@@ -851,7 +856,12 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain,
 			Local: n.Local, Manual: n.Manual, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
 			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, NginxVersion: n.NginxVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
-			Inbounds: []Inbound{}, Addresses: []Address{}}
+			Inbounds: []Inbound{}, Addresses: []Address{}, SetupStep: -1}
+		if details {
+			if step, err := s.svc.NodeSetupStep(ctx, n.ID); err == nil {
+				d.SetupStep = step
+			}
+		}
 		if n.LastError != "" {
 			d.Problems = append(d.Problems, n.LastError)
 		}
@@ -1026,6 +1036,41 @@ func (s *Server) nodeChecklist(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return localize(r, steps, "title", "detail"), nil
+}
+
+// nodeWizard is the setup wizard of a node: the derived step and the requirement checks.
+func (s *Server) nodeWizard(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	step, steps, err := s.svc.NodeWizard(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"step": step, "steps": localize(r, steps, "title", "detail")}, nil
+}
+
+// confirmRequirements marks the node's wizard requirements confirmed (confirm=false unconfirms).
+func (s *Server) confirmRequirements(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		Confirm *bool `json:"confirm"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ts := s.svc.Now().Unix()
+	if in.Confirm != nil && !*in.Confirm {
+		ts = 0
+	}
+	if err := s.svc.ConfirmNodeRequirements(r.Context(), actor(r), id, ts); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 func (s *Server) nodeAction(r *http.Request) (any, error) {

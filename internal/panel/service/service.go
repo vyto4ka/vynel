@@ -134,6 +134,11 @@ func (s *Service) SetClock(now func() time.Time) {
 	store.Now = now
 }
 
+// Now returns the service clock.
+func (s *Service) Now() time.Time {
+	return s.now()
+}
+
 // change runs fn in a transaction, then records the audit entry and the outbox event in the same
 // transaction, and finally notifies OnChange.
 type change struct {

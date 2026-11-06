@@ -183,6 +183,8 @@ export interface Node {
   manual: boolean
   enabled: boolean
   state: string
+  // Step in the setup wizard: 0 = finished, 2 = profiles, 3 = node variables, 4 = requirements, -1 = unknown.
+  setupStep: number
   lastSeenAt: number | null
   xrayVersion: string
   agentVersion: string
@@ -397,6 +399,20 @@ export interface JoinInfo {
   ttl: string
   error?: string
   warnings?: string[] | null
+}
+
+// Requirement check in the node setup wizard.
+export interface WizardCheck {
+  key: string
+  title: string
+  state: 'ok' | 'wait' | 'fail' | 'skip'
+  detail?: string
+}
+
+// Answer of GET nodes/{id}/wizard.
+export interface NodeWizard {
+  step: number
+  steps: WizardCheck[]
 }
 
 // ---- подписка ----
