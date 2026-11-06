@@ -2,8 +2,8 @@ package cli
 
 import (
 	"context"
-	"io"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"

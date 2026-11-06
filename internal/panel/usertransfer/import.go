@@ -25,7 +25,7 @@ type Importer struct {
 	unknowns map[string]bool
 	report   *Report
 
-	opt       ImportOptions
+	opt ImportOptions
 }
 
 // NewImporter binds an importer to a store.
