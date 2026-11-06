@@ -325,3 +325,42 @@ func TestCaddySessionPathsOneDomain(t *testing.T) {
 		t.Fatalf("the panel's catch-all must come first (panel %d, decoy %d):\n%s", panel, decoy, cfg)
 	}
 }
+
+// A manual node gets no web server spec at all: the panel manages only its Xray config.
+func TestManualNodeNoWebSpec(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "")
+	f.nginxNode(t, n) // even with a modern agent that can run nginx
+	if err := store.SetNodeManual(f.ctx, f.s.st.DB, n.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	if ds.Nginx != "" || ds.Caddy != nil {
+		t.Fatalf("manual node got a web config: nginx %d, caddy %d", len(ds.Nginx), len(ds.Caddy))
+	}
+	if len(ds.Config) == 0 {
+		t.Fatal("the Xray config must still be built")
+	}
+	// The checklist skips the web server, DNS and site steps instead of waiting on them.
+	// The applied/desired hashes make the checklist reach those steps (the reconciler does this
+	// once the node applies the snapshot).
+	if err := store.SetNodeDesired(f.ctx, f.s.st.DB, n.ID, 1, ds.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodeRuntime(f.ctx, f.s.st.DB, n.ID, store.NodeRuntime{AgentVersion: "t", XrayVersion: "x", AppliedHash: ds.Hash}); err != nil {
+		t.Fatal(err)
+	}
+	steps := must(f.s.NodeChecklist(f.ctx, n.ID, func(int64) bool { return true }))
+	byKey := map[string]string{}
+	for _, s := range steps {
+		byKey[s.Key] = s.State
+	}
+	for _, k := range []string{"web", "dns", "site"} {
+		if byKey[k] != "skip" {
+			t.Fatalf("checklist step %s = %s, want skip", k, byKey[k])
+		}
+	}
+}

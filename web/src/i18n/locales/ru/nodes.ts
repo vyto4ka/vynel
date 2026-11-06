@@ -47,6 +47,8 @@ export default {
   keys_updated: 'Ключи обновлены',
   listen_ip: 'Слушать IP',
   manual_json_edit_for_this: 'Ручная правка JSON только для этой ноды',
+  auto_setup_disabled: 'Автонастройка отключена: панель управляет только конфигом Xray. nginx, сертификаты и файрвол настраиваются вручную.',
+  manual_node: 'Ручная',
   name_in_the_app: 'Название в приложении',
   name_shown_in_apps: 'Название (видно в приложениях)',
   network: 'Сеть',
