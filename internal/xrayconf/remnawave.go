@@ -45,7 +45,7 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 	}
 	var root any
 	if err := json.Unmarshal([]byte(in.Xray), &root); err != nil {
-		return nil, fmt.Errorf("Xray-конфиг: %v", err)
+		return nil, fmt.Errorf("Xray-конфиг: %w", err)
 	}
 	rootMap, _ := root.(map[string]any)
 	var inbound map[string]any
@@ -229,7 +229,7 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 	if strings.TrimSpace(in.Host) != "" {
 		var h any
 		if err := json.Unmarshal([]byte(in.Host), &h); err != nil {
-			return nil, fmt.Errorf("конфиг подписки: %v", err)
+			return nil, fmt.Errorf("конфиг подписки: %w", err)
 		}
 		if hm, ok := h.(map[string]any); ok {
 			host = hm
@@ -355,12 +355,12 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 	}
 	if _, err := ParseTemplate([]byte(source)); err != nil {
 		if os.Getenv("VYNEL_DEBUG_IMPORT") != "" {
-			os.WriteFile("remna-debug.yml", []byte(source), 0644)
+			_ = os.WriteFile("remna-debug.yml", []byte(source), 0644)
 		}
-		return &RemnawaveResult{Source: source, ID: id, Notes: notes}, fmt.Errorf("сгенерированный шаблон не собрался: %v", err)
+		return &RemnawaveResult{Source: source, ID: id, Notes: notes}, fmt.Errorf("сгенерированный шаблон не собрался: %w", err)
 	}
 	if _, err := SampleRender(mustParse(source)); err != nil {
-		return &RemnawaveResult{Source: source, ID: id, Notes: notes}, fmt.Errorf("сгенерированный шаблон не прошёл пробную сборку: %v", err)
+		return &RemnawaveResult{Source: source, ID: id, Notes: notes}, fmt.Errorf("сгенерированный шаблон не прошёл пробную сборку: %w", err)
 	}
 	return &RemnawaveResult{Source: source, ID: id, Notes: notes}, nil
 }
@@ -410,7 +410,8 @@ func hostFromInbound(host map[string]any, inbound map[string]any, security strin
 	if host["port"] == nil {
 		host["port"] = "${INBOUND_PORT}"
 	}
-	if security == "reality" {
+	switch security {
+	case "reality":
 		if host["security"] == nil {
 			host["security"] = "reality"
 		}
@@ -429,7 +430,7 @@ func hostFromInbound(host map[string]any, inbound map[string]any, security strin
 				Options:     []string{"chrome", "firefox", "safari", "ios", "android", "edge", "random", "randomized"},
 				Description: "TLS-отпечаток клиента (uTLS). Уходит в подписку."})
 		}
-	} else if security == "tls" {
+	case "tls":
 		if host["security"] == nil {
 			host["security"] = "tls"
 		}
