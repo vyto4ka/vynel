@@ -375,7 +375,7 @@
  "это текущая сессия — нажмите «Выйти»": "this is the current session — press “Log out”",
  "эту настройку нельзя менять отсюда": "this setting cannot be changed from here",
  "пустой Xray-конфиг": "empty Xray config",
- "Xray-конфиг: %w": "Xray config: %w",
+ "не удалось разобрать Xray-конфиг: %w": "failed to parse the Xray config: %w",
  "в Xray-конфиге нет inbounds": "the Xray config has no inbounds",
  "в Xray-конфиге %d инбаундов; шаблон vynel описывает один — оставьте основной, остальные игнорируются панелью (системные секции добавляются сами)": "the Xray config has %d inbounds; a vynel template describes one — keep the main one, the rest are ignored by the panel (system sections are added automatically)",
  "это не Xray-конфиг: нет ни inbounds, ни протокола инбаунда": "this is not an Xray config: no inbounds and no inbound protocol",

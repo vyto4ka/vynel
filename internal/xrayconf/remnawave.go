@@ -45,7 +45,7 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 	}
 	var root any
 	if err := json.Unmarshal([]byte(in.Xray), &root); err != nil {
-		return nil, fmt.Errorf("Xray-конфиг: %w", err)
+		return nil, fmt.Errorf("не удалось разобрать Xray-конфиг: %w", err)
 	}
 	rootMap, _ := root.(map[string]any)
 	var inbound map[string]any
