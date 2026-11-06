@@ -167,6 +167,10 @@ export function Nodes() {
                           <div className="row" style={{ marginTop: 8, gap: 6 }}>
                             <button className="btn sm" onClick={() => setHostOf(i)}><Icon name="edit" />{' '}{t('nodes.connection_point')}</button>
                             <button className="btn sm primary" onClick={() => setConfigOf(i)}><Icon name="code" />{' '}{t('nodes.configure')}</button>
+                            <button className="btn sm" title={t('nodes.duplicate_the_inbound_a_copy')} onClick={() => {
+                              act(() => post<{ id: number; tag: string }>(`inbounds/${i.id}/duplicate`))
+                                .then((r) => { if (r) { act(() => Promise.resolve(true), t('nodes.inbound_duplicated', { tag: r.tag })); reload() } })
+                            }}><Icon name="copy" />{' '}{t('common.duplicate')}</button>
                             <button className="btn sm" onClick={async () => {
                               if (await confirm(t('nodes.generate_new_reality_keys_and'), t('nodes.generate')))
                                 act(() => patch(`inbounds/${i.id}`, { regenerateKeys: true }), t('nodes.keys_updated')).then(reload)
