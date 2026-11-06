@@ -70,7 +70,35 @@ func userTransferCmd() *cobra.Command {
 	importCmd.Flags().BoolVar(&dryRun, "dry-run", false, "only report what would happen")
 	importCmd.Flags().BoolVar(&reissue, "reissue-tokens", false, "give imported users new subscription links and print them")
 
-	c.AddCommand(export, importCmd)
+	var rnURL, rnToken string
+	var rnMode string
+	var rnDryRun, rnReissue bool
+	importRn := &cobra.Command{
+		Use: "import-remnawave", Short: "Pull users from a Remnawave panel over its API", Args: cobra.NoArgs,
+		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
+			restore := usertransfer.RnSetPrivate(true) // the panel may live in the admin's own network
+			defer restore()
+			f, err := usertransfer.FetchRemnawave(ctx, usertransfer.RemnawavePanel{BaseURL: rnURL, Token: rnToken})
+			if err != nil {
+				return err
+			}
+			// Remnawave tokens are not vynel's: everyone gets a fresh link, listed in the report.
+			rnReissue = true
+			rep, err := importFile(ctx, s, f, usertransfer.ImportOptions{Mode: rnMode, DryRun: rnDryRun, ReissueTokens: rnReissue, Actor: "cli"})
+			if err != nil {
+				return err
+			}
+			printImportReport(cmd.OutOrStdout(), f, rep, rnDryRun)
+			return nil
+		}),
+	}
+	importRn.Flags().StringVar(&rnURL, "url", "", "Remnawave panel address, e.g. https://panel.example.com")
+	importRn.Flags().StringVar(&rnToken, "token", "", "Remnawave API token (Panel → API tokens)")
+	importRn.Flags().StringVar(&rnMode, "mode", "skip", "what to do with users already here: skip, upsert or rename")
+	importRn.Flags().BoolVar(&rnDryRun, "dry-run", false, "only report what would happen")
+	importRn.Flags().BoolVar(&rnReissue, "reissue-tokens", true, "give imported users new subscription links and print them")
+
+	c.AddCommand(export, importCmd, importRn)
 	return c
 }
 
