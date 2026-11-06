@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/certs"
 	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
@@ -114,6 +115,9 @@ type Service struct {
 	api        apiState   // public API: token touches, webhook dispatcher
 	// NodeConnected says whether a node has a live session; the API tells when that changes.
 	NodeConnected func(int64) bool
+	// SelfCertStatus reads the certificate of a panel domain (app.go wires the panel's nginx
+	// certificate manager in here); nil = certificates are managed elsewhere (Caddy).
+	SelfCertStatus func(domain string) (certs.Status, bool)
 }
 
 // New creates a service over a store.

@@ -58,6 +58,7 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/templates/{id}", s.deleteTemplate)
 
 	s.handle("GET /api/nodes", s.nodes)
+	s.handle("GET /api/self-host", s.selfHost)
 	s.handle("POST /api/nodes", s.createNode)
 	s.handle("PATCH /api/nodes/{id}", s.updateNode)
 	s.handle("DELETE /api/nodes/{id}", s.deleteNode)
@@ -814,6 +815,11 @@ func (s *Server) deleteTemplate(r *http.Request) (any, error) {
 // ---- nodes ----
 
 func (s *Server) nodes(r *http.Request) (any, error) { return s.nodeList(r, true) }
+
+// selfHost is the panel's own server for the card above the node list.
+func (s *Server) selfHost(r *http.Request) (any, error) {
+	return s.svc.SelfHost(r.Context())
+}
 
 func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	ctx := r.Context()

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate, Provider } from '../api'
+import { del, get, Inbound, InboundDetails, JoinInfo, Node, patch, post, Profile, ProfileTemplate, Provider, SelfHost } from '../api'
 import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
@@ -12,6 +12,7 @@ import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000)
+  const selfHost = useLoad(() => get<SelfHost>('self-host'), [], 30000)
   const profiles = useLoad(() => get<Profile[]>('profiles'))
   const [adding, setAdding] = useState(false)
   const [join, setJoin] = useState<JoinInfo | null>(null)
@@ -46,6 +47,8 @@ export function Nodes() {
         }}><Icon name="refresh" />{' '}<Trans k="nodes.update_all_2" v={{ count: updates.data!.count }} /></button>}
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" />{' '}{t('nodes.add_a_server')}</button>
       </div>
+
+      {selfHost.data && <SelfHostCard sh={selfHost.data} />}
 
       {!nodes.data ? <Loading error={nodes.error} /> : nodes.data.length === 0 ? <div className="card"><Empty icon="🛰">{t('nodes.no_nodes')}</Empty></div> : (
         <div className="cards">
@@ -190,6 +193,49 @@ export function Nodes() {
       {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
       {configOf && <InboundEditor i={configOf} onClose={() => setConfigOf(null)} onSaved={reload} />}
     </>
+  )
+}
+
+// Карточка панели-хоста: этот сервер в списке нод, но без действий ноды.
+function SelfHostCard({ sh }: { sh: SelfHost }) {
+  const certOf = (d: string) => sh.certs.find((c) => c.domain === d)
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div className="node-head">
+          <span className="flag">🎛</span>
+          <div>
+            <h3>{t('nodes.panel_this_server')}</h3>
+            <div className="card-sub">
+              {sh.domains.length > 0 ? sh.domains.join(' · ') : t('nodes.no_domain')}
+            </div>
+          </div>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          {sh.withNode ? <Badge color="green" dot>{t('nodes.panel_with_node')}</Badge> : <Badge dot>{t('nodes.panel_without_node')}</Badge>}
+        </div>
+      </div>
+      <div className="card-pad">
+        <div className="kv small" style={{ gridTemplateColumns: '110px 1fr' }}>
+          <div className="k">{t('nodes.panel_version')}</div><div>v{sh.version}</div>
+          <div className="k">{t('nodes.uptime')}</div><div>{uptime(sh.uptime)}</div>
+          {sh.domains.map((d) => {
+            const c = certOf(d)
+            return (
+              <div key={d} style={{ display: 'contents' }}>
+                <div className="k">{t('nodes.panel_certificate')}</div>
+                <div>
+                  {!c || !c.ok ? <span className="muted">{t('nodes.panel_cert_placeholder')}</span> :
+                    c.placeholder ? <>{d} — <span className="amber-text">{t('nodes.panel_cert_placeholder')}</span></> :
+                      <Trans k="nodes.panel_cert_expires" v={{ v: new Date(c.notAfter * 1000).toLocaleDateString() }} />}{c?.ok && !c.placeholder && c.issuer ? ` · ${c.issuer}` : ''}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="muted small" style={{ marginTop: 10 }}>{t('nodes.panel_hosts_the_web')}</div>
+      </div>
+    </div>
   )
 }
 

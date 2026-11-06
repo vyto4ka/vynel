@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/certs"
 	"github.com/vyto4ka/vynel/internal/node/agent"
 	"github.com/vyto4ka/vynel/internal/node/caddy"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
@@ -250,6 +251,11 @@ func Run(ctx context.Context, cfg Config) error {
 			return err
 		}
 		defer m.Close()
+		// The «Ноды» page shows this server's certificates: read them from the same manager.
+		p.Service.SelfCertStatus = func(domain string) (certs.Status, bool) {
+			st, err := m.Certs.Status(domain)
+			return st, err == nil
+		}
 		run("nginx", func() error { return panelNginxLoop(ctx, p.Service, m, cfg.Log) })
 		if fw != nil {
 			gw := gatewayPorts(ctx, p.Service, cfg.GatewayListen)

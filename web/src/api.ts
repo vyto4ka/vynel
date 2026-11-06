@@ -214,6 +214,15 @@ export interface Provider {
   icon: string // data: URI, '' — нет
 }
 
+// Панель-хост: сервер, где работает сама панель (карточка над списком нод).
+export interface SelfHost {
+  domains: string[]
+  version: string
+  uptime: number
+  withNode: boolean
+  certs: { domain: string; issuer: string; notAfter: number; placeholder: boolean; ok: boolean }[]
+}
+
 // Нода в «Биллинге»: стоимость, оплата и лимит трафика у провайдера.
 export interface BillingNode {
   id: number
