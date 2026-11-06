@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"slices"
 	"sync"
-	"syscall"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -138,7 +137,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg.CertInterval = time.Minute
 	}
 	if cfg.Restart == nil {
-		cfg.Restart = func() { _ = syscall.Kill(os.Getpid(), syscall.SIGTERM) }
+		cfg.Restart = selfTerm
 	}
 	if cfg.Update == nil {
 		cfg.Update = update.StartFollowing
