@@ -14,6 +14,35 @@ type Group struct {
 	Description string
 	Sort        int64
 	CreatedAt   int64
+	Defaults    *GroupDefaults
+}
+
+// GroupDefaults is copied to individual users only on an explicit group enrollment.
+// Empty modes keep the user's current values; nil limits keep panel/user defaults.
+type GroupDefaults struct {
+	Expiry       string `json:"expiry"` // keep | date | period | never
+	ExpireAt     *int64 `json:"expireAt"`
+	Months       int    `json:"months"`
+	Days         int    `json:"days"`
+	Traffic      string `json:"traffic"` // keep | limit | unlimited
+	TrafficLimit int64  `json:"trafficLimit"`
+	Reset        string `json:"reset"` // empty keeps the current reset strategy
+	HWIDLimit    *int64 `json:"hwidLimit"`
+	IPLimit      *int64 `json:"ipLimit"`
+}
+
+const groupCols = `id, name, description, sort, created_at, user_defaults`
+
+func scanGroup(row interface{ Scan(...any) error }) (*Group, error) {
+	g := &Group{}
+	var defaults string
+	if err := row.Scan(&g.ID, &g.Name, &g.Description, &g.Sort, &g.CreatedAt, &defaults); err != nil {
+		return nil, mapErr(err)
+	}
+	if err := json.Unmarshal([]byte(defaults), &g.Defaults); err != nil {
+		return nil, err
+	}
+	return g, nil
 }
 
 // Access kinds (docs/INBOUNDS.md §1.5).
@@ -35,7 +64,7 @@ type AccessRule struct {
 // CreateGroup inserts a group.
 func CreateGroup(ctx context.Context, q DBTX, g *Group) error {
 	g.CreatedAt = unix()
-	res, err := q.ExecContext(ctx, `INSERT INTO groups (name, description, sort, created_at) VALUES (?, ?, ?, ?)`, g.Name, g.Description, g.Sort, g.CreatedAt)
+	res, err := q.ExecContext(ctx, `INSERT INTO groups (name, description, sort, created_at, user_defaults) VALUES (?, ?, ?, ?, ?)`, g.Name, g.Description, g.Sort, g.CreatedAt, toJSON(g.Defaults))
 	if err != nil {
 		return mapErr(err)
 	}
@@ -45,36 +74,30 @@ func CreateGroup(ctx context.Context, q DBTX, g *Group) error {
 
 // UpdateGroup saves a group.
 func UpdateGroup(ctx context.Context, q DBTX, g *Group) error {
-	return execOne(ctx, q, `UPDATE groups SET name=?, description=?, sort=? WHERE id=?`, g.Name, g.Description, g.Sort, g.ID)
+	return execOne(ctx, q, `UPDATE groups SET name=?, description=?, sort=?, user_defaults=? WHERE id=?`, g.Name, g.Description, g.Sort, toJSON(g.Defaults), g.ID)
 }
 
 // GetGroup loads a group by id.
 func GetGroup(ctx context.Context, q DBTX, id int64) (*Group, error) {
-	g := &Group{}
-	err := q.QueryRowContext(ctx, `SELECT id, name, description, sort, created_at FROM groups WHERE id=?`, id).
-		Scan(&g.ID, &g.Name, &g.Description, &g.Sort, &g.CreatedAt)
-	return g, mapErr(err)
+	return scanGroup(q.QueryRowContext(ctx, `SELECT `+groupCols+` FROM groups WHERE id=?`, id))
 }
 
 // GetGroupByName loads a group by name.
 func GetGroupByName(ctx context.Context, q DBTX, name string) (*Group, error) {
-	g := &Group{}
-	err := q.QueryRowContext(ctx, `SELECT id, name, description, sort, created_at FROM groups WHERE name=?`, name).
-		Scan(&g.ID, &g.Name, &g.Description, &g.Sort, &g.CreatedAt)
-	return g, mapErr(err)
+	return scanGroup(q.QueryRowContext(ctx, `SELECT `+groupCols+` FROM groups WHERE name=?`, name))
 }
 
 // ListGroups returns all groups.
 func ListGroups(ctx context.Context, q DBTX) ([]*Group, error) {
-	rows, err := q.QueryContext(ctx, `SELECT id, name, description, sort, created_at FROM groups ORDER BY sort, id`)
+	rows, err := q.QueryContext(ctx, `SELECT `+groupCols+` FROM groups ORDER BY sort, id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*Group
 	for rows.Next() {
-		g := &Group{}
-		if err := rows.Scan(&g.ID, &g.Name, &g.Description, &g.Sort, &g.CreatedAt); err != nil {
+		g, err := scanGroup(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, g)
@@ -394,14 +417,16 @@ func GetUserByUsername(ctx context.Context, q DBTX, username string) (*User, err
 
 // UserFilter narrows ListUsers.
 type UserFilter struct {
-	Status     string  // '' = any
-	Search     string  // substring of username or note
-	TelegramID *int64  // exactly this Telegram account
-	ExternalID *string // exactly this id in the other system
-	Sort       string  // a key of userSorts; '' = by id
-	Desc       bool
-	Limit      int
-	Offset     int
+	GroupID      *int64 // member of this group; ExcludeGroup selects nonmembers
+	ExcludeGroup bool
+	Status       string  // '' = any
+	Search       string  // substring of username or note
+	TelegramID   *int64  // exactly this Telegram account
+	ExternalID   *string // exactly this id in the other system
+	Sort         string  // a key of userSorts; '' = by id
+	Desc         bool
+	Limit        int
+	Offset       int
 }
 
 // userSorts are the columns the users table sorts by. "Never" sorts last going up: no end date
@@ -432,6 +457,13 @@ func (f UserFilter) order() string {
 
 func (f UserFilter) where() (string, []any) {
 	where, args := []string{"1=1"}, []any{}
+	if f.GroupID != nil {
+		clause := "EXISTS (SELECT 1 FROM user_groups ug WHERE ug.user_id=users.id AND ug.group_id=?)"
+		if f.ExcludeGroup {
+			clause = "NOT " + clause
+		}
+		where, args = append(where, clause), append(args, *f.GroupID)
+	}
 	if f.Status != "" {
 		where, args = append(where, "status=?"), append(args, f.Status)
 	}

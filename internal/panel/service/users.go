@@ -21,14 +21,7 @@ var usernameRe = regexp.MustCompile(`^[\p{L}\p{N}_.\-@]{1,64}$`)
 
 // CreateGroup adds a group.
 func (s *Service) CreateGroup(ctx context.Context, actor Actor, name, description string) (*store.Group, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, invalid("group name is required")
-	}
-	g := &store.Group{Name: name, Description: description}
-	err := s.mutate(ctx, change{actor: actor, action: "group.create", entity: "group", entityID: idOf(&g.ID), event: EvGroupChanged, diff: map[string]string{"name": name}},
-		func(q store.DBTX) error { return store.CreateGroup(ctx, q, g) })
-	return g, err
+	return s.SaveGroup(ctx, actor, 0, GroupInput{Name: name, Description: description})
 }
 
 // DeleteGroup removes a group.
@@ -227,6 +220,7 @@ func checkReset(r *string) error {
 // CreateUserInput creates a user. Only Username is required: the rest comes from the template
 // (docs/ARCHITECTURE.md §7.1). Non-nil fields override the template.
 type CreateUserInput struct {
+	GroupDefaultsID   int64 // explicit enrollment from a group; copy defaults in the creation transaction
 	Username          string
 	TemplateID        int64 // 0 = default template
 	ExpireAt          *time.Time
@@ -317,6 +311,17 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 			if u.Note == "" {
 				u.Note = tpl.Note
 			}
+			if in.GroupDefaultsID != 0 {
+				group, err := store.GetGroup(ctx, q, in.GroupDefaultsID)
+				if err != nil {
+					return err
+				}
+				if err := checkGroupDefaults(group.Defaults); err != nil {
+					return err
+				}
+				applyGroupDefaults(u, group.Defaults, now)
+				in.GroupIDs = []int64{group.ID}
+			}
 			u.Status = computeStatus(u, now)
 			if u.TelegramID != nil {
 				if *u.TelegramID <= 0 {
@@ -349,6 +354,9 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 			}
 			// What the template gives on top: own grants, without an end date.
 			for _, g := range tpl.Grants {
+				if in.GroupDefaultsID != 0 {
+					break // group creation takes access from this group, not unrelated template grants
+				}
 				if checkTemplateGrants(ctx, q, []store.TemplateGrant{g}) != nil {
 					continue // deleted since the template was saved
 				}
