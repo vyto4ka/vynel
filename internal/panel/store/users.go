@@ -392,6 +392,11 @@ func GetUserByUsername(ctx context.Context, q DBTX, username string) (*User, err
 	return scanUser(q.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE username=?`, username))
 }
 
+// GetUserByUUID loads a user by uuid.
+func GetUserByUUID(ctx context.Context, q DBTX, uuid string) (*User, error) {
+	return scanUser(q.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE uuid=?`, uuid))
+}
+
 // UserFilter narrows ListUsers.
 type UserFilter struct {
 	Status     string  // '' = any
