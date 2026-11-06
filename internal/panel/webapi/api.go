@@ -1,6 +1,7 @@
 package webapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
+	"github.com/vyto4ka/vynel/internal/panel/usertransfer"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
@@ -39,6 +41,8 @@ func (s *Server) routes() {
 
 	s.handle("GET /api/users", s.users)
 	s.handle("POST /api/users", s.createUser)
+	s.handle("GET /api/users/export", s.usersExport)
+	s.handle("POST /api/users/import", s.usersImport)
 	s.handle("GET /api/users/{id}", s.user)
 	s.handle("PATCH /api/users/{id}", s.updateUser)
 	s.handle("POST /api/users/{id}/{action}", s.userAction)
@@ -1378,4 +1382,46 @@ func (s *Server) network(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return localize(r, n, "error"), nil
+}
+
+// usersExport answers the transfer file (the format `vynel admin user transfer import`
+// reads): uuid and subscription tokens included, groups by name. The browser offers it as a
+// download; the token inside makes the file as sensitive as the panel itself.
+func (s *Server) usersExport(r *http.Request) (any, error) {
+	f, err := usertransfer.Export(r.Context(), s.svc.Store(), usertransfer.ExportOptions{
+		Filter: store.UserFilter{Status: r.URL.Query().Get("status"), Search: r.URL.Query().Get("search")},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// usersImport reads a transfer file (a whole JSON body; the UI reads the file client-side).
+// The report says what landed: counts, problems, missing groups, new links.
+func (s *Server) usersImport(r *http.Request) (any, error) {
+	var in struct {
+		File          json.RawMessage `json:"file"`
+		Mode          string          `json:"mode"`
+		ReissueTokens bool            `json:"reissueTokens"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	f, err := usertransfer.Unmarshal(in.File)
+	if err != nil {
+		return nil, badRequest(err.Error())
+	}
+	im := usertransfer.NewImporter(s.svc.Store(), usertransfer.ImportOptions{Mode: in.Mode, ReissueTokens: in.ReissueTokens, Actor: "web"})
+	im.NewTokenFn = service.NewSubToken
+	im.LinkFn = func(u *store.User) (string, error) { return s.svc.SubscriptionURL(r.Context(), u) }
+	rep, err := im.Import(r.Context(), f)
+	if err != nil {
+		return nil, err
+	}
+	s.svc.Invalidate()
+	return map[string]any{
+		"total": f.Meta.Users, "created": rep.Created, "updated": rep.Updated, "skipped": rep.Skipped,
+		"renamed": rep.Renamed, "failed": rep.Failed, "problems": rep.Problems, "missingGroups": rep.MissingGroups(),
+	}, nil
 }
