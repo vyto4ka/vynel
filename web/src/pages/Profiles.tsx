@@ -2,8 +2,8 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { ClientRouting, del, get, Group, patch, post, Profile, ProfileClient, ProfileDetails, ProfileTemplate, put, Variable } from '../api'
 import { CascadeList } from '../extras'
 import { RoutingForm } from '../routing'
-import { CodeEditor, parseObject, pretty } from '../code'
-import { templateStarter } from '../templateStarter'
+import { CodeEditor, parseObject, pretty, placeholderPositions } from '../code'
+import { blankStarter, templateStarter } from '../templateStarter'
 import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t as tr, Trans } from '../i18n'
 import { useAdvanced } from '../mode'
@@ -461,6 +461,7 @@ export function VariableTable({ vars, values, onChange, empty, link }: { vars: V
 function TemplateList() {
   const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
   const [edit, setEdit] = useState<{ id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean } | null>(null)
+  const [choosing, setChoosing] = useState(false)
   const act = useAction()
   const confirm = useConfirm()
   if (!tpls.data) return <Loading error={tpls.error} />
@@ -470,10 +471,16 @@ function TemplateList() {
     for (let i = 2; tpls.data!.some((x) => x.id === id); i++) id = `${base}-${i}`
     return id
   }
-  const create = () => {
-    const src = templateStarter().replace(/^id:.*$/m, `id: ${freeID('my-xhttp')}`)
-    setEdit({ id: '', source: src, isNew: true, readOnly: false, help: true })
+  const create = () => setChoosing(true)
+
+  const startFrom = (base: string, src: string, help?: boolean) => {
+    setChoosing(false)
+    const id = freeID(base)
+    setEdit({ id: '', source: src.replace(/^id:.*$/m, `id: ${id}`).replace(/^(# .*\n)+/, ''), isNew: true, readOnly: false, help })
   }
+
+  // Копия встроенного шаблона для пресета: id меняется на свободный.
+  const builtin = (t: ProfileTemplate) => () => startFrom(t.id.replace(/-copy(-\d+)?$/, ''), t.source)
 
   const copy = (t: ProfileTemplate) => {
     const id = freeID(t.id.replace(/-copy(-\d+)?$/, '') + '-copy')
@@ -527,23 +534,77 @@ function TemplateList() {
           </div>
         ))}
       </div>
+      {choosing && <PresetDialog tpls={tpls.data.filter((x) => !x.custom)} onStarter={() => startFrom('my-xhttp', templateStarter(), true)} onBlank={() => startFrom('my-template', blankStarter(), true)} onBuiltin={builtin} onClose={() => setChoosing(false)} />}
       {edit && <TemplateEditor {...edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); tpls.reload() }} />}
     </>
   )
 }
 
+// Диалог «Новый шаблон»: с чего начать — копия встроенного, заготовка с пояснениями или
+// пустой каркас.
+function PresetDialog({ tpls, onStarter, onBlank, onBuiltin, onClose }: { tpls: ProfileTemplate[]; onStarter: () => void; onBlank: () => void; onBuiltin: (t: ProfileTemplate) => () => void; onClose: () => void }) {
+  return (
+    <Modal title={tr('common.new_template')} onClose={onClose}
+      footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" onClick={onBlank}>{tr('profiles.empty_skeleton')}</button></>}>
+      <p className="muted" style={{ marginBottom: 14 }}>{tr('profiles.choose_what_the_new')}</p>
+      <div className="cards cols">
+        {tpls.map((t) => (
+          <div key={t.id} className="card clickable" onClick={onBuiltin(t)}>
+            <div className="card-head">
+              <div>
+                <h3>{t.title}</h3>
+                <div className="card-sub mono">{t.id}</div>
+              </div>
+              <Badge>{tr('profiles.built_in')}</Badge>
+            </div>
+            <div className="card-pad">
+              <div className="small text-2">{t.summary}</div>
+              <div className="small muted" style={{ marginTop: 8 }}>
+                <Trans k="profiles.variables_2" v={{ v: (t.variables || []).map((v) => v.name).join(', ') || '—' }} />
+              </div>
+            </div>
+          </div>
+        ))}
+        <div className="card clickable" onClick={onStarter}>
+          <div className="card-head">
+            <div><h3>{tr('profiles.blueprint_with_comments')}</h3></div>
+            <Badge>{tr('profiles.built_in')}</Badge>
+          </div>
+          <div className="card-pad">
+            <div className="small text-2">{tr('profiles.vless_xhttp_blueprint')}</div>
+          </div>
+        </div>
+        <div className="card clickable" onClick={onBlank}>
+          <div className="card-head">
+            <div><h3>{tr('profiles.empty_skeleton')}</h3></div>
+            <Badge color="pink">{tr('profiles.from_scratch')}</Badge>
+          </div>
+          <div className="card-pad">
+            <div className="small text-2">{tr('profiles.id_protocol_port_the')}</div>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 type CheckResult = { ok: boolean; error?: string; id?: string; title?: string; variables?: Variable[]; sample?: Record<string, unknown> }
+type PreviewResult = { ok: boolean; error?: string; id?: string; title?: string; inbound?: Record<string, unknown>; host?: Record<string, unknown>; unresolved?: string[] }
 type Reference = { reference: { builtins: string[]; generators: string[]; derivations: string[]; lint: string[]; validations: string[]; webRoles: string[] } }
 
 function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }: { id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean; onClose: () => void; onSaved: () => void }) {
   const [text, setText] = useState(source)
   const [check, setCheck] = useState<CheckResult | null>(null)
+  const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [side, setSide] = useState<'check' | 'help'>(help ? 'help' : 'check')
   const ref = useLoad(() => get<Reference>('profile-templates/reference'))
   const act = useAction()
 
+  // Живое превью и проверка — один debounce: превью показывает черновик как он есть,
+  // проверка решает, сохранится ли он.
   useEffect(() => {
     const t = setTimeout(() => {
+      post<PreviewResult>('profile-templates/preview', { source: text }).then(setPreview).catch((e) => setPreview({ ok: false, error: e.message }))
       post<CheckResult>('profile-templates/check', { source: text }).then(setCheck).catch((e) => setCheck({ ok: false, error: e.message }))
     }, 500)
     return () => clearTimeout(t)
@@ -555,6 +616,10 @@ function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }:
     if (r !== undefined) onSaved()
   }
 
+  // Неразрешённые ${VAR}: подсветить их в YAML и показать списком.
+  const unresolved = preview?.ok ? (preview.unresolved || []) : []
+  const marks = useMemo(() => placeholderPositions(text, unresolved.length ? unresolved : undefined), [text, unresolved.join(',')])
+
   return (
     <Modal title={readOnly ? tr('profiles.built_in_template', { id }) : isNew ? tr('common.new_template') : tr('profiles.template', { id })} xl onClose={onClose}
       footer={readOnly ? <><span className="muted small grow">{tr('profiles.built_in_templates_are_not')}</span><button className="btn primary" onClick={onClose}>{tr('common.close')}</button></> : <>
@@ -563,24 +628,47 @@ function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }:
         <button className="btn primary" disabled={!check?.ok} onClick={save}>{tr('common.save')}</button>
       </>}>
       <div className="editor-split">
-        <CodeEditor lang="yaml" value={text} onChange={setText} readOnly={readOnly} height="calc(100vh - 230px)" />
+        <CodeEditor lang="yaml" value={text} onChange={setText} readOnly={readOnly} height="calc(100vh - 230px)" marks={marks} />
         <div className="preview-pane">
           <div className="seg" style={{ marginBottom: 10 }}>
             <button className={side === 'check' ? 'on' : ''} onClick={() => setSide('check')}><Trans k="profiles.check" v={{ v: check && !check.ok && ' ✗' }} /></button>
             <button className={side === 'help' ? 'on' : ''} onClick={() => setSide('help')}>{tr('profiles.reference')}</button>
           </div>
           {side === 'check' ? (
-            !check ? <Loading /> : check.ok ? (
-              <>
-                <div className="alert green" style={{ marginBottom: 10 }}><Trans k="profiles.the_template_is_fine" v={{ title: check.title, id: check.id }} /></div>
-                <div className="label" style={{ marginBottom: 6 }}>{tr('profiles.an_inbound_example_node_nl')}</div>
-                <CodeEditor lang="json" value={pretty(check.sample)} readOnly height="calc(100vh - 380px)" />
-              </>
-            ) : <div className="alert pink" style={{ whiteSpace: 'pre-wrap' }}>{check.error}</div>
+            <TemplatePreview check={check} preview={preview} unresolved={unresolved} />
           ) : <TemplateHelp r={ref.data?.reference} />}
         </div>
       </div>
     </Modal>
+  )
+}
+
+// Три части превью: статус проверки, инбаунд (переменные подставлены) и host — что уйдёт
+// в подписку. Секретные переменные приходят с бэкенда замаскированными.
+function TemplatePreview({ check, preview, unresolved }: { check: CheckResult | null; preview: PreviewResult | null; unresolved: string[] }) {
+  if (!check && !preview) return <Loading />
+  if (!preview?.ok) return <div className="alert pink" style={{ whiteSpace: 'pre-wrap' }}>{preview?.error}</div>
+  return (
+    <>
+      {check?.ok ? (
+        <div className="alert green" style={{ marginBottom: 10 }}><Trans k="profiles.the_template_is_fine" v={{ title: check.title, id: check.id }} /></div>
+      ) : check && (
+        <div className="alert pink" style={{ marginBottom: 10, whiteSpace: 'pre-wrap' }}>{check.error}</div>
+      )}
+      {unresolved.length > 0 && (
+        <div className="alert pink" style={{ marginBottom: 10 }}>
+          <Trans k="profiles.unresolved_variables" v={{ v: unresolved.map((name) => <code key={name}>{` $\{${name}\}` }</code>) }} />
+        </div>
+      )}
+      <div className="label" style={{ marginBottom: 6 }}>{tr('profiles.an_inbound_example_node_nl')}</div>
+      <CodeEditor lang="json" value={pretty(preview.inbound)} readOnly height="calc(50vh - 120px)" />
+      {preview.host && (
+        <>
+          <div className="label" style={{ margin: '14px 0 6px' }}>{tr('profiles.host_goes_to_the')}</div>
+          <CodeEditor lang="json" value={pretty(preview.host)} readOnly height="calc(50vh - 180px)" />
+        </>
+      )}
+    </>
   )
 }
 

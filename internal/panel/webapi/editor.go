@@ -14,6 +14,7 @@ import (
 func (s *Server) editorRoutes() {
 	s.handle("GET /api/profile-templates/reference", s.templateReference)
 	s.handle("POST /api/profile-templates/check", s.checkTemplate)
+	s.handle("POST /api/profile-templates/preview", s.previewTemplate)
 	s.handle("POST /api/profile-templates", s.saveProfileTemplate)
 	s.handle("PUT /api/profile-templates/{id}", s.saveProfileTemplate)
 	s.handle("DELETE /api/profile-templates/{id}", s.deleteProfileTemplate)
@@ -95,6 +96,54 @@ func maskValues(vals map[string]any, secret map[string]bool) map[string]any {
 	return out
 }
 
+// maskTree masks a rendered tree wherever a secret variable's value appears (the host
+// section expands the same values the inbound used).
+func maskTree(tree map[string]any, secrets map[string]bool) map[string]any {
+	if len(secrets) == 0 {
+		return tree
+	}
+	var walk func(any) any
+	walk = func(x any) any {
+		switch t := x.(type) {
+		case map[string]any:
+			out := make(map[string]any, len(t))
+			for k, v := range t {
+				out[k] = walk(v)
+			}
+			return out
+		case []any:
+			out := make([]any, len(t))
+			for i, v := range t {
+				out[i] = walk(v)
+			}
+			return out
+		case string:
+			if secrets[t] {
+				return masked
+			}
+		}
+		return x
+	}
+	m, _ := walk(tree).(map[string]any)
+	return m
+}
+
+// secretValues collects the rendered values of a template's secret variables.
+func secretValues(t *xrayconf.Template, vals map[string]any) map[string]bool {
+	out := map[string]bool{}
+	if t == nil {
+		return out
+	}
+	for _, v := range t.Variables {
+		if v.Secret {
+			if s, ok := vals[v.Name].(string); ok && s != "" {
+				out[s] = true
+			}
+		}
+	}
+	return out
+}
+
 // dropMasked removes values the UI sent back unchanged as "•••".
 func dropMasked(v map[string]any) map[string]any {
 	for k, x := range v {
@@ -131,6 +180,33 @@ func (s *Server) checkTemplate(r *http.Request) (any, error) {
 		return map[string]any{"ok": false, "error": err.Error()}, nil
 	}
 	return localize(r, map[string]any{"ok": true, "id": t.ID, "title": t.Title, "variables": t.Variables, "sample": maskSecrets(rendered)}, "title", "description"), nil
+}
+
+// previewTemplate renders a template as SampleRender would (a trial node NL, generated keys),
+// without the save-oriented checks: a draft with a bad id or tag_pattern still gets a preview.
+// The response carries the rendered inbound, the expanded host section (what the subscription
+// gets) and which ${VAR} the editor should highlight as unresolved.
+func (s *Server) previewTemplate(r *http.Request) (any, error) {
+	var in struct {
+		Source string `json:"source"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	t, rendered, host, unresolved, err := xrayconf.PreviewRender([]byte(in.Source))
+	if err != nil {
+		return map[string]any{"ok": false, "error": err.Error()}, nil
+	}
+	m := &xrayconf.RenderedInbound{Tag: rendered.Tag, Protocol: rendered.Protocol, Flow: rendered.Flow,
+		Inbound: rendered.Inbound, Values: rendered.Values, Template: t}
+	out := map[string]any{"ok": true, "id": t.ID, "title": t.Title, "inbound": maskSecrets(m)}
+	if host != nil {
+		out["host"] = maskTree(host, secretValues(t, rendered.Values))
+	}
+	if len(unresolved) > 0 {
+		out["unresolved"] = unresolved
+	}
+	return localize(r, out, "title"), nil
 }
 
 func (s *Server) saveProfileTemplate(r *http.Request) (any, error) {
