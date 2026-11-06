@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { ClientRouting, del, get, Group, patch, post, Profile, ProfileClient, ProfileDetails, ProfileTemplate, put, Variable } from '../api'
+import { ClientRouting, del, get, Group, Node, patch, post, Profile, ProfileClient, ProfileDetails, ProfileTemplate, put, Variable } from '../api'
 import { CascadeList } from '../extras'
 import { RoutingForm } from '../routing'
 import { CodeEditor, parseObject, pretty, placeholderPositions } from '../code'
@@ -45,6 +45,7 @@ function ProfileList() {
   const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
   const [creating, setCreating] = useState(false)
   const [edit, setEdit] = useState<number | null>(null)
+  const [applyTo, setApplyTo] = useState<Profile | null>(null)
   const act = useAction()
   const confirm = useConfirm()
 
@@ -68,6 +69,11 @@ function ProfileList() {
                   </div>
                   <div className="row" style={{ gap: 4 }}>
                     <button className="btn sm" onClick={() => setEdit(p.id)}><Icon name="edit" />{' '}{tr('common.edit')}</button>
+                    <button className="btn sm" title={tr('profiles.duplicate')} onClick={() => {
+                      act(() => post<{ id: number; name: string }>(`profiles/${p.id}/duplicate`), undefined)
+                        .then((r) => { if (r) { act(() => Promise.resolve(true), tr('profiles.profile_copied', { name: r.name })); profiles.reload() } })
+                    }}><Icon name="copy" /></button>
+                    <button className="btn sm" onClick={() => setApplyTo(p)}><Icon name="nodes" />{' '}{tr('profiles.apply_to_nodes')}</button>
                     <button className="btn ghost icon sm" title={tr('common.delete')} onClick={async () => {
                       if (await confirm(<><Trans k="profiles.delete_the_profile" v={{ name: p.name }} />{' '}{p.inbounds.length > 0 && tr('profiles.it_is_used_on_nodes', { join: p.inbounds.join(', ') })}</>, tr('common.delete')))
                         act(() => del(`profiles/${p.id}`), tr('profiles.profile_deleted')).then((r) => { if (r !== undefined) profiles.reload() })
@@ -95,7 +101,86 @@ function ProfileList() {
       )}
       {creating && <CreateProfile tpls={tpls.data} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); profiles.reload(); setEdit(id) }} />}
       {edit !== null && <ProfileEditor id={edit} onClose={() => setEdit(null)} onSaved={() => profiles.reload()} />}
+      {applyTo && <ApplyToNodes profile={applyTo} onClose={() => setApplyTo(null)} onDone={() => { setApplyTo(null); profiles.reload() }} />}
     </>
+  )
+}
+
+// Диалог «Применить к нодам…»: чекбоксы нод, превью (сколько инбаундов будет, у кого нет
+// домена) и результат по нодам после отправки.
+function ApplyToNodes({ profile, onClose, onDone }: { profile: Profile; onClose: () => void; onDone: () => void }) {
+  const nodes = useLoad(() => get<Node[]>('nodes'))
+  const [picked, setPicked] = useState<number[]>([])
+  const [result, setResult] = useState<{ results: { nodeId: number; nodeName: string; tag?: string; skipped?: boolean; error?: string }[] } | null>(null)
+  const act = useAction()
+  if (!nodes.data) return <Modal title={tr('profiles.apply_the_profile_to_nodes', { name: profile.name })} onClose={onClose}><Loading error={nodes.error} /></Modal>
+
+  // Free nodes: the profile is not on them yet; the rest would be skipped anyway.
+  const free = nodes.data.filter((n) => !n.inbounds.some((i) => i.profileId === profile.id))
+  const withoutDomain = free.filter((n) => !n.domain && picked.includes(n.id))
+  const done = result?.results || []
+  const okN = done.filter((r) => r.tag).length
+  const skipN = done.filter((r) => r.skipped).length
+  const failN = done.filter((r) => r.error).length
+
+  const submit = async () => {
+    const r = await act(() => post<{ results: typeof done }>(`profiles/${profile.id}/apply`, { nodeIds: picked }))
+    if (r) {
+      const ok = r.results.filter((x) => x.tag).length
+      setResult({ results: r.results })
+      act(() => Promise.resolve(true), tr('profiles.apply_done', { ok, skip: r.results.filter((x) => x.skipped).length, fail: r.results.filter((x) => x.error).length }))
+    }
+  }
+  const picking = (
+    <>
+      {free.length === 0 ? <div className="muted">{tr('profiles.no_fit_nodes')}</div> : (
+        <>
+          <div className="label" style={{ marginBottom: 8 }}>{tr('profiles.pick_nodes')}</div>
+          {free.map((n) => (
+            <label key={n.id} className="check">
+              <input type="checkbox" checked={picked.includes(n.id)}
+                onChange={(e) => setPicked(e.target.checked ? [...picked, n.id] : picked.filter((x) => x !== n.id))} />
+              {n.name} <span className="muted small">({n.code})</span>{!n.domain && <span className="amber-text small"> — {tr('nodes.no_domain')}</span>}
+            </label>
+          ))}
+        </>
+      )}
+    </>
+  )
+  const report = (
+    <div className="checklist">
+      {done.map((r) => (
+        <div key={r.nodeId} className={'check-step ' + (r.tag ? 'ok' : r.skipped ? 'skip' : 'fail')}>
+          <span className="check-icon">{r.tag ? '✓' : r.skipped ? '–' : '!'}</span>
+          <div>
+            <div>{r.nodeName || (tr('common.node') + ' #' + r.nodeId)}{r.tag ? <> · <span className="mono">{r.tag}</span></> : null}</div>
+            {r.error && <div className="small pink-text">{r.error}</div>}
+            {r.skipped && <div className="small muted">{tr('profiles.skipped_already_attached')}</div>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+  const footer = result ? (
+    <>
+      <span className="small grow">{tr('profiles.apply_done', { ok: okN, skip: skipN, fail: failN })}</span>
+      <button className="btn primary" onClick={onDone}>{tr('common.done')}</button>
+    </>
+  ) : (
+    <>
+      <span className="muted small grow">
+        {withoutDomain.length > 0
+          ? tr('profiles.n_inbounds_will_be_created', { n: picked.length, m: withoutDomain.length })
+          : tr('profiles.n_inbounds_will_be_created_2', { n: picked.length })}
+      </span>
+      <button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
+      <button className="btn primary" disabled={picked.length === 0} onClick={submit}>{tr('common.apply')}</button>
+    </>
+  )
+  return (
+    <Modal title={tr('profiles.apply_the_profile_to_nodes', { name: profile.name })} onClose={onClose} footer={footer}>
+      {result ? report : picking}
+    </Modal>
   )
 }
 

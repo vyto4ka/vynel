@@ -83,6 +83,8 @@ export default {
   primary: ' (primary)',
   profile: '· profile {name}',
   profile_added_to_the_node: 'Profile added to the node',
+  duplicate_the_inbound_a_copy: 'Duplicate the inbound — a copy with fresh keys and a suffixed tag',
+  inbound_duplicated: 'Inbound duplicated: {tag}',
   profile_on_the_node: 'Profile on the node {code}',
   provider_s_site: 'Provider’s site',
   reality_self_steal_poses_as: 'Reality self-steal poses as a site on this domain: a real site with a certificate opens on the node, and the connections hide behind it.',

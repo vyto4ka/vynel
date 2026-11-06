@@ -83,6 +83,8 @@ export default {
   primary: ' (основной)',
   profile: '· профиль {name}',
   profile_added_to_the_node: 'Профиль добавлен на ноду',
+  duplicate_the_inbound_a_copy: 'Дублировать инбаунд — копия с новыми ключами и тегом с суффиксом',
+  inbound_duplicated: 'Инбаунд продублирован: {tag}',
   profile_on_the_node: 'Профиль на ноду {code}',
   provider_s_site: 'Сайт провайдера',
   reality_self_steal_poses_as: 'Reality self-steal выдаёт себя за сайт на этом домене: на ноде открывается настоящий сайт с сертификатом, а подключения прячутся за ним.',

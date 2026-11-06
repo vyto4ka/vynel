@@ -20,8 +20,11 @@ func (s *Server) editorRoutes() {
 	s.handle("DELETE /api/profile-templates/{id}", s.deleteProfileTemplate)
 	s.handle("GET /api/profiles/{id}", s.profile)
 	s.handle("POST /api/profiles/{id}/preview", s.previewProfile)
+	s.handle("POST /api/profiles/{id}/duplicate", s.duplicateProfile)
+	s.handle("POST /api/profiles/{id}/apply", s.applyProfile)
 	s.handle("GET /api/inbounds/{id}", s.inbound)
 	s.handle("POST /api/inbounds/{id}/preview", s.previewInbound)
+	s.handle("POST /api/inbounds/{id}/duplicate", s.duplicateInbound)
 }
 
 const masked = "•••"
@@ -356,6 +359,65 @@ func (s *Server) previewProfile(r *http.Request) (any, error) {
 }
 
 // ---- node inbounds ----
+
+// duplicateProfile copies a profile without its node bindings.
+func (s *Server) duplicateProfile(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	p, err := s.svc.DuplicateProfile(r.Context(), actor(r), id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": p.ID, "name": p.Name}, nil
+}
+
+// applyProfile attaches a profile to the nodes listed in the body; the result says what
+// happened on each node (created, skipped, error) instead of failing as a whole.
+func (s *Server) applyProfile(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		NodeIDs []int64 `json:"nodeIds"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	res, err := s.svc.ApplyProfileToNodes(r.Context(), actor(r), id, in.NodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(res))
+	for _, x := range res {
+		item := map[string]any{"nodeId": x.NodeID, "nodeName": x.NodeName}
+		switch {
+		case x.Skipped:
+			item["skipped"] = true
+		case x.Err != nil:
+			item["error"] = x.Err.Error()
+		default:
+			item["tag"] = x.Tag
+		}
+		out = append(out, item)
+	}
+	return map[string]any{"results": out}, nil
+}
+
+// duplicateInbound copies a node inbound with fresh node keys and a suffixed tag.
+func (s *Server) duplicateInbound(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	ni, err := s.svc.DuplicateInbound(r.Context(), actor(r), id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": ni.ID, "tag": ni.Tag}, nil
+}
 
 type inboundEdit struct {
 	Enabled         *bool          `json:"enabled"`
