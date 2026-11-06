@@ -116,8 +116,13 @@ func applyGroupDefaults(u *store.User, d *store.GroupDefaults, now time.Time) {
 	case "unlimited":
 		u.TrafficLimitBytes = nil
 	}
-	if d.Reset != "" {
+	if d.Reset != "" && d.Reset != u.ResetStrategy {
 		u.ResetStrategy = d.Reset
+		// A previously unscheduled counter must not be mistaken for a missed
+		// calendar reset on the next maintenance tick. Keep usage, and start
+		// the new schedule at enrollment; unchanged schedules retain their due date.
+		at := now.Unix()
+		u.LastResetAt = &at
 	}
 	if d.HWIDLimit != nil {
 		value := *d.HWIDLimit

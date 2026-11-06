@@ -120,3 +120,52 @@ func TestCreateUserInGroupAndClearDefaults(t *testing.T) {
 		t.Fatal("never expiry not applied")
 	}
 }
+
+func TestGroupResetScheduleKeepsUsageUntilNextPeriod(t *testing.T) {
+	for _, tc := range []struct{ from, to string }{{"no", "month"}, {"month", "week"}, {"week", "day"}} {
+		t.Run(tc.from+"-to-"+tc.to, func(t *testing.T) {
+			f := newFixture(t)
+			u := must(f.s.CreateUser(f.ctx, ActorCLI, CreateUserInput{Username: "existing", ResetStrategy: tc.from}))
+			old := f.now.AddDate(0, -2, 0).Unix()
+			if _, err := f.s.st.DB.ExecContext(f.ctx, `UPDATE users SET created_at=?, traffic_used_bytes=70, lifetime_used_bytes=120, last_reset_at=NULL WHERE id=?`, old, u.ID); err != nil {
+				t.Fatal(err)
+			}
+			g := must(f.s.SaveGroup(f.ctx, ActorCLI, 0, GroupInput{Name: "New schedule", SetDefaults: true, Defaults: &store.GroupDefaults{Traffic: "limit", TrafficLimit: 100, Reset: tc.to}}))
+			must(f.s.ChangeGroupMembers(f.ctx, ActorCLI, g.ID, []int64{u.ID}, true, true))
+			// Running the actual background job right away used to erase all 70 bytes.
+			if n := must(f.s.ResetDueTraffic(f.ctx)); n != 0 {
+				t.Fatalf("enrollment caused %d immediate resets", n)
+			}
+			got := must(f.s.User(f.ctx, u.ID))
+			if got.TrafficUsedBytes != 70 || got.LifetimeUsedBytes != 120 {
+				t.Fatalf("usage changed: %+v", got)
+			}
+			// It still resets normally at the first calendar boundary after enrollment.
+			f.now = f.now.AddDate(0, 1, 0)
+			if n := must(f.s.ResetDueTraffic(f.ctx)); n != 1 {
+				t.Fatalf("new schedule did not reset: %d", n)
+			}
+			got = must(f.s.User(f.ctx, u.ID))
+			if got.TrafficUsedBytes != 0 || got.LifetimeUsedBytes != 120 {
+				t.Fatalf("scheduled reset: %+v", got)
+			}
+		})
+	}
+}
+
+func TestGroupEnrollmentDoesNotPostponeUnchangedReset(t *testing.T) {
+	f := newFixture(t)
+	u := must(f.s.CreateUser(f.ctx, ActorCLI, CreateUserInput{Username: "monthly", ResetStrategy: "month"}))
+	old := f.now.AddDate(0, -2, 0).Unix()
+	if _, err := f.s.st.DB.ExecContext(f.ctx, `UPDATE users SET created_at=?, traffic_used_bytes=70, last_reset_at=? WHERE id=?`, old, old, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	g := must(f.s.SaveGroup(f.ctx, ActorCLI, 0, GroupInput{Name: "Same schedule", SetDefaults: true, Defaults: &store.GroupDefaults{Reset: "month"}}))
+	must(f.s.ChangeGroupMembers(f.ctx, ActorCLI, g.ID, []int64{u.ID}, true, true))
+	if got := must(f.s.User(f.ctx, u.ID)); got.LastResetAt == nil || *got.LastResetAt != old {
+		t.Fatal("unchanged reset was postponed")
+	}
+	if n := must(f.s.ResetDueTraffic(f.ctx)); n != 1 {
+		t.Fatalf("overdue reset should still run: %d", n)
+	}
+}

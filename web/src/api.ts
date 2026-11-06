@@ -193,8 +193,11 @@ export interface Node {
   flag: string
   domain: string
   local: boolean
+  manual: boolean
   enabled: boolean
   state: string
+  // Step in the setup wizard: 0 = finished, 2 = profiles, 3 = node variables, 4 = requirements, -1 = unknown.
+  setupStep: number
   lastSeenAt: number | null
   xrayVersion: string
   agentVersion: string
@@ -225,6 +228,15 @@ export interface Provider {
   url: string
   loginUrl: string
   icon: string // data: URI, '' — нет
+}
+
+// Панель-хост: сервер, где работает сама панель (карточка над списком нод).
+export interface SelfHost {
+  domains: string[]
+  version: string
+  uptime: number
+  withNode: boolean
+  certs: { domain: string; issuer: string; notAfter: number; placeholder: boolean; ok: boolean }[]
 }
 
 // Нода в «Биллинге»: стоимость, оплата и лимит трафика у провайдера.
@@ -324,7 +336,13 @@ export interface InboundDetails {
   hostSource?: Record<string, any>
   rendered?: Record<string, any>
   error?: string
+  // Inheritance of each key of the final render: 'template' | 'profile' | 'node' (docs/INBOUNDS.md §1.4).
+  sources?: SourceMap
+  levels?: { template?: Record<string, any>; profile?: Record<string, any>; node?: Record<string, any> }
 }
+
+// SourceMap labels each key: a level name, or a subtree when the value is an object.
+export type SourceMap = { [key: string]: string | SourceMap }
 
 export interface Profile {
   id: number
@@ -394,6 +412,20 @@ export interface JoinInfo {
   ttl: string
   error?: string
   warnings?: string[] | null
+}
+
+// Requirement check in the node setup wizard.
+export interface WizardCheck {
+  key: string
+  title: string
+  state: 'ok' | 'wait' | 'fail' | 'skip'
+  detail?: string
+}
+
+// Answer of GET nodes/{id}/wizard.
+export interface NodeWizard {
+  step: number
+  steps: WizardCheck[]
 }
 
 // ---- подписка ----

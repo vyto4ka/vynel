@@ -46,7 +46,7 @@ MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY
 ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
 VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY="" SUB_PATH="" PANEL_PATH=""
-LOGIN_MODE="" SESSION_PATHS=""
+LOGIN_MODE="" SESSION_PATHS="" MANUAL=0
 NO_TUI="${VYNEL_NO_TUI:-0}" TUI=0 SETUP_BIN=""
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -64,6 +64,8 @@ Modes:
   aio        panel + VPN node on this server (one IP, one domain is enough)
   panel      panel only; VPN nodes are other servers
   node       VPN node for an existing panel (needs --token from the panel)
+  node-manual  manual VPN node: the panel manages only Xray; nginx, certificates and the
+             network (sysctl, firewall) stay with the admin (implies --manual)
   update     update everything installed here, keep the data
   harden     protect this server: firewall, SSH by key only, another SSH port
   uninstall  remove the services (--purge also deletes all data and binaries)
@@ -88,6 +90,8 @@ Options:
   --sub-path PATH        aio/panel: path of subscription links (default /s/), e.g. sub or api/v1/client
   --panel-path PATH      aio/panel: secret path of the web panel (default: random, 12 characters)
   --token TOKEN          node: join token from the panel
+  --manual               node: manual mode — only Xray is installed and managed by the panel;
+                         nginx, certificates, sysctl and the firewall stay with the admin
   --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
   --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz, or .age if encrypted)
   --backup-password PASS password of an encrypted backup (asked when needed and not given)
@@ -128,6 +132,7 @@ while [[ $# -gt 0 ]]; do
     --restore) RESTORE="${2:-}"; shift 2 ;;
     --backup-password) export VYNEL_BACKUP_PASSWORD="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
+    --manual) MANUAL=1; shift ;;
     --ref) REF="${2:-}"; REF_SET=1; shift 2 ;;
     --channel) CHANNEL="${2:-}"; shift 2 ;;
     --binary) LOCAL_BIN="${2:-}"; shift 2 ;;
@@ -280,15 +285,16 @@ bash_menu() {
   echo "  1) Всё на этом сервере: панель + VPN-нода   (проще всего начать с этого)"
   echo "  2) Только панель (VPN-ноды будут на других серверах)"
   echo "  3) Только VPN-нода для существующей панели  (нужен токен из панели)"
-  echo "  4) Обновить установленное"
-  echo "  5) Защитить сервер: файрвол, SSH только по ключу, другой порт SSH"
-  echo "  6) Удалить"
+  echo "  4) Нода (ручная): только Xray, nginx и сеть настраиваются сами"
+  echo "  5) Обновить установленное"
+  echo "  6) Защитить сервер: файрвол, SSH только по ключу, другой порт SSH"
+  echo "  7) Удалить"
   echo
   local def=1 choice=""
-  [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] && def=4
+  [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] && def=5
   ask choice "Выберите" "$def"
   case "$choice" in
-    1) MODE=aio ;; 2) MODE=panel ;; 3) MODE=node ;; 4) MODE=update ;; 5) MODE=harden ;; 6) MODE=uninstall ;;
+    1) MODE=aio ;; 2) MODE=panel ;; 3) MODE=node ;; 4) MODE=node-manual; MANUAL=1 ;; 5) MODE=update ;; 6) MODE=harden ;; 7) MODE=uninstall ;;
     *) die "нет такого пункта: $choice" ;;
   esac
   WIZARD=1
@@ -302,7 +308,7 @@ if [[ -z "$MODE" ]]; then
     MODE=tui # the form opens once the vynel binary is here (below)
   fi
 fi
-case "$MODE" in aio|panel|node|update|harden|uninstall|tui) ;; *) usage; die "unknown mode $MODE" ;; esac
+case "$MODE" in aio|panel|node|node-manual|update|harden|uninstall|tui) ;; *) usage; die "unknown mode $MODE" ;; esac
 case "$FIREWALL" in ""|on|off) ;; *) die "--firewall: on or off" ;; esac
 [[ -z "$SSH_PORT" || "$SSH_PORT" == random || ( "$SSH_PORT" =~ ^[0-9]+$ && "$SSH_PORT" -ge 1024 && "$SSH_PORT" -le 65535 ) ]] || die "--ssh-port: random or 1024–65535"
 
@@ -352,7 +358,7 @@ check_mode() {
   if [[ "$MODE" == update || "$MODE" == harden ]]; then
     [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] || die "nothing to $MODE: vynel is not installed here (run without --mode for the menu)"
   fi
-  if [[ "$MODE" == node && $PANEL_INSTALLED -eq 1 ]]; then
+  if [[ ( "$MODE" == node || "$MODE" == node-manual ) && $PANEL_INSTALLED -eq 1 ]]; then
     die "this server runs the panel (ports 80/443 are taken); a node needs another server — or choose all-in-one to run a node here"
   fi
   if [[ ( "$MODE" == aio || "$MODE" == panel ) && $NODE_INSTALLED -eq 1 ]]; then
@@ -1275,7 +1281,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/vynel node run --data-dir $NODE_DATA
+ExecStart=/usr/local/bin/vynel node run --data-dir $NODE_DATA$([[ "$MODE" == node-manual ]] && echo " --manual")
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -1725,9 +1731,16 @@ do_node() {
 
   install_vynel
   install_xray
-  install_nginx
+  if [[ "$MODE" == node-manual ]]; then
+    # Manual node: nginx, certificates, sysctl and the firewall are the admin's.
+    info "manual node: nginx, certificates and the firewall are not set up"
+  else
+    install_nginx
+  fi
   drop_temp_swap
-  open_ports 80 443 443/udp
+  if [[ "$MODE" != node-manual ]]; then
+    open_ports 80 443 443/udp
+  fi
 
   if [[ -n "$TOKEN" ]]; then
     info "joining the panel"
@@ -1745,8 +1758,10 @@ do_node() {
     if systemctl is-active --quiet vynel-node; then ok=1; break; fi
     sleep 2
   done
-  apply_firewall
-  apply_ssh
+  if [[ "$MODE" != node-manual ]]; then
+    apply_firewall
+    apply_ssh
+  fi
 
   echo
   pink "══════════════════════════  vynel установлен: нода  ══════════════════════════"
@@ -1758,8 +1773,13 @@ do_node() {
   echo
   print_security_block
   echo
-  echo "  Нода получает настройки от панели сама: домен, ключи Reality, пользователей."
-  echo "  Проверьте в панели: «Ноды» — через минуту состояние «работает»."
+  if [[ "$MODE" == node-manual ]]; then
+    echo "  Ручная нода: панель управляет только конфигом Xray. nginx, сертификаты, sysctl"
+    echo "  и файрвол настраиваются вручную — панель их не трогает."
+  else
+    echo "  Нода получает настройки от панели сама: домен, ключи Reality, пользователей."
+    echo "  Проверьте в панели: «Ноды» — через минуту состояние «работает»."
+  fi
   echo
   line "  логи" "journalctl -u vynel-node -f"
   line "  перезапуск" "systemctl restart vynel-node"
@@ -1923,7 +1943,7 @@ run_tui() {
   if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
   if [[ $rc -ne 0 ]]; then rm -f "$out"; return 1; fi
   # Only known names, single-quoted values (internal/setup Answers.Shell).
-  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH|LOGIN_MODE|SESSION_PATHS)='" "$out"; then
+  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH|LOGIN_MODE|SESSION_PATHS|MANUAL)='" "$out"; then
     rm -f "$out"
     return 1
   fi
@@ -1932,6 +1952,7 @@ run_tui() {
   rm -f "$out"
   TUI=1 ASSUME_YES=1 WIZARD=0
   [[ -z "$SUB_DOMAIN" ]] && SUB_DOMAIN="$DOMAIN"
+  [[ "$MANUAL" == 1 ]] && MODE=node-manual
   check_mode
 }
 
@@ -1949,6 +1970,7 @@ case "$MODE" in
   aio) do_aio ;;
   panel) do_panel ;;
   node) do_node ;;
+  node-manual) do_node ;;
   update) do_update ;;
   harden) do_harden ;;
 esac

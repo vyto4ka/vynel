@@ -23,6 +23,8 @@ export default {
   done: 'Done',
   downloaded: 'downloaded',
   edit: 'Edit',
+  apply: 'Apply',
+  duplicate: 'Duplicate',
   empty_no_limit: 'Empty — no limit',
   error: 'error',
   groups: 'Groups',
