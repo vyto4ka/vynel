@@ -47,6 +47,8 @@ export default {
   keys_updated: 'Keys updated',
   listen_ip: 'Listen IP',
   manual_json_edit_for_this: 'Manual JSON edit for this node only',
+  auto_setup_disabled: 'Auto-setup is off: the panel manages only the Xray config. nginx, certificates and the firewall are set up by hand.',
+  manual_node: 'Manual',
   name_in_the_app: 'Name in the app',
   name_shown_in_apps: 'Name (shown in apps)',
   network: 'Network',

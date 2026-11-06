@@ -143,6 +143,7 @@ type Node struct {
 	Flag         string    `json:"flag"`
 	Domain       string    `json:"domain"`
 	Local        bool      `json:"local"`
+	Manual       bool      `json:"manual"`
 	Enabled      bool      `json:"enabled"`
 	State        string    `json:"state"`
 	LastSeenAt   *int64    `json:"lastSeenAt"`
@@ -848,7 +849,7 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	for _, ns := range sts {
 		n := ns.Node
 		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain,
-			Local: n.Local, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
+			Local: n.Local, Manual: n.Manual, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
 			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, NginxVersion: n.NginxVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
 			Inbounds: []Inbound{}, Addresses: []Address{}}
 		if n.LastError != "" {
@@ -926,6 +927,8 @@ type nodeIn struct {
 	Country string `json:"country"`
 	Domain  string `json:"domain"`
 	Code    string `json:"code"`
+	// Manual: the panel manages only the Xray config; nginx and the network are the admin's.
+	Manual bool `json:"manual"`
 	// Attach these profiles to a new node right away.
 	ProfileIDs []int64 `json:"profileIds"`
 }
@@ -936,7 +939,7 @@ func (s *Server) createNode(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx, a := r.Context(), actor(r)
-	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, Code: in.Code})
+	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, Code: in.Code, Manual: in.Manual})
 	if err != nil {
 		return nil, err
 	}
@@ -975,6 +978,7 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 		Country string  `json:"country"`
 		Domain  *string `json:"domain"`
 		Enabled *bool   `json:"enabled"`
+		Manual  *bool   `json:"manual"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -983,14 +987,17 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	enabled, domain := n.Enabled, n.Domain
+	enabled, domain, manual := n.Enabled, n.Domain, n.Manual
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
 	if in.Domain != nil {
 		domain = *in.Domain
 	}
-	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain}, enabled)
+	if in.Manual != nil {
+		manual = *in.Manual
+	}
+	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain, Manual: manual}, enabled)
 	return nil, err
 }
 

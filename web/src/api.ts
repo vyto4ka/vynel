@@ -180,6 +180,7 @@ export interface Node {
   flag: string
   domain: string
   local: boolean
+  manual: boolean
   enabled: boolean
   state: string
   lastSeenAt: number | null

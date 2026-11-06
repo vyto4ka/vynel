@@ -62,7 +62,7 @@ export function Nodes() {
                   <div className="node-head">
                     <span className="flag">{n.flag || '🌐'}</span>
                     <div>
-                      <h3>{n.name} <span className="muted small">{n.code}</span> {n.local && <Badge>{t('nodes.on_the_panel_server')}</Badge>}</h3>
+                      <h3>{n.name} <span className="muted small">{n.code}</span> {n.local && <Badge>{t('nodes.on_the_panel_server')}</Badge>} {n.manual && <Badge>{t('nodes.manual_node')}</Badge>}</h3>
                       <div className="card-sub">{n.domain || t('nodes.no_domain')}{' '}<Trans k="nodes.contact" v={{ v: ago(n.lastSeenAt) }} /></div>
                       {n.provider && (
                         <div className="row small" style={{ gap: 8, marginTop: 4 }}>
@@ -82,7 +82,7 @@ export function Nodes() {
                     <button className="btn ghost icon sm" title={t('common.edit')} onClick={() => setEditNode(n)}><Icon name="edit" /></button>
                     <Menu title={t('common.actions')} items={[
                       { label: t('nodes.restart_xray'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'xray', t('nodes.xray_restarted')) },
-                      { label: t('nodes.restart_the_web_server'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', t('nodes.web_server_restarted')) },
+                      ...(!n.manual ? [{ label: t('nodes.restart_the_web_server'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', t('nodes.web_server_restarted')) }] : []),
                       { label: t('nodes.resend_the_config'), icon: 'nodes', disabled: !online, onClick: () => nodeAction(n, 'resync', t('nodes.config_sent')) },
                       'divider',
                       { label: updOf(n)?.available ? t('nodes.update_to', { latest: updates.data?.latest }) : t('nodes.update_vynel_xray_and_nginx'), icon: 'refresh', disabled: !online || !!updOf(n)?.updating,
@@ -112,6 +112,9 @@ export function Nodes() {
                   </div>
                 </div>
                 <div className="card-pad">
+                  {n.manual && (
+                    <div className="alert amber" style={{ marginBottom: 14 }}>{t('nodes.auto_setup_disabled')}</div>
+                  )}
                   {n.problems.length > 0 && (
                     <div className="alert pink" style={{ marginBottom: 14 }}>
                       <ul className="list-plain" style={{ color: 'inherit' }}>{n.problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
@@ -137,7 +140,7 @@ export function Nodes() {
                           </div>
                         </>
                       ) : <div className="muted small">{t('nodes.no_metrics_yet')}</div>}
-                      <div className="muted small" style={{ marginTop: 10 }}><Trans k="nodes.xray_agent" v={{ v: n.xrayVersion || '—', v2: n.agentVersion || '—', v3: n.nginxVersion ? ` · nginx ${n.nginxVersion}` : n.caddyVersion && ` · Caddy ${n.caddyVersion}` }} /></div>
+                      <div className="muted small" style={{ marginTop: 10 }}><Trans k="nodes.xray_agent" v={{ v: n.xrayVersion || '—', v2: n.agentVersion || '—', v3: !n.manual && n.nginxVersion ? ` · nginx ${n.nginxVersion}` : !n.manual && n.caddyVersion && ` · Caddy ${n.caddyVersion}` }} /></div>
                       {n.addresses.length > 0 && (
                         <div className="row small" style={{ marginTop: 8, gap: 6 }}>
                           {n.addresses.map((a) => <span key={a.id} className="chip static">{a.ip}{a.primary && ' ★'}{!a.onInterface && t('nodes.not_on_the_interface')}</span>)}
