@@ -95,7 +95,7 @@ Options:
   --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
   --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz, or .age if encrypted)
   --users FILE           aio/panel: import users from a vynel export file (users only; see
-                         `vynel admin user transfer export` on the old server). Remnawave and
+                         "vynel admin user transfer export" on the old server). Remnawave and
                          3x-ui users are imported after the install: vynel admin user transfer
   --backup-password PASS password of an encrypted backup (asked when needed and not given)
   --channel CHANNEL      stable: the latest published release (default); dev: the build CI makes of a
