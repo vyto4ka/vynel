@@ -3,7 +3,6 @@ export default {
   add_a_server: 'Add a server',
   add_a_server_step_1: 'Add a server · step 1 of 2',
   add_a_server_step_2: 'Add a server · step 2 of 2',
-  add_profiles_right_away: 'Add profiles right away',
   address: 'Address',
   all_on_all_the_server: 'All — on all the server’s addresses',
   an_a_record_to_the: 'An A record to the new server’s IP, grey cloud in Cloudflare',

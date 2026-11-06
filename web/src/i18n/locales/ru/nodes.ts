@@ -3,7 +3,6 @@ export default {
   add_a_server: 'Добавить сервер',
   add_a_server_step_1: 'Добавить сервер · шаг 1 из 2',
   add_a_server_step_2: 'Добавить сервер · шаг 2 из 2',
-  add_profiles_right_away: 'Сразу добавить профили',
   address: 'Адрес',
   all_on_all_the_server: 'Все — на всех адресах сервера',
   an_a_record_to_the: 'A-запись на IP нового сервера, серое облако в Cloudflare',

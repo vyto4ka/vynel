@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -43,7 +45,15 @@ func TestManualNodeSkipsWeb(t *testing.T) {
 
 	// A snapshot's web part is ignored, the Xray part applied.
 	ctx := context.Background()
-	s := &nodev1.Snapshot{Revision: 1, Hash: "h1", XrayConfig: []byte(`{"inbounds":[]}`), NginxConfig: "# a rogue panel's nginx config"}
+	apiPort := xraytest.FreePort(t)
+	cfg := map[string]any{
+		"inbounds": []any{},
+		"outbounds": []any{xraytest.Direct()},
+		"api":      map[string]any{"tag": "api", "listen": "127.0.0.1:" + strconv.Itoa(apiPort), "services": []any{"HandlerService", "StatsService"}},
+		"stats":    map[string]any{},
+	}
+	raw, _ := json.Marshal(cfg)
+	s := &nodev1.Snapshot{Revision: 1, Hash: "h1", XrayConfig: raw, NginxConfig: "# a rogue panel's nginx config"}
 	if err := a.ApplySnapshot(ctx, s); err != nil {
 		t.Fatal(err)
 	}
