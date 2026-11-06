@@ -1,6 +1,7 @@
 package xrayconf
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"regexp"
@@ -218,6 +219,100 @@ func (t *Template) ResolveValues(profileVals, nodeVals map[string]any, ctx NodeC
 		vals["XHTTP_EXTRA"] = extra
 	}
 	return vals, nil
+}
+
+// ResolveValuesLoose is ResolveValues for previews: missing values and undeclared ${VAR}
+// placeholders do not fail — the former render as "", the latter stay in place as text, so
+// a half-written template still shows a preview (the editor highlights what is missing).
+func (t *Template) ResolveValuesLoose(profileVals, nodeVals map[string]any, ctx NodeContext) (map[string]any, error) {
+	vals := ctx.builtins()
+	for _, v := range t.Variables {
+		if v.Source == SourceDerived {
+			continue
+		}
+		src := profileVals
+		if v.Scope == ScopeNode {
+			src = nodeVals
+		}
+		val, ok := src[v.Name]
+		if !ok || isEmpty(val) {
+			switch {
+			case v.DefaultFrom == "node.domain" && ctx.Domain != "":
+				val, ok = ctx.Domain, true
+			case v.Default != nil:
+				val, ok = v.Default, true
+			}
+		}
+		if !ok {
+			vals[v.Name] = ""
+			continue
+		}
+		vals[v.Name] = normalize(val)
+	}
+	for _, v := range t.Variables {
+		if v.Source != SourceDerived {
+			continue
+		}
+		m := derivedRe.FindStringSubmatch(v.From)
+		arg, _ := vals[m[2]].(string)
+		if val, err := derivations[m[1]](arg); err == nil {
+			vals[v.Name] = val
+		} else {
+			vals[v.Name] = ""
+		}
+	}
+	tag := ctx.Tag
+	if tag == "" {
+		tag = substStringLoose(t.TagPattern, vals)
+	}
+	vals["TAG"] = tag
+	if t.extra != nil {
+		extra := substituteLoose(deepCopy(t.extra), vals)
+		vals["XHTTP_EXTRA"] = extra
+	}
+	return vals, nil
+}
+
+// substStringLoose substitutes what it can and leaves unknown ${VAR} in place.
+func substStringLoose(s string, vals map[string]any) string {
+	return placeholderRe.ReplaceAllStringFunc(s, func(m string) string {
+		v, ok := vals[m[2:len(m)-1]]
+		if !ok {
+			return m
+		}
+		switch x := v.(type) {
+		case string:
+			return x
+		case map[string]any, []any:
+			b, _ := json.Marshal(x)
+			return string(b)
+		default:
+			return fmt.Sprint(x)
+		}
+	})
+}
+
+// substituteLoose substitutes in place, keeping unknown ${VAR} as text.
+func substituteLoose(node any, vals map[string]any) any {
+	switch n := node.(type) {
+	case map[string]any:
+		for k, v := range n {
+			n[k] = substituteLoose(v, vals)
+		}
+	case []any:
+		for i, v := range n {
+			n[i] = substituteLoose(v, vals)
+		}
+	case string:
+		if m := placeholderRe.FindStringSubmatch(n); m != nil && m[0] == n {
+			if v, ok := vals[m[1]]; ok {
+				return v
+			}
+			return n
+		}
+		return substStringLoose(n, vals)
+	}
+	return node
 }
 
 func isEmpty(v any) bool {

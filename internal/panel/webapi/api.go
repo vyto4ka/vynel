@@ -58,11 +58,14 @@ func (s *Server) routes() {
 	s.handle("DELETE /api/templates/{id}", s.deleteTemplate)
 
 	s.handle("GET /api/nodes", s.nodes)
+	s.handle("GET /api/self-host", s.selfHost)
 	s.handle("POST /api/nodes", s.createNode)
 	s.handle("PATCH /api/nodes/{id}", s.updateNode)
 	s.handle("DELETE /api/nodes/{id}", s.deleteNode)
 	s.handle("POST /api/nodes/{id}/token", s.nodeToken)
 	s.handle("GET /api/nodes/{id}/checklist", s.nodeChecklist)
+	s.handle("GET /api/nodes/{id}/wizard", s.nodeWizard)
+	s.handle("POST /api/nodes/{id}/confirm-requirements", s.confirmRequirements)
 	s.handle("POST /api/nodes/{id}/action", s.nodeAction)
 	s.handle("GET /api/updates", s.getUpdates)
 	s.handle("POST /api/updates/check", s.checkUpdates)
@@ -142,6 +145,7 @@ type Node struct {
 	Flag         string    `json:"flag"`
 	Domain       string    `json:"domain"`
 	Local        bool      `json:"local"`
+	Manual       bool      `json:"manual"`
 	Enabled      bool      `json:"enabled"`
 	State        string    `json:"state"`
 	LastSeenAt   *int64    `json:"lastSeenAt"`
@@ -154,7 +158,10 @@ type Node struct {
 	Metrics      *Metrics  `json:"metrics"`
 	Inbounds     []Inbound `json:"inbounds"`
 	Addresses    []Address `json:"addresses"`
-	Provider     *Provider `json:"provider"` // where the node is rented, nil = not set
+	// SetupStep is the node's place in the setup wizard: 0 = finished, 2 = choose profiles,
+	// 3 = node variables, 4 = requirements. -1 = unknown (the step could not be computed).
+	SetupStep int       `json:"setupStep"`
+	Provider  *Provider `json:"provider"` // where the node is rented, nil = not set
 }
 
 // Metrics are the latest host numbers of a node.
@@ -815,6 +822,11 @@ func (s *Server) deleteTemplate(r *http.Request) (any, error) {
 
 func (s *Server) nodes(r *http.Request) (any, error) { return s.nodeList(r, true) }
 
+// selfHost is the panel's own server for the card above the node list.
+func (s *Server) selfHost(r *http.Request) (any, error) {
+	return s.svc.SelfHost(r.Context())
+}
+
 func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	ctx := r.Context()
 	sts, err := s.svc.NodeStatuses(ctx, s.cfg.Connected)
@@ -842,9 +854,14 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	for _, ns := range sts {
 		n := ns.Node
 		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain,
-			Local: n.Local, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
+			Local: n.Local, Manual: n.Manual, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
 			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, NginxVersion: n.NginxVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
-			Inbounds: []Inbound{}, Addresses: []Address{}}
+			Inbounds: []Inbound{}, Addresses: []Address{}, SetupStep: -1}
+		if details {
+			if step, err := s.svc.NodeSetupStep(ctx, n.ID); err == nil {
+				d.SetupStep = step
+			}
+		}
 		if n.LastError != "" {
 			d.Problems = append(d.Problems, n.LastError)
 		}
@@ -920,6 +937,8 @@ type nodeIn struct {
 	Country string `json:"country"`
 	Domain  string `json:"domain"`
 	Code    string `json:"code"`
+	// Manual: the panel manages only the Xray config; nginx and the network are the admin's.
+	Manual bool `json:"manual"`
 	// Attach these profiles to a new node right away.
 	ProfileIDs []int64 `json:"profileIds"`
 }
@@ -930,7 +949,7 @@ func (s *Server) createNode(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx, a := r.Context(), actor(r)
-	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, Code: in.Code})
+	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, Code: in.Code, Manual: in.Manual})
 	if err != nil {
 		return nil, err
 	}
@@ -969,6 +988,7 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 		Country string  `json:"country"`
 		Domain  *string `json:"domain"`
 		Enabled *bool   `json:"enabled"`
+		Manual  *bool   `json:"manual"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -977,14 +997,17 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	enabled, domain := n.Enabled, n.Domain
+	enabled, domain, manual := n.Enabled, n.Domain, n.Manual
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
 	if in.Domain != nil {
 		domain = *in.Domain
 	}
-	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain}, enabled)
+	if in.Manual != nil {
+		manual = *in.Manual
+	}
+	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain, Manual: manual}, enabled)
 	return nil, err
 }
 
@@ -1013,6 +1036,41 @@ func (s *Server) nodeChecklist(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return localize(r, steps, "title", "detail"), nil
+}
+
+// nodeWizard is the setup wizard of a node: the derived step and the requirement checks.
+func (s *Server) nodeWizard(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	step, steps, err := s.svc.NodeWizard(r.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"step": step, "steps": localize(r, steps, "title", "detail")}, nil
+}
+
+// confirmRequirements marks the node's wizard requirements confirmed (confirm=false unconfirms).
+func (s *Server) confirmRequirements(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		Confirm *bool `json:"confirm"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ts := s.svc.Now().Unix()
+	if in.Confirm != nil && !*in.Confirm {
+		ts = 0
+	}
+	if err := s.svc.ConfirmNodeRequirements(r.Context(), actor(r), id, ts); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 func (s *Server) nodeAction(r *http.Request) (any, error) {

@@ -191,12 +191,45 @@ const linkField = StateField.define<LinkState>({
 
 type Status = { line: number; col: number; problem: SyntaxProblem | null; size: number }
 
-export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onValidity, highlight: linkPaths }: {
+// ---- unresolved ${VAR} placeholders (the template editor's live preview) ----
+
+const markEffect = StateEffect.define<[number, number][]>()
+const unresolvedMark = Decoration.mark({ class: 'cm-unresolved' })
+
+// placeholderPositions finds every ${VAR} in a text; names narrows it to the given variables,
+// undefined = all of them. The result is [from, to] offsets for the editor.
+export function placeholderPositions(text: string, names?: string[]): [number, number][] {
+  const want = names ? new Set(names) : null
+  const out: [number, number][] = []
+  const re = /\$\{(\w+)\}/g
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (want && !want.has(m[1])) continue
+    out.push([m.index, m.index + m[0].length])
+  }
+  return out
+}
+
+type MarkState = { ranges: [number, number][]; deco: DecorationSet }
+const markField = StateField.define<MarkState>({
+  create: () => ({ ranges: [], deco: Decoration.none }),
+  update(v, tr) {
+    let ranges = v.ranges
+    for (const e of tr.effects) if (e.is(markEffect)) ranges = e.value
+    if (ranges === v.ranges && !tr.docChanged) return v
+    const deco = ranges.map(([from, to]) => unresolvedMark.range(Math.min(from, tr.state.doc.length), Math.min(to, tr.state.doc.length)))
+    return { ranges, deco: Decoration.set(deco, true) }
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
+})
+
+export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onValidity, highlight: linkPaths, marks }: {
   value: string
   onChange?: (v: string) => void
   lang: CodeLang
   height?: number | string
   readOnly?: boolean
+  // ${VAR} placeholders to light up as unresolved (offsets into the text).
+  marks?: [number, number][]
   // Called with the reason when the text is not valid, null when it is: for a Save button.
   onValidity?: (error: string | null) => void
   // JSON paths to light up (a form field's lines); the editor scrolls to the first one.
@@ -245,7 +278,7 @@ export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onVa
       extensions: [
         lineNumbers(), foldGutter(), history(), drawSelection(), indentOnInput(), bracketMatching(), closeBrackets(),
         highlightActiveLine(), highlightActiveLineGutter(), highlightSelectionMatches(),
-        indentUnit.of('  '), linkField,
+        indentUnit.of('  '), linkField, markField,
         keymap.of([
           { key: 'Shift-Alt-f', run: format }, // как в VS Code
           indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap,
@@ -302,6 +335,24 @@ export function CodeEditor({ value, onChange, lang, height = 360, readOnly, onVa
   useEffect(() => {
     view.current?.dispatch({ effects: ro.current.reconfigure(EditorState.readOnly.of(!!readOnly)) })
   }, [readOnly])
+
+  // ${VAR} места от живого превью: сместить на правки текста и заменить на новые.
+  const marksKey = (marks ?? []).map(([a, b]) => `${a}:${b}`).join(',')
+  useEffect(() => {
+    const v = view.current
+    if (!v) return
+    if (!marksKey) {
+      if (v.state.field(markField).ranges.length) v.dispatch({ effects: markEffect.of([]) })
+      return
+    }
+    const doc = v.state.doc.toString()
+    const shifted = (marks ?? []).map(([from, to]): [number, number] => {
+      if (to > value.length) return [Math.min(from, doc.length), Math.min(to, doc.length)] as [number, number]
+      return [from, to]
+    })
+    v.dispatch({ effects: markEffect.of(shifted) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marksKey])
 
   const copy = () => {
     navigator.clipboard?.writeText(view.current?.state.doc.toString() ?? '').then(() => {

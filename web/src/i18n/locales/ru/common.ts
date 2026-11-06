@@ -23,6 +23,8 @@ export default {
   done: 'Готово',
   downloaded: 'скачано',
   edit: 'Изменить',
+  apply: 'Применить',
+  duplicate: 'Дублировать',
   empty_no_limit: 'Пусто — без лимита',
   error: 'ошибка',
   groups: 'Группы',

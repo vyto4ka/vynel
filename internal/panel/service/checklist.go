@@ -147,6 +147,8 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 	}
 	web := webVersion(n)
 	switch {
+	case n.Manual:
+		add("web", rest[3][1], StepSkip, "ручная нода: веб-сервер настраивает администратор")
 	case n.Domain == "":
 		add("web", rest[3][1], StepSkip, "у ноды нет домена")
 	case web != "":
@@ -156,7 +158,9 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 	}
 	// 6. DNS of the node's domain.
 	dnsOK := true
-	if n.Domain == "" {
+	if n.Manual {
+		add("dns", rest[4][1], StepSkip, "ручная нода: DNS и сертификаты настраивает администратор")
+	} else if n.Domain == "" {
 		add("dns", rest[4][1], StepSkip, "у ноды нет домена")
 	} else {
 		addrs, err := store.ListAddresses(ctx, s.st.DB, n.ID)
@@ -181,6 +185,8 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 	}
 	// 7. The site opens from outside with a real certificate.
 	switch {
+	case n.Manual:
+		add("site", rest[5][1], StepSkip, "ручная нода: сайт и сертификат настраивает администратор")
 	case n.Domain == "":
 		add("site", rest[5][1], StepSkip, "у ноды нет домена")
 	case !dnsOK || web == "":
