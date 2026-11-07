@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { get, Network, NetRole, post, put, Setting } from '../api'
 import { Badge, Field, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
+import { applyTheme, loadTheme, themes } from '../theme'
 
 export function Settings() {
   const { data, error, reload } = useLoad(() => get<Setting[]>('settings'))
@@ -9,6 +10,7 @@ export function Settings() {
   const sections = [...new Set(data.map((s) => s.section))]
   return (
     <div className="cards" style={{ maxWidth: 900 }}>
+      <ThemeCard />
       <Stealth settings={data} />
       <NetworkCard />
       {sections.map((sec) => (
@@ -26,6 +28,26 @@ export function Settings() {
 const value = (all: Setting[], key: string) => {
   const s = all.find((x) => x.key === key)
   return s ? (s.set ? s.value ?? '' : s.default ?? '') : ''
+}
+
+// ThemeCard — the panel palette. Меняется сразу и без перезагрузки; сохраняется в браузере,
+// как режим интерфейса и язык. Catppuccin — https://github.com/catppuccin/catppuccin (MIT).
+function ThemeCard() {
+  const [theme, setTheme] = useState(loadTheme)
+  return (
+    <div className="card">
+      <div className="card-head">
+        <div><h3>{t('settings.theme')}</h3><div className="card-sub">{t('settings.theme_sub')}</div></div>
+      </div>
+      <div className="card-pad">
+        <div className="seg" role="group" aria-label={t('settings.theme')}>
+          {themes.map((x) => (
+            <button key={x.id} className={theme === x.id ? 'on' : ''} onClick={() => { setTheme(x.id); applyTheme(x.id) }}>{x.name}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // Сводка скрытия (docs/STEALTH.md §1) и быстрый переезд панели на случайный порт и путь.

@@ -28,6 +28,8 @@ export default {
   sign_in_only_through_telegram: 'Sign-in only through Telegram',
   subscription_page_hidden: 'Subscription page hidden',
   subscriptions: 'subscriptions',
+  theme: 'Theme',
+  theme_sub: 'The panel palette. Applied instantly, saved in this browser. Catppuccin by catppuccin (MIT).',
   the_node_has_not_reported: 'The node has not reported its addresses yet',
   the_panel_and_subscriptions: 'The panel and subscriptions pick their IP below, in “Panel access” and “Subscriptions”. The inbound’s entry and exit IPs are under “Nodes” → “Configure”.',
   the_panel_has_moved: 'The panel has moved',

@@ -28,6 +28,8 @@ export default {
   sign_in_only_through_telegram: 'Вход только через Telegram',
   subscription_page_hidden: 'Страница подписки скрыта',
   subscriptions: 'подписки',
+  theme: 'Оформление',
+  theme_sub: 'Цветовая схема панели. Применяется сразу, сохраняется в этом браузере. Палитры Catppuccin (MIT).',
   the_node_has_not_reported: 'Нода ещё не прислала свои адреса',
   the_panel_and_subscriptions: 'Панель и подписки выбирают IP ниже, в разделах «Доступ к панели» и «Подписки». Вход и выход инбаунда — в «Ноды» → «Настроить».',
   the_panel_has_moved: 'Панель переехала',
