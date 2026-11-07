@@ -61,6 +61,19 @@ func TestServeHeaders(t *testing.T) {
 		if w.Code != 200 || w.Header().Get("Last-Modified") == "" || w.Header().Get("Etag") == "" {
 			t.Fatalf("%s: headers %v", n, w.Header())
 		}
+		// The security headers a real site sends — on 200 and on 404 alike.
+		for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
+			if w.Header().Get(name) == "" {
+				t.Fatalf("%s: no %s in %v", n, name, w.Header())
+			}
+		}
+		nf := httptest.NewRecorder()
+		Serve(nf, httptest.NewRequest("GET", "/nope", nil), n)
+		for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
+			if nf.Header().Get(name) == "" {
+				t.Fatalf("%s: 404 without %s in %v", n, name, nf.Header())
+			}
+		}
 
 		// HEAD: no body, same headers, no Content-Length mismatch.
 		h := httptest.NewRecorder()
@@ -105,10 +118,8 @@ func TestServeHeaders(t *testing.T) {
 		}
 
 		// The 404 page carries no caching headers: a real site's error page does not either.
-		w = httptest.NewRecorder()
-		Serve(w, httptest.NewRequest("GET", "/nope", nil), n)
-		if w.Header().Get("Etag") != "" || w.Header().Get("Last-Modified") != "" {
-			t.Fatalf("%s: 404 headers %v", n, w.Header())
+		if nf.Header().Get("Etag") != "" || nf.Header().Get("Last-Modified") != "" {
+			t.Fatalf("%s: 404 headers %v", n, nf.Header())
 		}
 	}
 }
