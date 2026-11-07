@@ -99,12 +99,32 @@ var serveEpoch = func() time.Time {
 	return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 }()
 
+// securityHeaders are the headers a real site sends; security scanners check for them. They
+// must not vary between the decoy and a real static site.
+var securityHeaders = [][2]string{
+	{"X-Content-Type-Options", "nosniff"},
+	{"X-Frame-Options", "SAMEORIGIN"},
+	{"Referrer-Policy", "strict-origin-when-cross-origin"},
+	{"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self'"},
+}
+
+// SetSecurityHeaders adds the same headers to a hand-written decoy response (the
+// subscription handler's 404), so all decoy answers look alike.
+func SetSecurityHeaders(w http.ResponseWriter) {
+	for _, h := range securityHeaders {
+		w.Header().Set(h[0], h[1])
+	}
+}
+
 // Serve answers a request with a site the way nginx serves it: clean URLs (/about is
 // about.html or about/index.html), the site's 404 page for anything else, Last-Modified and
 // conditional requests on static files.
 func Serve(w http.ResponseWriter, r *http.Request, name string) {
 	if !Valid(name) {
 		name = Names()[0]
+	}
+	for _, h := range securityHeaders {
+		w.Header().Set(h[0], h[1])
 	}
 	p := path.Clean("/" + r.URL.Path)
 	for _, c := range []string{p, p + ".html", path.Join(p, "index.html")} {

@@ -275,6 +275,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) notFound(ctx context.Context, w http.ResponseWriter) {
 	name, _ := h.svc.Setting(ctx, service.SettingSubDecoy, "docs")
+	decoy.SetSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = w.Write(decoy.NotFound(name))
