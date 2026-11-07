@@ -4,6 +4,7 @@
 package decoy
 
 import (
+	"bytes"
 	"crypto/rand"
 	"embed"
 	"fmt"
@@ -15,7 +16,11 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/vyto4ka/vynel/internal/buildinfo"
 )
 
 //go:embed sites
@@ -83,8 +88,20 @@ func Random() string {
 	return names[n.Int64()]
 }
 
+// serveEpoch is the fixed mtime reported for every file: the sites are embedded, so the build
+// date reads as a site deployed once and never touched since. If-Modified-Since before it gets
+// 304, the way a real static server answers. Unix(0,0) would mean "no date" to net/http, so a
+// missing or unparsable build date falls back to a fixed past date.
+var serveEpoch = func() time.Time {
+	if d, err := time.Parse(time.RFC3339, buildinfo.Date); err == nil && !d.IsZero() {
+		return d.Truncate(time.Second).UTC()
+	}
+	return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+}()
+
 // Serve answers a request with a site the way nginx serves it: clean URLs (/about is
-// about.html or about/index.html), the site's 404 page for anything else.
+// about.html or about/index.html), the site's 404 page for anything else, Last-Modified and
+// conditional requests on static files.
 func Serve(w http.ResponseWriter, r *http.Request, name string) {
 	if !Valid(name) {
 		name = Names()[0]
@@ -97,7 +114,11 @@ func Serve(w http.ResponseWriter, r *http.Request, name string) {
 			if ct := mime.TypeByExtension(path.Ext(f)); ct != "" {
 				w.Header().Set("Content-Type", ct)
 			}
-			_, _ = w.Write(b)
+			w.Header().Set("Last-Modified", serveEpoch.Format(http.TimeFormat))
+			// nginx's etag format: hex of mtime and size. With the fixed epoch it is a stable
+			// tag per file, exactly what a real static site sends.
+			w.Header().Set("Etag", `"`+strconv.FormatInt(serveEpoch.Unix(), 16)+"-"+strconv.FormatInt(int64(len(b)), 16)+`"`)
+			http.ServeContent(w, r, path.Base(f), serveEpoch, bytes.NewReader(b))
 			return
 		}
 	}
