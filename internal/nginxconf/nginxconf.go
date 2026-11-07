@@ -348,6 +348,11 @@ func Build(spec Spec) (string, error) {
 			realIP(2)
 			certLines(w, 2, d)
 			w(2, "add_header Strict-Transport-Security \"max-age=31536000\" always;")
+			// The headers a real site sends; security scanners check for them.
+			w(2, "add_header X-Content-Type-Options \"nosniff\" always;")
+			w(2, "add_header X-Frame-Options \"SAMEORIGIN\" always;")
+			w(2, "add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;")
+			w(2, "add_header Content-Security-Policy \"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self'\" always;")
 			for _, sn := range srv.snippets[d] {
 				for _, line := range strings.Split(sn, "\n") {
 					w(2, "%s", strings.TrimRight(line, " \t"))
