@@ -67,7 +67,7 @@ export function Logo({ size = 36 }: { size?: number }) {
         </linearGradient>
       </defs>
       <rect x="4" y="4" width="88" height="88" rx="24" fill={`url(#${id})`} />
-      <path d="M30 34 L48 66 L66 34" fill="none" stroke="#0d1013" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M30 34 L48 66 L66 34" fill="none" stroke="var(--inverse-on-surface)" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
