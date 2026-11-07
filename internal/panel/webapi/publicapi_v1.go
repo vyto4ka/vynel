@@ -11,6 +11,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
+	"github.com/vyto4ka/vynel/internal/panel/usertransfer"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
@@ -22,6 +23,7 @@ func (s *Server) v1Routes() {
 	s.v1("GET", "/me", "", s.v1Me)
 
 	s.v1("GET", "/users", service.ScopeUsersRead, s.v1Users)
+	s.v1("GET", "/users/export", service.ScopeUsersRead, s.v1UsersExport)
 	s.v1("POST", "/users", service.ScopeUsersWrite, s.v1CreateUser)
 	s.v1("GET", "/users/{id}", service.ScopeUsersRead, s.v1User)
 	s.v1("PATCH", "/users/{id}", service.ScopeUsersWrite, s.v1PatchUser)
@@ -92,6 +94,17 @@ type v1User struct {
 	OnlineAt          *string `json:"online_at"`
 	CreatedAt         string  `json:"created_at"`
 	SubscriptionURL   any     `json:"subscription_url,omitempty"` // a link, or null while the subscription domain is not set; absent in lists
+}
+
+// v1UsersExport returns every user in the transfer format (usertransfer.ExportFile): one GET,
+// no pagination, ready for `vynel admin user transfer import` on another server.
+func (s *Server) v1UsersExport(r *http.Request, c *v1Ctx) (any, error) {
+	q := r.URL.Query()
+	f := store.UserFilter{Status: q.Get("status"), Search: q.Get("search")}
+	if f.Status != "" && !slices.Contains([]string{store.StatusActive, store.StatusDisabled, store.StatusLimited, store.StatusExpired}, f.Status) {
+		return nil, apiErr(http.StatusBadRequest, "bad_parameter", "status is active, disabled, limited or expired").on("status")
+	}
+	return usertransfer.Export(r.Context(), s.svc.Store(), usertransfer.ExportOptions{Filter: f})
 }
 
 func (s *Server) v1UserDTO(r *http.Request, u *store.User, groups []int64, withURL bool) v1User {

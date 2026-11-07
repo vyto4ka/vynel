@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
+	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/panel/usertransfer"
 )
 
 // apiCall sends a request to the public API with a token.
@@ -320,5 +322,73 @@ func TestOpenAPIServed(t *testing.T) {
 	}
 	if w := apiCall(t, c, "", "GET", "/openapi.yaml", ""); w.Code != 200 || !strings.HasPrefix(w.Body.String(), "openapi:") {
 		t.Fatalf("yaml: %d", w.Code)
+	}
+}
+
+// The export endpoint answers with the transfer file, honors filters, and its file imports.
+func TestAPIUsersExport(t *testing.T) {
+	c, svc, _ := newServer(t)
+	read := apiToken(t, svc, service.ScopeUsersRead)
+
+	for _, name := range []string{"alice", "bob"} {
+		if _, err := svc.CreateUser(t.Context(), service.ActorCLI, service.CreateUserInput{Username: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.CreateUser(t.Context(), service.ActorCLI, service.CreateUserInput{Username: "carl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SetUserEnabled(t.Context(), service.ActorCLI, 3, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if w := apiCall(t, c, "", "GET", "/users/export", ""); w.Code != 401 {
+		t.Fatalf("no token: %d %s", w.Code, w.Body.String())
+	}
+	w := apiCall(t, c, read, "GET", "/users/export", "")
+	if w.Code != 200 {
+		t.Fatalf("export: %d %s", w.Code, w.Body.String())
+	}
+	f, err := usertransfer.Unmarshal(w.Body.Bytes())
+	if err != nil {
+		t.Fatalf("not a transfer file: %v (%s)", err, w.Body.String())
+	}
+	if f.Meta.Source != usertransfer.SourceVynel || f.Meta.Format != usertransfer.Format || f.Meta.Users != 3 {
+		t.Fatalf("meta: %+v", f.Meta)
+	}
+	names := map[string]bool{}
+	for _, u := range f.Users {
+		names[u.Username] = true
+		if u.UUID == "" || u.SubToken == "" {
+			t.Errorf("%s: no uuid or token in the export", u.Username)
+		}
+	}
+	if !names["alice"] || !names["bob"] || !names["carl"] {
+		t.Fatalf("users: %v", names)
+	}
+
+	w = apiCall(t, c, read, "GET", "/users/export?status=disabled", "")
+	if f, err = usertransfer.Unmarshal(w.Body.Bytes()); err != nil || f.Meta.Users != 1 || f.Users[0].Username != "carl" {
+		t.Fatalf("filter: %v %v", f, err)
+	}
+	if w = apiCall(t, c, read, "GET", "/users/export?status=wrong", ""); w.Code != 400 || errCode(t, w) != "bad_parameter" {
+		t.Fatalf("bad status: %d %s", w.Code, w.Body.String())
+	}
+
+	// The file answers a real import on a fresh store.
+	st, err := store.Open(t.Context(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	im := usertransfer.NewImporter(st, usertransfer.ImportOptions{})
+	im.NewTokenFn = service.NewSubToken
+	rep, err := im.Import(t.Context(), f)
+	if err != nil || rep.Created != 1 {
+		t.Fatalf("import: %v %+v", err, rep)
+	}
+	imported, err := store.GetUserByUsername(t.Context(), st.DB, "carl")
+	if err != nil || imported.SubToken != f.Users[0].SubToken {
+		t.Fatalf("imported carl: %v", err)
 	}
 }

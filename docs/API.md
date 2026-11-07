@@ -203,6 +203,7 @@ API нужно, чтобы подключить к панели то, что д�
 |-------|-------|----------|
 | `GET /users` | `users:read` | Список. Фильтры: `status`, `search`, `username`, `telegram_id`, `external_id`; `sort`, `order`; `limit`, `offset`; `include=subscription` добавляет ссылку подписки каждому |
 | `POST /users` | `users:write` | Создать |
+| `GET /users/export` | `users:read` | Файл переноса пользователей: все, одним ответом (uuid и токены подписок включены). Фильтры: `status`, `search`. Формат — тот, что читает `vynel admin user transfer import` на другой панели |
 | `GET /users/{id}` | `users:read` | Один пользователь со ссылкой подписки |
 | `PATCH /users/{id}` | `users:write` | Изменить: присылайте только то, что меняется |
 | `DELETE /users/{id}` | `users:delete` | Удалить (`204`) |

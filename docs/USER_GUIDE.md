@@ -696,6 +696,7 @@ vynel admin
   backup [-o файл]          бэкап в файл (.tar.gz)
   api-token create | list | revoke   токены API без веб-панели (§16)
   user      add | list | show | extend | disable | enable | reset | groups | reissue | links | devices | rm
+            transfer export | import | import-remnawave | import-3xui   перенос пользователей (§14.1)
   group     add | list | grant | revoke
   template  add | list
   node      add | list | addr | token | rm
@@ -816,6 +817,40 @@ vynel version
 3. Если у панели сменился IP, на каждой ноде выполните `vynel node set-panel НОВЫЙ_IP:9443`. Ключи и сертификаты нод остаются прежними.
 
 На уже установленной панели: `systemctl stop vynel && vynel restore файл.tar.gz --yes && systemctl start vynel`. Прежние данные не удаляются, а откладываются в `/var/lib/vynel/.before-restore-<время>/`.
+
+### 14.1 Перенос пользователей (без бэкапа)
+
+Бэкап переносит панель целиком, включая ноды и настройки. Когда нужны только люди — переезд на новую панель с нуля, перенос с Remnawave или 3x-ui — есть экспорт пользователей: небольшой файл с именами, ключами VLESS, лимитами, сроками и ссылками подписок. Ноды, группы доступа и настройки остаются у каждой панели свои; группы подтягиваются по именам, каких нет — пользователь окажется без них (это видно в отчёте).
+
+**Ключи и ссылки сохраняются**: после импорта клиенты продолжают работать — uuid тот же, токен подписки тот же, меняется только домен в ссылке (перенаправьте DNS, и приложения сами подхватят новый сервер при обновлении подписки). Опция `--reissue-tokens` выдаёт всем новые ссылки — если старые могли утечь.
+
+```bash
+# на старом сервере
+vynel admin user transfer export /tmp/users.json
+vynel admin user transfer export --password 'секрет' /tmp/users.json.age   # зашифровать (age)
+
+# на новом сервере (панель работает)
+vynel admin user transfer import /tmp/users.json
+vynel admin user transfer import --mode upsert /tmp/users.json       # существующих перезаписать
+vynel admin user transfer import --mode rename /tmp/users.json       # или добавить с -2
+vynel admin user transfer import --dry-run /tmp/users.json           # только отчёт
+vynel admin user transfer import --password 'секрет' /tmp/users.json.age
+
+# с панели Remnawave (по её API: URL и токен, раздел API tokens)
+vynel admin user transfer import-remnawave --url https://panel.example.com --token …
+
+# из базы 3x-ui (файл x-ui.db, скопированный со старого сервера)
+vynel admin user transfer import-3xui /root/x-ui.db
+```
+
+Токены подписок Remnawave и 3x-ui устроены иначе — каждый пользователь получает новую ссылку vynel, список печатается в отчёте.
+
+Файл экспорта открывает подписки всех пользователей: храните его как пароль, при передаче по открытому каналу шифруйте. Существующие пользователи сравниваются по имени, затем по uuid; `skip` не трогает их, `upsert` обновляет из файла, `rename` добавляет копию с суффиксом `-2`.
+
+**При установке** вопрос «Перенести пользователей из файла экспорта?» (или флаг `--users файл.json`) импортирует файл до первой настройки панели — удобно при переезде на чистый сервер.
+
+**В веб-панели**: «Пользователи» → «Перенос» — экспорт в файл (с учётом поиска), импорт файла с теми же режимами и отчётом. **По API** (§16): `GET /api/v1/users/export` отдаёт тот же файл — новая панель может забрать пользователей со старой по сети, достаточно API-токена со скоупом `users:read`.
+
 
 ## 15. Если не подключается: логи и диагностика
 
