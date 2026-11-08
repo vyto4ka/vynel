@@ -2,10 +2,13 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { del, get, Group, patch, post, Template, User, UserDetails } from '../api'
 import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
-import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Info, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Info, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad, useToast } from '../ui'
 import { t as tr, Trans } from '../i18n'
 
 const pageSize = 200
+
+type BulkAction = 'enable' | 'disable' | 'reset' | 'delete'
+interface BulkResult { succeeded: number[]; failed: { id: number; error: string }[] }
 
 // Колонки, по которым сортирует сервер (список идёт страницами).
 type SortKey = 'username' | 'status' | 'traffic' | 'expire' | 'groups' | 'online' | 'created'
@@ -34,15 +37,33 @@ export function Users() {
   const [transfer, setTransfer] = useState(false)
   const [open, setOpen] = useState<number | null>(openId)
   const [page, setPage] = useState(0)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkFailures, setBulkFailures] = useState<{ id: number; name: string; error: string }[]>([])
+  const act = useAction()
+  const confirm = useConfirm()
+  const toast = useToast()
+  useEffect(() => { setSelected(new Set()); setBulkFailures([]) }, [sort, search, page])
   useEffect(() => setPage(0), [sort, search])
   useEffect(() => {
     try { localStorage.setItem('vynel.users.sort', JSON.stringify(sort)) } catch { /* приватное окно */ }
   }, [sort])
   // Страницами: с десятками тысяч пользователей весь список разом тормозил и панель, и браузер.
-  const list = useLoad(() => get<{ users: User[]; total: number }>(`users?search=${encodeURIComponent(search)}&sort=${sort.key}&dir=${sort.desc ? 'desc' : 'asc'}` +
-    `&limit=${pageSize}&offset=${page * pageSize}`), [sort, search, page], 20000)
-  const users = { ...list, data: list.data?.users }
-  const total = list.data?.total ?? 0
+  const query = `users?search=${encodeURIComponent(search)}&sort=${sort.key}&dir=${sort.desc ? 'desc' : 'asc'}&limit=${pageSize}&offset=${page * pageSize}`
+  const list = useLoad(async () => ({ query, ...await get<{ users: User[]; total: number }>(query) }), [query], 20000)
+  // A previous page's response can arrive after the filter changes. Never let its rows be selected.
+  const current = list.data?.query === query ? list.data : null
+  const users = { ...list, data: current?.users }
+  const total = current?.total ?? 0
+  const chosen = (users.data || []).filter((u) => selected.has(u.id))
+  const pageSelected = !!users.data?.length && chosen.length === users.data.length
+  useEffect(() => {
+    if (!current) return
+    const visible = new Set(current.users.map((u) => u.id))
+    setSelected((ids) => new Set([...ids].filter((id) => visible.has(id))))
+    const lastPage = Math.max(0, Math.ceil(current.total / pageSize) - 1)
+    if (page > lastPage) setPage(lastPage)
+  }, [current, page])
   const groups = useLoad(() => get<Group[]>('groups'))
   const groupName = useMemo(() => new Map((groups.data || []).map((g) => [g.id, g.name])), [groups.data])
 
@@ -56,18 +77,59 @@ export function Users() {
     setOpen(id)
   }
   // Первое нажатие — по возрастанию, второе — по убыванию, третье — сброс.
-  const toggle = (k: SortKey) => setSort(sort.key !== k ? { key: k, desc: false } : !sort.desc ? { key: k, desc: true } : { key: '', desc: false })
+  const toggle = (k: SortKey) => !bulkBusy && setSort(sort.key !== k ? { key: k, desc: false } : !sort.desc ? { key: k, desc: true } : { key: '', desc: false })
+
+  const bulk = async (action: BulkAction) => {
+    const ids = chosen.map((u) => u.id)
+    if (!ids.length || bulkBusy) return
+    const labels = { enable: tr('users.enable'), disable: tr('users.disable'), reset: tr('users.reset_traffic'), delete: tr('common.delete') }
+    const messages = {
+      enable: tr('users.bulk_confirm_enable', { count: ids.length }),
+      disable: tr('users.bulk_confirm_disable', { count: ids.length }),
+      reset: tr('users.bulk_confirm_reset', { count: ids.length }),
+      delete: tr('users.bulk_confirm_delete', { count: ids.length }),
+    }
+    if (!(await confirm(<>{messages[action]}<p className="small muted">{chosen.slice(0, 5).map((u) => u.username).join(', ')}{chosen.length > 5 ? '…' : ''}</p></>, labels[action], action === 'delete'))) return
+    setBulkBusy(true)
+    setBulkFailures([])
+    try {
+      const result = await act(() => post<BulkResult>('users/bulk', { ids, action }))
+      if (result) {
+        const done = new Set(result.succeeded)
+        setSelected((prev) => new Set([...prev].filter((id) => !done.has(id))))
+        setBulkFailures(result.failed.map((f) => ({ ...f, name: chosen.find((u) => u.id === f.id)?.username || `#${f.id}` })))
+        toast(tr('users.bulk_result', { done: result.succeeded.length, failed: result.failed.length }), result.failed.length > 0)
+        if (action === 'delete' && open && done.has(open)) show(null)
+      }
+      await users.reload()
+    } finally { setBulkBusy(false) }
+  }
 
   return (
     <>
       <div className="toolbar">
         <div className="grow search-box">
-          <input className="input" placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="input" disabled={bulkBusy} placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
           <span className="muted search-icon"><Icon name="search" size={18} /></span>
         </div>
-        <button className="btn" onClick={() => setTransfer(true)}><Icon name="move" /> <span className="hide-sm">{tr('users.transfer')}</span></button>
-        <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" /> <span className="hide-sm">{tr('common.user')}</span></button>
+        <button className="btn" disabled={bulkBusy} onClick={() => setTransfer(true)}><Icon name="move" /> <span className="hide-sm">{tr('users.transfer')}</span></button>
+        <button className="btn primary" disabled={bulkBusy} onClick={() => setCreating(true)}><Icon name="plus" /> <span className="hide-sm">{tr('common.user')}</span></button>
       </div>
+
+      {chosen.length > 0 && <div className="card card-pad row" style={{ gap: 8, marginBottom: 12 }} aria-live="polite">
+        <b style={{ marginRight: 8 }}>{tr('users.selected_count', { count: chosen.length })}</b>
+        <button className="btn sm" disabled={bulkBusy} onClick={() => bulk('enable')}>{tr('users.enable')}</button>
+        <button className="btn sm" disabled={bulkBusy} onClick={() => bulk('disable')}>{tr('users.disable')}</button>
+        <button className="btn sm" disabled={bulkBusy} onClick={() => bulk('reset')}><Icon name="refresh" /> {tr('users.reset_traffic')}</button>
+        <button className="btn sm danger" disabled={bulkBusy} onClick={() => bulk('delete')}><Icon name="trash" /> {tr('common.delete')}</button>
+        <button className="btn sm ghost" disabled={bulkBusy} onClick={() => { setSelected(new Set()); setBulkFailures([]) }}>{tr('users.clear_selection')}</button>
+        {bulkBusy && <span className="muted small">{tr('common.loading')}</span>}
+      </div>}
+      {bulkFailures.length > 0 && <div className="alert pink" style={{ marginBottom: 12 }} role="alert">
+        <details open><summary>{tr('users.bulk_failed_count', { count: bulkFailures.length })}</summary>
+          <ul>{bulkFailures.map((f) => <li key={f.id}>{f.name}: {f.error}</li>)}</ul>
+        </details>
+      </div>}
 
       <div className="card">
         {!users.data ? <Loading error={users.error} /> : users.data.length === 0 ? (
@@ -77,6 +139,9 @@ export function Users() {
             <table className="table">
               <thead>
                 <tr>
+                  <th style={{ width: 44 }}><input type="checkbox" aria-label={tr('users.select_page')} checked={pageSelected} disabled={bulkBusy}
+                    ref={(el) => { if (el) el.indeterminate = chosen.length > 0 && !pageSelected }}
+                    onChange={(e) => { setSelected(new Set(e.target.checked ? users.data!.map((u) => u.id) : [])); setBulkFailures([]) }} /></th>
                   {columns.map(([k, label, cls]) => (
                     <th key={k} className={'sortable ' + cls + (sort.key === k ? ' sorted' : '')} onClick={() => toggle(k)} aria-sort={sort.key === k ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
                       {label}<span className="sort-mark">{sort.key === k ? (sort.desc ? ' ↓' : ' ↑') : ' ↕'}</span>
@@ -88,7 +153,11 @@ export function Users() {
                 {users.data.map((u) => {
                   const st = statusInfo[u.status]
                   return (
-                    <tr key={u.id} className={'click' + (open === u.id ? ' selected' : '')} onClick={() => show(u.id)}>
+                    <tr key={u.id} className={'click' + (open === u.id || selected.has(u.id) ? ' selected' : '')} onClick={() => show(u.id)}>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" aria-label={tr('users.select_user', { username: u.username })} disabled={bulkBusy} checked={selected.has(u.id)}
+                          onChange={(e) => { const checked = e.target.checked; setSelected((prev) => { const next = new Set(prev); if (checked) next.add(u.id); else next.delete(u.id); return next }); setBulkFailures([]) }} />
+                      </td>
                       <td>
                         <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
                           {isOnline(u.onlineAt) && <span className="online-dot" title={tr('common.online_2')} />}
@@ -119,8 +188,8 @@ export function Users() {
           <div className="row between card-pad small text-2">
             <span><Trans k="common.of" v={{ v: page * pageSize + 1, min: Math.min(total, (page + 1) * pageSize), total: total }} /></span>
             <div className="row" style={{ gap: 6 }}>
-              <button className="btn sm ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>{tr('common.back')}</button>
-              <button className="btn sm ghost" disabled={(page + 1) * pageSize >= total} onClick={() => setPage(page + 1)}>{tr('common.next')}</button>
+              <button className="btn sm ghost" disabled={bulkBusy || page === 0} onClick={() => setPage(page - 1)}>{tr('common.back')}</button>
+              <button className="btn sm ghost" disabled={bulkBusy || (page + 1) * pageSize >= total} onClick={() => setPage(page + 1)}>{tr('common.next')}</button>
             </div>
           </div>
         )}

@@ -1,4 +1,15 @@
 export default {
+  selected_count: 'Selected: {count}',
+  select_page: 'Select everyone on this page',
+  select_user: 'Select user {username}',
+  clear_selection: 'Clear selection',
+  bulk_confirm_enable: 'Enable selected users ({count})? Expiry dates and limits will be kept.',
+  bulk_confirm_disable: 'Disable selected users ({count})? Their VPN connections will stop working.',
+  bulk_confirm_reset: 'Reset traffic for selected users ({count})? The current period counter will be zeroed. This cannot be undone.',
+  bulk_confirm_delete: 'Delete selected users ({count})? Their subscriptions will stop working. This cannot be undone.',
+  bulk_result: 'Completed: {done}. Failed: {failed}.',
+  bulk_failed_count: 'Failed for {count} users',
+
   addresses_at_once_2: 'Addresses at once',
   and_days: 'and days {v}',
   auto_picks_the_format_by: '“Auto” picks the format by the app that requests the subscription (the “Clients” tab on the “Subscription” page).',
