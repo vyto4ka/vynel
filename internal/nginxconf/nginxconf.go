@@ -259,6 +259,9 @@ func Build(spec Spec) (string, error) {
 	w(1, "charset_types text/css application/javascript image/svg+xml;")
 	w(1, "gzip on;")
 	w(1, "gzip_types text/css application/javascript image/svg+xml application/json;")
+	// stapling speeds up revocation checks; web-check lists it as informational.
+	w(1, "ssl_stapling on;")
+	w(1, "ssl_stapling_verify on;")
 	w(1, "# XHTTP may carry uplink data in cookies and long query strings")
 	w(1, "client_header_buffer_size 4k;")
 	w(1, "large_client_header_buffers 8 256k;")
@@ -347,12 +350,16 @@ func Build(spec Spec) (string, error) {
 			w(2, "server_name %s;", strings.Join(append([]string{d}, srv.names[d]...), " "))
 			realIP(2)
 			certLines(w, 2, d)
-			w(2, "add_header Strict-Transport-Security \"max-age=31536000\" always;")
+			// includeSubDomains: a real site protects its whole name; web-check flags a bare HSTS.
+			w(2, "add_header Strict-Transport-Security \"max-age=31536000; includeSubDomains\" always;")
 			// The headers a real site sends; security scanners check for them.
 			w(2, "add_header X-Content-Type-Options \"nosniff\" always;")
 			w(2, "add_header X-Frame-Options \"SAMEORIGIN\" always;")
 			w(2, "add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;")
 			w(2, "add_header Content-Security-Policy \"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self'\" always;")
+			w(2, "add_header Permissions-Policy \"camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()\" always;")
+			w(2, "add_header Cross-Origin-Opener-Policy \"same-origin\" always;")
+			w(2, "add_header Cross-Origin-Resource-Policy \"same-origin\" always;")
 			for _, sn := range srv.snippets[d] {
 				for _, line := range strings.Split(sn, "\n") {
 					w(2, "%s", strings.TrimRight(line, " \t"))

@@ -106,6 +106,9 @@ var securityHeaders = [][2]string{
 	{"X-Frame-Options", "SAMEORIGIN"},
 	{"Referrer-Policy", "strict-origin-when-cross-origin"},
 	{"Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self'"},
+	{"Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"},
+	{"Cross-Origin-Opener-Policy", "same-origin"},
+	{"Cross-Origin-Resource-Policy", "same-origin"},
 }
 
 // SetSecurityHeaders adds the same headers to a hand-written decoy response (the
