@@ -250,15 +250,18 @@ func testNginxServes(t *testing.T, reject bool) {
 	if h.Get("Strict-Transport-Security") == "" || h.Get("Server") != "nginx" {
 		t.Fatalf("headers %v", h)
 	}
+	if !strings.Contains(h.Get("Strict-Transport-Security"), "includeSubDomains") {
+		t.Fatalf("HSTS without includeSubDomains: %q", h.Get("Strict-Transport-Security"))
+	}
 	// The security headers a real site sends — the same set on every answer of the site.
-	for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
+	for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy", "Permissions-Policy", "Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy"} {
 		if h.Get(name) == "" {
 			t.Fatalf("no %s in %v", name, h)
 		}
 	}
 	c, b, h = get("a.test", "a.test", "GET", "/nope", "")
 	check("decoy 404", c, b, 404, "one not found")
-	for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
+	for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy", "Permissions-Policy", "Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy"} {
 		if h.Get(name) == "" {
 			t.Fatalf("404 without %s in %v", name, h)
 		}

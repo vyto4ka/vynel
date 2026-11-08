@@ -62,14 +62,14 @@ func TestServeHeaders(t *testing.T) {
 			t.Fatalf("%s: headers %v", n, w.Header())
 		}
 		// The security headers a real site sends — on 200 and on 404 alike.
-		for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
+		for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy", "Permissions-Policy", "Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy"} {
 			if w.Header().Get(name) == "" {
 				t.Fatalf("%s: no %s in %v", n, name, w.Header())
 			}
 		}
 		nf := httptest.NewRecorder()
 		Serve(nf, httptest.NewRequest("GET", "/nope", nil), n)
-		for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"} {
+		for _, name := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy", "Permissions-Policy", "Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy"} {
 			if nf.Header().Get(name) == "" {
 				t.Fatalf("%s: 404 without %s in %v", n, name, nf.Header())
 			}

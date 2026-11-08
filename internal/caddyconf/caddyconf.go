@@ -211,10 +211,13 @@ func hideServer() map[string]any {
 // siteHeaders are the headers a real site sends; security scanners check for them.
 func siteHeaders() map[string]any {
 	return map[string]any{
-		"X-Content-Type-Options":  []string{"nosniff"},
-		"X-Frame-Options":         []string{"SAMEORIGIN"},
-		"Referrer-Policy":         []string{"strict-origin-when-cross-origin"},
-		"Content-Security-Policy": []string{"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self'"},
+		"X-Content-Type-Options":       []string{"nosniff"},
+		"X-Frame-Options":              []string{"SAMEORIGIN"},
+		"Referrer-Policy":              []string{"strict-origin-when-cross-origin"},
+		"Content-Security-Policy":      []string{"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self'"},
+		"Permissions-Policy":           []string{"camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"},
+		"Cross-Origin-Opener-Policy":   []string{"same-origin"},
+		"Cross-Origin-Resource-Policy": []string{"same-origin"},
 	}
 }
 
