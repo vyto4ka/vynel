@@ -298,27 +298,16 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx := r.Context()
-	updatePanel := func() error {
-		nodes, err := s.svc.Nodes(ctx)
-		if err != nil {
-			return err
-		}
-		for _, n := range nodes {
-			if n.Local {
-				return update.StartFollowingXray(ctx, "", "", &n.XrayRelease)
-			}
-		}
-		return update.Start(ctx)
-	}
 	info, err := s.updateInfo(ctx, false)
 	if err != nil {
 		return nil, err
 	}
-	if s.cfg.NodeAction == nil {
+	if s.cfg.NodeAction == nil && in.Target == "node" {
 		return nil, badRequest("обновление нод недоступно")
 	}
 	var mu sync.Mutex
 	started, failed := []string{}, map[string]string{}
+	var panelStartedAt int64
 	versionOf := map[int64]string{0: info.Panel.Version}
 	for _, n := range info.Nodes {
 		versionOf[n.ID] = n.Version
@@ -334,6 +323,10 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		started = append(started, name)
 	}
 	nodeUpdate := func(n UpdateNode) {
+		if s.cfg.NodeAction == nil {
+			done(n.Name, n.ID, errors.New("обновление нод недоступно"))
+			return
+		}
 		_, err := s.cfg.NodeAction(ctx, n.ID, "update")
 		done(n.Name, n.ID, err)
 		res := "ok"
@@ -341,6 +334,20 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 			res = err.Error()
 		}
 		_ = s.svc.LogNodeAction(ctx, actor(r), n.ID, "update", res)
+	}
+	panelUpdate := func() {
+		// Take the server timestamp before dispatch: the installer may finish before this request returns.
+		startedAt := time.Now().Unix()
+		err := s.cfg.PanelUpdate(ctx)
+		if err == nil {
+			panelStartedAt = startedAt
+		}
+		done("Панель", 0, err)
+		result := "started"
+		if err != nil {
+			result = err.Error()
+		}
+		_ = s.svc.LogPanelUpdate(ctx, actor(r), result)
 	}
 	switch in.Target {
 	case "node":
@@ -350,7 +357,7 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 			}
 		}
 	case "panel":
-		done("Панель", 0, updatePanel())
+		panelUpdate()
 	case "all":
 		var wg sync.WaitGroup
 		for _, n := range info.Nodes {
@@ -362,12 +369,12 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		wg.Wait()
 		// The panel last: once it restarts, this request and the page go down with it.
 		if info.Panel.Available && !info.Panel.Updating {
-			done("Панель", 0, updatePanel())
+			panelUpdate()
 		}
 	default:
 		return nil, badRequest("что обновлять: all, panel или node")
 	}
-	return map[string]any{"started": started, "failed": failed}, nil
+	return map[string]any{"started": started, "failed": failed, "panelStartedAt": panelStartedAt}, nil
 }
 
 // updateError explains the usual failures in words.

@@ -121,6 +121,20 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
 		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec, svc),
+		PanelUpdate: func(ctx context.Context) error {
+			if cfg.WithNode {
+				nodes, err := svc.Nodes(ctx)
+				if err != nil {
+					return err
+				}
+				for _, n := range nodes {
+					if n.Local {
+						return update.StartFollowingXray(ctx, "", "", &n.XrayRelease)
+					}
+				}
+			}
+			return update.Start(ctx)
+		},
 		UpdateStatus: rec.UpdateStatus, XrayTest: xrayTester(cfg.Xray)})
 	return p, func() { st.Close() }, nil
 }

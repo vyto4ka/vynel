@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -410,6 +411,12 @@ func (s *Service) Node(ctx context.Context, id int64) (*store.Node, error) {
 var NodeActions = map[string]string{
 	"xray": "перезапустить Xray", "caddy": "перезапустить веб-сервер", "resync": "отправить конфиг заново",
 	"service": "перезапустить службу vynel", "reboot": "перезагрузить сервер", "update": "обновить vynel, Xray и nginx",
+}
+
+// LogPanelUpdate records the local updater result in the admin audit log.
+func (s *Service) LogPanelUpdate(ctx context.Context, actor Actor, result string) error {
+	diff, _ := json.Marshal(map[string]string{"result": result})
+	return store.AddAudit(ctx, s.st.DB, store.AuditEntry{Actor: actor.Kind, ActorID: actor.ID, Action: "panel.update", Entity: "panel", Diff: string(diff)})
 }
 
 // LogNodeAction records an admin action on a node in the audit log.
