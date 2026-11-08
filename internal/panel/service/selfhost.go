@@ -34,7 +34,7 @@ type SelfHost struct {
 // SelfHost collects what the panel knows about its own server. It never creates a node
 // record: a panel installed without a node stays without one.
 func (s *Service) SelfHost(ctx context.Context) (*SelfHost, error) {
-	out := &SelfHost{Version: buildinfo.Version, Uptime: int64(time.Since(processStart).Seconds())}
+	out := &SelfHost{Domains: []string{}, Version: buildinfo.Version, Uptime: int64(time.Since(processStart).Seconds())}
 	for _, key := range []string{SettingSubDomain, SettingWebDomain} {
 		d, err := s.Setting(ctx, key, "")
 		if err != nil {

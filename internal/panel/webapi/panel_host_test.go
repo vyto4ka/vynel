@@ -20,6 +20,7 @@ func TestPanelHostRentalAPIWithoutNode(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	var host struct {
+		Domains  []string
 		WithNode bool
 		Billing  PanelBilling
 	}
@@ -27,7 +28,7 @@ func TestPanelHostRentalAPIWithoutNode(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &host); err != nil {
 		t.Fatal(err)
 	}
-	if host.WithNode || host.Billing.Cost != 1200 || host.Billing.MonthlyCost != 100 || host.Billing.Note != "Private host note" {
+	if host.Domains == nil || host.WithNode || host.Billing.Cost != 1200 || host.Billing.MonthlyCost != 100 || host.Billing.Note != "Private host note" {
 		t.Fatalf("host: %s", w.Body.String())
 	}
 	if nodes, err := svc.Nodes(t.Context()); err != nil || len(nodes) != 0 {
