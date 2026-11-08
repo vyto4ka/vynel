@@ -42,6 +42,9 @@ const paths: Record<string, ReactNode> = {
   power: <><path d="M12 3v8" /><path d="M6.3 7.3a8 8 0 1 0 11.4 0" /></>,
   plug: <><path d="M9 3v5M15 3v5" /><path d="M6 8h12v3a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></>,
   sub: <><rect x="6" y="2.5" width="12" height="19" rx="2.5" /><path d="M10 6h4M9.5 11h5M9.5 14.5h5M11 18h2" /></>,
+  move: <><path d="M5 12h14M13 6l6 6-6 6" /><path d="M11 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5" /></>,
+  download: <><path d="M12 4v11M7 11l5 5 5-5" /><path d="M5 20h14" /></>,
+  upload: <><path d="M12 16V5M7 9l5-5 5 5" /><path d="M5 20h14" /></>,
 }
 
 export function Icon({ name, size }: { name: string; size?: number }) {
@@ -64,7 +67,7 @@ export function Logo({ size = 36 }: { size?: number }) {
         </linearGradient>
       </defs>
       <rect x="4" y="4" width="88" height="88" rx="24" fill={`url(#${id})`} />
-      <path d="M30 34 L48 66 L66 34" fill="none" stroke="#0d1013" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M30 34 L48 66 L66 34" fill="none" stroke="var(--inverse-on-surface)" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

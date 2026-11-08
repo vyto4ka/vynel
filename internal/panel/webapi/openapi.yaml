@@ -122,6 +122,26 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/Invalid" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /users/export:
+    get:
+      tags: [Users]
+      operationId: exportUsers
+      summary: "Export users for transfer"
+      description: "Every user as one transfer file (the format `vynel admin user transfer import` reads on another server): uuid and subscription token included, so clients keep working after a move. Filter by status or search text. Not paged: one response has them all."
+      x-required-scope: users:read
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, disabled, limited, expired] } }
+        - { name: search, in: query, description: Part of the username or the note, schema: { type: string } }
+      responses:
+        "200":
+          description: "The transfer file"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UsersExport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /users/{id}:
     parameters:
       - { $ref: "#/components/parameters/UserID" }
@@ -614,6 +634,38 @@ components:
           properties:
             version: { type: string }
             time: { type: string, format: date-time }
+    UsersExport:
+      type: object
+      description: "The transfer file: users of one panel, ready to import elsewhere (the token makes it sensitive — move it over a trusted channel)."
+      properties:
+        meta:
+          type: object
+          properties:
+            format: { type: integer, description: File format version }
+            createdAt: { type: integer, format: int64, description: Unix seconds }
+            source: { type: string, description: "vynel, remnawave or 3x-ui" }
+            sourceVersion: { type: string }
+            users: { type: integer, description: Number of users in the file }
+        users: { type: array, items: { $ref: "#/components/schemas/UsersExportUser" } }
+    UsersExportUser:
+      type: object
+      properties:
+        username: { type: string }
+        uuid: { type: string, format: uuid }
+        subToken: { type: string, description: The end of the subscription link; the user keeps it after a move }
+        status: { type: string, enum: [active, disabled, limited, expired] }
+        expireAt: { type: integer, format: int64, nullable: true, description: Unix seconds; null = never }
+        trafficLimitBytes: { type: integer, format: int64, nullable: true }
+        trafficUsedBytes: { type: integer, format: int64 }
+        resetStrategy: { type: string, enum: [no, day, week, month] }
+        hwidLimit: { type: integer, format: int64, nullable: true }
+        hwidOff: { type: boolean }
+        ipLimit: { type: integer, format: int64, nullable: true }
+        clientType: { type: string }
+        telegramId: { type: integer, format: int64, nullable: true }
+        externalId: { type: string, nullable: true }
+        note: { type: string }
+        groups: { type: array, items: { type: string }, description: Group names, matched by name on import }
     User:
       type: object
       properties:

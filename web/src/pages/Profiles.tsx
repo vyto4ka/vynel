@@ -547,6 +547,7 @@ function TemplateList() {
   const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
   const [edit, setEdit] = useState<{ id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean } | null>(null)
   const [choosing, setChoosing] = useState(false)
+  const [importing, setImporting] = useState(false)
   const act = useAction()
   const confirm = useConfirm()
   if (!tpls.data) return <Loading error={tpls.error} />
@@ -562,6 +563,13 @@ function TemplateList() {
     setChoosing(false)
     const id = freeID(base)
     setEdit({ id: '', source: src.replace(/^id:.*$/m, `id: ${id}`).replace(/^(# .*\n)+/, ''), isNew: true, readOnly: false, help })
+  }
+
+  // Готовый шаблон из импорта: id подбирается свободным, комментарии импорта остаются.
+  const imported = (source: string, id: string) => {
+    setImporting(false)
+    const free = freeID(id || 'remna-import')
+    setEdit({ id: '', source: source.replace(/^id:.*$/m, `id: ${free}`), isNew: true, readOnly: false })
   }
 
   // Копия встроенного шаблона для пресета: id меняется на свободный.
@@ -619,15 +627,16 @@ function TemplateList() {
           </div>
         ))}
       </div>
-      {choosing && <PresetDialog tpls={tpls.data.filter((x) => !x.custom)} onStarter={() => startFrom('my-xhttp', templateStarter(), true)} onBlank={() => startFrom('my-template', blankStarter(), true)} onBuiltin={builtin} onClose={() => setChoosing(false)} />}
+      {choosing && <PresetDialog tpls={tpls.data.filter((x) => !x.custom)} onStarter={() => startFrom('my-xhttp', templateStarter(), true)} onBlank={() => startFrom('my-template', blankStarter(), true)} onBuiltin={builtin} onImport={() => { setChoosing(false); setImporting(true) }} onClose={() => setChoosing(false)} />}
+      {importing && <RemnawaveImport onClose={() => setImporting(false)} onImported={imported} />}
       {edit && <TemplateEditor {...edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); tpls.reload() }} />}
     </>
   )
 }
 
-// Диалог «Новый шаблон»: с чего начать — копия встроенного, заготовка с пояснениями или
-// пустой каркас.
-function PresetDialog({ tpls, onStarter, onBlank, onBuiltin, onClose }: { tpls: ProfileTemplate[]; onStarter: () => void; onBlank: () => void; onBuiltin: (t: ProfileTemplate) => () => void; onClose: () => void }) {
+// Диалог «Новый шаблон»: с чего начать — копия встроенного, заготовка с пояснениями,
+// пустой каркас или импорт из Remnawave.
+function PresetDialog({ tpls, onStarter, onBlank, onBuiltin, onImport, onClose }: { tpls: ProfileTemplate[]; onStarter: () => void; onBlank: () => void; onBuiltin: (t: ProfileTemplate) => () => void; onImport: () => void; onClose: () => void }) {
   return (
     <Modal title={tr('common.new_template')} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" onClick={onBlank}>{tr('profiles.empty_skeleton')}</button></>}>
@@ -659,6 +668,15 @@ function PresetDialog({ tpls, onStarter, onBlank, onBuiltin, onClose }: { tpls: 
             <div className="small text-2">{tr('profiles.vless_xhttp_blueprint')}</div>
           </div>
         </div>
+        <div className="card clickable" onClick={onImport}>
+          <div className="card-head">
+            <div><h3>{tr('profiles.import_from_remnawave')}</h3></div>
+            <Badge color="pink">{tr('profiles.from_config')}</Badge>
+          </div>
+          <div className="card-pad">
+            <div className="small text-2">{tr('profiles.paste_an_xray_config')}</div>
+          </div>
+        </div>
         <div className="card clickable" onClick={onBlank}>
           <div className="card-head">
             <div><h3>{tr('profiles.empty_skeleton')}</h3></div>
@@ -676,6 +694,72 @@ function PresetDialog({ tpls, onStarter, onBlank, onBuiltin, onClose }: { tpls: 
 type CheckResult = { ok: boolean; error?: string; id?: string; title?: string; variables?: Variable[]; sample?: Record<string, unknown> }
 type PreviewResult = { ok: boolean; error?: string; id?: string; title?: string; inbound?: Record<string, unknown>; host?: Record<string, unknown>; unresolved?: string[] }
 type Reference = { reference: { builtins: string[]; generators: string[]; derivations: string[]; lint: string[]; validations: string[]; webRoles: string[] } }
+type ImportResult = { ok: boolean; error?: string; source?: string; id?: string; notes?: string[] }
+
+// Диалог «Импорт из Remnawave»: Xray-конфиг (обязательно), конфиг подписки (необязательно) и
+// nginx-конфиг с галочкой включения. Бэкенд превращает их в шаблон vynel, который открывается
+// в редакторе для проверки и сохранения.
+function RemnawaveImport({ onClose, onImported }: { onClose: () => void; onImported: (source: string, id: string) => void }) {
+  const [xray, setXray] = useState('')
+  const [host, setHost] = useState('')
+  const [nginx, setNginx] = useState('')
+  const [withNginx, setWithNginx] = useState(false)
+  const [title, setTitle] = useState('')
+  const [result, setResult] = useState<ImportResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const act = useAction()
+
+  const submit = async () => {
+    setBusy(true)
+    setResult(null)
+    const r = await post<ImportResult>('profile-templates/import-remnawave', { xray, host, nginx, withNginx, title })
+      .catch((e) => ({ ok: false, error: e.message }) as ImportResult)
+    setBusy(false)
+    if (r.ok && r.source) {
+      act(() => Promise.resolve(true), tr('profiles.import_converted_opened'))
+      onImported(r.source, r.id || '')
+    } else {
+      setResult(r)
+    }
+  }
+  const fieldError = (text: string): string | undefined => {
+    if (!text.trim()) return undefined
+    try { JSON.parse(text) } catch (e: any) { return e.message }
+    return undefined
+  }
+  const xrayErr = fieldError(xray)
+  const hostErr = fieldError(host)
+  const badJson = !!xrayErr || !!hostErr
+  return (
+    <Modal title={tr('profiles.import_from_remnawave')} onClose={onClose}
+      footer={<>
+        {result && !result.ok && <span className="pink-text small grow" style={{ whiteSpace: 'pre-wrap' }}>{result.error}</span>}
+        <button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
+        <button className="btn primary" disabled={busy || !xray.trim() || badJson} onClick={submit}>{tr('common.import')}</button>
+      </>}>
+      <div className="small text-2" style={{ marginBottom: 12 }}>{tr('profiles.paste_the_xray_config')}{' '}<Info>{tr('profiles.keys_and_domain_will')}</Info></div>
+      <Field label={tr('profiles.xray_config_json')}>
+        <CodeEditor lang="json" value={xray} onChange={setXray} height="220px" />
+        {xrayErr && <div className="small pink-text" style={{ marginTop: 4 }}>{xrayErr}</div>}
+      </Field>
+      <Field label={tr('profiles.subscription_config_json')} info={tr('profiles.host_connection_point')}>
+        <CodeEditor lang="json" value={host} onChange={setHost} height="120px" />
+        {hostErr && <div className="small pink-text" style={{ marginTop: 4 }}>{hostErr}</div>}
+      </Field>
+      <label className="check" style={{ margin: '10px 0 6px' }}>
+        <input type="checkbox" checked={withNginx} onChange={(e) => setWithNginx(e.target.checked)} />{' '}{tr('profiles.add_nginx_config')}
+      </label>
+      {withNginx && (
+        <Field label={tr('profiles.nginx_config')}>
+          <CodeEditor lang="yaml" value={nginx} onChange={setNginx} height="140px" />
+        </Field>
+      )}
+      <Field label={tr('profiles.template_title')} info={tr('profiles.how_the_template_will')}>
+        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Reality из Remna" />
+      </Field>
+    </Modal>
+  )
+}
 
 function TemplateEditor({ id, source, isNew, readOnly, help, onClose, onSaved }: { id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean; onClose: () => void; onSaved: () => void }) {
   const [text, setText] = useState(source)

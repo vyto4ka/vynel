@@ -17,6 +17,7 @@ export default {
   default: 'по умолчанию',
   default_2: 'по умолчанию{v}',
   default_3: 'по умолчанию {default}',
+  import: 'Импортировать',
   delete: 'Удалить',
   device_limit: 'Лимит устройств',
   devices: 'Устройства',
