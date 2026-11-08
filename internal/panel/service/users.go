@@ -271,7 +271,7 @@ func (s *Service) CreateUser(ctx context.Context, actor Actor, in CreateUserInpu
 			return nil, err
 		}
 		u.SubToken = in.SubToken
-	} else if u.SubToken, err = newSubToken(); err != nil {
+	} else if u.SubToken, err = NewSubToken(); err != nil {
 		return nil, err
 	}
 	err = s.mutate(ctx, change{actor: actor, action: "user.create", entity: "user", entityID: idOf(&u.ID), event: EvUserChanged, diff: map[string]any{"username": u.Username}},
@@ -476,7 +476,7 @@ func (s *Service) ReissueUser(ctx context.Context, actor Actor, id int64, subTok
 	return s.updateUser(ctx, actor, id, "user.reissue", map[string]bool{"sub_token": subToken, "uuid": uuid}, func(_ store.DBTX, u *store.User) error {
 		var err error
 		if subToken {
-			if u.SubToken, err = newSubToken(); err != nil {
+			if u.SubToken, err = NewSubToken(); err != nil {
 				return err
 			}
 		}
@@ -569,7 +569,8 @@ func (s *Service) UserGroupIDs(ctx context.Context, id int64) ([]int64, error) {
 	return store.UserGroupIDs(ctx, s.st.DB, id)
 }
 
-func newSubToken() (string, error) {
+// NewSubToken mints a random subscription token (also used by user imports).
+func NewSubToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err

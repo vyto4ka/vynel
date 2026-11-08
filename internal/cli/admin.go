@@ -850,7 +850,7 @@ func adminUserCmd() *cobra.Command {
 		}),
 	}
 
-	c.AddCommand(add, list, extend, groupsCmd, reissue, links, devices, link,
+	c.AddCommand(add, list, extend, groupsCmd, reissue, links, devices, link, userTransferCmd(),
 		&cobra.Command{
 			Use: "show USERNAME", Short: "Show a user with traffic per node and the subscription URL", Args: cobra.ExactArgs(1),
 			RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
