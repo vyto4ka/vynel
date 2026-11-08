@@ -34,6 +34,7 @@ export function Users() {
   const [sort, setSort] = useState(savedSort)
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
+  const [transfer, setTransfer] = useState(false)
   const [open, setOpen] = useState<number | null>(openId)
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -111,6 +112,7 @@ export function Users() {
           <input className="input" disabled={bulkBusy} placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
           <span className="muted search-icon"><Icon name="search" size={18} /></span>
         </div>
+        <button className="btn" disabled={bulkBusy} onClick={() => setTransfer(true)}><Icon name="move" /> <span className="hide-sm">{tr('users.transfer')}</span></button>
         <button className="btn primary" disabled={bulkBusy} onClick={() => setCreating(true)}><Icon name="plus" /> <span className="hide-sm">{tr('common.user')}</span></button>
       </div>
 
@@ -194,6 +196,7 @@ export function Users() {
       </div>
 
       {creating && <CreateUser groups={groups.data || []} onClose={() => setCreating(false)} onCreated={(u) => { setCreating(false); users.reload(); show(u.id) }} />}
+      {transfer && <TransferUsers search={search} onClose={() => setTransfer(false)} onImported={() => { users.reload(); groups.reload() }} />}
       {open && <UserDrawer id={open} groups={groups.data || []} onClose={() => show(null)} onChanged={users.reload} />}
     </>
   )
@@ -201,6 +204,70 @@ export function Users() {
 
 // Число из поля: пусто — «как в шаблоне» (null).
 const num = (v: string): number | null => (v.trim() === '' ? null : Math.max(0, Number(v.replace(',', '.')) || 0))
+
+// Перенос пользователей: экспорт в файл и импорт из него. Только люди: ноды и настройки
+// остаются у каждой панели свои. UUID и ссылки подписок сохраняются — клиенты продолжают
+// работать на новой панели.
+function TransferUsers({ search, onClose, onImported }: { search: string; onClose: () => void; onImported: () => void }) {
+  const act = useAction()
+  const [mode, setMode] = useState<'skip' | 'upsert' | 'rename'>('skip')
+  const [reissue, setReissue] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [report, setReport] = useState<{ total: number; created: number; updated: number; skipped: number; renamed: number; failed: number; problems: string[]; missingGroups: string[] } | null>(null)
+
+  const doExport = async () => {
+    const f = await act(() => get<any>(`users/export${search ? `?search=${encodeURIComponent(search)}` : ''}`), tr('users.exported'))
+    if (!f) return
+    const name = f.meta?.source === 'remnawave' || f.meta?.source === '3x-ui' ? `users-${f.meta.source}.json` : 'users-export.json'
+    const blob = new Blob([JSON.stringify(f, null, 2)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = name
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const doImport = async () => {
+    if (!file) return
+    const text = await file.text()
+    const r = await act(() => post<any>('users/import', { file: text, mode, reissueTokens: reissue }), tr('users.imported'))
+    if (r) { setReport(r); onImported() }
+  }
+
+  return (
+    <Modal title={tr('users.transfer_users')} onClose={onClose}>
+      <div className="card card-pad" style={{ marginBottom: 12 }}>
+        <div className="label" style={{ marginBottom: 8 }}>{tr('users.export_section')}<Info>{tr('users.export_info')}</Info></div>
+        <button className="btn primary" onClick={doExport}><Icon name="download" />{' '}{tr('users.download_file')}</button>
+        {search && <div className="muted small" style={{ marginTop: 6 }}>{tr('users.export_filtered', { v: search })}</div>}
+      </div>
+      <div className="card card-pad">
+        <div className="label" style={{ marginBottom: 8 }}>{tr('users.import_section')}</div>
+        <Field label={tr('users.file')} help={tr('users.file_help')}>
+          <input className="input" type="file" accept=".json,application/json" onChange={(e) => { setFile(e.target.files?.[0] || null); setReport(null) }} />
+        </Field>
+        <Field label={tr('users.mode')}>
+          <select className="input" value={mode} onChange={(e) => setMode(e.target.value as 'skip' | 'upsert' | 'rename')}>
+            <option value="skip">{tr('users.mode_skip')}</option>
+            <option value="upsert">{tr('users.mode_upsert')}</option>
+            <option value="rename">{tr('users.mode_rename')}</option>
+          </select>
+        </Field>
+        <label className="check" style={{ marginBottom: 12 }}>
+          <input type="checkbox" checked={reissue} onChange={(e) => setReissue(e.target.checked)} />{' '}{tr('users.reissue_on_import')}
+        </label>
+        <button className="btn primary" disabled={!file} onClick={doImport}><Icon name="upload" />{' '}{tr('users.import_2')}</button>
+        {report && (
+          <div className="alert amber" style={{ marginTop: 12 }}>
+            <Trans k="users.import_report" v={{ total: report.total, created: report.created, updated: report.updated, skipped: report.skipped, failed: report.failed }} />
+            {report.problems?.length > 0 && <div style={{ marginTop: 6 }} className="small">{report.problems.map((p, i) => <div key={i}>{p}</div>)}</div>}
+            {report.missingGroups?.length > 0 && <div style={{ marginTop: 6 }} className="small"><Trans k="users.import_missing_groups" v={{ v: report.missingGroups.join(', ') }} /></div>}
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
 
 function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: () => void; onCreated: (u: User) => void }) {
   const templates = useLoad(() => get<Template[]>('templates'))

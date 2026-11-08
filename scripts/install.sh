@@ -43,7 +43,7 @@ PANEL_UNIT=/etc/systemd/system/vynel.service
 NODE_UNIT=/etc/systemd/system/vynel-node.service
 
 MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
-ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" ASSUME_YES=0 PURGE=0 WIZARD=0
+ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" USERS_FILE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
 VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY="" SUB_PATH="" PANEL_PATH=""
 LOGIN_MODE="" SESSION_PATHS="" MANUAL=0
@@ -94,6 +94,9 @@ Options:
                          nginx, certificates, sysctl and the firewall stay with the admin
   --bot-token TOKEN      aio/panel: Telegram bot token from @BotFather (optional)
   --restore FILE         aio/panel: restore users, nodes and keys from a backup (.tar.gz, or .age if encrypted)
+  --users FILE           aio/panel: import users from a vynel export file (users only; see
+                         "vynel admin user transfer export" on the old server). Remnawave and
+                         3x-ui users are imported after the install: vynel admin user transfer
   --backup-password PASS password of an encrypted backup (asked when needed and not given)
   --channel CHANNEL      stable: the latest published release (default); dev: the build CI makes of a
                          branch from every push, to try a commit before it is released (see --ref)
@@ -130,6 +133,7 @@ while [[ $# -gt 0 ]]; do
     --panel-path) PANEL_PATH="${2:-}"; shift 2 ;;
     --bot-token) BOT_TOKEN="${2:-}"; shift 2 ;;
     --restore) RESTORE="${2:-}"; shift 2 ;;
+    --users) USERS_FILE="${2:-}"; shift 2 ;;
     --backup-password) export VYNEL_BACKUP_PASSWORD="${2:-}"; shift 2 ;;
     --token) TOKEN="${2:-}"; shift 2 ;;
     --manual) MANUAL=1; shift ;;
@@ -1384,6 +1388,9 @@ ask_bot_and_restore() {
   if [[ -z "$RESTORE" && ! -f "$DATA/panel.db" ]] && ask_yes "Восстановить пользователей и ноды из бэкапа?" n; then
     ask RESTORE "Путь к файлу бэкапа (.tar.gz или .age)" ""
   fi
+  if [[ -z "$RESTORE" && -z "$USERS_FILE" && ! -f "$DATA/panel.db" ]] && ask_yes "Перенести пользователей из файла экспорта (только пользователи, без нод)?" n; then
+    ask USERS_FILE "Путь к файлу экспорта (users-export.json)" ""
+  fi
 }
 
 # restore_backup: before the panel is configured, so setup adapts the restored data to this server.
@@ -1399,6 +1406,20 @@ restore_backup() {
   out="$(vynel restore --data-dir "$DATA" --yes "$RESTORE")"
   RESTORED="${out%%$'\n'*}"
   green "  $RESTORED"
+}
+
+# import_users: after restore_backup (a full backup already has the users). The file keeps
+# uuid and subscription tokens, so clients survive the move; links print in the final block.
+USERS_IMPORT=""
+import_users() {
+  [[ -n "$USERS_FILE" ]] || return 0
+  [[ -n "$RESTORE" ]] && return 0
+  [[ -f "$USERS_FILE" ]] || die "users export file $USERS_FILE not found"
+  info "importing users from $USERS_FILE"
+  local out
+  out="$(admin user transfer import --mode upsert --reissue-tokens "$USERS_FILE" 2>&1)" || die "users import failed: $out"
+  USERS_IMPORT="${out%%$'\n'*}"
+  green "  $USERS_IMPORT"
 }
 
 # setup_bot: stores the token and makes a bind code -> BOT_CODE BOT_LINK
@@ -1440,6 +1461,12 @@ print_bot_block() {
     pink "  Восстановлено из бэкапа"
     echo "  $RESTORED"
     echo "  Если у панели новый IP, на каждой ноде: vynel node set-panel ${PUBLIC_IP}:${GATEWAY_LISTEN##*:}"
+    echo
+  fi
+  if [[ -n "$USERS_IMPORT" ]]; then
+    pink "  Пользователи перенесены"
+    echo "  $USERS_IMPORT"
+    echo "  Новые ссылки подписок: vynel admin user links USERNAME или в панели: Пользователи."
     echo
   fi
 }
@@ -1558,6 +1585,7 @@ do_aio() {
   if [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]]; then open_ports 80 443 443/udp; else open_ports 80 443 443/udp "${GATEWAY_LISTEN##*:}"; fi
 
   restore_backup
+  import_users
   info "configuring the panel"
   default_email "$DOMAIN"
   local setup_args=(--domain "$DOMAIN" --sub-domain "$SUB_DOMAIN" --name "$NAME")
@@ -1658,6 +1686,7 @@ do_panel() {
   open_ports 80 443 "${GATEWAY_LISTEN##*:}"
 
   restore_backup
+  import_users
   info "configuring the panel"
   admin setting sub.domain "$DOMAIN" >/dev/null
   default_email "$DOMAIN"
@@ -1943,7 +1972,7 @@ run_tui() {
   if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
   if [[ $rc -ne 0 ]]; then rm -f "$out"; return 1; fi
   # Only known names, single-quoted values (internal/setup Answers.Shell).
-  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH|LOGIN_MODE|SESSION_PATHS|MANUAL)='" "$out"; then
+  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|USERS_FILE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH|LOGIN_MODE|SESSION_PATHS|MANUAL)='" "$out"; then
     rm -f "$out"
     return 1
   fi

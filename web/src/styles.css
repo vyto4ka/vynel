@@ -71,6 +71,7 @@
   --s4: #bb7f14; /* amber */
   --s5: #3f86e0; /* blue */
   --s6: #4fa34a; /* green */
+  --syntax-keyword: #c2b1f8; /* code editor keywords */
 
   /* M3 shape scale. */
   --shape-xs: 4px;
@@ -94,6 +95,76 @@
   --sidebar: 268px;
   --sidebar-collapsed: 96px;
   color-scheme: dark;
+}
+
+/* Catppuccin palettes (https://github.com/catppuccin/catppuccin, MIT). The accent stays the same
+   idea: teal primary, pink tertiary, so the app reads identically, only the neutrals change tone
+   and temperature. Latte is the light palette of the set; it flips color-scheme. */
+:root[data-theme='mocha'], :root[data-theme='macchiato'], :root[data-theme='frappe'], :root[data-theme='latte'] {
+  --secondary-container: var(--primary-container-dim);
+  --on-secondary-container: var(--on-primary-container);
+}
+:root[data-theme='mocha'] {
+  --crust: #11111b; --mantle: #181825; --base: #1e1e2e; --container-low: #262637; --container: #2a2a3c;
+  --container-high: #303047; --container-highest: #363652; --surface-1: #494966; --overlay: #7b7b9e;
+  --subtext: #bac3de; --on-surface-variant: #a5adce; --on-surface: #cdd6f4; --outline: #6c7086; --outline-variant: #313244;
+  --inverse-surface: #cdd6f4; --inverse-on-surface: #1e1e2e;
+  --primary: #94e2d5; --on-primary: #1d3430; --primary-container: #304f4b; --primary-container-dim: #2a4541;
+  --on-primary-container: #c3f2ea;
+  --tertiary: #f5c2e7; --on-tertiary: #493040; --tertiary-container: #5c4061; --on-tertiary-container: #f8dcf1;
+  --warning: #f9e2af; --warning-container: #554427; --on-warning-container: #fdf0d5;
+  --error: #f38ba8; --on-error: #4c2033; --error-container: #6b3a50; --on-error-container: #fbd7e4;
+  --muted: #8d90ad; --miku-soft: rgba(148, 226, 213, 0.14); --pink-soft: rgba(245, 194, 231, 0.14);
+  --amber-soft: rgba(249, 226, 175, 0.14); --red-soft: rgba(243, 139, 168, 0.14);
+  --s1: #1d9f94; --s2: #8b72ec; --s3: #d9558f; --s4: #b88c1f; --s5: #4f86e6; --s6: #53a46c;
+}
+:root[data-theme='macchiato'] {
+  --crust: #161620; --mantle: #1e2030; --base: #24273a; --container-low: #2c2f42; --container: #303347;
+  --container-high: #363a50; --container-highest: #3d4157; --surface-1: #51556e; --overlay: #8085a3;
+  --subtext: #b8bfdd; --on-surface-variant: #a4abcc; --on-surface: #cad3f5; --outline: #6e738d; --outline-variant: #363a4f;
+  --inverse-surface: #cad3f5; --inverse-on-surface: #24273a;
+  --primary: #8fd6cc; --on-primary: #1d332f; --primary-container: #2f4c47; --primary-container-dim: #29423e;
+  --on-primary-container: #c0e9e1;
+  --tertiary: #f0b6e2; --on-tertiary: #4b2f42; --tertiary-container: #5d3f60; --on-tertiary-container: #f6d8ef;
+  --warning: #f5dcaa; --warning-container: #544324; --on-warning-container: #fbedd0;
+  --error: #f08bab; --on-error: #4b1f31; --error-container: #68364a; --on-error-container: #f9d5e0;
+  --muted: #8a8fae; --miku-soft: rgba(143, 214, 204, 0.14); --pink-soft: rgba(240, 182, 226, 0.14);
+  --amber-soft: rgba(245, 220, 170, 0.14); --red-soft: rgba(240, 139, 171, 0.14);
+  --s1: #1b9d91; --s2: #8a6eeb; --s3: #d9558f; --s4: #b7881c; --s5: #4a83e2; --s6: #4ea069;
+}
+:root[data-theme='frappe'] {
+  --crust: #191d27; --mantle: #232634; --base: #303446; --container-low: #383c50; --container: #3c4155;
+  --container-high: #434861; --container-highest: #4a4f69; --surface-1: #5e6382; --overlay: #8f95b2;
+  --subtext: #bcc0d8; --on-surface-variant: #a8adc7; --on-surface: #d4d8f2; --outline: #737994; --outline-variant: #414559;
+  --inverse-surface: #d4d8f2; --inverse-on-surface: #303446;
+  --primary: #9ae0d6; --on-primary: #1f3733; --primary-container: #34514c; --primary-container-dim: #2e4743;
+  --on-primary-container: #c8f0e8;
+  --tertiary: #f3bde4; --on-tertiary: #4a3044; --tertiary-container: #5e4164; --on-tertiary-container: #f8dcf1;
+  --warning: #f6dcb3; --warning-container: #574727; --on-warning-container: #fdefd6;
+  --error: #f294ae; --on-error: #4c2236; --error-container: #6d3a50; --on-error-container: #fbdbe4;
+  --muted: #9095b2; --miku-soft: rgba(154, 224, 214, 0.14); --pink-soft: rgba(243, 189, 228, 0.14);
+  --amber-soft: rgba(246, 220, 179, 0.14); --red-soft: rgba(242, 148, 174, 0.14);
+  --s1: #20a197; --s2: #9074f0; --s3: #d9558f; --s4: #bb8b1e; --s5: #528ae8; --s6: #58a872;
+  --syntax-keyword: #9a7df0;
+}
+:root[data-theme='latte'] { --syntax-keyword: #7a5fd6; }
+:root[data-theme='latte'] {
+  --crust: #dce0e8; --mantle: #e6e9ef; --base: #eff1f5; --container-low: #e6e9ef; --container: #e2e6ee;
+  --container-high: #dde1ea; --container-highest: #d7dce6; --surface-1: #bcc0cc; --overlay: #8c8fa1;
+  --subtext: #5c5f77; --on-surface-variant: #6c6f85; --on-surface: #4c4f69; --outline: #7c7f93; --outline-variant: #bcc0cc;
+  --inverse-surface: #4c4f69; --inverse-on-surface: #eff1f5;
+  --primary: #179299; --on-primary: #ffffff; --primary-container: #a5e3e5; --primary-container-dim: #bcdde0;
+  --on-primary-container: #0e4247;
+  --tertiary: #ea76cb; --on-tertiary: #ffffff; --tertiary-container: #f3c2e9; --on-tertiary-container: #5c1f4d;
+  --warning: #df8e1d; --warning-container: #f5dcc2; --on-warning-container: #5a4313;
+  --error: #d20f39; --on-error: #ffffff; --error-container: #f2c3c9; --on-error-container: #5e1220;
+  --muted: #6c6f85; --miku-soft: rgba(23, 146, 153, 0.12); --pink-soft: rgba(234, 118, 203, 0.12);
+  --amber-soft: rgba(223, 142, 29, 0.12); --red-soft: rgba(210, 15, 57, 0.12);
+  --s1: #0f8a8f; --s2: #6f53d6; --s3: #c34178; --s4: #a06b11; --s5: #3470c9; --s6: #3d8748;
+  --elev-1: 0 1px 2px rgba(76, 79, 105, 0.12), 0 1px 3px 1px rgba(76, 79, 105, 0.08);
+  --elev-2: 0 1px 2px rgba(76, 79, 105, 0.12), 0 2px 6px 2px rgba(76, 79, 105, 0.08);
+  --elev-3: 0 4px 8px 3px rgba(76, 79, 105, 0.08), 0 1px 3px rgba(76, 79, 105, 0.12);
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -517,8 +588,8 @@ pre.code {
 .login-wrap {
   min-height: 100%; display: grid; place-items: center; padding: 16px;
   background:
-    radial-gradient(720px 420px at 15% 10%, rgba(117, 224, 215, .12), transparent 70%),
-    radial-gradient(620px 380px at 90% 90%, rgba(255, 148, 186, .10), transparent 70%),
+    radial-gradient(720px 420px at 15% 10%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 70%),
+    radial-gradient(620px 380px at 90% 90%, color-mix(in srgb, var(--tertiary) 10%, transparent), transparent 70%),
     var(--mantle);
 }
 .login { width: min(400px, 100%); padding: 32px 28px 28px; border-radius: var(--shape-xl); background: var(--container-low); box-shadow: var(--elev-2); }
@@ -556,7 +627,7 @@ pre.code {
 .preview-pane { position: sticky; top: 0; min-width: 0; }
 .code-editor { min-width: 0; }
 .code-editor .cm-editor { max-width: 100%; }
-.code-editor .cm-unresolved { background: rgba(251, 130, 118, 0.22); border-radius: 3px; box-shadow: inset 0 -1px 0 var(--error); }
+.code-editor .cm-unresolved { background: color-mix(in srgb, var(--error) 22%, transparent); border-radius: 3px; box-shadow: inset 0 -1px 0 var(--error); }
 .seg.sm button { height: 28px; padding: 0 10px; font-size: 12.5px; }
 /* Итоговый конфиг инбаунда как дерево: ключ — бейдж источника — значение. */
 .json-tree { border: 1px solid var(--outline-variant); border-radius: var(--shape-md); background: var(--container); padding: 10px 14px; margin-bottom: 12px; max-height: 420px; overflow: auto; }
@@ -822,7 +893,7 @@ select.input.placeholder { color: var(--muted); }
 .origins { min-width: 0; }
 .origin-row { display: grid; gap: 1px; padding: 8px 10px; border-radius: var(--shape-sm); cursor: default; }
 .origin-row:hover { background: color-mix(in srgb, var(--tertiary) 12%, transparent); }
-.amber-text { color: var(--warning, #f5c572); }
+.amber-text { color: var(--warning); }
 @media (max-width: 900px) { .origins-split { grid-template-columns: 1fr; } }
 
 /* ---------- страница «API» ---------- */

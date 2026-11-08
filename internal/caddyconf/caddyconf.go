@@ -111,13 +111,14 @@ func Build(spec Spec) ([]byte, error) {
 			}
 			routes = append(routes, map[string]any{
 				"match":    []any{map[string]any{"host": []string{d}}},
-				"handle":   []any{map[string]any{"handler": "subroute", "routes": sub}},
+				"handle":   []any{map[string]any{"handler": "headers", "response": map[string]any{"set": siteHeaders()}}, map[string]any{"handler": "subroute", "routes": sub}},
 				"terminal": true,
 			})
 			if decoy != "" {
 				errRoutes = append(errRoutes, map[string]any{
 					"match": []any{map[string]any{"host": []string{d}}},
 					"handle": []any{hideServer(),
+						map[string]any{"handler": "headers", "response": map[string]any{"set": siteHeaders()}},
 						map[string]any{"handler": "rewrite", "uri": "/404.html"},
 						map[string]any{"handler": "file_server", "root": DecoyDirPlaceholder + "/" + decoy, "status_code": "{http.error.status_code}"}},
 				})
@@ -205,6 +206,19 @@ func listenAddr(s Site) string {
 
 func hideServer() map[string]any {
 	return map[string]any{"handler": "headers", "response": map[string]any{"deferred": true, "delete": []string{"Server", "Via"}}}
+}
+
+// siteHeaders are the headers a real site sends; security scanners check for them.
+func siteHeaders() map[string]any {
+	return map[string]any{
+		"X-Content-Type-Options":       []string{"nosniff"},
+		"X-Frame-Options":              []string{"SAMEORIGIN"},
+		"Referrer-Policy":              []string{"strict-origin-when-cross-origin"},
+		"Content-Security-Policy":      []string{"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self'"},
+		"Permissions-Policy":           []string{"camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"},
+		"Cross-Origin-Opener-Policy":   []string{"same-origin"},
+		"Cross-Origin-Resource-Policy": []string{"same-origin"},
+	}
 }
 
 // siteRoutes renders the routes of one domain and returns the decoy used for its 404 page.
