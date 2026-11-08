@@ -27,7 +27,7 @@ func TestFetchRemnawave(t *testing.T) {
 			t.Errorf("page size: %d", size)
 		}
 		all := []rnUser{
-			{Username: "alice", VlessUUID: "uuid-a", Status: "ACTIVE", TrafficLimitBytes: 1073741824, TrafficLimitStrat: "MONTH",
+			{Username: "alice", VlessUUID: "uuid-a", ShortUUID: "short-alice", Status: "ACTIVE", TrafficLimitBytes: 1073741824, TrafficLimitStrat: "MONTH",
 				ExpireAt: "2027-01-01T00:00:00Z", HWIDDeviceLimit: i64(3), TelegramID: i64(777), Description: "vip",
 				ActiveInternalSquad: []struct {
 					Name string `json:"name"`
@@ -64,7 +64,7 @@ func TestFetchRemnawave(t *testing.T) {
 		byName[u.Username] = u
 	}
 	a := byName["alice"]
-	if a.UUID != "uuid-a" || a.Status != "active" || a.ResetStrategy != "month" || a.HWIDLimit == nil || *a.HWIDLimit != 3 {
+	if a.UUID != "uuid-a" || a.SubToken != "short-alice" || a.Status != "active" || a.ResetStrategy != "month" || a.HWIDLimit == nil || *a.HWIDLimit != 3 {
 		t.Errorf("alice: %+v", a)
 	}
 	if a.ExpireAt == nil || *a.ExpireAt != 1798761600 {
@@ -111,7 +111,7 @@ func TestFetchRemnawaveErrors(t *testing.T) {
 	}
 }
 
-// The file of a Remnawave fetch imports: tokens minted, statuses kept, groups by name.
+// The file of a Remnawave fetch imports: tokens minted or preserved, statuses kept, groups by name.
 func TestRemnawaveFileImports(t *testing.T) {
 	f := &ExportFile{Meta: ExportMeta{Format: Format, Source: SourceRemnawave, Users: 2}, Users: []TransferUser{
 		{Username: "alice", UUID: "uuid-a", Status: "active"},
@@ -129,7 +129,66 @@ func TestRemnawaveFileImports(t *testing.T) {
 	if u.SubToken == "" {
 		t.Errorf("no token minted for a Remnawave user")
 	}
-	if mustUser(t, st, "bob").Status != "disabled" {
-		t.Errorf("status not kept")
+	b := mustUser(t, st, "bob")
+	if b.Status != "disabled" || !b.Disabled {
+		t.Errorf("status/disabled not kept: %+v", b)
+	}
+}
+
+// A raw JSON dump from Remnawave's /api/users unmarshals directly and imports with
+// preserved shortUuid, traffic, auto-created squads, and duplicate TelegramID handling.
+func TestRawRemnawaveUnmarshalAndImport(t *testing.T) {
+	raw := []byte(`{
+		"response": {
+			"users": [
+				{
+					"username": "u1",
+					"vlessUuid": "uuid-1",
+					"shortUuid": "short-1",
+					"status": "ACTIVE",
+					"telegramId": 999999,
+					"activeInternalSquads": [{"name": "Squad-A"}],
+					"userTraffic": {"usedTrafficBytes": 5000}
+				},
+				{
+					"username": "u2",
+					"vlessUuid": "uuid-2",
+					"shortUuid": "short-2",
+					"status": "ACTIVE",
+					"telegramId": 999999,
+					"activeInternalSquads": [{"name": "Squad-A"}],
+					"usedTrafficBytes": 7000
+				}
+			],
+			"total": 2
+		}
+	}`)
+	f, err := Unmarshal(raw)
+	if err != nil {
+		t.Fatalf("unmarshal raw Remnawave JSON: %v", err)
+	}
+	if f.Meta.Source != SourceRemnawave || len(f.Users) != 2 {
+		t.Fatalf("meta/users: %+v %d", f.Meta, len(f.Users))
+	}
+	st := testStore(t)
+	im := NewImporter(st, ImportOptions{WithTraffic: true, CreateGroups: true})
+	im.NewTokenFn = func() (string, error) { return "fallback-tok", nil }
+	rep, err := im.Import(context.Background(), f)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if rep.Created != 2 || rep.Failed != 0 {
+		t.Fatalf("report: %+v", rep)
+	}
+	if cg := rep.CreatedGroups(); len(cg) != 1 || cg[0] != "Squad-A" {
+		t.Errorf("created groups: %v", cg)
+	}
+	u1 := mustUser(t, st, "u1")
+	if u1.SubToken != "short-1" || u1.TrafficUsedBytes != 5000 || u1.LifetimeUsedBytes != 5000 {
+		t.Errorf("u1: %+v", u1)
+	}
+	u2 := mustUser(t, st, "u2")
+	if u2.SubToken != "short-2" || u2.TrafficUsedBytes != 7000 || u2.TelegramID != nil || u2.Note != "tg:999999" {
+		t.Errorf("u2 duplicate tg collision not handled: %+v", u2)
 	}
 }

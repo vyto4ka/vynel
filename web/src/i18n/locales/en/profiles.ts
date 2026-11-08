@@ -179,4 +179,8 @@ export default {
   preview_subscription: 'Subscription',
   remark_help: '${NODE_FLAG} ${NODE_NAME} → “🇳🇱 Netherlands”',
   remark_info: 'You can add your own text: ${NODE_FLAG} ${NODE_NAME} · Reality',
+  remnawave_select_inbound: 'Inbound from config (found: {n})',
+  remnawave_keep_keys: 'Keep existing REALITY keys (privateKey, shortIds) and XHTTP/WS path as defaults',
+  remnawave_keep_keys_hint: 'Useful when migrating a live node seamlessly: clients with a cached subscription keep working without refreshing.',
+  remnawave_extra_sections_hint: 'The config also contains routing/outbounds sections — you can import them under “Xray → Import from config”.',
 }

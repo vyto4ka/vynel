@@ -58,4 +58,20 @@ func TestUsersExportImportRoundTrip(t *testing.T) {
 	if w.Code != 400 {
 		t.Fatalf("junk file: %d %s", w.Code, w.Body.String())
 	}
+
+	// Bulk actions on imported users.
+	w = dst.do("GET", "/api/users", "", false)
+	var list []User
+	_ = json.Unmarshal(w.Body.Bytes(), &list)
+	if len(list) != 2 {
+		t.Fatalf("expected 2 users on dst, got %d", len(list))
+	}
+	bulkPayload, _ := json.Marshal(map[string]any{
+		"ids":    []int64{list[0].ID, list[1].ID},
+		"action": "disable",
+	})
+	w = dst.do("POST", "/api/users/bulk", string(bulkPayload), true)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"done":2`) {
+		t.Fatalf("bulk disable: %d %s", w.Code, w.Body.String())
+	}
 }
