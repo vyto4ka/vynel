@@ -69,4 +69,5 @@ scripts/release-assets.sh "$tmp" 'x;y' latest >/dev/null 2>&1 && bad "a bad vers
 # shellcheck disable=SC2016 # the pattern names ${VYNEL_REF literally
 sed -n '/^BUILT_RELEASE=/,/^\[\[ -n "\${VYNEL_REF/p' "$tmp/install.sh" | grep -q 'BUILT_REF' || bad "built values not read"
 
+bash scripts/test-xray-install.sh || bad "Xray version selection"
 exit $fail

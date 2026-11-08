@@ -38,6 +38,8 @@ type Config struct {
 	Bot           *bot.Bot // Telegram bot (status, backups); nil in tests
 	// NodeAction runs an admin action (service.NodeActions) on a connected node; nil = unavailable.
 	NodeAction func(ctx context.Context, nodeID int64, action string) (detail string, err error)
+	// PanelUpdate starts this server's updater; nil uses the local systemd updater.
+	PanelUpdate func(context.Context) error
 	// UpdateStatus is what a node last reported about its update; nil = never reports.
 	UpdateStatus func(nodeID int64) *update.Status
 	// XrayTest lets the Xray binary of this server read a config (`xray run -test`); nil = this
@@ -65,6 +67,9 @@ const (
 
 // New creates the server.
 func New(cfg Config) *Server {
+	if cfg.PanelUpdate == nil {
+		cfg.PanelUpdate = update.Start
+	}
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}

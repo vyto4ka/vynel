@@ -120,7 +120,21 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	p.Bot = bot.New(bot.Config{Service: svc, DataDir: cfg.DataDir, Version: cfg.Version, Connected: rec.Connected,
 		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
-		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
+		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec, svc),
+		PanelUpdate: func(ctx context.Context) error {
+			if cfg.WithNode {
+				nodes, err := svc.Nodes(ctx)
+				if err != nil {
+					return err
+				}
+				for _, n := range nodes {
+					if n.Local {
+						return update.StartFollowingXray(ctx, "", "", &n.XrayRelease)
+					}
+				}
+			}
+			return update.Start(ctx)
+		},
 		UpdateStatus: rec.UpdateStatus, XrayTest: xrayTester(cfg.Xray)})
 	return p, func() { st.Close() }, nil
 }
@@ -138,7 +152,7 @@ func xrayTester(bin xray.Binary) func(ctx context.Context, cfg []byte) error {
 }
 
 // nodeAction runs the panel's node actions through the node's live session.
-func nodeAction(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, action string) (string, error) {
+func nodeAction(rec *reconciler.Reconciler, svc *service.Service) func(ctx context.Context, nodeID int64, action string) (string, error) {
 	commands := map[string]nodev1.Command_Action{
 		"xray": nodev1.Command_ACTION_RESTART_XRAY, "caddy": nodev1.Command_ACTION_RESTART_CADDY,
 		"service": nodev1.Command_ACTION_RESTART_AGENT, "reboot": nodev1.Command_ACTION_REBOOT, "update": nodev1.Command_ACTION_UPDATE,
@@ -159,6 +173,15 @@ func nodeAction(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int
 			// Nodes update to the release the panel follows, so the panel and its nodes run one version.
 			src := update.LoadSource()
 			c.Release, c.Ref = src.Release, src.Ref
+			n, err := svc.Node(ctx, nodeID)
+			if err != nil {
+				return "", err
+			}
+			if n.Can(update.CapXrayRelease) {
+				c.XrayRelease = &n.XrayRelease
+			} else if n.XrayRelease != "" {
+				return "", errors.New("для выбора версии Xray сначала обновите агент ноды установщиком (--mode update)")
+			}
 		}
 		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
@@ -225,6 +248,10 @@ func Run(ctx context.Context, cfg Config) error {
 		}}
 	}
 	if cfg.WithNode {
+		if cfg.LocalNode.XrayRelease == nil {
+			release := update.LoadSource().XrayRelease
+			cfg.LocalNode.XrayRelease = &release
+		}
 		node, err := p.Service.EnsureLocalNode(ctx, cfg.LocalNode)
 		if err != nil {
 			return err

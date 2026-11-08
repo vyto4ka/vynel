@@ -39,6 +39,7 @@ var (
 //     trying a commit on your own server before releasing it.
 type Source struct {
 	Ref, Release, ReleaseURL, GHProxy string
+	XrayRelease                       string // empty follows latest; otherwise an official Xray release tag
 }
 
 // ReleaseLatest is the Release of the stable channel: GitHub's "latest" release.
@@ -72,6 +73,10 @@ func LoadSource() Source {
 			}
 			v = strings.Trim(v, `'"`)
 			switch k {
+			case "VYNEL_XRAY_VERSION":
+				if release, err := NormalizeXrayRelease(v); err == nil {
+					s.XrayRelease = release
+				}
 			case "VYNEL_REF":
 				if refRe.MatchString(v) {
 					s.Ref = v
@@ -101,9 +106,14 @@ func LoadSource() Source {
 // SaveSource writes the source to EnvFile, the format scripts/install.sh writes and LoadSource
 // reads.
 func SaveSource(s Source) error {
+	xrayRelease, err := NormalizeXrayRelease(s.XrayRelease)
+	if err != nil {
+		return err
+	}
 	var b strings.Builder
 	b.WriteString("# written by scripts/install.sh and `vynel update --channel`; read by `vynel update`\n")
 	fmt.Fprintf(&b, "VYNEL_REF=%s\nVYNEL_RELEASE=%s\n", s.Ref, s.Release)
+	fmt.Fprintf(&b, "VYNEL_XRAY_VERSION=%s\n", xrayRelease)
 	if s.ReleaseURL != "" {
 		fmt.Fprintf(&b, "VYNEL_RELEASE_URL=%s\n", s.ReleaseURL)
 	}
@@ -171,16 +181,30 @@ func (s Source) Follow(release, ref string) (Source, error) {
 // StartFollowing switches this server to the release the panel follows (Follow; "" = stay) and
 // starts the update.
 func StartFollowing(ctx context.Context, release, ref string) error {
+	return StartFollowingXray(ctx, release, ref, nil)
+}
+
+// StartFollowingXray also applies the node's Xray target. nil preserves the local setting,
+// including when an older panel sends a command without this field.
+func StartFollowingXray(ctx context.Context, release, ref string, xrayRelease *string) error {
+	s := LoadSource()
+	next := s
+	var err error
 	if release != "" {
-		s := LoadSource()
-		next, err := s.Follow(release, ref)
+		next, err = s.Follow(release, ref)
 		if err != nil {
 			return err
 		}
-		if next != s {
-			if err := SaveSource(next); err != nil {
-				return fmt.Errorf("cannot switch to the panel's release %s: %w", release, err)
-			}
+	}
+	if xrayRelease != nil {
+		next.XrayRelease, err = NormalizeXrayRelease(*xrayRelease)
+		if err != nil {
+			return err
+		}
+	}
+	if next != s {
+		if err := SaveSource(next); err != nil {
+			return fmt.Errorf("cannot save update settings: %w", err)
 		}
 	}
 	return Start(ctx)
@@ -202,7 +226,7 @@ func (s Source) releaseURL() string {
 }
 
 func (s Source) env() []string {
-	env := []string{"VYNEL_REF=" + s.Ref, "VYNEL_RELEASE=" + s.Release}
+	env := []string{"VYNEL_REF=" + s.Ref, "VYNEL_RELEASE=" + s.Release, "VYNEL_XRAY_VERSION=" + s.XrayRelease}
 	if s.ReleaseURL != "" {
 		env = append(env, "VYNEL_RELEASE_URL="+s.ReleaseURL)
 	}
@@ -376,6 +400,12 @@ func run(ctx context.Context, w io.Writer, s Source) error {
 			fmt.Fprintf(out, "cannot download the release's installer (%v): using the one built into this version\n", err)
 			script = scripts.Install
 		}
+	}
+	// Old release installers always take latest Xray. Use this binary's trusted embedded
+	// installer when necessary so a pin is never silently ignored (nor erased on update).
+	if s.XrayRelease != "" && !strings.Contains(string(script), "VYNEL_XRAY_VERSION") {
+		fmt.Fprintln(out, "release installer predates Xray selection: using the embedded installer")
+		script = scripts.Install
 	}
 	tmp, err := os.CreateTemp("", "vynel-install-*.sh")
 	if err != nil {

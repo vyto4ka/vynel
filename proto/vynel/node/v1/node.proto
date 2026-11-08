@@ -130,6 +130,8 @@ message Command {
   // (an older panel): the node updates from its own release.
   string release = 3;
   string ref = 4;
+  // Absent: keep this node's setting (old panels). Empty: latest. Otherwise an official tag.
+  optional string xray_release = 5;
 }
 
 // CommandResult answers a Command. For a service restart or reboot it is sent before acting.
