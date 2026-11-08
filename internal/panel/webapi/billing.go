@@ -13,9 +13,22 @@ import (
 func (s *Server) billingRoutes() {
 	s.handle("GET /api/billing", s.billing)
 	s.handle("POST /api/providers", s.saveProvider)
+	s.handle("GET /api/providers", s.billingProviders)
 	s.handle("PUT /api/providers/{id}", s.saveProvider)
 	s.handle("DELETE /api/providers/{id}", s.deleteProvider)
 	s.handle("PATCH /api/nodes/{id}/billing", s.nodeBilling)
+}
+
+func (s *Server) billingProviders(r *http.Request) (any, error) {
+	ps, err := s.svc.Providers(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Provider, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, providerDTO(p))
+	}
+	return out, nil
 }
 
 // Provider is a hosting provider as the UI sees it.
@@ -50,14 +63,18 @@ func (s *Server) billing(r *http.Request) (any, error) {
 	for _, nb := range bills {
 		n, b := nb.Node, nb.Billing
 		nodes = append(nodes, map[string]any{
-			"id": n.ID, "code": n.Code, "name": n.Name, "flag": xrayconf.CountryFlag(n.Country), "enabled": n.Enabled,
+			"id": n.ID, "code": n.Code, "name": n.Name, "flag": xrayconf.CountryFlag(n.Country), "enabled": n.Enabled, "local": n.Local,
 			"providerId": b.ProviderID, "cost": b.Cost, "currency": b.Currency, "costPeriod": b.CostPeriod, "monthlyCost": nb.MonthlyCost,
 			"paidUntil": b.PaidUntil, "trafficLimit": b.TrafficLimit, "resetDay": b.ResetDay, "trafficCount": b.TrafficCount,
 			"used": nb.Used, "periodFrom": nb.PeriodFrom, "periodTo": nb.PeriodTo, "offByLimit": nb.OffByLimit,
 			"overridden": b.OverridePeriod == nb.PeriodFrom && b.OverridePeriod != 0,
 		})
 	}
-	return map[string]any{"providers": providers, "nodes": nodes, "margin": service.LimitMargin,
+	panel, err := s.panelBillingDTO(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"providers": providers, "nodes": nodes, "panel": panel, "margin": service.LimitMargin,
 		"remindDays": int(service.PayReminder.Hours() / 24)}, nil
 }
 

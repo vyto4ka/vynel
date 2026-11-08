@@ -75,6 +75,7 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 		return nil, nil, err
 	}
 	svc := service.New(st)
+	svc.SelfWithNode = func() bool { return cfg.WithNode }
 	if err := svc.EnsureDefaults(ctx); err != nil {
 		st.Close()
 		return nil, nil, err

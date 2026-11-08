@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react'
-import { Billing as BillingT, BillingNode, del, get, patch, post, Provider, put } from '../api'
+import { Billing as BillingT, BillingNode, del, get, patch, post, Provider, put, PanelBilling } from '../api'
 import { bytes, date, fromDateInput, GiB, toDateInput } from '../format'
 import { Bar, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
@@ -25,6 +25,7 @@ export function ProviderIcon({ p, size = 18 }: { p: Provider | null | undefined;
 export function Billing() {
   const { data, error, reload } = useLoad(() => get<BillingT>('billing'), [], 60000)
   const [editProvider, setEditProvider] = useState<Provider | 'new' | null>(null)
+  const [editPanel, setEditPanel] = useState(false)
   const [editNode, setEditNode] = useState<BillingNode | null>(null)
   const act = useAction()
   const confirm = useConfirm()
@@ -33,8 +34,8 @@ export function Billing() {
 
   // Итоги: в месяц по валютам, ближайшая оплата.
   const monthly = new Map<string, number>()
-  for (const n of data.nodes) if (n.monthlyCost > 0) monthly.set(n.currency, (monthly.get(n.currency) || 0) + n.monthlyCost)
-  const due = data.nodes.filter((n) => n.paidUntil).sort((a, b) => a.paidUntil! - b.paidUntil!)[0]
+  for (const n of [data.panel, ...data.nodes.filter((n) => !n.local)]) if (n.monthlyCost > 0) monthly.set(n.currency, (monthly.get(n.currency) || 0) + n.monthlyCost)
+  const due = [{ ...data.panel, name: t('billing.panel_server'), flag: '🎛' }, ...data.nodes.filter((n) => !n.local)].filter((n) => n.paidUntil).sort((a, b) => a.paidUntil! - b.paidUntil!)[0]
   const limited = data.nodes.filter((n) => n.trafficLimit > 0)
   const fullest = [...limited].sort((a, b) => b.used / b.trafficLimit - a.used / a.trafficLimit)[0]
 
@@ -64,6 +65,11 @@ export function Billing() {
           <div className="v">{fullest ? `${Math.min(100, Math.round((100 * fullest.used) / fullest.trafficLimit))}%` : '—'}</div>
           <div className="s">{fullest ? t('billing.most', { flag: fullest.flag, name: fullest.name }) : t('billing.no_limits_set')}</div>
         </div>
+      </div>
+
+      <div className="card section-gap">
+        <div className="card-head"><h3>{t('billing.panel_server')}</h3><button className="btn" onClick={() => setEditPanel(true)}><Icon name="edit" /> {t('billing.rental_edit')}</button></div>
+        <div className="card-pad"><PanelRentalDetails value={data.panel} /></div>
       </div>
 
       <div className="card section-gap">
@@ -118,7 +124,7 @@ export function Billing() {
                       <td className="nowrap"><span style={{ fontSize: 16 }}>{n.flag}</span> <b>{n.name}</b> <span className="muted small">{n.code}</span>
                         {n.offByLimit && <div className="small pink-text">{t('billing.switched_off_by_the_limit')}</div>}</td>
                       <td className="nowrap hide-sm">{p ? <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><ProviderIcon p={p} />{p.name}</span> : <span className="muted">—</span>}</td>
-                      <td className="nowrap">{n.cost > 0 ? <>{money(n.cost)} {n.currency}<span className="muted small"> / {n.costPeriod === 'year' ? t('billing.year') : t('billing.mo')}</span></> : <span className="muted">—</span>}</td>
+                      <td className="nowrap">{n.local ? <span className="muted small">{t('billing.shared_panel_rental')}</span> : n.cost > 0 ? <>{money(n.cost)} {n.currency}<span className="muted small"> / {n.costPeriod === 'year' ? t('billing.year') : t('billing.mo')}</span></> : <span className="muted">—</span>}</td>
                       <td className="nowrap">{n.paidUntil ? <><div>{date(n.paidUntil)}</div><div className="small"><PaidLeft ts={n.paidUntil} /></div></> : <span className="muted">—</span>}</td>
                       <td className="hide-sm" style={{ minWidth: 190 }}>
                         {n.trafficLimit > 0 ? <>
@@ -137,8 +143,9 @@ export function Billing() {
       </div>
 
       {editProvider && <ProviderForm p={editProvider === 'new' ? null : editProvider} onClose={() => setEditProvider(null)} onSaved={() => { setEditProvider(null); reload() }} />}
+      {editPanel && <PanelBillingForm value={data.panel} providers={data.providers} remindDays={data.remindDays} onClose={() => setEditPanel(false)} onSaved={() => { setEditPanel(false); reload() }} />}
       {editNode && <NodeBillingForm n={editNode} providers={data.providers} margin={data.margin} remindDays={data.remindDays}
-        onClose={() => setEditNode(null)} onSaved={() => { setEditNode(null); reload() }} onNewProvider={() => { setEditNode(null); setEditProvider('new') }} />}
+        onClose={() => setEditNode(null)} onSaved={() => { setEditNode(null); reload() }} />}
     </>
   )
 }
@@ -150,7 +157,7 @@ function PaidLeft({ ts }: { ts: number }) {
   return <span className={d <= 5 ? 'pink-text' : 'muted'}><Trans k="billing.d_left" v={{ d: d }} /></span>
 }
 
-function ProviderForm({ p, onClose, onSaved }: { p: Provider | null; onClose: () => void; onSaved: () => void }) {
+function ProviderForm({ p, onClose, onSaved }: { p: Provider | null; onClose: () => void; onSaved: (p: Provider) => void }) {
   const [url, setUrl] = useState(p?.url || '')
   const [loginUrl, setLoginUrl] = useState(p?.loginUrl || '')
   const [name, setName] = useState(p?.name || '')
@@ -160,9 +167,9 @@ function ProviderForm({ p, onClose, onSaved }: { p: Provider | null; onClose: ()
     e.preventDefault()
     setBusy(true)
     const body = { name, url, loginUrl }
-    const r = await act(() => (p ? put(`providers/${p.id}`, body) : post('providers', body)), p ? t('common.saved') : t('billing.provider_added'))
+    const r = await act(() => (p ? put<Provider>(`providers/${p.id}`, body) : post<Provider>('providers', body)), p ? t('common.saved') : t('billing.provider_added'))
     setBusy(false)
-    if (r !== undefined) onSaved()
+    if (r !== undefined) onSaved(r)
   }
   return (
     <Modal title={p ? p.name : t('billing.new_provider')} onClose={onClose}
@@ -183,17 +190,36 @@ function ProviderForm({ p, onClose, onSaved }: { p: Provider | null; onClose: ()
   )
 }
 
-function NodeBillingForm({ n, providers, margin, remindDays, onClose, onSaved, onNewProvider }: {
-  n: BillingNode; providers: Provider[]; margin: number; remindDays: number; onClose: () => void; onSaved: () => void; onNewProvider: () => void
+type BillingFormProps = { providers: Provider[]; remindDays: number; onClose: () => void; onSaved: () => void }
+
+export function PanelBillingForm({ value, ...rest }: BillingFormProps & { value: PanelBilling }) {
+  return <RentalBillingForm target={{ kind: 'panel', value }} {...rest} />
+}
+
+function NodeBillingForm({ n, margin, ...rest }: BillingFormProps & { n: BillingNode; margin: number }) {
+  return <RentalBillingForm target={{ kind: 'node', value: n }} margin={margin} {...rest} />
+}
+
+function RentalBillingForm({ target, providers, margin = 0, remindDays, onClose, onSaved }: BillingFormProps & {
+  target: { kind: 'panel'; value: PanelBilling } | { kind: 'node'; value: BillingNode }; margin?: number
 }) {
-  const [providerId, setProviderId] = useState(n.providerId || 0)
-  const [cost, setCost] = useState(n.cost ? String(n.cost) : '')
-  const [currency, setCurrency] = useState(n.currency)
-  const [period, setPeriod] = useState(n.costPeriod)
-  const [paid, setPaid] = useState(toDateInput(n.paidUntil))
-  const [limit, setLimit] = useState(n.trafficLimit ? String(Math.round((n.trafficLimit / GiB) * 100) / 100) : '')
-  const [resetDay, setResetDay] = useState(String(n.resetDay || 1))
-  const [count, setCount] = useState(n.trafficCount)
+  const n = target.kind === 'node' ? target.value : null
+  const panel = target.kind === 'panel' ? target.value : null
+  const r = target.value
+  const [note, setNote] = useState(panel?.note || '')
+  const [addingProvider, setAddingProvider] = useState(false)
+  const [createdProviders, setCreatedProviders] = useState<Provider[]>([])
+  const [busy, setBusy] = useState(false)
+  const allProviders = [...providers, ...createdProviders.filter((p) => !providers.some((v) => v.id === p.id))]
+  const close = () => { if (!addingProvider && !busy) onClose() }
+  const [providerId, setProviderId] = useState(r.providerId || 0)
+  const [cost, setCost] = useState(r.cost ? String(r.cost) : '')
+  const [currency, setCurrency] = useState(r.currency)
+  const [period, setPeriod] = useState(r.costPeriod)
+  const [paid, setPaid] = useState(toDateInput(r.paidUntil))
+  const [limit, setLimit] = useState(n?.trafficLimit ? String(Math.round((n?.trafficLimit / GiB) * 100) / 100) : '')
+  const [resetDay, setResetDay] = useState(String(n?.resetDay || 1))
+  const [count, setCount] = useState(n?.trafficCount || 'both')
   const act = useAction()
   // «+1 месяц» / «+1 год» от текущей даты оплаты (или от сегодня).
   const extend = (months: number) => {
@@ -203,25 +229,28 @@ function NodeBillingForm({ n, providers, margin, remindDays, onClose, onSaved, o
   }
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    if (busy) return
+    setBusy(true)
     const body = {
       providerId, cost: Number(cost.replace(',', '.')) || 0, currency: currency.trim() || '₽', costPeriod: period,
-      paidUntil: fromDateInput(paid) || 0, trafficLimit: Math.round((Number(limit.replace(',', '.')) || 0) * GiB),
-      resetDay: Math.min(31, Math.max(1, Number(resetDay) || 1)), trafficCount: count,
+      paidUntil: fromDateInput(paid) || 0,
+      ...(n ? { trafficLimit: Math.round((Number(limit.replace(',', '.')) || 0) * GiB), resetDay: Math.min(31, Math.max(1, Number(resetDay) || 1)), trafficCount: count } : { note }),
     }
-    const r = await act(() => patch(`nodes/${n.id}/billing`, body), t('common.saved'))
-    if (r !== undefined) onSaved()
+    const result = await act(() => patch(n ? `nodes/${n.id}/billing` : 'self-host/billing', body), t('common.saved'))
+    setBusy(false)
+    if (result !== undefined) onSaved()
   }
-  return (
-    <Modal title={<>{n.flag} {n.name} <span className="muted small">{n.code}</span></>} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="node-billing">{t('common.save')}</button></>}>
+  return (<>
+    <Modal title={n ? <>{n.flag} {n.name} <span className="muted small">{n.code}</span></> : t('billing.panel_server')} onClose={close}
+      footer={<><button className="btn ghost" onClick={close} disabled={busy}>{t('common.cancel')}</button><button className="btn primary" form="node-billing" disabled={busy}>{t('common.save')}</button></>}>
       <form id="node-billing" onSubmit={submit}>
         <Field label={t('common.provider')}>
           <div className="row" style={{ flexWrap: 'nowrap' }}>
             <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
               <option value={0}>{t('common.not_set')}</option>
-              {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {allProviders.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
-            <button type="button" className="btn ghost" onClick={onNewProvider}><Icon name="plus" /> <span className="hide-sm">{t('billing.new')}</span></button>
+            <button type="button" className="btn ghost" onClick={() => setAddingProvider(true)}><Icon name="plus" /> <span className="hide-sm">{t('billing.new')}</span></button>
           </div>
         </Field>
         <div className="grid3">
@@ -240,6 +269,9 @@ function NodeBillingForm({ n, providers, margin, remindDays, onClose, onSaved, o
             <button type="button" className="btn ghost" onClick={() => extend(period === 'year' ? 12 : 1)}>+1 {period === 'year' ? t('billing.year') : t('billing.mo')}</button>
           </div>
         </Field>
+        {panel && <Field label={t('billing.private_note')}><textarea className="input" rows={3} maxLength={4000} value={note} onChange={(e) => setNote(e.target.value)} /></Field>}
+        {(panel?.localNodeId || n?.local) && <p className="muted small">{t('billing.shared_rental_help')}</p>}
+        {n && <>
         <div className="label" style={{ margin: '6px 0 8px' }}>{t('billing.provider_traffic')}<Info><Trans k="billing.counted_on_the_server_s" v={{ v: bytes(margin) }} /></Info>
         </div>
         <div className="grid3">
@@ -255,7 +287,22 @@ function NodeBillingForm({ n, providers, margin, remindDays, onClose, onSaved, o
           {n.offByLimit && <span className="pink-text">{' '}{t('billing.switched_off_by_the_limit_2')}</span>}
           {n.overridden && <span>{' '}{t('billing.switched_on_manually_until')}</span>}
         </div>
+        </>}
       </form>
     </Modal>
+    {addingProvider && <ProviderForm p={null} onClose={() => setAddingProvider(false)} onSaved={(p) => { setCreatedProviders((ps) => [...ps, p]); setProviderId(p.id); setAddingProvider(false) }} />}
+    </>
   )
+}
+
+export function PanelRentalDetails({ value: p }: { value: PanelBilling }) {
+  return <>
+    <div className="kv small" style={{ gridTemplateColumns: '130px 1fr' }}>
+      <div className="k">{t('common.provider')}</div><div>{p.provider ? <span className="row"><ProviderIcon p={p.provider} />{p.provider.name}</span> : '—'}</div>
+      <div className="k">{t('billing.price')}</div><div>{p.cost > 0 ? `${money(p.cost)} ${p.currency} / ${p.costPeriod === 'year' ? t('billing.year') : t('billing.mo')}` : '—'}</div>
+      <div className="k">{t('billing.paid_until')}</div><div>{p.paidUntil ? <>{date(p.paidUntil)} · <PaidLeft ts={p.paidUntil} /></> : '—'}</div>
+    </div>
+    {p.provider && (p.provider.loginUrl || p.provider.url) && <a className="btn sm ghost" style={{ marginTop: 8 }} href={p.provider.loginUrl || p.provider.url} target="_blank" rel="noreferrer"><Icon name="external" /> {t('billing.provider_account')}</a>}
+    {p.note && <p className="small text-2" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{p.note}</p>}
+  </>
 }

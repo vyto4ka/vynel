@@ -306,6 +306,7 @@
  "нода применяет конфигурацию": "the node is applying the configuration",
  "нужен JSON-объект { … }": "a JSON object { … } is needed",
  "нужен объект {…}": "an object {…} is needed",
+ "примечание: не более 4000 символов": "the note must be at most 4000 characters",
  "нужно число от 0": "a number from 0 is needed",
  "обновить vynel, Xray и nginx": "update vynel, Xray and nginx",
  "обновление нод недоступно": "node updates are not available",

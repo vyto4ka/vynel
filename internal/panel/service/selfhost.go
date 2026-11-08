@@ -55,6 +55,9 @@ func (s *Service) SelfHost(ctx context.Context) (*SelfHost, error) {
 			break
 		}
 	}
+	if s.SelfWithNode != nil {
+		out.WithNode = s.SelfWithNode()
+	}
 	out.Certs = []SelfCert{}
 	for _, d := range out.Domains {
 		c := SelfCert{Domain: d}

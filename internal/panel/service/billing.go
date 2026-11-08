@@ -390,43 +390,16 @@ func (s *Service) SetNodeBilling(ctx context.Context, actor Actor, nodeID int64,
 			if b, err = store.GetNodeBilling(ctx, q, nodeID); err != nil {
 				return err
 			}
-			if in.ProviderID != nil {
-				if *in.ProviderID == 0 {
-					b.ProviderID = nil
-				} else {
-					if _, err := store.GetProvider(ctx, q, *in.ProviderID); err != nil {
-						return invalid("провайдер #%d не найден", *in.ProviderID)
-					}
-					id := *in.ProviderID
-					b.ProviderID = &id
+			var panel *store.PanelBilling
+			if n.Local {
+				panel, err = store.GetPanelBilling(ctx, q)
+				if err != nil {
+					return err
 				}
+				panelRentalIntoNode(panel, b)
 			}
-			if in.Cost != nil {
-				if *in.Cost < 0 || math.IsNaN(*in.Cost) || *in.Cost > 1e9 {
-					return InField("Стоимость", invalid("нужно число от 0"))
-				}
-				b.Cost = math.Round(*in.Cost*100) / 100
-			}
-			if in.Currency != nil {
-				c := strings.TrimSpace(*in.Currency)
-				if c == "" || len([]rune(c)) > 8 {
-					return InField("Валюта", invalid("от 1 до 8 символов"))
-				}
-				b.Currency = c
-			}
-			if in.CostPeriod != nil {
-				if *in.CostPeriod != "month" && *in.CostPeriod != "year" {
-					return InField("Период оплаты", invalid("month или year"))
-				}
-				b.CostPeriod = *in.CostPeriod
-			}
-			if in.PaidUntil != nil {
-				if *in.PaidUntil <= 0 {
-					b.PaidUntil = nil
-				} else if b.PaidUntil == nil || *b.PaidUntil != *in.PaidUntil {
-					v := *in.PaidUntil
-					b.PaidUntil, b.RemindedFor = &v, 0
-				}
+			if err := applyRentalInput(ctx, q, b, in); err != nil {
+				return err
 			}
 			if in.TrafficLimit != nil {
 				if *in.TrafficLimit < 0 {
@@ -460,6 +433,15 @@ func (s *Service) SetNodeBilling(ctx context.Context, actor Actor, nodeID int64,
 						return err
 					}
 				}
+			}
+			if panel != nil {
+				nodeRentalIntoPanel(b, panel)
+				if err := store.SavePanelBilling(ctx, q, panel); err != nil {
+					return err
+				}
+				traffic := *b
+				traffic.ProviderID, traffic.Cost, traffic.PaidUntil, traffic.RemindedFor = nil, 0, nil, 0
+				return store.SaveNodeBilling(ctx, q, &traffic)
 			}
 			return store.SaveNodeBilling(ctx, q, b)
 		})
@@ -535,6 +517,13 @@ func (s *Service) BillingOverview(ctx context.Context) ([]NodeBill, error) {
 		if b == nil {
 			b = store.DefaultBilling(n.ID)
 		}
+		if n.Local {
+			p, err := store.GetPanelBilling(ctx, q)
+			if err != nil {
+				return nil, err
+			}
+			panelRentalIntoNode(p, b)
+		}
 		used, period, err := s.nodeUse(ctx, q, b, loc)
 		if err != nil {
 			return nil, err
@@ -570,12 +559,22 @@ func (s *Service) NodeProviders(ctx context.Context) (map[int64]*store.Provider,
 			out[id] = byID[*b.ProviderID]
 		}
 	}
+	panel, err := s.PanelBilling(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if panel.LocalNodeID != nil && panel.Provider != nil {
+		out[*panel.LocalNodeID] = panel.Provider
+	}
 	return out, nil
 }
 
 // checkBilling runs with the maintenance: it switches off a node about to cross its traffic
 // limit, back on when its period starts again, and reminds about payments due.
 func (s *Service) checkBilling(ctx context.Context) error {
+	if err := s.checkPanelPayment(ctx); err != nil {
+		return err
+	}
 	q := s.st.DB
 	loc := s.BotLocation(ctx)
 	all, err := store.ListNodeBilling(ctx, q)

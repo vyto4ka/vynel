@@ -1,4 +1,10 @@
 export default {
+  panel_check: 'Check for updates',
+  panel_update: 'Update panel',
+  panel_check_error: 'Could not check for updates:',
+  panel_current: 'The current version is installed',
+  panel_confirm: 'Update the panel? The management service will restart and the page will reconnect. Remote VPN nodes will keep running.',
+  panel_confirm_with_node: 'Update the panel and local VPN node? Connections to this server will briefly disconnect during restart. Remote nodes will keep running.',
   a_new_vynel_version_is: 'A new vynel version is available · {latest}',
   and: ' and ',
   command_sent: 'command sent',
@@ -11,7 +17,6 @@ export default {
   no_update_is_running_now: 'No update is running now. Below is the log of the last one.',
   nothing_to_update_everything: 'Nothing to update: everything is already on the latest version',
   outdated_vynel_xray_and_nginx: 'Outdated: {what}. vynel, Xray and nginx will be updated; your data stays.',
-  panel: 'Panel',
   restarting: 'restarting',
   restarting_services: 'Restarting services',
   show_update_log: 'Show update log',

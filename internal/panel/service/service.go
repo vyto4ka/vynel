@@ -118,6 +118,11 @@ type Service struct {
 	// SelfCertStatus reads the certificate of a panel domain (app.go wires the panel's nginx
 	// certificate manager in here); nil = certificates are managed elsewhere (Caddy).
 	SelfCertStatus func(domain string) (certs.Status, bool)
+	// SelfWithNode is the actual process role, including when a stored local node is inactive.
+	SelfWithNode        func() bool
+	panelPaymentMu      sync.Mutex
+	panelPaymentAttempt int64
+	panelPaymentAt      time.Time
 }
 
 // New creates a service over a store.
