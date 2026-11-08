@@ -1,6 +1,7 @@
 import { p } from '../../plural'
 
 export default {
+  retry: 'Повторить',
   actions: 'Действия',
   add: 'Добавить',
   all_addresses: 'все адреса',

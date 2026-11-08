@@ -60,7 +60,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+	// Independent feature migrations can arrive in either merge order. Goose still
+	// runs each recorded version once, including a newly added lower version.
+	if err := goose.UpContext(ctx, db, "migrations", goose.WithAllowMissing()); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

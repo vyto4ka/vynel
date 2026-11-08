@@ -3,7 +3,7 @@ import { get, post, UpdateInfo, UpdateNode } from './api'
 import { Badge, Icon, Modal, useAction, useConfirm, useLoad, useToast } from './ui'
 import { t, Trans } from './i18n'
 
-type RunResult = { started: string[]; failed: Record<string, string> }
+type RunResult = { started: string[]; failed: Record<string, string>; panelStartedAt: number }
 
 // Обновление идёт: опрашивать чаще.
 export const updatesActive = (info: UpdateInfo | null) => !!info && [info.panel, ...info.nodes].some((n) => n.updating)
@@ -21,16 +21,22 @@ export function useUpdates(slowMs = 20000) {
 export function useRunUpdate(info: UpdateInfo | null, reload: () => void) {
   const act = useAction()
   const toast = useToast()
-  const [waiting, setWaiting] = useState(false)
+  const [waitFor, setWaitFor] = useState<{ version: string; at: number } | null>(null)
+  const waiting = waitFor !== null
 
   useEffect(() => {
-    if (!waiting || !info) return
-    const from = info.panel.version
+    if (!waitFor) return
     const t = setInterval(() => {
-      get<{ version: string }>('session').then((s) => { if (s.version !== from) location.reload() }, () => {})
+      get<{ version: string }>('session').then((s) => { if (s.version !== waitFor.version) location.reload() }, () => {})
     }, 3000)
     return () => clearInterval(t)
-  }, [waiting, info])
+  }, [waitFor])
+  useEffect(() => {
+    if (waitFor && info && !info.panel.updating && (info.panel.state === 'done' || info.panel.state === 'failed') && (info.panel.finishedAt || 0) >= waitFor.at) {
+      if (info.panel.version !== waitFor.version) location.reload()
+      else setWaitFor(null)
+    }
+  }, [waitFor, info])
 
   return {
     waiting,
@@ -40,7 +46,7 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void) {
       if (r.started.length) toast(t('updates.command_sent_to', { v: r.started.join(', ') }))
       for (const [name, err] of Object.entries(r.failed)) toast(`${name}: ${err}`, true)
       if (r.started.length === 0 && Object.keys(r.failed).length === 0) toast(t('updates.nothing_to_update_everything'))
-      if (r.started.includes(t('updates.panel'))) setWaiting(true)
+      if (r.panelStartedAt > 0) setWaitFor({ version: info?.panel.version || '', at: r.panelStartedAt })
       reload()
     },
   }

@@ -76,6 +76,8 @@ type Notice struct {
 	User         string
 	Addrs        []string
 	Count, Limit int
+	// panel-billing: the period to resolve against the current common server rental.
+	PanelPayment *PanelPayment
 	// billing: a ready message (payment due, a node switched off or on by its traffic limit).
 	Text string
 }

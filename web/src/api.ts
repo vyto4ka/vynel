@@ -223,7 +223,20 @@ export interface SelfHost {
   version: string
   uptime: number
   withNode: boolean
+  billing: PanelBilling
   certs: { domain: string; issuer: string; notAfter: number; placeholder: boolean; ok: boolean }[]
+}
+
+export interface PanelBilling {
+  providerId: number | null
+  provider: Provider | null
+  cost: number
+  currency: string
+  costPeriod: 'month' | 'year'
+  paidUntil: number | null
+  note: string
+  monthlyCost: number
+  localNodeId: number | null
 }
 
 // Нода в «Биллинге»: стоимость, оплата и лимит трафика у провайдера.
@@ -233,6 +246,7 @@ export interface BillingNode {
   name: string
   flag: string
   enabled: boolean
+  local: boolean
   providerId: number | null
   cost: number
   currency: string
@@ -252,6 +266,7 @@ export interface BillingNode {
 export interface Billing {
   providers: Provider[]
   nodes: BillingNode[]
+  panel: PanelBilling
   margin: number
   remindDays: number
 }

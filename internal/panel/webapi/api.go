@@ -63,6 +63,7 @@ func (s *Server) routes() {
 
 	s.handle("GET /api/nodes", s.nodes)
 	s.handle("GET /api/self-host", s.selfHost)
+	s.handle("PATCH /api/self-host/billing", s.panelBilling)
 	s.handle("POST /api/nodes", s.createNode)
 	s.handle("PATCH /api/nodes/{id}", s.updateNode)
 	s.handle("DELETE /api/nodes/{id}", s.deleteNode)
@@ -828,7 +829,21 @@ func (s *Server) nodes(r *http.Request) (any, error) { return s.nodeList(r, true
 
 // selfHost is the panel's own server for the card above the node list.
 func (s *Server) selfHost(r *http.Request) (any, error) {
-	return s.svc.SelfHost(r.Context())
+	h, err := s.svc.SelfHost(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	if s.cfg.Version != "" {
+		h.Version = s.cfg.Version
+	}
+	p, err := s.panelBillingDTO(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	return struct {
+		*service.SelfHost
+		Billing *PanelBilling `json:"billing"`
+	}{h, p}, nil
 }
 
 func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {

@@ -47,9 +47,10 @@ type Bot struct {
 	loginMsg map[int64]int64        // chat -> the latest sign-in link message (the older one is deleted)
 	quickMu  sync.Mutex             // one quick-buttons check-and-send at a time
 
-	alerts  alertState
-	backup  backupState
-	watchSt watchState
+	alerts       alertState
+	backup       backupState
+	watchSt      watchState
+	panelPayment panelPaymentDelivery
 }
 
 type pendingInput struct {
@@ -229,6 +230,8 @@ func (b *Bot) nextTick(ctx context.Context, tick <-chan time.Time) bool {
 			return false
 		case n := <-b.svc.Notices():
 			switch {
+			case n.Kind == "panel-billing" && n.PanelPayment != nil:
+				b.onPanelPayment(ctx, n.PanelPayment.PaidUntil)
 			case n.Kind == "login" && n.Session != nil:
 				b.onLogin(ctx, n.Session)
 			case n.Kind == "ended":

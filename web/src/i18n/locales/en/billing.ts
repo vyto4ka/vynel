@@ -1,4 +1,10 @@
 export default {
+  panel_server: 'Panel server',
+  rental_edit: 'Hosting and payment',
+  private_note: 'Administrator note',
+  provider_account: 'Provider account',
+  shared_panel_rental: 'Included in the panel server',
+  shared_rental_help: 'The panel and its local VPN node share one rental. Editing payment in either card changes the same record. The traffic limit applies only to the VPN node.',
   a_link_to_the_provider: 'A link to the provider’s home page: the panel takes the name and icon from it.',
   account_login: 'Account login',
   click_a_row_to_set: 'click a row to set the provider, price and limit',
