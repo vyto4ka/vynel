@@ -53,6 +53,8 @@ func (s *Server) routes() {
 	s.handle("POST /api/groups", s.createGroup)
 	s.handle("PATCH /api/groups/{id}", s.updateGroup)
 	s.handle("DELETE /api/groups/{id}", s.deleteGroup)
+	s.handle("GET /api/groups/{id}/users", s.groupUsers)
+	s.handle("POST /api/groups/{id}/users", s.changeGroupUsers)
 	s.handle("POST /api/groups/{id}/access", s.grant)
 	s.handle("DELETE /api/groups/{id}/access", s.revoke)
 
@@ -667,7 +669,7 @@ func (s *Server) groups(r *http.Request) (any, error) {
 			}
 			rl = append(rl, map[string]any{"kind": ru.Kind, "refId": ru.RefID, "label": label})
 		}
-		out = append(out, map[string]any{"id": g.ID, "name": g.Name, "description": g.Description, "users": counts[g.ID], "rules": rl})
+		out = append(out, map[string]any{"id": g.ID, "name": g.Name, "description": g.Description, "users": counts[g.ID], "rules": rl, "defaults": g.Defaults})
 	}
 	return localize(r, out, "label"), nil
 }
@@ -701,11 +703,15 @@ func (s *Server) refLabels(r *http.Request) (map[string]string, error) {
 }
 
 func (s *Server) createGroup(r *http.Request) (any, error) {
-	var in struct{ Name, Description string }
+	var in groupInput
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	g, err := s.svc.CreateGroup(r.Context(), actor(r), in.Name, in.Description)
+	input, err := in.serviceInput()
+	if err != nil {
+		return nil, err
+	}
+	g, err := s.svc.SaveGroup(r.Context(), actor(r), 0, input)
 	if err != nil {
 		return nil, err
 	}
@@ -717,11 +723,15 @@ func (s *Server) updateGroup(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var in struct{ Name, Description string }
+	var in groupInput
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	_, err = s.svc.UpdateGroup(r.Context(), actor(r), id, in.Name, in.Description)
+	input, err := in.serviceInput()
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.svc.SaveGroup(r.Context(), actor(r), id, input)
 	return nil, err
 }
 
