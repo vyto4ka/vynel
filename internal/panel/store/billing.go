@@ -135,7 +135,9 @@ func ListNodeBilling(ctx context.Context, q DBTX) (map[int64]*NodeBilling, error
 func SaveNodeBilling(ctx context.Context, q DBTX, b *NodeBilling) error {
 	_, err := q.ExecContext(ctx, `INSERT INTO node_billing (`+billingCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (node_id) DO UPDATE SET provider_id=excluded.provider_id, cost=excluded.cost, currency=excluded.currency,
-		cost_period=excluded.cost_period, paid_until=excluded.paid_until, reminded_for=excluded.reminded_for,
+		cost_period=excluded.cost_period, paid_until=excluded.paid_until,
+		reminded_for=CASE WHEN node_billing.paid_until IS excluded.paid_until
+			THEN max(node_billing.reminded_for, excluded.reminded_for) ELSE excluded.reminded_for END,
 		traffic_limit=excluded.traffic_limit, reset_day=excluded.reset_day, traffic_count=excluded.traffic_count,
 		off_period=excluded.off_period, override_period=excluded.override_period`,
 		b.NodeID, b.ProviderID, b.Cost, b.Currency, b.CostPeriod, b.PaidUntil, b.RemindedFor, b.TrafficLimit, b.ResetDay,

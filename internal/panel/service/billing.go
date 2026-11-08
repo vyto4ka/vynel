@@ -589,11 +589,7 @@ func (s *Service) checkBilling(ctx context.Context) error {
 			continue
 		}
 		if b.PaidUntil != nil && b.RemindedFor != *b.PaidUntil && time.Unix(*b.PaidUntil, 0).Sub(now) <= PayReminder {
-			b.RemindedFor = *b.PaidUntil
-			if err := store.SaveNodeBilling(ctx, q, b); err != nil {
-				return err
-			}
-			s.notify(Notice{Kind: "billing", Text: s.payText(ctx, n, b)})
+			s.queuePaymentReminder(ctx, n, b)
 		}
 		if b.TrafficLimit == 0 && b.OffPeriod == 0 {
 			continue
@@ -622,6 +618,13 @@ func (s *Service) checkBilling(ctx context.Context) error {
 				esc(nodeTitle(n)), gb(used), gb(b.TrafficLimit), time.Unix(period[1], 0).In(loc).Format("02.01 15:04"))})
 		}
 	}
+	s.paymentMu.Lock()
+	for id := range s.paymentAttempts {
+		if b := all[id]; b == nil || b.PaidUntil == nil || b.RemindedFor == *b.PaidUntil {
+			delete(s.paymentAttempts, id)
+		}
+	}
+	s.paymentMu.Unlock()
 	return nil
 }
 

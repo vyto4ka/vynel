@@ -78,6 +78,11 @@ type Notice struct {
 	Count, Limit int
 	// billing: a ready message (payment due, a node switched off or on by its traffic limit).
 	Text string
+	// Payment reminders are acknowledged only after Telegram delivery. Other billing
+	// notices leave these zero. The date also invalidates stale queued reminders.
+	NodeID    int64
+	PaidUntil int64
+	ActionURL string
 }
 
 // LoginBlocked records that an address failed to sign in too often and is refused for a
@@ -98,9 +103,15 @@ func (s *Service) noticeCh() chan Notice {
 func (s *Service) Notices() <-chan Notice { return s.noticeCh() }
 
 func (s *Service) notify(n Notice) {
+	s.tryNotify(n)
+}
+
+func (s *Service) tryNotify(n Notice) bool {
 	select {
 	case s.noticeCh() <- n:
+		return true
 	default:
+		return false
 	}
 }
 

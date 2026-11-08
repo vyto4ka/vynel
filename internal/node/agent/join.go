@@ -181,7 +181,11 @@ func GRPCDialer(dir string) (Dialer, func(), error) {
 	}
 	client := nodev1.NewNodeGatewayClient(conn)
 	dial := func(ctx context.Context) (Conn, error) {
-		return client.Connect(ctx)
+		stream, err := client.Connect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &remoteConn{Conn: stream, gateway: client}, nil
 	}
 	return dial, func() { conn.Close() }, nil
 }
