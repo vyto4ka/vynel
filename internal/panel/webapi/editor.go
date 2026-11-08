@@ -191,16 +191,27 @@ func (s *Server) checkTemplate(r *http.Request) (any, error) {
 // reviews the produced template and saves it like any other.
 func (s *Server) importRemnawave(r *http.Request) (any, error) {
 	var in struct {
-		Xray      string `json:"xray"`
-		Host      string `json:"host"`
-		Nginx     string `json:"nginx"`
-		WithNginx bool   `json:"withNginx"`
-		Title     string `json:"title"`
+		Xray         string `json:"xray"`
+		Host         string `json:"host"`
+		Nginx        string `json:"nginx"`
+		WithNginx    bool   `json:"withNginx"`
+		Title        string `json:"title"`
+		InboundTag   string `json:"inboundTag"`
+		InboundIndex *int   `json:"inboundIndex"`
+		KeepKeys     bool   `json:"keepKeys"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	res, err := xrayconf.ImportRemnawave(xrayconf.RemnawaveImport{Xray: in.Xray, Host: in.Host, Nginx: in.Nginx, WithNginx: in.WithNginx}, in.Title)
+	res, err := xrayconf.ImportRemnawave(xrayconf.RemnawaveImport{
+		Xray:         in.Xray,
+		Host:         in.Host,
+		Nginx:        in.Nginx,
+		WithNginx:    in.WithNginx,
+		InboundTag:   in.InboundTag,
+		InboundIndex: in.InboundIndex,
+		KeepKeys:     in.KeepKeys,
+	}, in.Title)
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}, nil
 	}

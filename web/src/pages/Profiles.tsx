@@ -704,15 +704,42 @@ function RemnawaveImport({ onClose, onImported }: { onClose: () => void; onImpor
   const [host, setHost] = useState('')
   const [nginx, setNginx] = useState('')
   const [withNginx, setWithNginx] = useState(false)
+  const [keepKeys, setKeepKeys] = useState(false)
+  const [inboundIdx, setInboundIdx] = useState(0)
   const [title, setTitle] = useState('')
   const [result, setResult] = useState<ImportResult | null>(null)
   const [busy, setBusy] = useState(false)
   const act = useAction()
 
+  // Разбираем список клиентских инбаундов (кроме dokodemo-door), чтобы при наличии нескольких
+  // дать выбрать нужный прямо в диалоге, а также подсказываем, если в конфиге есть routing/outbounds.
+  const parsedXray = useMemo(() => {
+    if (!xray.trim()) return { inbounds: [] as { tag: string; protocol: string; port: unknown; network: string }[], hasExtra: false }
+    try {
+      const obj = JSON.parse(xray)
+      const rawList: any[] = Array.isArray(obj) ? obj : (obj && Array.isArray(obj.inbounds) ? obj.inbounds : [])
+      const filtered = rawList.filter((x) => x && typeof x === 'object' && !(x.protocol === 'dokodemo-door' && rawList.length > 1))
+      const inbounds = filtered.map((m, idx) => ({
+        tag: typeof m.tag === 'string' && m.tag ? m.tag : `#${idx + 1}`,
+        protocol: typeof m.protocol === 'string' ? m.protocol : '?',
+        port: m.port ?? '?',
+        network: m.streamSettings?.network || m.streamSettings?.security || '',
+      }))
+      const hasExtra = !Array.isArray(obj) && obj && typeof obj === 'object' && (Array.isArray(obj.outbounds) && obj.outbounds.length > 0 || !!obj.routing)
+      return { inbounds, hasExtra }
+    } catch {
+      return { inbounds: [] as { tag: string; protocol: string; port: unknown; network: string }[], hasExtra: false }
+    }
+  }, [xray])
+
+  useEffect(() => { setInboundIdx(0) }, [parsedXray.inbounds.length])
+
   const submit = async () => {
     setBusy(true)
     setResult(null)
-    const r = await post<ImportResult>('profile-templates/import-remnawave', { xray, host, nginx, withNginx, title })
+    const payload: Record<string, unknown> = { xray, host, nginx, withNginx, keepKeys, title }
+    if (parsedXray.inbounds.length > 1) payload.inboundIndex = inboundIdx
+    const r = await post<ImportResult>('profile-templates/import-remnawave', payload)
       .catch((e) => ({ ok: false, error: e.message }) as ImportResult)
     setBusy(false)
     if (r.ok && r.source) {
@@ -742,6 +769,21 @@ function RemnawaveImport({ onClose, onImported }: { onClose: () => void; onImpor
         <CodeEditor lang="json" value={xray} onChange={setXray} height="220px" />
         {xrayErr && <div className="small pink-text" style={{ marginTop: 4 }}>{xrayErr}</div>}
       </Field>
+      {parsedXray.inbounds.length > 1 && (
+        <Field label={tr('profiles.remnawave_select_inbound', { n: parsedXray.inbounds.length })}>
+          <select className="input mono" value={inboundIdx} onChange={(e) => setInboundIdx(Number(e.target.value))}>
+            {parsedXray.inbounds.map((ib, idx) => (
+              <option key={idx} value={idx}>{ib.tag} · {ib.protocol}:{String(ib.port)}{ib.network ? ` (${ib.network})` : ''}</option>
+            ))}
+          </select>
+        </Field>
+      )}
+      {parsedXray.hasExtra && (
+        <div className="small muted" style={{ marginBottom: 10 }}>{tr('profiles.remnawave_extra_sections_hint')}</div>
+      )}
+      <label className="check" style={{ margin: '6px 0 10px' }}>
+        <input type="checkbox" checked={keepKeys} onChange={(e) => setKeepKeys(e.target.checked)} />{' '}{tr('profiles.remnawave_keep_keys')}{' '}<Info>{tr('profiles.remnawave_keep_keys_hint')}</Info>
+      </label>
       <Field label={tr('profiles.subscription_config_json')} info={tr('profiles.host_connection_point')}>
         <CodeEditor lang="json" value={host} onChange={setHost} height="120px" />
         {hostErr && <div className="small pink-text" style={{ marginTop: 4 }}>{hostErr}</div>}

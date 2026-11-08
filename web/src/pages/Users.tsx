@@ -30,17 +30,23 @@ function openId(): number | null {
 export function Users() {
   const [sort, setSort] = useState(savedSort)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [groupFilter, setGroupFilter] = useState(0)
+  const [selected, setSelected] = useState<number[]>([])
   const [creating, setCreating] = useState(false)
   const [transfer, setTransfer] = useState(false)
   const [open, setOpen] = useState<number | null>(openId)
   const [page, setPage] = useState(0)
-  useEffect(() => setPage(0), [sort, search])
+  const act = useAction()
+  const confirm = useConfirm()
+  useEffect(() => { setPage(0); setSelected([]) }, [sort, search, statusFilter, groupFilter])
   useEffect(() => {
     try { localStorage.setItem('vynel.users.sort', JSON.stringify(sort)) } catch { /* приватное окно */ }
   }, [sort])
   // Страницами: с десятками тысяч пользователей весь список разом тормозил и панель, и браузер.
-  const list = useLoad(() => get<{ users: User[]; total: number }>(`users?search=${encodeURIComponent(search)}&sort=${sort.key}&dir=${sort.desc ? 'desc' : 'asc'}` +
-    `&limit=${pageSize}&offset=${page * pageSize}`), [sort, search, page], 20000)
+  const list = useLoad(() => get<{ users: User[]; total: number }>(
+    `users?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}${groupFilter ? `&group=${groupFilter}` : ''}&sort=${sort.key}&dir=${sort.desc ? 'desc' : 'asc'}` +
+    `&limit=${pageSize}&offset=${page * pageSize}`), [sort, search, statusFilter, groupFilter, page], 20000)
   const users = { ...list, data: list.data?.users }
   const total = list.data?.total ?? 0
   const groups = useLoad(() => get<Group[]>('groups'))
@@ -58,6 +64,27 @@ export function Users() {
   // Первое нажатие — по возрастанию, второе — по убыванию, третье — сброс.
   const toggle = (k: SortKey) => setSort(sort.key !== k ? { key: k, desc: false } : !sort.desc ? { key: k, desc: true } : { key: '', desc: false })
 
+  const pageIds = useMemo(() => (users.data || []).map((u) => u.id), [users.data])
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id))
+  const toggleSelectAll = () => {
+    if (allPageSelected) setSelected(selected.filter((id) => !pageIds.includes(id)))
+    else setSelected(Array.from(new Set([...selected, ...pageIds])))
+  }
+  const toggleSelectOne = (id: number) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const runBulk = async (body: Record<string, unknown>, confirmText?: string) => {
+    if (selected.length === 0) return
+    if (confirmText && !(await confirm(confirmText, tr('common.delete')))) return
+    const r = await act(() => post<{ done: number; failed: number }>('users/bulk', { ids: selected, ...body }), tr('users.bulk_done', { done: selected.length }))
+    if (r) {
+      setSelected([])
+      users.reload()
+      groups.reload()
+    }
+  }
+
   return (
     <>
       <div className="toolbar">
@@ -65,18 +92,56 @@ export function Users() {
           <input className="input" placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
           <span className="muted search-icon"><Icon name="search" size={18} /></span>
         </div>
+        <select className="input" style={{ width: 'auto' }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">{tr('users.filter_all_statuses')}</option>
+          {Object.entries(statusInfo).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        {(groups.data?.length ?? 0) > 0 && (
+          <select className="input hide-sm" style={{ width: 'auto' }} value={groupFilter} onChange={(e) => setGroupFilter(Number(e.target.value))}>
+            <option value={0}>{tr('users.filter_all_groups')}</option>
+            {groups.data!.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        )}
         <button className="btn" onClick={() => setTransfer(true)}><Icon name="move" /> <span className="hide-sm">{tr('users.transfer')}</span></button>
         <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" /> <span className="hide-sm">{tr('common.user')}</span></button>
       </div>
 
+      {selected.length > 0 && (
+        <div className="card card-pad row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
+          <div className="row" style={{ gap: 8 }}>
+            <b>{tr('users.bulk_selected', { n: selected.length })}</b>
+            <button className="btn sm ghost" onClick={() => setSelected([])}>{tr('users.bulk_clear')}</button>
+          </div>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn sm" onClick={() => runBulk({ action: 'extend', months: 1, days: 0 })}>{tr('users.bulk_extend_month')}</button>
+            <button className="btn sm" onClick={() => runBulk({ action: 'reset' })}>{tr('users.bulk_reset_traffic')}</button>
+            <button className="btn sm" onClick={() => runBulk({ action: 'enable' })}>{tr('users.bulk_enable')}</button>
+            <button className="btn sm" onClick={() => runBulk({ action: 'disable' })}>{tr('users.bulk_disable')}</button>
+            {(groups.data?.length ?? 0) > 0 && (
+              <select className="input" style={{ width: 'auto', height: 30, padding: '0 8px' }} value="" onChange={(e) => {
+                const gid = Number(e.target.value)
+                if (gid > 0) runBulk({ action: 'addGroup', groupId: gid })
+              }}>
+                <option value="">{tr('users.bulk_add_group')}</option>
+                {groups.data!.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            )}
+            <button className="btn sm danger" onClick={() => runBulk({ action: 'delete' }, tr('users.bulk_delete_confirm', { n: selected.length }))}>{tr('users.bulk_delete')}</button>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         {!users.data ? <Loading error={users.error} /> : users.data.length === 0 ? (
-          <Empty icon="🌱">{search ? tr('users.nobody_found') : <>{tr('users.no_users_yet')}<br />{tr('users.press_user_a_name_is')}</>}</Empty>
+          <Empty icon="🌱">{search || statusFilter || groupFilter ? tr('users.nobody_found') : <>{tr('users.no_users_yet')}<br />{tr('users.press_user_a_name_is')}</>}</Empty>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
+                  <th style={{ width: 32 }} onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAll} />
+                  </th>
                   {columns.map(([k, label, cls]) => (
                     <th key={k} className={'sortable ' + cls + (sort.key === k ? ' sorted' : '')} onClick={() => toggle(k)} aria-sort={sort.key === k ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
                       {label}<span className="sort-mark">{sort.key === k ? (sort.desc ? ' ↓' : ' ↑') : ' ↕'}</span>
@@ -87,8 +152,12 @@ export function Users() {
               <tbody>
                 {users.data.map((u) => {
                   const st = statusInfo[u.status]
+                  const isSel = selected.includes(u.id)
                   return (
-                    <tr key={u.id} className={'click' + (open === u.id ? ' selected' : '')} onClick={() => show(u.id)}>
+                    <tr key={u.id} className={'click' + (open === u.id || isSel ? ' selected' : '')} onClick={() => show(u.id)}>
+                      <td onClick={(e) => { e.stopPropagation(); toggleSelectOne(u.id) }}>
+                        <input type="checkbox" checked={isSel} onChange={() => {}} />
+                      </td>
                       <td>
                         <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
                           {isOnline(u.onlineAt) && <span className="online-dot" title={tr('common.online_2')} />}
@@ -127,7 +196,7 @@ export function Users() {
       </div>
 
       {creating && <CreateUser groups={groups.data || []} onClose={() => setCreating(false)} onCreated={(u) => { setCreating(false); users.reload(); show(u.id) }} />}
-      {transfer && <TransferUsers search={search} onClose={() => setTransfer(false)} onImported={() => { users.reload(); groups.reload() }} />}
+      {transfer && <TransferUsers search={search} status={statusFilter} group={groupFilter} onClose={() => setTransfer(false)} onImported={() => { users.reload(); groups.reload() }} />}
       {open && <UserDrawer id={open} groups={groups.data || []} onClose={() => show(null)} onChanged={users.reload} />}
     </>
   )
@@ -136,18 +205,40 @@ export function Users() {
 // Число из поля: пусто — «как в шаблоне» (null).
 const num = (v: string): number | null => (v.trim() === '' ? null : Math.max(0, Number(v.replace(',', '.')) || 0))
 
-// Перенос пользователей: экспорт в файл и импорт из него. Только люди: ноды и настройки
-// остаются у каждой панели свои. UUID и ссылки подписок сохраняются — клиенты продолжают
-// работать на новой панели.
-function TransferUsers({ search, onClose, onImported }: { search: string; onClose: () => void; onImported: () => void }) {
+type TransferReport = {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  renamed: number
+  failed: number
+  problems: string[]
+  missingGroups: string[]
+  createdGroups?: string[]
+  dryRun?: boolean
+}
+
+// Перенос пользователей: экспорт в файл и импорт из файла или напрямую из Remnawave по API.
+// UUID и ссылки подписок (shortUuid) сохраняются — клиенты продолжают работать на новой панели.
+function TransferUsers({ search, status, group, onClose, onImported }: { search: string; status: string; group: number; onClose: () => void; onImported: () => void }) {
   const act = useAction()
+  const [tab, setTab] = useState<'file' | 'remnawave'>('file')
   const [mode, setMode] = useState<'skip' | 'upsert' | 'rename'>('skip')
   const [reissue, setReissue] = useState(false)
+  const [createGroups, setCreateGroups] = useState(true)
+  const [withTraffic, setWithTraffic] = useState(true)
   const [file, setFile] = useState<File | null>(null)
-  const [report, setReport] = useState<{ total: number; created: number; updated: number; skipped: number; renamed: number; failed: number; problems: string[]; missingGroups: string[] } | null>(null)
+  const [remnaUrl, setRemnaUrl] = useState('')
+  const [remnaToken, setRemnaToken] = useState('')
+  const [report, setReport] = useState<TransferReport | null>(null)
 
   const doExport = async () => {
-    const f = await act(() => get<any>(`users/export${search ? `?search=${encodeURIComponent(search)}` : ''}`), tr('users.exported'))
+    const qs = new URLSearchParams()
+    if (search) qs.set('search', search)
+    if (status) qs.set('status', status)
+    if (group) qs.set('group', String(group))
+    const qstr = qs.toString()
+    const f = await act(() => get<any>(`users/export${qstr ? `?${qstr}` : ''}`), tr('users.exported'))
     if (!f) return
     const name = f.meta?.source === 'remnawave' || f.meta?.source === '3x-ui' ? `users-${f.meta.source}.json` : 'users-export.json'
     const blob = new Blob([JSON.stringify(f, null, 2)], { type: 'application/json' })
@@ -158,12 +249,41 @@ function TransferUsers({ search, onClose, onImported }: { search: string; onClos
     URL.revokeObjectURL(a.href)
   }
 
-  const doImport = async () => {
-    if (!file) return
-    const text = await file.text()
-    const r = await act(() => post<any>('users/import', { file: text, mode, reissueTokens: reissue }), tr('users.imported'))
-    if (r) { setReport(r); onImported() }
+  const doImport = async (dryRun: boolean) => {
+    if (tab === 'file') {
+      if (!file) return
+      const text = await file.text()
+      const r = await act(() => post<TransferReport>('users/import', {
+        file: text,
+        mode,
+        reissueTokens: reissue,
+        createGroups,
+        withTraffic,
+        dryRun,
+      }), dryRun ? undefined : tr('users.imported'))
+      if (r) {
+        setReport(r)
+        if (!dryRun) onImported()
+      }
+    } else {
+      if (!remnaUrl.trim() || !remnaToken.trim()) return
+      const r = await act(() => post<TransferReport>('users/import-remnawave', {
+        url: remnaUrl.trim(),
+        token: remnaToken.trim(),
+        mode,
+        reissueTokens: reissue,
+        createGroups,
+        withTraffic,
+        dryRun,
+      }), dryRun ? undefined : tr('users.imported'))
+      if (r) {
+        setReport(r)
+        if (!dryRun) onImported()
+      }
+    }
   }
+
+  const canImport = tab === 'file' ? !!file : (!!remnaUrl.trim() && !!remnaToken.trim())
 
   return (
     <Modal title={tr('users.transfer_users')} onClose={onClose}>
@@ -173,10 +293,28 @@ function TransferUsers({ search, onClose, onImported }: { search: string; onClos
         {search && <div className="muted small" style={{ marginTop: 6 }}>{tr('users.export_filtered', { v: search })}</div>}
       </div>
       <div className="card card-pad">
-        <div className="label" style={{ marginBottom: 8 }}>{tr('users.import_section')}</div>
-        <Field label={tr('users.file')} help={tr('users.file_help')}>
-          <input className="input" type="file" accept=".json,application/json" onChange={(e) => { setFile(e.target.files?.[0] || null); setReport(null) }} />
-        </Field>
+        <div className="row between" style={{ marginBottom: 10 }}>
+          <div className="label">{tr('users.import_section')}</div>
+          <div className="tabs">
+            <button type="button" className={'tab' + (tab === 'file' ? ' active' : '')} onClick={() => { setTab('file'); setReport(null) }}>{tr('users.import_tab_file')}</button>
+            <button type="button" className={'tab' + (tab === 'remnawave' ? ' active' : '')} onClick={() => { setTab('remnawave'); setReport(null) }}>{tr('users.import_tab_remnawave')}</button>
+          </div>
+        </div>
+        {tab === 'file' ? (
+          <Field label={tr('users.file')} help={tr('users.file_help')}>
+            <input className="input" type="file" accept=".json,application/json" onChange={(e) => { setFile(e.target.files?.[0] || null); setReport(null) }} />
+          </Field>
+        ) : (
+          <>
+            <div className="small muted" style={{ marginBottom: 10 }}>{tr('users.remnawave_api_hint')}</div>
+            <Field label={tr('users.remnawave_url')}>
+              <input className="input mono" value={remnaUrl} onChange={(e) => { setRemnaUrl(e.target.value); setReport(null) }} placeholder="https://panel.example.com" />
+            </Field>
+            <Field label={tr('users.remnawave_token')}>
+              <input className="input mono" type="password" value={remnaToken} onChange={(e) => { setRemnaToken(e.target.value); setReport(null) }} placeholder="eyJhbGciOi..." />
+            </Field>
+          </>
+        )}
         <Field label={tr('users.mode')}>
           <select className="input" value={mode} onChange={(e) => setMode(e.target.value as 'skip' | 'upsert' | 'rename')}>
             <option value="skip">{tr('users.mode_skip')}</option>
@@ -184,13 +322,23 @@ function TransferUsers({ search, onClose, onImported }: { search: string; onClos
             <option value="rename">{tr('users.mode_rename')}</option>
           </select>
         </Field>
+        <label className="check" style={{ marginBottom: 6 }}>
+          <input type="checkbox" checked={createGroups} onChange={(e) => setCreateGroups(e.target.checked)} />{' '}{tr('users.import_create_groups')}
+        </label>
+        <label className="check" style={{ marginBottom: 6 }}>
+          <input type="checkbox" checked={withTraffic} onChange={(e) => setWithTraffic(e.target.checked)} />{' '}{tr('users.import_with_traffic')}
+        </label>
         <label className="check" style={{ marginBottom: 12 }}>
           <input type="checkbox" checked={reissue} onChange={(e) => setReissue(e.target.checked)} />{' '}{tr('users.reissue_on_import')}
         </label>
-        <button className="btn primary" disabled={!file} onClick={doImport}><Icon name="upload" />{' '}{tr('users.import_2')}</button>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn" disabled={!canImport} onClick={() => doImport(true)}>{tr('users.import_dry_run_btn')}</button>
+          <button className="btn primary" disabled={!canImport} onClick={() => doImport(false)}><Icon name="upload" />{' '}{tr('users.import_2')}</button>
+        </div>
         {report && (
-          <div className="alert amber" style={{ marginTop: 12 }}>
-            <Trans k="users.import_report" v={{ total: report.total, created: report.created, updated: report.updated, skipped: report.skipped, failed: report.failed }} />
+          <div className={'alert ' + (report.dryRun ? 'miku' : 'amber')} style={{ marginTop: 12 }}>
+            <Trans k={report.dryRun ? 'users.import_dry_run_report' : 'users.import_report'} v={{ total: report.total, created: report.created, updated: report.updated, skipped: report.skipped, failed: report.failed }} />
+            {(report.createdGroups?.length ?? 0) > 0 && <div style={{ marginTop: 6 }} className="small"><Trans k="users.import_created_groups" v={{ v: report.createdGroups!.join(', ') }} /></div>}
             {report.problems?.length > 0 && <div style={{ marginTop: 6 }} className="small">{report.problems.map((p, i) => <div key={i}>{p}</div>)}</div>}
             {report.missingGroups?.length > 0 && <div style={{ marginTop: 6 }} className="small"><Trans k="users.import_missing_groups" v={{ v: report.missingGroups.join(', ') }} /></div>}
           </div>

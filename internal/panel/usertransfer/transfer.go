@@ -55,6 +55,7 @@ type ImportOptions struct {
 	DryRun        bool
 	WithTraffic   bool // copy TrafficUsedBytes (always true when the file has it and upsert)
 	ReissueTokens bool
+	CreateGroups  bool // create groups missing on this panel and grant them AccessAll
 	Actor         string
 }
 
@@ -67,14 +68,15 @@ const (
 
 // Report is what Import did (or, on DryRun, would do).
 type Report struct {
-	Created  int
-	Updated  int
-	Skipped  int
-	Renamed  int
-	Failed   int
-	Problems []string        // one line per failed user
-	Links    []ReportLink    // subscription links of the reissued users
-	unknowns map[string]bool // group names not found on this panel (computed)
+	Created       int
+	Updated       int
+	Skipped       int
+	Renamed       int
+	Failed        int
+	Problems      []string        // one line per failed user
+	Links         []ReportLink    // subscription links of the reissued users
+	unknowns      map[string]bool // group names not found on this panel (computed)
+	createdGroups map[string]bool // group names auto-created during import
 }
 
 // ReportLink is a new subscription link after ReissueTokens.
@@ -84,7 +86,7 @@ type ReportLink struct {
 }
 
 func newReport() *Report {
-	return &Report{unknowns: map[string]bool{}}
+	return &Report{unknowns: map[string]bool{}, createdGroups: map[string]bool{}}
 }
 
 // MissingGroups lists group names the export had that this panel does not (in stable order).
@@ -94,6 +96,19 @@ func (r *Report) MissingGroups() []string {
 	}
 	out := make([]string, 0, len(r.unknowns))
 	for g := range r.unknowns {
+		out = append(out, g)
+	}
+	sortStrings(out)
+	return out
+}
+
+// CreatedGroups lists group names created during import (in stable order).
+func (r *Report) CreatedGroups() []string {
+	if len(r.createdGroups) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(r.createdGroups))
+	for g := range r.createdGroups {
 		out = append(out, g)
 	}
 	sortStrings(out)
@@ -115,6 +130,7 @@ func (t TransferUser) user() *store.User {
 		Username:          t.Username,
 		UUID:              t.UUID,
 		SubToken:          t.SubToken,
+		Disabled:          t.Status == store.StatusDisabled,
 		Status:            t.Status,
 		ExpireAt:          t.ExpireAt,
 		TrafficLimitBytes: t.TrafficLimitBytes,

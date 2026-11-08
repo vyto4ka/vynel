@@ -19,13 +19,16 @@ import (
 
 // RemnawaveImport is the input of the converter.
 type RemnawaveImport struct {
-	Xray      string // required: the Xray JSON config (full or a single inbound)
-	Host      string // optional: the subscription host JSON (Remnawave Host entity)
-	Nginx     string // optional: nginx directives; empty = no nginx section
-	WithNginx bool   // whether to include the nginx section (the UI checkbox)
+	Xray         string // required: the Xray JSON config (full, array of inbounds, or a single inbound)
+	Host         string // optional: the subscription host JSON (Remnawave Host entity)
+	Nginx        string // optional: nginx directives; empty = no nginx section
+	WithNginx    bool   // whether to include the nginx section (the UI checkbox)
+	InboundTag   string // optional: select a specific inbound by tag when multiple inbounds exist
+	InboundIndex *int   // optional: select a specific inbound by 0-based index (after filtering dokodemo-door)
+	KeepKeys     bool   // preserve existing Reality privateKey, shortIds and XHTTP/WS path as defaults
 }
 
-// RemnawaveResult is the produced template: the YAML source plus what the UI reports.
+// RemnawaveResult is the produced template: the produced YAML source plus what the UI reports.
 type RemnawaveResult struct {
 	Source string   // the template YAML
 	ID     string   // the suggested template id
@@ -47,18 +50,60 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 	if err := json.Unmarshal([]byte(in.Xray), &root); err != nil {
 		return nil, fmt.Errorf("не удалось разобрать Xray-конфиг: %w", err)
 	}
+	notes := []string{}
 	rootMap, _ := root.(map[string]any)
+	rootArr, isArr := root.([]any)
 	var inbound map[string]any
 	switch {
-	case rootMap != nil && rootMap["inbounds"] != nil:
-		ins, ok := rootMap["inbounds"].([]any)
-		if !ok || len(ins) == 0 {
+	case (rootMap != nil && rootMap["inbounds"] != nil) || isArr:
+		var ins []any
+		if isArr {
+			ins = rootArr
+		} else {
+			ins, _ = rootMap["inbounds"].([]any)
+		}
+		if len(ins) == 0 {
 			return nil, fmt.Errorf("в Xray-конфиге нет inbounds")
 		}
-		if len(ins) > 1 {
-			return nil, fmt.Errorf("в Xray-конфиге %d инбаундов; шаблон vynel описывает один — оставьте основной, остальные игнорируются панелью (системные секции добавляются сами)", len(ins))
+		filtered := make([]map[string]any, 0, len(ins))
+		skippedDokodemo := false
+		for _, raw := range ins {
+			m, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if proto, _ := m["protocol"].(string); proto == "dokodemo-door" && len(ins) > 1 {
+				skippedDokodemo = true
+				continue
+			}
+			filtered = append(filtered, m)
 		}
-		inbound, _ = ins[0].(map[string]any)
+		if skippedDokodemo {
+			notes = append(notes, "служебный инбаунд dokodemo-door пропущен — панель добавляет секцию API сама")
+		}
+		if len(filtered) == 0 {
+			inbound, _ = ins[0].(map[string]any)
+		} else if tag := strings.TrimSpace(in.InboundTag); tag != "" {
+			for _, m := range filtered {
+				if t, _ := m["tag"].(string); t == tag {
+					inbound = m
+					break
+				}
+			}
+			if inbound == nil {
+				return nil, fmt.Errorf("инбаунд с тегом %s не найден в Xray-конфиге", tag)
+			}
+		} else if in.InboundIndex != nil {
+			idx := *in.InboundIndex
+			if idx < 0 || idx >= len(filtered) {
+				return nil, fmt.Errorf("инбаунд с индексом %d не найден в Xray-конфиге", idx)
+			}
+			inbound = filtered[idx]
+		} else if len(filtered) > 1 {
+			return nil, fmt.Errorf("в Xray-конфиге %d инбаундов; шаблон vynel описывает один — оставьте основной, остальные игнорируются панелью (системные секции добавляются сами)", len(filtered))
+		} else {
+			inbound = filtered[0]
+		}
 	case rootMap != nil && rootMap["protocol"] != nil:
 		inbound = rootMap
 	default:
@@ -68,7 +113,6 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 		return nil, fmt.Errorf("инбаунд в Xray-конфиге не является объектом")
 	}
 
-	notes := []string{}
 	variables := []Variable{}
 	vars := map[string]bool{}
 
@@ -141,21 +185,51 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 			notes = append(notes, fmt.Sprintf("serverNames: %s заменён доменом ноды, остальные имена оставлены как есть (%s)", snDomain, strings.Join(stringList(keepNames), ", ")))
 		}
 
-		// privateKey: generated per node; publicKey derived — that is what goes into the host.
-		if _, has := rs["privateKey"]; has {
+		// privateKey: generated per node (or preserved as default if KeepKeys is set); publicKey derived.
+		if rawPriv, has := rs["privateKey"]; has {
+			origPriv, _ := rawPriv.(string)
+			origPriv = strings.TrimSpace(origPriv)
 			rs["privateKey"] = "${REALITY_PRIVATE_KEY}"
-			addVar(Variable{Name: "REALITY_PRIVATE_KEY", Scope: ScopeNode, Source: SourceGenerate, Generator: "x25519", Secret: true,
-				Description: "Приватный ключ REALITY, свой на каждой ноде."})
-			addVar(Variable{Name: "REALITY_PUBLIC_KEY", Scope: ScopeNode, Source: SourceDerived, From: "x25519_public(REALITY_PRIVATE_KEY)",
-				Description: "Публичный ключ (password / pbk), уходит в подписку."})
-			notes = append(notes, "privateKey заменён на генерируемый ${REALITY_PRIVATE_KEY} — оригинальный ключ не переносится")
+			if in.KeepKeys && origPriv != "" {
+				if _, err := X25519Public(origPriv); err == nil {
+					addVar(Variable{Name: "REALITY_PRIVATE_KEY", Scope: ScopeNode, Source: SourceConst, Default: origPriv, Secret: true,
+						Description: "Приватный ключ REALITY, свой на каждой ноде."})
+					addVar(Variable{Name: "REALITY_PUBLIC_KEY", Scope: ScopeNode, Source: SourceDerived, From: "x25519_public(REALITY_PRIVATE_KEY)",
+						Description: "Публичный ключ (password / pbk), уходит в подписку."})
+					notes = append(notes, "оригинальный privateKey сохранён как значение по умолчанию ${REALITY_PRIVATE_KEY}")
+				}
+			}
+			if !vars["REALITY_PRIVATE_KEY"] {
+				addVar(Variable{Name: "REALITY_PRIVATE_KEY", Scope: ScopeNode, Source: SourceGenerate, Generator: "x25519", Secret: true,
+					Description: "Приватный ключ REALITY, свой на каждой ноде."})
+				addVar(Variable{Name: "REALITY_PUBLIC_KEY", Scope: ScopeNode, Source: SourceDerived, From: "x25519_public(REALITY_PRIVATE_KEY)",
+					Description: "Публичный ключ (password / pbk), уходит в подписку."})
+				notes = append(notes, "privateKey заменён на генерируемый ${REALITY_PRIVATE_KEY} — оригинальный ключ не переносится")
+			}
 		}
-		// shortIds: generated per node (the old one stays nowhere — new keys anyway).
-		if _, has := rs["shortIds"]; has {
-			rs["shortIds"] = []any{"${REALITY_SHORT_ID}"}
-			addVar(Variable{Name: "REALITY_SHORT_ID", Scope: ScopeNode, Source: SourceGenerate, Generator: "shortid",
-				Description: "shortId (8 байт hex)."})
-			notes = append(notes, "shortIds заменён на генерируемый ${REALITY_SHORT_ID}")
+		// shortIds: generated per node (or preserved as default if KeepKeys is set).
+		if rawSids, has := rs["shortIds"]; has {
+			var keptSids []string
+			if in.KeepKeys {
+				if arr, ok := rawSids.([]any); ok {
+					keptSids = stringList(arr)
+				}
+			}
+			if len(keptSids) > 0 {
+				outSids := []any{"${REALITY_SHORT_ID}"}
+				for _, extra := range keptSids[1:] {
+					outSids = append(outSids, extra)
+				}
+				rs["shortIds"] = outSids
+				addVar(Variable{Name: "REALITY_SHORT_ID", Scope: ScopeNode, Source: SourceConst, Default: keptSids[0],
+					Description: "shortId (8 байт hex)."})
+				notes = append(notes, "оригинальный shortId сохранён как значение по умолчанию ${REALITY_SHORT_ID}")
+			} else {
+				rs["shortIds"] = []any{"${REALITY_SHORT_ID}"}
+				addVar(Variable{Name: "REALITY_SHORT_ID", Scope: ScopeNode, Source: SourceGenerate, Generator: "shortid",
+					Description: "shortId (8 байт hex)."})
+				notes = append(notes, "shortIds заменён на генерируемый ${REALITY_SHORT_ID}")
+			}
 		}
 		// target/dest with 127.0.0.1:<port> is a self-steal: expose the port as a variable.
 		for _, key := range []string{"target", "dest"} {
@@ -186,14 +260,20 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 		delete(ts, "certificate")
 	}
 
-	// XHTTP: path becomes a generated profile variable (a guessable default path is bad).
+	// XHTTP: path becomes a generated profile variable (or a constant default when KeepKeys is set).
 	if xs, ok := ss["xhttpSettings"].(map[string]any); ok {
 		if path, ok := xs["path"].(string); ok && path != "" {
 			xs["path"] = "${XHTTP_PATH}"
-			addVar(Variable{Name: "XHTTP_PATH", Scope: ScopeProfile, Source: SourceGenerate, Generator: "path",
-				Options: []string{path, "/api/stream", "/static/chunks", "/media/feed"}, Validate: "path",
-				Description: "Путь XHTTP без завершающего слеша. Одинаковый на сервере и в подписке."})
-			notes = append(notes, "путь XHTTP вынесен в генерируемую переменную XHTTP_PATH (исходный — в options)")
+			if in.KeepKeys {
+				addVar(Variable{Name: "XHTTP_PATH", Scope: ScopeProfile, Source: SourceConst, Default: path, Validate: "path",
+					Description: "Путь XHTTP без завершающего слеша. Одинаковый на сервере и в подписке."})
+				notes = append(notes, "оригинальный путь XHTTP сохранён в переменной XHTTP_PATH")
+			} else {
+				addVar(Variable{Name: "XHTTP_PATH", Scope: ScopeProfile, Source: SourceGenerate, Generator: "path",
+					Options: []string{path, "/api/stream", "/static/chunks", "/media/feed"}, Validate: "path",
+					Description: "Путь XHTTP без завершающего слеша. Одинаковый на сервере и в подписке."})
+				notes = append(notes, "путь XHTTP вынесен в генерируемую переменную XHTTP_PATH (исходный — в options)")
+			}
 		}
 		if extra, ok := xs["extra"].(string); ok && strings.TrimSpace(extra) != "" {
 			// The extra JSON may itself contain ${} placeholders after reality handling; keep it
@@ -211,10 +291,16 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 	if ws, ok := ss["wsSettings"].(map[string]any); ok {
 		if path, ok := ws["path"].(string); ok && path != "" && !strings.Contains(path, "${") {
 			ws["path"] = "${XHTTP_PATH}"
-			addVar(Variable{Name: "XHTTP_PATH", Scope: ScopeProfile, Source: SourceGenerate, Generator: "path",
-				Options: []string{path, "/api/stream", "/static/chunks"}, Validate: "path",
-				Description: "Путь WebSocket без завершающего слеша."})
-			notes = append(notes, "путь WebSocket вынесен в переменную XHTTP_PATH")
+			if in.KeepKeys {
+				addVar(Variable{Name: "XHTTP_PATH", Scope: ScopeProfile, Source: SourceConst, Default: path, Validate: "path",
+					Description: "Путь WebSocket без завершающего слеша."})
+				notes = append(notes, "оригинальный путь WebSocket сохранён в переменной XHTTP_PATH")
+			} else {
+				addVar(Variable{Name: "XHTTP_PATH", Scope: ScopeProfile, Source: SourceGenerate, Generator: "path",
+					Options: []string{path, "/api/stream", "/static/chunks"}, Validate: "path",
+					Description: "Путь WebSocket без завершающего слеша."})
+				notes = append(notes, "путь WebSocket вынесен в переменную XHTTP_PATH")
+			}
 		}
 	}
 
@@ -283,7 +369,11 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 			b.WriteString("    options: [" + strings.Join(opts, ", ") + "]\n")
 		}
 		if v.Default != nil {
-			fmt.Fprintf(&b, "    default: %v\n", v.Default)
+			if s, ok := v.Default.(string); ok {
+				fmt.Fprintf(&b, "    default: %s\n", yamlQuote(s))
+			} else {
+				fmt.Fprintf(&b, "    default: %v\n", v.Default)
+			}
 		}
 		if v.DefaultFrom != "" {
 			fmt.Fprintf(&b, "    default_from: %s\n", v.DefaultFrom)
