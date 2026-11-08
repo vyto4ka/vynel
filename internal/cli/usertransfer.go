@@ -52,9 +52,9 @@ func userTransferCmd() *cobra.Command {
 	export.Flags().StringVar(&password, "password", "", "encrypt the file with this password (age; the file has tokens, so protect it)")
 
 	var mode, importPassword string
-	var dryRun, reissue bool
+	var dryRun, reissue, withTraffic, createGroups bool
 	importCmd := &cobra.Command{
-		Use: "import FILE", Short: "Read users from a vynel export file", Args: cobra.ExactArgs(1),
+		Use: "import FILE", Short: "Read users from a vynel export file (or raw Remnawave /api/users JSON)", Args: cobra.ExactArgs(1),
 		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
 			b, err := os.ReadFile(args[0])
 			if err != nil {
@@ -67,7 +67,14 @@ func userTransferCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rep, err := importFile(ctx, s, f, usertransfer.ImportOptions{Mode: mode, DryRun: dryRun, ReissueTokens: reissue, Actor: "cli"})
+			rep, err := importFile(ctx, s, f, usertransfer.ImportOptions{
+				Mode:          mode,
+				DryRun:        dryRun,
+				WithTraffic:   withTraffic,
+				ReissueTokens: reissue,
+				CreateGroups:  createGroups,
+				Actor:         "cli",
+			})
 			if err != nil {
 				return err
 			}
@@ -78,11 +85,13 @@ func userTransferCmd() *cobra.Command {
 	importCmd.Flags().StringVar(&mode, "mode", "skip", "what to do with users already here: skip, upsert or rename")
 	importCmd.Flags().StringVar(&importPassword, "password", "", "password of an encrypted export file")
 	importCmd.Flags().BoolVar(&dryRun, "dry-run", false, "only report what would happen")
+	importCmd.Flags().BoolVar(&withTraffic, "with-traffic", true, "copy used traffic counters from the file")
+	importCmd.Flags().BoolVar(&createGroups, "create-groups", false, "auto-create missing groups and grant them access to all inbounds")
 	importCmd.Flags().BoolVar(&reissue, "reissue-tokens", false, "give imported users new subscription links and print them")
 
 	var rnURL, rnToken string
 	var rnMode string
-	var rnDryRun, rnReissue bool
+	var rnDryRun, rnReissue, rnWithTraffic, rnCreateGroups bool
 	importRn := &cobra.Command{
 		Use: "import-remnawave", Short: "Pull users from a Remnawave panel over its API", Args: cobra.NoArgs,
 		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
@@ -92,9 +101,14 @@ func userTransferCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Remnawave tokens are not vynel's: everyone gets a fresh link, listed in the report.
-			rnReissue = true
-			rep, err := importFile(ctx, s, f, usertransfer.ImportOptions{Mode: rnMode, DryRun: rnDryRun, ReissueTokens: rnReissue, Actor: "cli"})
+			rep, err := importFile(ctx, s, f, usertransfer.ImportOptions{
+				Mode:          rnMode,
+				DryRun:        rnDryRun,
+				WithTraffic:   rnWithTraffic,
+				ReissueTokens: rnReissue,
+				CreateGroups:  rnCreateGroups,
+				Actor:         "cli",
+			})
 			if err != nil {
 				return err
 			}
@@ -106,7 +120,9 @@ func userTransferCmd() *cobra.Command {
 	importRn.Flags().StringVar(&rnToken, "token", "", "Remnawave API token (Panel → API tokens)")
 	importRn.Flags().StringVar(&rnMode, "mode", "skip", "what to do with users already here: skip, upsert or rename")
 	importRn.Flags().BoolVar(&rnDryRun, "dry-run", false, "only report what would happen")
-	importRn.Flags().BoolVar(&rnReissue, "reissue-tokens", true, "give imported users new subscription links and print them")
+	importRn.Flags().BoolVar(&rnWithTraffic, "with-traffic", true, "copy used traffic counters from Remnawave")
+	importRn.Flags().BoolVar(&rnCreateGroups, "create-groups", true, "auto-create missing Internal Squads as groups with access to all inbounds")
+	importRn.Flags().BoolVar(&rnReissue, "reissue-tokens", false, "mint new subscription tokens instead of keeping Remnawave shortUuid")
 
 	var xuiMode string
 	var xuiDryRun, xuiReissue bool
@@ -152,6 +168,9 @@ func printImportReport(w io.Writer, f *usertransfer.ExportFile, rep *usertransfe
 		title, rep.Created+rep.Updated, f.Meta.Users, rep.Created, rep.Updated, rep.Skipped, rep.Renamed, rep.Failed)
 	for _, p := range rep.Problems {
 		fmt.Fprintf(w, "  problem: %s\n", p)
+	}
+	if created := rep.CreatedGroups(); len(created) > 0 {
+		fmt.Fprintf(w, "created groups (with access to all inbounds): %v\n", created)
 	}
 	if missing := rep.MissingGroups(); len(missing) > 0 {
 		fmt.Fprintf(w, "groups not on this panel (users landed without them): %v\n", missing)

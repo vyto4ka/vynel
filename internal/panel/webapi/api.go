@@ -43,6 +43,8 @@ func (s *Server) routes() {
 	s.handle("POST /api/users", s.createUser)
 	s.handle("GET /api/users/export", s.usersExport)
 	s.handle("POST /api/users/import", s.usersImport)
+	s.handle("POST /api/users/import-remnawave", s.usersImportRemnawave)
+	s.handle("POST /api/users/bulk", s.usersBulk)
 	s.handle("GET /api/users/{id}", s.user)
 	s.handle("PATCH /api/users/{id}", s.updateUser)
 	s.handle("POST /api/users/{id}/{action}", s.userAction)
@@ -371,6 +373,9 @@ func (s *Server) users(r *http.Request) (any, error) {
 	ctx := r.Context()
 	q := r.URL.Query()
 	f := store.UserFilter{Status: q.Get("status"), Search: q.Get("search"), Sort: q.Get("sort"), Desc: q.Get("dir") == "desc"}
+	if g, err := strconv.ParseInt(q.Get("group"), 10, 64); err == nil && g > 0 {
+		f.GroupID = &g
+	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit > 0 {
 		f.Limit = min(limit, 1000)
@@ -1388,9 +1393,12 @@ func (s *Server) network(r *http.Request) (any, error) {
 // reads): uuid and subscription tokens included, groups by name. The browser offers it as a
 // download; the token inside makes the file as sensitive as the panel itself.
 func (s *Server) usersExport(r *http.Request) (any, error) {
-	f, err := usertransfer.Export(r.Context(), s.svc.Store(), usertransfer.ExportOptions{
-		Filter: store.UserFilter{Status: r.URL.Query().Get("status"), Search: r.URL.Query().Get("search")},
-	})
+	q := r.URL.Query()
+	filter := store.UserFilter{Status: q.Get("status"), Search: q.Get("search")}
+	if g, err := strconv.ParseInt(q.Get("group"), 10, 64); err == nil && g > 0 {
+		filter.GroupID = &g
+	}
+	f, err := usertransfer.Export(r.Context(), s.svc.Store(), usertransfer.ExportOptions{Filter: filter})
 	if err != nil {
 		return nil, err
 	}
@@ -1398,12 +1406,15 @@ func (s *Server) usersExport(r *http.Request) (any, error) {
 }
 
 // usersImport reads a transfer file (a whole JSON body; the UI reads the file client-side).
-// The report says what landed: counts, problems, missing groups, new links.
+// The report says what landed: counts, problems, missing groups, created groups.
 func (s *Server) usersImport(r *http.Request) (any, error) {
 	var in struct {
 		File          json.RawMessage `json:"file"`
 		Mode          string          `json:"mode"`
 		ReissueTokens bool            `json:"reissueTokens"`
+		CreateGroups  bool            `json:"createGroups"`
+		WithTraffic   *bool           `json:"withTraffic"`
+		DryRun        bool            `json:"dryRun"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -1412,16 +1423,126 @@ func (s *Server) usersImport(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, badRequest(err.Error())
 	}
-	im := usertransfer.NewImporter(s.svc.Store(), usertransfer.ImportOptions{Mode: in.Mode, ReissueTokens: in.ReissueTokens, Actor: "web"})
+	withTraffic := in.WithTraffic == nil || *in.WithTraffic
+	return s.runUsersImport(r, f, usertransfer.ImportOptions{
+		Mode:          in.Mode,
+		ReissueTokens: in.ReissueTokens,
+		CreateGroups:  in.CreateGroups,
+		WithTraffic:   withTraffic,
+		DryRun:        in.DryRun,
+		Actor:         "web",
+	})
+}
+
+// usersImportRemnawave pulls users directly from a Remnawave panel over its API and imports them.
+func (s *Server) usersImportRemnawave(r *http.Request) (any, error) {
+	var in struct {
+		URL           string `json:"url"`
+		Token         string `json:"token"`
+		Mode          string `json:"mode"`
+		ReissueTokens bool   `json:"reissueTokens"`
+		CreateGroups  *bool  `json:"createGroups"`
+		WithTraffic   *bool  `json:"withTraffic"`
+		DryRun        bool   `json:"dryRun"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	f, err := usertransfer.FetchRemnawave(r.Context(), usertransfer.RemnawavePanel{
+		BaseURL: strings.TrimSpace(in.URL),
+		Token:   strings.TrimSpace(in.Token),
+	})
+	if err != nil {
+		return nil, badRequest(err.Error())
+	}
+	createGroups := in.CreateGroups == nil || *in.CreateGroups
+	withTraffic := in.WithTraffic == nil || *in.WithTraffic
+	return s.runUsersImport(r, f, usertransfer.ImportOptions{
+		Mode:          in.Mode,
+		ReissueTokens: in.ReissueTokens,
+		CreateGroups:  createGroups,
+		WithTraffic:   withTraffic,
+		DryRun:        in.DryRun,
+		Actor:         "web",
+	})
+}
+
+func (s *Server) runUsersImport(r *http.Request, f *usertransfer.ExportFile, opt usertransfer.ImportOptions) (any, error) {
+	im := usertransfer.NewImporter(s.svc.Store(), opt)
 	im.NewTokenFn = service.NewSubToken
 	im.LinkFn = func(u *store.User) (string, error) { return s.svc.SubscriptionURL(r.Context(), u) }
 	rep, err := im.Import(r.Context(), f)
 	if err != nil {
 		return nil, err
 	}
-	s.svc.Invalidate()
+	if !opt.DryRun {
+		s.svc.Invalidate()
+		if s.svc.OnChange != nil {
+			s.svc.OnChange()
+		}
+	}
 	return map[string]any{
-		"total": f.Meta.Users, "created": rep.Created, "updated": rep.Updated, "skipped": rep.Skipped,
-		"renamed": rep.Renamed, "failed": rep.Failed, "problems": rep.Problems, "missingGroups": rep.MissingGroups(),
+		"total":         f.Meta.Users,
+		"created":       rep.Created,
+		"updated":       rep.Updated,
+		"skipped":       rep.Skipped,
+		"renamed":       rep.Renamed,
+		"failed":        rep.Failed,
+		"problems":      rep.Problems,
+		"missingGroups": rep.MissingGroups(),
+		"createdGroups": rep.CreatedGroups(),
+		"dryRun":        opt.DryRun,
 	}, nil
+}
+
+// usersBulk applies a batch action to a list of user IDs.
+func (s *Server) usersBulk(r *http.Request) (any, error) {
+	var in struct {
+		IDs      []int64 `json:"ids"`
+		Action   string  `json:"action"` // extend, reset, enable, disable, addGroup, setGroups, delete
+		Months   int     `json:"months"`
+		Days     int     `json:"days"`
+		GroupID  int64   `json:"groupId"`
+		GroupIDs []int64 `json:"groupIds"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ctx, a := r.Context(), actor(r)
+	done, failed := 0, 0
+	for _, id := range in.IDs {
+		var err error
+		switch in.Action {
+		case "extend":
+			_, err = s.svc.ExtendUser(ctx, a, id, in.Months, in.Days)
+		case "reset":
+			_, err = s.svc.ResetUserTraffic(ctx, a, id)
+		case "enable":
+			_, err = s.svc.SetUserEnabled(ctx, a, id, true)
+		case "disable":
+			_, err = s.svc.SetUserEnabled(ctx, a, id, false)
+		case "addGroup":
+			cur, gerr := s.svc.UserGroupIDs(ctx, id)
+			if gerr != nil {
+				err = gerr
+				break
+			}
+			if !slices.Contains(cur, in.GroupID) {
+				cur = append(cur, in.GroupID)
+			}
+			_, err = s.svc.SetUserGroups(ctx, a, id, cur)
+		case "setGroups":
+			_, err = s.svc.SetUserGroups(ctx, a, id, in.GroupIDs)
+		case "delete":
+			err = s.svc.DeleteUser(ctx, a, id)
+		default:
+			return nil, &httpError{http.StatusBadRequest, "unknown action"}
+		}
+		if err != nil {
+			failed++
+		} else {
+			done++
+		}
+	}
+	return map[string]any{"done": done, "failed": failed}, nil
 }

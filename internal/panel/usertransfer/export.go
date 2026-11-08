@@ -94,13 +94,26 @@ func (f *ExportFile) Marshal() ([]byte, error) {
 	return json.MarshalIndent(f, "", "  ")
 }
 
-// Unmarshal reads a file from JSON and checks its format.
+// Unmarshal reads a file from JSON and checks its format. It also accepts a raw JSON dump
+// of Remnawave's /api/users endpoint and converts it on the fly.
 func Unmarshal(b []byte) (*ExportFile, error) {
 	f := &ExportFile{}
 	if err := json.Unmarshal(b, f); err != nil {
+		if users, ok := tryUnmarshalRemnawave(b); ok {
+			return &ExportFile{
+				Meta:  ExportMeta{Format: Format, CreatedAt: unixNow(), Source: SourceRemnawave, Users: len(users)},
+				Users: users,
+			}, nil
+		}
 		return nil, err
 	}
 	if f.Meta.Format == 0 {
+		if users, ok := tryUnmarshalRemnawave(b); ok {
+			return &ExportFile{
+				Meta:  ExportMeta{Format: Format, CreatedAt: unixNow(), Source: SourceRemnawave, Users: len(users)},
+				Users: users,
+			}, nil
+		}
 		return nil, errFormat("no meta.format: not a vynel users export")
 	}
 	if f.Meta.Format > Format {

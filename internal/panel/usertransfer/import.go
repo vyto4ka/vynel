@@ -99,14 +99,22 @@ func (im *Importer) one(ctx context.Context, t TransferUser, rep *Report) error 
 	case ModeUpsert:
 		return im.upsert(ctx, existing, t, rep)
 	default: // rename
-		return im.create(ctx, renamed(t), rep)
+		return im.create(ctx, im.renamed(ctx, t), rep)
 	}
 }
 
 func isNotFound(err error) bool { return errors.Is(err, store.ErrNotFound) }
 
-func renamed(t TransferUser) TransferUser {
-	t.Username = t.Username + "-2"
+func (im *Importer) renamed(ctx context.Context, t TransferUser) TransferUser {
+	base := t.Username
+	for i := 2; i < 1000; i++ {
+		cand := fmt.Sprintf("%s-%d", base, i)
+		if _, err := store.GetUserByUsername(ctx, im.st.DB, cand); isNotFound(err) {
+			t.Username = cand
+			return t
+		}
+	}
+	t.Username = base + "-2"
 	return t
 }
 
@@ -124,16 +132,27 @@ func (im *Importer) create(ctx context.Context, t TransferUser, rep *Report) err
 			return err
 		}
 		u.SubToken = tok
+	} else if other, err := store.GetUserBySubToken(ctx, im.st.DB, u.SubToken); err == nil && other != nil {
+		if tok, err := im.newToken(); err == nil {
+			u.SubToken = tok
+		}
 	}
 	if !im.opt.WithTraffic {
 		u.TrafficUsedBytes = 0
+		u.LifetimeUsedBytes = 0
+	} else {
+		u.LifetimeUsedBytes = u.TrafficUsedBytes
 	}
 	u.CreatedBy = im.opt.Actor
 	if im.opt.DryRun {
+		im.inspectGroupsDryRun(ctx, t.Groups)
 		rep.Created++
 		return nil
 	}
 	err := im.st.Tx(ctx, func(q store.DBTX) error {
+		if err := im.resolveUniqueCollisions(ctx, q, u); err != nil {
+			return err
+		}
 		if err := store.CreateUser(ctx, q, u); err != nil {
 			return err
 		}
@@ -161,8 +180,12 @@ func (im *Importer) upsert(ctx context.Context, existing *store.User, t Transfer
 	if u.Status == "" {
 		u.Status = existing.Status
 	}
+	u.Disabled = u.Status == store.StatusDisabled
 	if u.ResetStrategy == "" {
 		u.ResetStrategy = "no"
+	}
+	if u.SubToken == "" {
+		u.SubToken = existing.SubToken
 	}
 	if im.opt.ReissueTokens {
 		if tok, err := im.newToken(); err == nil {
@@ -170,10 +193,14 @@ func (im *Importer) upsert(ctx context.Context, existing *store.User, t Transfer
 		}
 	}
 	if im.opt.DryRun {
+		im.inspectGroupsDryRun(ctx, t.Groups)
 		rep.Updated++
 		return nil
 	}
 	err := im.st.Tx(ctx, func(q store.DBTX) error {
+		if err := im.resolveUniqueCollisions(ctx, q, u); err != nil {
+			return err
+		}
 		if err := store.UpdateUser(ctx, q, u); err != nil {
 			return err
 		}
@@ -191,16 +218,95 @@ func (im *Importer) upsert(ctx context.Context, existing *store.User, t Transfer
 	return nil
 }
 
-// applyGroups maps group names to this panel's groups; names it does not have are recorded in
-// the report and the user lands without them (limits live on the user, nothing is lost).
+// resolveUniqueCollisions ensures that duplicate TelegramID or ExternalID values across
+// multiple subscriptions of the same customer (common in Remnawave) do not fail the import:
+// the second subscription keeps the ID in Note and clears the unique column.
+func (im *Importer) resolveUniqueCollisions(ctx context.Context, q store.DBTX, u *store.User) error {
+	if u.TelegramID != nil {
+		others, err := store.ListUsers(ctx, q, store.UserFilter{TelegramID: u.TelegramID, Limit: 1})
+		if err != nil {
+			return err
+		}
+		if len(others) > 0 && others[0].ID != u.ID {
+			u.Note = appendTag(u.Note, fmt.Sprintf("tg:%d", *u.TelegramID))
+			u.TelegramID = nil
+		}
+	}
+	if u.ExternalID != nil {
+		others, err := store.ListUsers(ctx, q, store.UserFilter{ExternalID: u.ExternalID, Limit: 1})
+		if err != nil {
+			return err
+		}
+		if len(others) > 0 && others[0].ID != u.ID {
+			u.Note = appendTag(u.Note, "ext:"+*u.ExternalID)
+			u.ExternalID = nil
+		}
+	}
+	return nil
+}
+
+func appendTag(note, tag string) string {
+	if strings.Contains(note, tag) {
+		return note
+	}
+	if note == "" {
+		return tag
+	}
+	return note + " (" + tag + ")"
+}
+
+func (im *Importer) inspectGroupsDryRun(ctx context.Context, names []string) {
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		_, err := store.GetGroupByName(ctx, im.st.DB, n)
+		if isNotFound(err) {
+			if im.opt.CreateGroups {
+				if im.report != nil {
+					im.report.createdGroups[n] = true
+				}
+			} else {
+				if im.report != nil {
+					im.report.unknowns[n] = true
+				}
+				if im.OnUnknownGroup != nil {
+					im.OnUnknownGroup(n)
+				}
+			}
+		}
+	}
+}
+
+// applyGroups maps group names to this panel's groups; names it does not have are either
+// auto-created with AccessAll (when CreateGroups is set) or recorded in the report.
 func (im *Importer) applyGroups(ctx context.Context, q store.DBTX, userID int64, names []string) error {
 	if len(names) == 0 {
 		return nil
 	}
 	var ids []int64
 	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
 		g, err := store.GetGroupByName(ctx, q, n)
 		if isNotFound(err) {
+			if im.opt.CreateGroups {
+				g = &store.Group{Name: n}
+				if err := store.CreateGroup(ctx, q, g); err != nil {
+					return err
+				}
+				if err := store.AddAccessRule(ctx, q, &store.AccessRule{GroupID: g.ID, Kind: store.AccessAll, RefID: 0}); err != nil {
+					return err
+				}
+				if im.report != nil {
+					im.report.createdGroups[n] = true
+				}
+				ids = append(ids, g.ID)
+				continue
+			}
 			if im.report != nil {
 				im.report.unknowns[n] = true
 			}

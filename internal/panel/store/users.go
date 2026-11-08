@@ -307,11 +307,11 @@ func scanUser(sc interface{ Scan(...any) error }) (*User, error) {
 func CreateUser(ctx context.Context, q DBTX, u *User) error {
 	now := unix()
 	u.CreatedAt, u.UpdatedAt = now, now
-	res, err := q.ExecContext(ctx, `INSERT INTO users (username, uuid, sub_token, disabled, status, expire_at, traffic_limit_bytes, reset_strategy, hwid_limit,
-		hwid_off, client_type, template_id, telegram_id, external_id, note, created_by, created_at, updated_at, ip_limit)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.Username, u.UUID, u.SubToken, u.Disabled, u.Status, nullInt(u.ExpireAt), nullInt(u.TrafficLimitBytes), u.ResetStrategy, nullInt(u.HWIDLimit),
-		u.HWIDOff, u.ClientType, nullInt(u.TemplateID), nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.CreatedBy, now, now, nullInt(u.IPLimit))
+	res, err := q.ExecContext(ctx, `INSERT INTO users (username, uuid, sub_token, disabled, status, expire_at, traffic_limit_bytes, traffic_used_bytes, lifetime_used_bytes,
+		reset_strategy, hwid_limit, hwid_off, client_type, template_id, telegram_id, external_id, note, created_by, created_at, updated_at, ip_limit)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.Username, u.UUID, u.SubToken, u.Disabled, u.Status, nullInt(u.ExpireAt), nullInt(u.TrafficLimitBytes), u.TrafficUsedBytes, u.LifetimeUsedBytes,
+		u.ResetStrategy, nullInt(u.HWIDLimit), u.HWIDOff, u.ClientType, nullInt(u.TemplateID), nullInt(u.TelegramID), nullStr(u.ExternalID), u.Note, u.CreatedBy, now, now, nullInt(u.IPLimit))
 	if err != nil {
 		return mapErr(err)
 	}
@@ -401,6 +401,7 @@ func GetUserByUUID(ctx context.Context, q DBTX, uuid string) (*User, error) {
 type UserFilter struct {
 	Status     string  // '' = any
 	Search     string  // substring of username or note
+	GroupID    *int64  // member of this group
 	TelegramID *int64  // exactly this Telegram account
 	ExternalID *string // exactly this id in the other system
 	Sort       string  // a key of userSorts; '' = by id
@@ -444,6 +445,9 @@ func (f UserFilter) where() (string, []any) {
 		where = append(where, "(username LIKE ? OR note LIKE ?)")
 		like := "%" + f.Search + "%"
 		args = append(args, like, like)
+	}
+	if f.GroupID != nil {
+		where, args = append(where, "id IN (SELECT user_id FROM user_groups WHERE group_id=?)"), append(args, *f.GroupID)
 	}
 	if f.TelegramID != nil {
 		where, args = append(where, "telegram_id=?"), append(args, *f.TelegramID)
