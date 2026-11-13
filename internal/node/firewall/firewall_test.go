@@ -94,7 +94,9 @@ func TestSync(t *testing.T) {
 		calls = append(calls, strings.Join(args, " "))
 		switch {
 		case args[0] == "-f":
-			loaded = stdin
+			if strings.Contains(stdin, "table inet "+Table) {
+				loaded = stdin
+			}
 		case args[0] == "list" && loaded == "":
 			return nil, errors.New("no table")
 		case args[0] == "delete":
