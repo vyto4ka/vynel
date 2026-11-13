@@ -99,6 +99,8 @@ func TestSync(t *testing.T) {
 			}
 		case args[0] == "list" && loaded == "":
 			return nil, errors.New("no table")
+		case args[0] == "list" && loaded != "":
+			return []byte("table exists"), nil
 		case args[0] == "delete":
 			loaded = ""
 		}
