@@ -426,9 +426,26 @@ func writeError(w http.ResponseWriter, r *http.Request, e *httpError) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": i18n.T(i18n.FromRequest(r), e.msg)})
 }
 
-func decode(r *http.Request, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
+// maxBody is the limit for an ordinary JSON request. Imports carry a whole transfer file in one
+// body and use maxImportBody instead.
+const (
+	maxBody       = 1 << 20
+	maxImportBody = 16 << 20
+)
+
+// decode reads a JSON body no larger than maxBody.
+func decode(r *http.Request, v any) error { return decodeLimit(r, v, maxBody) }
+
+// decodeImport reads a JSON body that may carry a transfer file or a foreign Xray config.
+func decodeImport(r *http.Request, v any) error { return decodeLimit(r, v, maxImportBody) }
+
+func decodeLimit(r *http.Request, v any, limit int64) error {
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
 	if err := dec.Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return &httpError{http.StatusRequestEntityTooLarge, "request body is too large"}
+		}
 		return badRequest("bad JSON: " + err.Error())
 	}
 	return nil

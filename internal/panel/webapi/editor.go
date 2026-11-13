@@ -197,7 +197,7 @@ func (s *Server) importRemnawave(r *http.Request) (any, error) {
 		WithNginx bool   `json:"withNginx"`
 		Title     string `json:"title"`
 	}
-	if err := decode(r, &in); err != nil {
+	if err := decodeImport(r, &in); err != nil {
 		return nil, err
 	}
 	res, err := xrayconf.ImportRemnawave(xrayconf.RemnawaveImport{Xray: in.Xray, Host: in.Host, Nginx: in.Nginx, WithNginx: in.WithNginx}, in.Title)

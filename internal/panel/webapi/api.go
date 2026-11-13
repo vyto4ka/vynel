@@ -1405,7 +1405,7 @@ func (s *Server) usersImport(r *http.Request) (any, error) {
 		Mode          string          `json:"mode"`
 		ReissueTokens bool            `json:"reissueTokens"`
 	}
-	if err := decode(r, &in); err != nil {
+	if err := decodeImport(r, &in); err != nil {
 		return nil, err
 	}
 	f, err := usertransfer.Unmarshal(in.File)
