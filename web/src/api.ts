@@ -14,12 +14,13 @@ export function setUnauthorizedHandler(fn: (message: string) => void) {
   onUnauthorized = fn
 }
 
-export async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+export async function api<T = any>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch('api/' + path, {
     method,
     credentials: 'same-origin',
     headers: { 'X-Vynel': '1', 'X-Lang': lang(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   })
   const text = await res.text()
   let data: any = null
@@ -43,11 +44,11 @@ function plainError(res: Response): string {
   return t('api.server_error', { code })
 }
 
-export const get = <T = any>(p: string) => api<T>('GET', p)
-export const post = <T = any>(p: string, b: unknown = {}) => api<T>('POST', p, b)
-export const put = <T = any>(p: string, b: unknown = {}) => api<T>('PUT', p, b)
-export const patch = <T = any>(p: string, b: unknown = {}) => api<T>('PATCH', p, b)
-export const del = <T = any>(p: string) => api<T>('DELETE', p)
+export const get = <T = any>(p: string, signal?: AbortSignal) => api<T>('GET', p, undefined, signal)
+export const post = <T = any>(p: string, b: unknown = {}, signal?: AbortSignal) => api<T>('POST', p, b, signal)
+export const put = <T = any>(p: string, b: unknown = {}, signal?: AbortSignal) => api<T>('PUT', p, b, signal)
+export const patch = <T = any>(p: string, b: unknown = {}, signal?: AbortSignal) => api<T>('PATCH', p, b, signal)
+export const del = <T = any>(p: string, signal?: AbortSignal) => api<T>('DELETE', p, undefined, signal)
 
 // ---- типы ----
 

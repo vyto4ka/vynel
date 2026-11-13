@@ -2,7 +2,10 @@
 # Kept for old links: the installer is scripts/install.sh now (menu: all-in-one, panel, node,
 # update, uninstall). Flags are passed through; --domain alone still means all-in-one.
 set -euo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+here=""
+if here=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P); then
+  :
+fi
 if [[ -n "$here" && -f "$here/install.sh" ]]; then
   exec bash "$here/install.sh" "$@"
 fi

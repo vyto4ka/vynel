@@ -85,7 +85,15 @@ func New(cfg Config) *Server {
 
 // Serve listens on addr until ctx ends.
 func (s *Server) Serve(ctx context.Context, addr string) error {
-	srv := &http.Server{Addr: addr, Handler: s, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       time.Minute,
+		MaxHeaderBytes:    1 << 20,
+	}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

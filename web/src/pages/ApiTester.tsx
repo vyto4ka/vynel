@@ -3,7 +3,7 @@ import { ApiToken, Integrations, post } from '../api'
 import { CodeEditor } from '../code'
 import { Badge, copyText, Field, Info, Loading, useAction, useToast } from '../ui'
 import { Icon } from '../ui'
-import { t } from '../i18n'
+import { lang as uiLang, t } from '../i18n'
 import { snippet, snippetLangs, SnippetLang } from '../apiSnippets'
 
 // The tester reads the same OpenAPI description integrators get, so every endpoint is here and the
@@ -102,7 +102,12 @@ export function Tester({ d, token, setToken, reloadTokens }: { d: Integrations; 
   const toast = useToast()
 
   useEffect(() => {
-    fetch('api/v1/openapi.json').then((r) => r.json()).then((s: Spec) => setOps(parseSpec(s))).catch((e) => setError(String(e)))
+    const controller = new AbortController()
+    fetch('api/v1/openapi.json', { signal: controller.signal, credentials: 'same-origin', headers: { 'X-Vynel': '1', 'X-Lang': uiLang() } })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+      .then((s: Spec) => setOps(parseSpec(s)))
+      .catch((e) => { if (e?.name !== 'AbortError') setError(String(e)) })
+    return () => controller.abort()
   }, [])
   const op = useMemo(() => ops?.find((o) => o.id === sel), [ops, sel])
 

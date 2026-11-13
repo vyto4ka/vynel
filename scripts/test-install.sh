@@ -26,7 +26,7 @@ block="$(sed -n '/^case "\$CHANNEL" in/,/^RELEASE_URL=/p' scripts/install.sh)"
 # shellcheck disable=SC2034,SC2329
 resolve() { # CHANNEL REF_SET REF BUILT_RELEASE VYNEL_RELEASE VYNEL_RELEASE_URL -> "RELEASE URL"
   (
-    die() { echo "die: $*"; exit 3; }
+    die() { echo "die: $*"; exit 3; } # shellcheck disable=SC2317 # called from eval of install.sh
     CHANNEL="$1" REF_SET="$2" REF="$3" BUILT_RELEASE="$4"
     VYNEL_RELEASE="$5" VYNEL_RELEASE_URL="$6"
     eval "$block"
