@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPortsFromConfigs(t *testing.T) {
@@ -107,7 +108,7 @@ func TestSync(t *testing.T) {
 		return nil, nil
 	}
 	defer func() { Runner = defaultRunner }()
-	m := &Manager{}
+	m := &Manager{sshAt: time.Now()}
 	ctx := context.Background()
 	ports := []Port{{Port: 443, Proto: "tcp", Why: "nginx"}}
 
