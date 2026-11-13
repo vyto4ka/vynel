@@ -1,6 +1,6 @@
 module github.com/vyto4ka/vynel
 
-go 1.26.0
+go 1.26.11
 
 require (
 	filippo.io/age v1.2.1
