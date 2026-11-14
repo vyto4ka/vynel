@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +45,8 @@ func TestDecodeLimit(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", body)
 	var v map[string]any
 	err := decodeLimit(r, &v, 8)
-	he, ok := err.(*httpError)
+	he := new(httpError)
+	ok := errors.As(err, &he)
 	if !ok || he.code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("got %T %v, want 413", err, err)
 	}
