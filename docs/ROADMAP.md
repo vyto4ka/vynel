@@ -41,10 +41,10 @@
 
 | Что | Выбор |
 |-----|-------|
-| Язык / модуль | Go 1.26, `github.com/vyto4ka/vynel` |
+| Язык / модуль | Go 1.26.11+, `github.com/vyto4ka/vynel` |
 | CLI | `cobra`: `vynel panel | node | install | admin | net | backup | restore | update` |
-| HTTP | `chi` |
-| БД | SQLite (`modernc.org/sqlite`, без CGO), миграции `goose`, запросы `sqlc` |
+| HTTP | стандартный `net/http` (`http.ServeMux`) |
+| БД | SQLite (`modernc.org/sqlite`, без CGO), миграции `goose`, SQL без `sqlc` |
 | Панель ↔ нода | gRPC (`grpc-go`), protobuf через `buf` |
 | Xray | бинарь `xray` + gRPC-клиенты его API (protos из `xtls/xray-core`); x25519 через `crypto/ecdh` |
 | Веб-сервер | nginx из пакетов дистрибутива (+ `libnginx-mod-stream`), конфиг собирает панель; сертификаты — `golang.org/x/crypto/acme` (до этого Caddy через Admin API) |
@@ -53,8 +53,8 @@
 | Telegram | `go-telegram/bot` |
 | Шифрование бэкапов | `filippo.io/age` |
 | SSH | `golang.org/x/crypto/ssh` |
-| Фронт | React + Vite + TypeScript + TanStack Query + shadcn/ui + Monaco, `pnpm`, вшивается через `go:embed` |
-| Релизы | GitHub Actions + `goreleaser`, sha256 + minisign-подпись |
+| Фронт | React + Vite + TypeScript + CodeMirror, `pnpm`, вшивается через `go:embed` |
+| Релизы | GitHub Actions (`release.yml`), sha256 и Ed25519-подпись (`scripts/release-key.sh`) |
 
 ---
 
@@ -165,7 +165,7 @@
 2. Пользователи: список, фильтры, создание по имени, карточка, продление, устройства.
 3. Группы и шаблоны пользователей.
 4. Ноды: статус, метрики, адреса, инбаунды с пометками «из профиля / изменено на ноде».
-5. Профили: форма шаблона + Monaco (JSON-режим), превью «затронет N нод».
+5. Профили: форма шаблона + CodeMirror (JSON/YAML), превью «затронет N нод».
 6. Точки подключения: ссылка, QR, предпросмотр в клиентах.
 7. Мастер «Добавить сервер» (пока только командой), страница-инструкция ноды с живым чеклистом.
 8. Дашборд и графики.
@@ -187,7 +187,7 @@ API для фронта — тонкий транспорт `webapi` над се
 
 ### Этап 9. Установщик и релизы
 
-- `goreleaser`: бинари, `checksums.txt`, minisign-подпись, GitHub Releases.
+- Свой release workflow: бинари, `SHA256SUMS`, Ed25519-подпись, GitHub Releases (без goreleaser).
 - `install.sh` (bootstrap) и `vynel install` (TUI) по INSTALL §2:
   - роли;
   - проверка системы;
