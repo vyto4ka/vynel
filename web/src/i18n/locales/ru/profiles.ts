@@ -179,4 +179,8 @@ export default {
   preview_subscription: 'Подписка',
   remark_help: '${NODE_FLAG} ${NODE_NAME} → «🇳🇱 Нидерланды»',
   remark_info: 'Можно добавить своё: ${NODE_FLAG} ${NODE_NAME} · Reality',
+  remnawave_select_inbound: 'Инбаунд из конфига (найдено: {n})',
+  remnawave_keep_keys: 'Сохранить существующие ключи REALITY (privateKey, shortIds) и путь XHTTP/WS как значения по умолчанию',
+  remnawave_keep_keys_hint: 'Полезно при бесшовном переезде рабочей ноды: клиенты с закешированной подпиской продолжат работать без обновления.',
+  remnawave_extra_sections_hint: 'В конфиге также обнаружены секции routing/outbounds — их можно перенести на вкладке «Xray → Импорт из конфига».',
 }

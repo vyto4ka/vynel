@@ -49,15 +49,18 @@ var remnawaveClient = &http.Client{
 
 // rnUser is one user of the Remnawave answer (the fields we read of GetUsersCommand).
 type rnUser struct {
-	Username            string `json:"username"`
-	Status              string `json:"status"`
-	TrafficLimitBytes   int64  `json:"trafficLimitBytes"`
-	TrafficLimitStrat   string `json:"trafficLimitStrategy"`
-	ExpireAt            string `json:"expireAt"`
-	TelegramID          *int64 `json:"telegramId"`
-	Description         string `json:"description"`
-	HWIDDeviceLimit     *int64 `json:"hwidDeviceLimit"`
-	VlessUUID           string `json:"vlessUuid"`
+	Username            string  `json:"username"`
+	Status              string  `json:"status"`
+	ShortUUID           string  `json:"shortUuid"`
+	TrafficLimitBytes   int64   `json:"trafficLimitBytes"`
+	UsedTrafficBytes    int64   `json:"usedTrafficBytes"`
+	TrafficLimitStrat   string  `json:"trafficLimitStrategy"`
+	ExpireAt            string  `json:"expireAt"`
+	TelegramID          *int64  `json:"telegramId"`
+	ExternalID          *string `json:"externalId"`
+	Description         string  `json:"description"`
+	HWIDDeviceLimit     *int64  `json:"hwidDeviceLimit"`
+	VlessUUID           string  `json:"vlessUuid"`
 	ActiveInternalSquad []struct {
 		Name string `json:"name"`
 	} `json:"activeInternalSquads"`
@@ -66,9 +69,9 @@ type rnUser struct {
 	} `json:"userTraffic"`
 }
 
-// FetchRemnawave pulls every user of a Remnawave panel into the transfer format. vynel does
-// not know Remnawave's subscription tokens, so SubToken is empty: import mints a fresh link
-// for everyone and the report lists them.
+// FetchRemnawave pulls every user of a Remnawave panel into the transfer format. Remnawave's
+// shortUuid becomes SubToken so existing subscription links keep working when the subscription
+// domain moves to vynel; if a user has no shortUuid, import mints a fresh token.
 func FetchRemnawave(ctx context.Context, p RemnawavePanel) (*ExportFile, error) {
 	base := strings.TrimSuffix(p.BaseURL, "/")
 	if u, err := url.Parse(base); err != nil || u.Scheme == "" || u.Host == "" {
@@ -131,17 +134,37 @@ func rnPage(ctx context.Context, base, token string, start int) ([]TransferUser,
 	if err := json.Unmarshal(body, &answer); err != nil {
 		return nil, 0, fmt.Errorf("cannot read the answer of %s: %w", u, err)
 	}
-	out := make([]TransferUser, 0, len(answer.Response.Users))
-	for _, ru := range answer.Response.Users {
+	return convertRemnawaveUsers(answer.Response.Users), answer.Response.Total, nil
+}
+
+func convertRemnawaveUsers(raw []rnUser) []TransferUser {
+	out := make([]TransferUser, 0, len(raw))
+	for _, ru := range raw {
+		used := ru.UserTraffic.UsedTrafficBytes
+		if used == 0 {
+			used = ru.UsedTrafficBytes
+		}
+		var tgID *int64
+		if ru.TelegramID != nil && *ru.TelegramID > 0 {
+			tgID = ru.TelegramID
+		}
+		var extID *string
+		if ru.ExternalID != nil {
+			if v := strings.TrimSpace(*ru.ExternalID); v != "" {
+				extID = &v
+			}
+		}
 		t := TransferUser{
 			Username:          ru.Username,
 			UUID:              ru.VlessUUID,
+			SubToken:          strings.TrimSpace(ru.ShortUUID),
 			Status:            rnStatus(ru.Status),
 			TrafficLimitBytes: rnLimit(ru.TrafficLimitBytes),
-			TrafficUsedBytes:  ru.UserTraffic.UsedTrafficBytes,
+			TrafficUsedBytes:  used,
 			ResetStrategy:     rnReset(ru.TrafficLimitStrat),
 			HWIDLimit:         ru.HWIDDeviceLimit,
-			TelegramID:        ru.TelegramID,
+			TelegramID:        tgID,
+			ExternalID:        extID,
 			Note:              ru.Description,
 		}
 		if ru.ExpireAt != "" {
@@ -157,7 +180,42 @@ func rnPage(ctx context.Context, base, token string, start int) ([]TransferUser,
 		}
 		out = append(out, t)
 	}
-	return out, answer.Response.Total, nil
+	return out
+}
+
+// tryUnmarshalRemnawave detects a raw JSON dump of Remnawave's /api/users endpoint
+// (either {"response":{"users":[...]}} or a raw [...] array of Remnawave user objects).
+func tryUnmarshalRemnawave(b []byte) ([]TransferUser, bool) {
+	var env struct {
+		Response struct {
+			Users []rnUser `json:"users"`
+		} `json:"response"`
+		Users []rnUser `json:"users"`
+	}
+	var list []rnUser
+	if err := json.Unmarshal(b, &env); err == nil {
+		if len(env.Response.Users) > 0 {
+			list = env.Response.Users
+		} else if len(env.Users) > 0 {
+			list = env.Users
+		}
+	} else if err := json.Unmarshal(b, &list); err != nil {
+		return nil, false
+	}
+	if len(list) == 0 {
+		return nil, false
+	}
+	hasVless := false
+	for _, u := range list {
+		if u.VlessUUID != "" {
+			hasVless = true
+			break
+		}
+	}
+	if !hasVless {
+		return nil, false
+	}
+	return convertRemnawaveUsers(list), true
 }
 
 // rnStatus maps Remnawave's status; unknown values stay active (a name, not a verdict).
