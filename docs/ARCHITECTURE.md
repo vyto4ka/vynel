@@ -285,7 +285,7 @@ https://panel.example.com/install/9fK2...xQ
 
 Как устроен профиль:
 
-- Это **обычный JSON Xray**. Его можно редактировать в Monaco-редакторе с подсветкой и автодополнением тегов, как в Remnawave.
+- Это **обычный JSON Xray**. Его можно редактировать в CodeMirror-редакторе с подсветкой и автодополнением тегов, как в Remnawave.
 - **Системные секции добавляются автоматически и в редакторе не видны**: `api`, `stats`, `policy` со `statsUser*` и `statsUserOnline`, API-инбаунд `127.0.0.1`, правило роутинга для API. Админ не может их сломать или забыть.
 - **`clients` в инбаундах пишутся пустыми**, пользователей подставляет панель.
 - **Наследование:** инбаунд ноды = профиль + переменные ноды (`${NODE_DOMAIN}`, ключи, `${TAG}`, IP) + локальные override. Общие настройки меняются в профиле один раз для всех 15 нод, при этом у каждой ноды остаётся свой вход, как `NL`/`DE` в Remnawave (INBOUNDS.md §1).
@@ -632,7 +632,7 @@ bash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/inst
 
 Повторный запуск предлагает обновить, перенастроить или удалить. Есть также `vynel update`, `vynel backup`, `vynel restore`, `vynel admin login-link`, `vynel net add-ip`.
 
-Стек: Go, `chi`, `grpc-go`, `goose`, `modernc.org/sqlite`, `filippo.io/age`, `go-telegram/bot`, gRPC-клиенты `xtls/xray-core`; фронтенд на React, Vite, TanStack Query, shadcn/ui и Monaco.
+Стек: Go, `net/http`, `grpc-go`, `goose`, `modernc.org/sqlite`, `filippo.io/age`, `go-telegram/bot`, gRPC-клиенты `xtls/xray-core`; фронтенд на React, Vite, CodeMirror.
 
 ---
 

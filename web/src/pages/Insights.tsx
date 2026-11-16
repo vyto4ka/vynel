@@ -74,7 +74,7 @@ function ProfileTraffic({ user, setUser }: { user: number; setUser: (id: number)
   }
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<string>('total')
-  const { data, error } = useLoad(() => get<TrafficT>(`insights/traffic?range=${range}${user ? '&user=' + user : ''}`), [range, user], 5 * 60 * 1000)
+  const { data, error } = useLoad((signal) => get<TrafficT>(`insights/traffic?range=${range}${user ? '&user=' + user : ''}`, signal), [range, user], 5 * 60 * 1000)
   const ok = data && data.range === range
   const groups = useMemo(() => {
     if (!data) return []
@@ -234,7 +234,7 @@ function usePaged<T>(path: string) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   useEffect(() => setPage(0), [search])
-  const list = useLoad(() => get<{ items: T[]; total: number }>(`${path}?q=${encodeURIComponent(search)}&limit=${pageSize}&offset=${page * pageSize}`), [search, page], 60000)
+  const list = useLoad((signal) => get<{ items: T[]; total: number }>(`${path}?q=${encodeURIComponent(search)}&limit=${pageSize}&offset=${page * pageSize}`, signal), [search, page], 60000)
   return { search, setSearch, page, setPage, list }
 }
 

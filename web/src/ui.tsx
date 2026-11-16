@@ -117,35 +117,42 @@ export function useAction() {
 
 // ---------- загрузка данных ----------
 
-export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = [], refreshMs = 0) {
+export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unknown[] = [], refreshMs = 0) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const requestId = useRef(0)
+  const controller = useRef<AbortController | null>(null)
   const fnRef = useRef(fn)
   fnRef.current = fn
+  // A newer load aborts the one in flight: a slow answer to an old filter must not overwrite
+  // the data the admin is looking at now.
   const reload = useCallback(async () => {
     const id = ++requestId.current
+    controller.current?.abort()
+    const ac = new AbortController()
+    controller.current = ac
     setLoading(true)
     setError(null)
     try {
-      const result = await fnRef.current()
+      const result = await fnRef.current(ac.signal)
       if (id !== requestId.current) return
       setData(result)
       setError(null)
     } catch (e: any) {
-      if (id === requestId.current) setError(e?.message || String(e))
+      if (id !== requestId.current || ac.signal.aborted) return
+      setError(e?.message || String(e))
     } finally {
       if (id === requestId.current) setLoading(false)
     }
   }, [])
   useEffect(() => {
     reload()
-    if (!refreshMs) return () => { requestId.current++ }
+    if (!refreshMs) return () => { requestId.current++; controller.current?.abort() }
     const t = setInterval(() => {
       if (!document.hidden) reload()
     }, refreshMs)
-    return () => { requestId.current++; clearInterval(t) }
+    return () => { requestId.current++; controller.current?.abort(); clearInterval(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
   return { data, error, loading, reload, setData }

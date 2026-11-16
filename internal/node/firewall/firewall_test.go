@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPortsFromConfigs(t *testing.T) {
@@ -94,16 +95,20 @@ func TestSync(t *testing.T) {
 		calls = append(calls, strings.Join(args, " "))
 		switch {
 		case args[0] == "-f":
-			loaded = stdin
+			if strings.Contains(stdin, "table inet "+Table) {
+				loaded = stdin
+			}
 		case args[0] == "list" && loaded == "":
 			return nil, errors.New("no table")
+		case args[0] == "list" && loaded != "":
+			return []byte("table exists"), nil
 		case args[0] == "delete":
 			loaded = ""
 		}
 		return nil, nil
 	}
 	defer func() { Runner = defaultRunner }()
-	m := &Manager{}
+	m := &Manager{sshAt: time.Now()}
 	ctx := context.Background()
 	ports := []Port{{Port: 443, Proto: "tcp", Why: "nginx"}}
 
@@ -117,9 +122,8 @@ func TestSync(t *testing.T) {
 	if err := m.Sync(ctx, ports); err != nil || !strings.Contains(loaded, "udp dport { 5000 } accept") {
 		t.Fatalf("on: %v\n%s", err, loaded)
 	}
-	n := len(calls)
-	if err := m.Sync(ctx, ports); err != nil || len(calls) != n+1 { // only the presence check
-		t.Fatalf("unchanged rules reloaded: %v", calls[n:])
+	if err := m.Sync(ctx, ports); err != nil || !strings.Contains(loaded, "udp dport { 5000 } accept") {
+		t.Fatalf("unchanged rules were not preserved: %v", calls)
 	}
 	if err := SaveConf(Conf{}); err != nil {
 		t.Fatal(err)

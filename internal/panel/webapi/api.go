@@ -1416,7 +1416,7 @@ func (s *Server) usersImport(r *http.Request) (any, error) {
 		WithTraffic   *bool           `json:"withTraffic"`
 		DryRun        bool            `json:"dryRun"`
 	}
-	if err := decode(r, &in); err != nil {
+	if err := decodeImport(r, &in); err != nil {
 		return nil, err
 	}
 	f, err := usertransfer.Unmarshal(in.File)
