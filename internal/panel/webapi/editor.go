@@ -200,7 +200,7 @@ func (s *Server) importRemnawave(r *http.Request) (any, error) {
 		InboundIndex *int   `json:"inboundIndex"`
 		KeepKeys     bool   `json:"keepKeys"`
 	}
-	if err := decode(r, &in); err != nil {
+	if err := decodeImport(r, &in); err != nil {
 		return nil, err
 	}
 	res, err := xrayconf.ImportRemnawave(xrayconf.RemnawaveImport{
