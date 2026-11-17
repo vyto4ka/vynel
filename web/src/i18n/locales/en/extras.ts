@@ -1,6 +1,4 @@
 export default {
-  a_cascade_the_app_connects: 'A cascade: the app connects to the entry node, and the traffic reaches the internet through the exit node. For the user it is a separate server in the subscription (“🇳🇱 Netherlands → 🇩🇪 Germany”). No new ports are needed: on the entry the user has their own key of the same inbound, and the entry node uses it to send the traffic to the exit.',
-  a_group_with_the_all: 'A group with the “all” access (“Main” by default) gets every cascade at once; others get them in “Groups” or in the user’s card (where you can set a term).',
   a_subscription_link_https_the: 'A subscription link (https://…, the way it is added to an app) or the server links themselves — vless://, hysteria2:// and others, one per line',
   added: 'Added',
   cascade: 'Cascade',
@@ -28,7 +26,6 @@ export default {
   grant: 'Grant',
   grant_a_cascade_or_subscription: '+ grant a cascade or subscription…',
   granted: 'Granted',
-  granted_via: 'Granted to users, groups and templates via “Cascades and subscriptions” in the user, group or template card.',
   https_sub_example_com_s: 'https://sub.example.com/s/…\nor vless://…',
   link: 'Link',
   name_in_the_panel: 'Name in the panel',

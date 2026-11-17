@@ -7,7 +7,6 @@ export default {
   currency: 'Currency',
   d_left: '{d} d left',
   delete_the_provider_nodes_keep: 'Delete the provider <b>{name}</b>? Nodes keep their price and dates, just without a provider.',
-  each_node_has_a_provider: 'Each node has a provider, a price and the date it is paid until: the bot reminds you {remindDays} days ahead. The provider’s traffic limit is counted on the server’s network interface: {v} before the limit the node switches off, and switches itself back on on the reset day.',
   empty_taken_from_the_site: 'Empty — taken from the site',
   every_month: 'Every month',
   icon_and_name_come_from: 'icon and name come from the site',

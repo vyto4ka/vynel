@@ -1,5 +1,4 @@
 export default {
-  a_template_is_a_set: 'A template is a set of defaults for new users: term, limits, groups. To create a user it is enough to enter a name; the rest comes from the default template.',
   and_days: 'and days',
   default_template: 'Default template',
   delete_the_template_users_already: 'Delete the template <b>{name}</b>? Users already created from it do not change.',

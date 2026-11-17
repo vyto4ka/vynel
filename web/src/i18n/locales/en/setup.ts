@@ -15,5 +15,5 @@ export default {
   create_user: 'Create a user',
   copy_link: 'Copy the link',
   transfer_users: 'Transfer users',
-  access_ready: 'Access is ready: the Reality profile was created, attached to the node and granted to the “Основная” group',
+  access_ready: 'Access is ready: the Reality profile was created, attached to the node and granted to the default group',
 }
