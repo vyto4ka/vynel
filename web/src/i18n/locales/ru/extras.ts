@@ -28,6 +28,7 @@ export default {
   grant: 'Выдать',
   grant_a_cascade_or_subscription: '+ выдать каскад или подписку…',
   granted: 'Выдано',
+  granted_via: 'Выдаются пользователям, группам и шаблонам через «Каскады и подписки» в карточке пользователя, группы или шаблона.',
   https_sub_example_com_s: 'https://sub.example.com/s/…\nили vless://…',
   link: 'Ссылка',
   name_in_the_panel: 'Название в панели',

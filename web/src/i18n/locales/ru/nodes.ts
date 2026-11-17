@@ -175,4 +175,6 @@ export default {
   finish_setup: 'Завершить',
   finish_later: 'Закончить позже',
   next_step_setup: 'Дальше: настройка ноды',
+  no_profiles_yet_inline: 'Профилей пока нет — создайте первый прямо здесь:',
+  create_profile_and_continue: 'Создать профиль и продолжить',
 }

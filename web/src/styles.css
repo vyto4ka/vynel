@@ -910,3 +910,88 @@ select.input.placeholder { color: var(--muted); }
   .api-tester-grid { grid-template-columns: minmax(0, 1fr); }
   .api-ops { position: static; max-height: 260px; }
 }
+
+/* ---------- чек-лист первоначальной настройки (дашборд) ---------- */
+.setup-card { border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--outline-variant)); }
+.setup-steps { display: flex; flex-direction: column; gap: 4px; }
+.setup-step {
+  display: flex; gap: 14px; align-items: flex-start; padding: 12px 14px;
+  border-radius: var(--shape-lg); color: var(--on-surface-variant);
+  transition: background-color .2s var(--ease);
+}
+.setup-step.current { background: var(--container-high); color: var(--on-surface); }
+.setup-step.done { color: var(--muted); }
+.setup-num {
+  flex: none; width: 32px; height: 32px; border-radius: 999px; display: inline-flex;
+  align-items: center; justify-content: center; font-weight: 600; font-size: 14px;
+  background: var(--secondary-container); color: var(--on-secondary-container);
+}
+.setup-step.current .setup-num { background: var(--primary-container); color: var(--on-primary-container); }
+.setup-step.done .setup-num { background: color-mix(in srgb, var(--primary) 22%, transparent); color: var(--primary); }
+
+/* ---------- онбординг: выбор режима ---------- */
+.onboard-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.onboard-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left;
+  padding: 16px; border: 1px solid var(--outline-variant); border-radius: var(--shape-lg);
+  background: var(--container-low); color: inherit; cursor: pointer; font: inherit;
+  transition: background-color .2s var(--ease), border-color .2s var(--ease);
+}
+.onboard-card:hover { background: var(--container-high); border-color: var(--outline); }
+.onboard-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.onboard-icon {
+  width: 44px; height: 44px; border-radius: 999px; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: var(--secondary-container); color: var(--on-secondary-container);
+}
+@media (max-width: 640px) { .onboard-cards { grid-template-columns: 1fr; } }
+
+/* ---------- сворачиваемые секции формы (details/summary) ---------- */
+details.form-section { border-top: 1px solid var(--outline-variant); margin: 4px 0 14px; }
+details.form-section > summary {
+  list-style: none; cursor: pointer; user-select: none; padding: 12px 2px;
+  font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px;
+  border-radius: var(--shape-sm);
+}
+details.form-section > summary::-webkit-details-marker { display: none; }
+details.form-section > summary::before {
+  content: ''; width: 18px; height: 18px; flex: none;
+  background: currentColor; opacity: .7;
+  clip-path: polygon(30% 15%, 75% 50%, 30% 85%, 38% 92%, 90% 50%, 38% 8%);
+  transition: transform .2s var(--ease);
+}
+details.form-section[open] > summary::before { transform: rotate(90deg); }
+details.form-section > summary:hover { color: var(--primary); }
+details.form-section > summary .muted { font-weight: 400; }
+.form-section-body { padding: 2px 2px 6px 26px; }
+
+/* ---------- цепочка маршрутов (Подписка → Профили → Приложение) ---------- */
+.routing-chain {
+  display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap;
+}
+.chain-layer { flex: 1 1 200px; min-width: 180px; }
+.chain-node {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px;
+  border-radius: 999px; font-weight: 600; font-size: 13px;
+  background: var(--secondary-container); color: var(--on-secondary-container);
+}
+.chain-node.dim { background: var(--container-high); color: var(--muted); font-weight: 500; }
+.chain-node.warn { background: var(--warning-container); color: var(--on-warning-container); }
+.chain-arrow { align-self: center; color: var(--muted); font-size: 18px; flex: none; }
+.chain-desc { margin-top: 8px; font-size: 12.5px; color: var(--on-surface-variant); display: flex; flex-direction: column; gap: 4px; }
+.chain-desc .chip { margin: 0 2px; }
+a.chip { text-decoration: none; cursor: pointer; }
+
+/* ---------- выбор шаблона карточками (мастер профиля) ---------- */
+.tpl-pick { border: 1px solid var(--outline-variant); transition: border-color .2s var(--ease), background-color .2s var(--ease); }
+.tpl-pick:hover { border-color: var(--outline); }
+.tpl-pick.selected { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 7%, var(--container-low)); }
+.tpl-pick-check {
+  width: 24px; height: 24px; border-radius: 999px; flex: none; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: var(--primary); color: var(--on-primary);
+}
+
+/* ---------- переключатель режима в топбаре ---------- */
+.mode-switch { align-items: center; }
+@media (max-width: 720px) { .mode-switch .seg button { padding: 0 10px; } }

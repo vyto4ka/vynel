@@ -175,4 +175,6 @@ export default {
   finish_setup: 'Finish',
   finish_later: 'Finish later',
   next_step_setup: 'Next: node setup',
+  no_profiles_yet_inline: 'No profiles yet — create the first one right here:',
+  create_profile_and_continue: 'Create the profile and continue',
 }

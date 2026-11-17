@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { Cascade, del, ExternalSub, get, GrantRow, Group, Node, patch, post, TemplateGrant, UserGrant } from './api'
 import { ago, date, fromDateInput } from './format'
-import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from './ui'
+import { Badge, Empty, Field, Icon, Info, Loading, Modal, Switch, useAction, useConfirm, useLoad } from './ui'
 import { t, Trans } from './i18n'
 
 // ================================================================ каскады
@@ -15,10 +15,7 @@ export function CascadeList() {
   return (
     <>
       <div className="toolbar">
-        <PageInfo>
-          <p>{t('extras.a_cascade_the_app_connects')}</p>
-          <p>{t('extras.a_group_with_the_all')}</p>
-        </PageInfo>
+        <div className="grow" />
         <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{t('extras.cascade')}</button>
       </div>
       {!cascades.data ? <Loading error={cascades.error} /> : cascades.data.length === 0 ? <div className="card"><Empty>{t('extras.no_cascades')}</Empty></div> : (
@@ -67,6 +64,7 @@ function CascadeForm({ c, nodes, onClose, onSaved }: { c: Cascade | null; nodes:
   const entryNode = inbounds.find((i) => i.id === entry)?.nodeId
   const exitNode = inbounds.find((i) => i.id === exit)?.nodeId
   const nodeName = (id?: number) => nodes.find((n) => n.id === id)?.name || ''
+  const nodeFlag = (id?: number) => nodes.find((n) => n.id === id)?.flag || ''
   // Название по умолчанию — из выбранных нод: «Нидерланды → Германия».
   const auto = entryNode && exitNode ? `${nodeName(entryNode)} → ${nodeName(exitNode)}` : ''
   const submit = async (e: FormEvent) => {
@@ -79,6 +77,12 @@ function CascadeForm({ c, nodes, onClose, onSaved }: { c: Cascade | null; nodes:
     <Modal title={c ? t('extras.cascade') : t('extras.new_cascade')} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="cascade-form" disabled={!(name.trim() || auto) || !entry || !exit}>{t('common.save')}</button></>}>
       <form id="cascade-form" onSubmit={submit}>
+        {/* Визуальная схема маршрута: читается сразу, до чтения селектов. */}
+        <div className="routing-chain" style={{ marginBottom: 14 }}>
+          <span className={'chain-node' + (entryNode ? '' : ' dim')}>{entryNode ? `${nodeFlag(entryNode)} ${nodeName(entryNode)}` : t('extras.entry')}</span>
+          <span className="chain-arrow">→</span>
+          <span className={'chain-node' + (exitNode ? '' : ' dim')}>{exitNode ? `${nodeFlag(exitNode)} ${nodeName(exitNode)}` : t('extras.exit')}</span>
+        </div>
         <Field label={t('extras.entry_node_1')} info={t('extras.where_the_app_connects_the')}>
           <select className="input" value={entry} onChange={(e) => setEntry(Number(e.target.value))}>
             <option value={0}>{t('extras.choose_an_inbound')}</option>
@@ -119,7 +123,9 @@ export function ExternalList() {
           </Info></h3>
           <button className="btn sm" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{t('common.subscription')}</button>
         </div>
-        {!subs.data ? <Loading error={subs.error} /> : subs.data.length === 0 ? <Empty>{t('extras.none_yet')}</Empty> : (
+        {!subs.data ? <Loading error={subs.error} /> : subs.data.length === 0 ? <Empty action={
+          <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{t('common.subscription')}</button>
+        }>{t('extras.none_yet')}</Empty> : (
           <div className="table-wrap">
             <table className="table">
               <tbody>

@@ -89,6 +89,7 @@ func (s *Server) routes() {
 	s.handle("PATCH /api/inbounds/{id}", s.updateInbound)
 	s.handle("DELETE /api/inbounds/{id}", s.detachInbound)
 	s.handle("GET /api/inbounds/{id}/config", s.inboundConfig)
+	s.handle("POST /api/setup/auto-access", s.setupAutoAccess)
 	s.editorRoutes()
 	s.xrayRoutes()
 
@@ -1171,7 +1172,8 @@ func (s *Server) profiles(r *http.Request) (any, error) {
 			over = map[string]any{}
 		}
 		out = append(out, map[string]any{"id": p.ID, "name": p.Name, "templateId": p.TemplateID, "templateTitle": titles[p.TemplateID],
-			"values": publicValues(p.Values), "override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "inbounds": tags})
+			"values": publicValues(p.Values), "override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "inbounds": tags,
+			"clientCustom": service.ClientOf(p).Custom})
 	}
 	return localize(r, out, "templateTitle"), nil
 }
@@ -1259,6 +1261,91 @@ func (s *Server) detachInbound(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return nil, s.svc.DetachInbound(r.Context(), actor(r), id)
+}
+
+// setupAutoAccess is the one-button step of the dashboard checklist: make sure the node has
+// a working access. It creates the default Reality profile when there is none, grants it to
+// the default group, attaches it to the node and resends the config. Idempotent.
+func (s *Server) setupAutoAccess(r *http.Request) (any, error) {
+	var in struct {
+		NodeID int64 `json:"nodeId"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ctx, a := r.Context(), actor(r)
+
+	nodes, err := s.svc.Nodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var node *store.Node
+	if in.NodeID != 0 {
+		for _, n := range nodes {
+			if n.ID == in.NodeID {
+				node = n
+				break
+			}
+		}
+		if node == nil {
+			return nil, badRequest("нода не найдена")
+		}
+	} else {
+		// Без указания: единственная подходящая нода (включённая, с доменом).
+		for _, n := range nodes {
+			if n.Enabled && n.Domain != "" {
+				if node != nil {
+					return nil, badRequest("несколько нод подходят — укажите nodeId")
+				}
+				node = n
+			}
+		}
+		if node == nil {
+			return nil, badRequest("нет включённой ноды с доменом — сначала добавьте сервер")
+		}
+	}
+
+	inbounds, err := s.svc.NodeInbounds(ctx, node.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(inbounds) > 0 {
+		return map[string]any{"nodeId": node.ID, "profileId": inbounds[0].ProfileID, "tag": inbounds[0].Tag, "created": false}, nil
+	}
+
+	prof, err := s.svc.ProfileByName(ctx, service.RealityProfileName)
+	if errors.Is(err, store.ErrNotFound) {
+		prof, err = s.svc.CreateProfile(ctx, a, service.ProfileInput{Name: service.RealityProfileName, TemplateID: "vless-reality-selfsteal"})
+		if err != nil {
+			return nil, err
+		}
+		groups, err := s.svc.Groups(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, g := range groups {
+			if g.Name == "Основная" {
+				if err := s.svc.GrantAccess(ctx, a, g.ID, store.AccessProfile, prof.ID); err != nil {
+					return nil, err
+				}
+			}
+		}
+	} else if err != nil {
+		return nil, err
+	}
+
+	ni, err := s.svc.AttachProfile(ctx, a, service.AttachInput{NodeID: node.ID, ProfileID: prof.ID})
+	if err != nil {
+		return nil, err
+	}
+	// Конфиг уйдёт на ноду сам через reconciler; resync — ускорить, ошибка не критична.
+	resynced := false
+	if s.cfg.NodeAction != nil {
+		if _, err := s.cfg.NodeAction(ctx, node.ID, "resync"); err == nil {
+			resynced = true
+		}
+	}
+	return map[string]any{"nodeId": node.ID, "profileId": prof.ID, "profileName": prof.Name, "tag": ni.Tag, "created": true, "resynced": resynced}, nil
 }
 
 // ---- settings ----

@@ -1,20 +1,21 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { ClientFragment, ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
-import { ExternalList } from '../extras'
-import { RoutingForm } from '../routing'
+import { RoutingChain, RoutingForm } from '../routing'
 import { Badge, Field, Icon, Info, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
 import { useUnsavedChanges } from '../unsaved'
+import { useAtLeast } from '../mode'
 
-const tabs: [string, string][] = [
-  ['basics', t('subscription.general')],
-  ['page', t('subscription.page')],
-  ['apps', t('common.apps')],
-  ['headers', t('subscription.headers')],
-  ['rules', t('subscription.clients')],
-  ['routing', t('subscription.routes')],
-  ['externals', t('subscription.external')],
-  ['test', t('subscription.check')],
+// Вкладки по режимам: Лёгкий — общие/страница/приложения; Стандарт — + маршруты и проверка;
+// Про — + заголовки и клиенты. Внешние подписки — отдельный раздел «Доступы → Внешние».
+const allTabs: [string, string, 'light' | 'standard' | 'pro'][] = [
+  ['basics', t('subscription.general'), 'light'],
+  ['page', t('subscription.page'), 'light'],
+  ['apps', t('common.apps'), 'light'],
+  ['routing', t('subscription.routes'), 'standard'],
+  ['test', t('subscription.check'), 'standard'],
+  ['headers', t('subscription.headers'), 'pro'],
+  ['rules', t('subscription.clients'), 'pro'],
 ]
 
 const platformNames: Record<string, string> = { android: 'Android', ios: 'iOS', windows: 'Windows', macos: 'macOS', linux: 'Linux' }
@@ -36,6 +37,11 @@ export function Subscription() {
   const userPage = useLoad(() => get<{ users: User[] }>('users?limit=200'))
   const users = { ...userPage, data: userPage.data?.users }
   const [tab, setTab] = useState('basics')
+  const standard = useAtLeast('standard')
+  const pro = useAtLeast('pro')
+  const tabs = allTabs.filter(([, , min]) => min === 'light' || (min === 'standard' ? standard : pro))
+  // Скрытая режимом вкладка не должна оставаться открытой.
+  useEffect(() => { if (!tabs.some(([id]) => id === tab)) setTab('basics') }, [tab, standard, pro])
   const [basics, setBasics] = useState<SubBasics | null>(null)
   const [page, setPage] = useState<SubPage | null>(null)
   const [headers, setHeaders] = useState<SubHeader[] | null>(null)
@@ -113,6 +119,11 @@ export function Subscription() {
         <div className="seg">
           {tabs.map(([id, label]) => <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
         </div>
+        {standard && (
+          <a className="btn ghost sm hide-sm" href="#/externals" title={t('subscription.external')}>
+            <Icon name="external" size={16} />{' '}{t('subscription.external')}
+          </a>
+        )}
         <div className="grow" />
         {dirty && <span className="pink-text small">{t('subscription.there_are_unsaved_changes')}</span>}
         <button className="btn ghost" disabled={!dirty} onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers); setRules(c.rules); setRouting(c.routing) }}>{t('common.revert')}</button>
@@ -126,8 +137,7 @@ export function Subscription() {
           {tab === 'apps' && <AppsTab p={page} set={setPage} catalog={c.appCatalog} />}
           {tab === 'headers' && <HeadersTab hs={headers} set={setHeaders} cfg={c} onReset={() => reset('headers')} />}
           {tab === 'rules' && <ClientsTab rules={rules} set={setRules} routing={routing} setRouting={setRouting} onReset={() => reset('rules')} />}
-          {tab === 'externals' && <ExternalList />}
-          {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} />}
+          {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} onTest={() => setTab('test')} />}
           {tab === 'test' && <TestTab routing={routing} page={page} headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
         </div>
         {showPreview && (
@@ -147,18 +157,15 @@ export function Subscription() {
   )
 }
 
-function RoutingTab({ r, set, onReset }: { r: ClientRouting; set: (r: ClientRouting) => void; onReset: () => void }) {
+function RoutingTab({ r, set, onReset, onTest }: { r: ClientRouting; set: (r: ClientRouting) => void; onReset: () => void; onTest: () => void }) {
   return (
     <>
+      <RoutingChain r={r} onTest={onTest} />
       <div className="card card-pad">
         <h3 style={{ marginTop: 0 }}>{t('subscription.routes_in_apps')}{' '}<Info>{t('subscription.routes_go_along_with_the')}</Info></h3>
         <div className="card-sub" style={{ marginBottom: 14 }}>{t('subscription.xray_json_mihomo_and_sing')}</div>
         <RoutingForm r={r} set={set} />
       </div>
-      <details className="card card-pad small"><summary>Happ / Karing</summary>
-        <p>{t('subscription.happ_routing_limits')}</p>
-        <p>{t('subscription.karing_routing_setup')}</p>
-      </details>
       <FragmentCard f={r.fragment ?? defaultFragment} set={(fragment) => set({ ...r, fragment })} />
       <div className="card card-pad small text-2 row">
         <button className="btn ghost sm" onClick={onReset}>{t('subscription.reset_the_routes_to_the_2')}</button>
@@ -197,6 +204,7 @@ function FragmentCard({ f, set }: { f: ClientFragment; set: (f: ClientFragment) 
 }
 
 function BasicsTab({ b, set }: { b: SubBasics; set: (b: SubBasics) => void }) {
+  const pro = useAtLeast('pro')
   const f = (k: keyof SubBasics) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     set({ ...b, [k]: k === 'updateHours' ? Number(e.target.value.replace(/\D/g, '')) || 0 : e.target.value })
   return (
@@ -212,9 +220,11 @@ function BasicsTab({ b, set }: { b: SubBasics; set: (b: SubBasics) => void }) {
           <input className="input" value={b.supportUrl} onChange={f('supportUrl')} placeholder="https://t.me/your_support" />
         </Field>
       </div>
-      <Field label={t('subscription.karing_dns_label')} info={t('subscription.karing_dns_help')}>
-        <textarea className="input mono" rows={3} value={(b.karingDns || []).join('\n')} onChange={(e) => set({ ...b, karingDns: e.target.value.split('\n') })} placeholder={'udp://8.8.8.8\nhttps://dns.google/dns-query'} />
-      </Field>
+      {pro && (
+        <Field label={t('subscription.karing_dns_label')} info={t('subscription.karing_dns_help')}>
+          <textarea className="input mono" rows={3} value={(b.karingDns || []).join('\n')} onChange={(e) => set({ ...b, karingDns: e.target.value.split('\n') })} placeholder={'udp://8.8.8.8\nhttps://dns.google/dns-query'} />
+        </Field>
+      )}
       <Field label={t('subscription.announcement')} help={t('subscription.empty_not_shown')} info={t('subscription.the_announce_header_a_line')}>
         <textarea className="input" rows={2} value={b.announce} onChange={f('announce')} placeholder={t('subscription.e_g_maintenance_on_saturday')} />
       </Field>

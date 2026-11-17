@@ -45,6 +45,7 @@ const paths: Record<string, ReactNode> = {
   move: <><path d="M5 12h14M13 6l6 6-6 6" /><path d="M11 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5" /></>,
   download: <><path d="M12 4v11M7 11l5 5 5-5" /><path d="M5 20h14" /></>,
   upload: <><path d="M12 16V5M7 9l5-5 5 5" /><path d="M5 20h14" /></>,
+  help: <><circle cx="12" cy="12" r="9" /><path d="M9.2 9a2.9 2.9 0 0 1 5.7.9c0 1.9-2.9 2.4-2.9 4.1" /><path d="M12 17.5h.01" /></>,
 }
 
 export function Icon({ name, size }: { name: string; size?: number }) {
@@ -371,8 +372,8 @@ export function Bar({ value, max }: { value: number; max: number | null }) {
   return <div className={'bar' + (p >= 90 ? ' warn' : '')}><i style={{ width: p + '%' }} /></div>
 }
 
-export function Empty({ icon, children }: { icon?: string; children: ReactNode }) {
-  return <div className="empty">{icon && <div className="big">{icon}</div>}{children}</div>
+export function Empty({ icon, action, children }: { icon?: string; action?: ReactNode; children: ReactNode }) {
+  return <div className="empty">{icon && <div className="big">{icon}</div>}{children}{action && <div style={{ marginTop: 14 }}>{action}</div>}</div>
 }
 
 export function TrafficChart({ days }: { days: Day[] }) {

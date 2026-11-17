@@ -1,8 +1,9 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { del, get, Group, patch, post, Template, User, UserDetails } from '../api'
 import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
-import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Info, Loading, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
+import { useAtLeast } from '../mode'
 import { t as tr, Trans } from '../i18n'
 
 const pageSize = 200
@@ -27,18 +28,26 @@ function openId(): number | null {
   return m ? Number(m[1]) : null
 }
 
+// Deep-links: #/users/new открывает форму создания, #/users/transfer — перенос.
+function hashAction(): 'new' | 'transfer' | null {
+  if (location.hash.startsWith('#/users/new')) return 'new'
+  if (location.hash.startsWith('#/users/transfer')) return 'transfer'
+  return null
+}
+
 export function Users() {
   const [sort, setSort] = useState(savedSort)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [groupFilter, setGroupFilter] = useState(0)
   const [selected, setSelected] = useState<number[]>([])
-  const [creating, setCreating] = useState(false)
-  const [transfer, setTransfer] = useState(false)
+  const [creating, setCreating] = useState(hashAction() === 'new')
+  const [transfer, setTransfer] = useState(hashAction() === 'transfer')
   const [open, setOpen] = useState<number | null>(openId)
   const [page, setPage] = useState(0)
   const act = useAction()
   const confirm = useConfirm()
+  const standard = useAtLeast('standard')
   useEffect(() => { setPage(0); setSelected([]) }, [sort, search, statusFilter, groupFilter])
   useEffect(() => {
     try { localStorage.setItem('vynel.users.sort', JSON.stringify(sort)) } catch { /* приватное окно */ }
@@ -53,7 +62,12 @@ export function Users() {
   const groupName = useMemo(() => new Map((groups.data || []).map((g) => [g.id, g.name])), [groups.data])
 
   useEffect(() => {
-    const h = () => setOpen(openId())
+    const h = () => {
+      setOpen(openId())
+      const a = hashAction()
+      if (a === 'new') setCreating(true)
+      if (a === 'transfer') setTransfer(true)
+    }
     window.addEventListener('hashchange', h)
     return () => window.removeEventListener('hashchange', h)
   }, [])
@@ -66,6 +80,8 @@ export function Users() {
 
   const pageIds = useMemo(() => (users.data || []).map((u) => u.id), [users.data])
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id))
+  // В лёгком режиме — короткая таблица без массовых операций.
+  const visibleColumns = standard ? columns : columns.filter(([k]) => ['username', 'status', 'expire', 'online'].includes(k))
   const toggleSelectAll = () => {
     if (allPageSelected) setSelected(selected.filter((id) => !pageIds.includes(id)))
     else setSelected(Array.from(new Set([...selected, ...pageIds])))
@@ -92,21 +108,26 @@ export function Users() {
           <input className="input" placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
           <span className="muted search-icon"><Icon name="search" size={18} /></span>
         </div>
-        <select className="input" style={{ width: 'auto' }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="">{tr('users.filter_all_statuses')}</option>
-          {Object.entries(statusInfo).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-        </select>
-        {(groups.data?.length ?? 0) > 0 && (
-          <select className="input hide-sm" style={{ width: 'auto' }} value={groupFilter} onChange={(e) => setGroupFilter(Number(e.target.value))}>
-            <option value={0}>{tr('users.filter_all_groups')}</option>
-            {groups.data!.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
+        {standard && (
+          <>
+            <select className="input" style={{ width: 'auto' }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">{tr('users.filter_all_statuses')}</option>
+              {Object.entries(statusInfo).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            {(groups.data?.length ?? 0) > 0 && (
+              <select className="input hide-sm" style={{ width: 'auto' }} value={groupFilter} onChange={(e) => setGroupFilter(Number(e.target.value))}>
+                <option value={0}>{tr('users.filter_all_groups')}</option>
+                {groups.data!.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            )}
+            <button className="btn ghost" title={tr('users.export_info')} onClick={() => doExport(search, statusFilter, groupFilter, act)}><Icon name="download" /> <span className="hide-sm">{tr('users.export')}</span></button>
+            <button className="btn" onClick={() => setTransfer(true)}><Icon name="move" /> <span className="hide-sm">{tr('users.transfer')}</span></button>
+          </>
         )}
-        <button className="btn" onClick={() => setTransfer(true)}><Icon name="move" /> <span className="hide-sm">{tr('users.transfer')}</span></button>
         <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" /> <span className="hide-sm">{tr('common.user')}</span></button>
       </div>
 
-      {selected.length > 0 && (
+      {standard && selected.length > 0 && (
         <div className="card card-pad row between" style={{ marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
           <div className="row" style={{ gap: 8 }}>
             <b>{tr('users.bulk_selected', { n: selected.length })}</b>
@@ -133,16 +154,22 @@ export function Users() {
 
       <div className="card">
         {!users.data ? <Loading error={users.error} /> : users.data.length === 0 ? (
-          <Empty icon="🌱">{search || statusFilter || groupFilter ? tr('users.nobody_found') : <>{tr('users.no_users_yet')}<br />{tr('users.press_user_a_name_is')}</>}</Empty>
+          <Empty icon="🌱" action={!(search || statusFilter || groupFilter) && (
+            <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" />{' '}{tr('common.user')}</button>
+          )}>
+            {search || statusFilter || groupFilter ? tr('users.nobody_found') : <>{tr('users.no_users_yet')}<br />{tr('users.press_user_a_name_is')}</>}
+          </Empty>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th style={{ width: 32 }} onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAll} />
-                  </th>
-                  {columns.map(([k, label, cls]) => (
+                  {standard && (
+                    <th style={{ width: 32 }} onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAll} />
+                    </th>
+                  )}
+                  {visibleColumns.map(([k, label, cls]) => (
                     <th key={k} className={'sortable ' + cls + (sort.key === k ? ' sorted' : '')} onClick={() => toggle(k)} aria-sort={sort.key === k ? (sort.desc ? 'descending' : 'ascending') : 'none'}>
                       {label}<span className="sort-mark">{sort.key === k ? (sort.desc ? ' ↓' : ' ↑') : ' ↕'}</span>
                     </th>
@@ -155,9 +182,11 @@ export function Users() {
                   const isSel = selected.includes(u.id)
                   return (
                     <tr key={u.id} className={'click' + (open === u.id || isSel ? ' selected' : '')} onClick={() => show(u.id)}>
-                      <td onClick={(e) => { e.stopPropagation(); toggleSelectOne(u.id) }}>
-                        <input type="checkbox" checked={isSel} onChange={() => {}} />
-                      </td>
+                      {standard && (
+                        <td onClick={(e) => { e.stopPropagation(); toggleSelectOne(u.id) }}>
+                          <input type="checkbox" checked={isSel} onChange={() => {}} />
+                        </td>
+                      )}
                       <td>
                         <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
                           {isOnline(u.onlineAt) && <span className="online-dot" title={tr('common.online_2')} />}
@@ -166,17 +195,19 @@ export function Users() {
                         {u.note && <div className="muted small ellipsis" style={{ maxWidth: 220 }}>{u.note}</div>}
                       </td>
                       <td><Badge color={st.color} dot>{st.label}</Badge></td>
-                      <td className="hide-sm" style={{ minWidth: 150 }}>
-                        <div className="small text-2">{bytes(u.trafficUsed)} / {bytes(u.trafficLimit)}</div>
-                        {u.trafficLimit != null && <Bar value={u.trafficUsed} max={u.trafficLimit} />}
-                      </td>
+                      {standard && (
+                        <td className="hide-sm" style={{ minWidth: 150 }}>
+                          <div className="small text-2">{bytes(u.trafficUsed)} / {bytes(u.trafficLimit)}</div>
+                          {u.trafficLimit != null && <Bar value={u.trafficUsed} max={u.trafficLimit} />}
+                        </td>
+                      )}
                       <td className="nowrap">
                         <div>{u.expireAt ? date(u.expireAt) : '∞'}</div>
                         <div className={'small ' + (u.expireAt && u.expireAt - Date.now() / 1000 < 7 * 86400 ? 'pink-text' : 'muted')}>{left(u.expireAt)}</div>
                       </td>
-                      <td className="small text-2 hide-sm">{u.groupIds.map((g) => groupName.get(g)).filter(Boolean).join(', ') || '—'}</td>
+                      {standard && <td className="small text-2 hide-sm">{u.groupIds.map((g) => groupName.get(g)).filter(Boolean).join(', ') || '—'}</td>}
                       <td className="small muted nowrap hide-sm">{isOnline(u.onlineAt) ? <span className="miku-text">{tr('common.now')}</span> : ago(u.onlineAt)}</td>
-                      <td className="small muted nowrap hide-sm">{date(u.createdAt)}</td>
+                      {standard && <td className="small muted nowrap hide-sm">{date(u.createdAt)}</td>}
                     </tr>
                   )
                 })}
@@ -196,7 +227,7 @@ export function Users() {
       </div>
 
       {creating && <CreateUser groups={groups.data || []} onClose={() => setCreating(false)} onCreated={(u) => { setCreating(false); users.reload(); show(u.id) }} />}
-      {transfer && <TransferUsers search={search} status={statusFilter} group={groupFilter} onClose={() => setTransfer(false)} onImported={() => { users.reload(); groups.reload() }} />}
+      {transfer && <TransferUsers onClose={() => setTransfer(false)} onImported={() => { users.reload(); groups.reload() }} />}
       {open && <UserDrawer id={open} groups={groups.data || []} onClose={() => show(null)} onChanged={users.reload} />}
     </>
   )
@@ -218,9 +249,27 @@ type TransferReport = {
   dryRun?: boolean
 }
 
-// Перенос пользователей: экспорт в файл и импорт из файла или напрямую из Remnawave по API.
+// Экспорт пользователей в JSON-файл — отдельное действие тулбара (не часть модала переноса).
+async function doExport(search: string, status: string, group: number, act: ReturnType<typeof useAction>) {
+  const qs = new URLSearchParams()
+  if (search) qs.set('search', search)
+  if (status) qs.set('status', status)
+  if (group) qs.set('group', String(group))
+  const qstr = qs.toString()
+  const f = await act(() => get<any>(`users/export${qstr ? `?${qstr}` : ''}`), tr('users.exported'))
+  if (!f) return
+  const name = f.meta?.source === 'remnawave' || f.meta?.source === '3x-ui' ? `users-${f.meta.source}.json` : 'users-export.json'
+  const blob = new Blob([JSON.stringify(f, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = name
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+// Перенос пользователей: импорт из файла или напрямую из Remnawave по API.
 // UUID и ссылки подписок (shortUuid) сохраняются — клиенты продолжают работать на новой панели.
-function TransferUsers({ search, status, group, onClose, onImported }: { search: string; status: string; group: number; onClose: () => void; onImported: () => void }) {
+function TransferUsers({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
   const act = useAction()
   const [tab, setTab] = useState<'file' | 'remnawave'>('file')
   const [mode, setMode] = useState<'skip' | 'upsert' | 'rename'>('skip')
@@ -231,23 +280,6 @@ function TransferUsers({ search, status, group, onClose, onImported }: { search:
   const [remnaUrl, setRemnaUrl] = useState('')
   const [remnaToken, setRemnaToken] = useState('')
   const [report, setReport] = useState<TransferReport | null>(null)
-
-  const doExport = async () => {
-    const qs = new URLSearchParams()
-    if (search) qs.set('search', search)
-    if (status) qs.set('status', status)
-    if (group) qs.set('group', String(group))
-    const qstr = qs.toString()
-    const f = await act(() => get<any>(`users/export${qstr ? `?${qstr}` : ''}`), tr('users.exported'))
-    if (!f) return
-    const name = f.meta?.source === 'remnawave' || f.meta?.source === '3x-ui' ? `users-${f.meta.source}.json` : 'users-export.json'
-    const blob = new Blob([JSON.stringify(f, null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = name
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
 
   const doImport = async (dryRun: boolean) => {
     if (tab === 'file') {
@@ -287,11 +319,6 @@ function TransferUsers({ search, status, group, onClose, onImported }: { search:
 
   return (
     <Modal title={tr('users.transfer_users')} onClose={onClose}>
-      <div className="card card-pad" style={{ marginBottom: 12 }}>
-        <div className="label" style={{ marginBottom: 8 }}>{tr('users.export_section')}<Info>{tr('users.export_info')}</Info></div>
-        <button className="btn primary" onClick={doExport}><Icon name="download" />{' '}{tr('users.download_file')}</button>
-        {search && <div className="muted small" style={{ marginTop: 6 }}>{tr('users.export_filtered', { v: search })}</div>}
-      </div>
       <div className="card card-pad">
         <div className="row between" style={{ marginBottom: 10 }}>
           <div className="label">{tr('users.import_section')}</div>
@@ -350,6 +377,7 @@ function TransferUsers({ search, status, group, onClose, onImported }: { search:
 
 function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: () => void; onCreated: (u: User) => void }) {
   const templates = useLoad(() => get<Template[]>('templates'))
+  const standard = useAtLeast('standard')
   const [username, setUsername] = useState('')
   const [templateId, setTemplateId] = useState(0)
   const [note, setNote] = useState('')
@@ -387,6 +415,21 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
   const tplExpiry = tpl && (tpl.expireMonths || tpl.expireDays)
   const fromTpl = <span className="from-tpl">{tr('users.from_the_template')}</span>
 
+  // Лёгкий режим: только имя — все параметры из шаблона по умолчанию.
+  if (!standard) {
+    return (
+      <Modal title={tr('users.new_user')} onClose={onClose}
+        footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" form="create-user" disabled={!username.trim()}>{tr('common.create')}</button></>}>
+        <form id="create-user" onSubmit={submit}>
+          <Field label={tr('users.name')} help={tr('users.latin_letters_digits_and_e')}>
+            <input className="input" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="vasya" />
+          </Field>
+          <p className="muted small">{tr('users.light_form_hint')}</p>
+        </form>
+      </Modal>
+    )
+  }
+
   return (
     <Modal title={tr('users.new_user')} onClose={onClose}
       footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" form="create-user" disabled={!username.trim()}>{tr('common.create')}</button></>}>
@@ -412,51 +455,63 @@ function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: 
         </div>
         <label className="check" style={{ marginTop: -6, marginBottom: 12 }}>
           <input type="checkbox" checked={never} onChange={(e) => setNever(e.target.checked)} />{' '}{tr('users.no_expiry')}</label>
-        <div className="grid2 keep2">
-          <Field label={<><Trans k="users.traffic_gb" v={{ v: traffic === '' && fromTpl }} /></>} help={tr('users.n0_no_limit')}>
-            <input className="input" inputMode="decimal" value={traffic} onChange={(e) => setTraffic(e.target.value.replace(/[^\d.,]/g, ''))}
-              placeholder={tpl?.trafficLimit ? String(+(tpl.trafficLimit / GiB).toFixed(2)) : tr('users.no_limit')} />
-          </Field>
-          <Field label={<><Trans k="users.traffic_reset" v={{ v: reset === '' && fromTpl }} /></>}>
-            <select className={'input' + (reset === '' ? ' placeholder' : '')} value={reset} onChange={(e) => setReset(e.target.value)}>
-              <option value="">{resetLabels[tpl?.resetStrategy || 'no']}</option>
-              {Object.entries(resetLabels).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </Field>
-          <Field label={<><Trans k="users.devices" v={{ v: hwid === '' && fromTpl }} /></>} help={tr('users.n0_no_limit')}>
-            <input className="input" inputMode="numeric" value={hwid} onChange={(e) => setHwid(e.target.value.replace(/\D/g, ''))}
-              placeholder={tpl?.hwidLimit != null ? String(tpl.hwidLimit || '∞') : tr('users.shared', { v: session.data?.hwidDefault || '∞' })} />
-          </Field>
-          <Field label={<>{tr('users.ip_limit_at_once')}{' '}{ip === '' && <span className="from-tpl">{tr('users.shared_limit')}</span>}</>} help={tr('users.n0_no_limit')}>
-            <input className="input" inputMode="numeric" value={ip} onChange={(e) => setIp(e.target.value.replace(/\D/g, ''))}
-              placeholder={String(session.data?.ipDefault || '∞')} />
-          </Field>
-        </div>
-        <Field label={<><Trans k="users.groups" v={{ v: ownGroups === null && fromTpl }} /></>}>
-          <div className="row">
-            {groups.map((g) => {
-              const on = (ownGroups ?? tpl?.groupIds ?? []).includes(g.id)
-              return (
-                <label key={g.id} className={'check' + (ownGroups === null ? ' muted' : '')}>
-                  <input type="checkbox" checked={on} onChange={() => {
-                    const cur = ownGroups ?? tpl?.groupIds ?? []
-                    setOwnGroups(on ? cur.filter((x) => x !== g.id) : [...cur, g.id])
-                  }} />
-                  {g.name}
-                </label>
-              )
-            })}
+
+        <details className="form-section">
+          <summary>{tr('users.section_limits')}<span className="muted small">{tr('users.section_from_template')}</span></summary>
+          <div className="form-section-body">
+            <div className="grid2 keep2">
+              <Field label={<><Trans k="users.traffic_gb" v={{ v: traffic === '' && fromTpl }} /></>} help={tr('users.n0_no_limit')}>
+                <input className="input" inputMode="decimal" value={traffic} onChange={(e) => setTraffic(e.target.value.replace(/[^\d.,]/g, ''))}
+                  placeholder={tpl?.trafficLimit ? String(+(tpl.trafficLimit / GiB).toFixed(2)) : tr('users.no_limit')} />
+              </Field>
+              <Field label={<><Trans k="users.traffic_reset" v={{ v: reset === '' && fromTpl }} /></>}>
+                <select className={'input' + (reset === '' ? ' placeholder' : '')} value={reset} onChange={(e) => setReset(e.target.value)}>
+                  <option value="">{resetLabels[tpl?.resetStrategy || 'no']}</option>
+                  {Object.entries(resetLabels).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+              </Field>
+              <Field label={<><Trans k="users.devices" v={{ v: hwid === '' && fromTpl }} /></>} help={tr('users.n0_no_limit')}>
+                <input className="input" inputMode="numeric" value={hwid} onChange={(e) => setHwid(e.target.value.replace(/\D/g, ''))}
+                  placeholder={tpl?.hwidLimit != null ? String(tpl.hwidLimit || '∞') : tr('users.shared', { v: session.data?.hwidDefault || '∞' })} />
+              </Field>
+              <Field label={<>{tr('users.ip_limit_at_once')}{' '}{ip === '' && <span className="from-tpl">{tr('users.shared_limit')}</span>}</>} help={tr('users.n0_no_limit')}>
+                <input className="input" inputMode="numeric" value={ip} onChange={(e) => setIp(e.target.value.replace(/\D/g, ''))}
+                  placeholder={String(session.data?.ipDefault || '∞')} />
+              </Field>
+            </div>
           </div>
-        </Field>
-        <Field label={tr('users.note')}>
-          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={tpl?.note || tr('users.e_g_telegram_vasya')} />
-        </Field>
-        <Field label={tr('users.subscription_link')} help={tr('users.link_help')} info={tr('users.link_info')}>
-          <div className="link-input">
-            <span className="mono muted">{session.data?.subBase || '…/s/'}</span>
-            <input className="input mono" value={subToken} onChange={(e) => setSubToken(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} placeholder={tr('users.random')} maxLength={64} />
+        </details>
+
+        <details className="form-section">
+          <summary>{tr('users.section_access')}</summary>
+          <div className="form-section-body">
+            <Field label={<><Trans k="users.groups" v={{ v: ownGroups === null && fromTpl }} /></>}>
+              <div className="row">
+                {groups.map((g) => {
+                  const on = (ownGroups ?? tpl?.groupIds ?? []).includes(g.id)
+                  return (
+                    <label key={g.id} className={'check' + (ownGroups === null ? ' muted' : '')}>
+                      <input type="checkbox" checked={on} onChange={() => {
+                        const cur = ownGroups ?? tpl?.groupIds ?? []
+                        setOwnGroups(on ? cur.filter((x) => x !== g.id) : [...cur, g.id])
+                      }} />
+                      {g.name}
+                    </label>
+                  )
+                })}
+              </div>
+            </Field>
+            <Field label={tr('users.note')}>
+              <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={tpl?.note || tr('users.e_g_telegram_vasya')} />
+            </Field>
+            <Field label={tr('users.subscription_link')} help={tr('users.link_help')} info={tr('users.link_info')}>
+              <div className="link-input">
+                <span className="mono muted">{session.data?.subBase || '…/s/'}</span>
+                <input className="input mono" value={subToken} onChange={(e) => setSubToken(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} placeholder={tr('users.random')} maxLength={64} />
+              </div>
+            </Field>
           </div>
-        </Field>
+        </details>
       </form>
     </Modal>
   )
@@ -478,9 +533,11 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
   const { data, error, reload } = useLoad(() => get<UserDetails>(`users/${id}`), [id], 20000)
   const act = useAction()
   const confirm = useConfirm()
+  const standard = useAtLeast('standard')
   const [editing, setEditing] = useState(false)
   const [showQR, setShowQR] = useState(false)
   const [linkEdit, setLinkEdit] = useState<string | null>(null)
+  const linkRef = useRef<HTMLDivElement>(null)
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     const r = await act(fn, ok)
@@ -494,11 +551,100 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
   const u = data.user
   const st = statusInfo[u.status]
 
+  const scrollToLink = () => linkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  const toggleBtn = u.enabled
+    ? <button className="btn sm" onClick={() => run(() => patch(`users/${id}`, { enabled: false }), tr('users.disabled'))}><Icon name="power" />{' '}{tr('users.disable')}</button>
+    : <button className="btn sm primary" onClick={() => run(() => patch(`users/${id}`, { enabled: true }), tr('users.enabled'))}><Icon name="power" />{' '}{tr('users.enable')}</button>
+
+  const extendBtns = [1, 3, 6, 12].map((m) => (
+    <button key={m} className="btn sm primary" onClick={() => run(() => post(`users/${id}/extend`, { months: m }), tr('users.extended_by_mo', { m }))}><Trans k="users.mo_2" v={{ m: m }} /></button>
+  ))
+
+  const doDelete = async () => {
+    if (await confirm(<><Trans k="users.delete_the_user_this_cannot" v={{ username: u.username }} /></>, tr('common.delete'))) {
+      const r = await act(() => del(`users/${id}`), tr('users.user_deleted'))
+      if (r !== undefined) { onChanged(); onClose() }
+    }
+  }
+
+  // Лёгкий режим: три блока — ссылка, состояние, действия.
+  if (!standard) {
+    return (
+      <Drawer title={<>{u.username} <Badge color={st.color} dot>{st.label}</Badge></>} onClose={onClose}>
+        <div className="card card-pad">
+          <div className="label" style={{ marginBottom: 8 }}>{tr('users.subscription_link_send_it_to')}</div>
+          {data.subUrl ? (
+            <>
+              <CopyField value={data.subUrl} />
+              <div className="row" style={{ marginTop: 10 }}>
+                <button className="btn sm" onClick={() => setShowQR(!showQR)}>{showQR ? tr('users.hide_qr') : tr('users.show_qr')}</button>
+                <a className="btn sm" href={data.subUrl} target="_blank" rel="noreferrer"><Icon name="link" />{' '}{tr('users.open_the_page')}</a>
+              </div>
+              {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
+            </>
+          ) : <div className="alert amber"><Trans k="users.no_link_check_subscription" v={{ subError: data.subError }} /></div>}
+        </div>
+
+        <div className="card card-pad">
+          <div className="kv">
+            <div className="k">{tr('users.expires')}</div>
+            <div>{u.expireAt ? <>{dateTime(u.expireAt)} <span className="muted">({left(u.expireAt)})</span></> : tr('users.no_expiry')}</div>
+            <div className="k">{tr('common.traffic')}</div>
+            <div>{bytes(u.trafficUsed)} / {bytes(u.trafficLimit)}
+              {u.trafficLimit != null && <div style={{ marginTop: 6 }}><Bar value={u.trafficUsed} max={u.trafficLimit} /></div>}</div>
+            <div className="k">{tr('common.online')}</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">{tr('common.now')}</span> : ago(u.onlineAt)}</div>
+          </div>
+        </div>
+
+        <div className="card card-pad">
+          <div className="label" style={{ marginBottom: 10 }}>{tr('common.actions')}</div>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="text-2 small">{tr('users.extend')}</span>
+            {[1, 3, 12].map((m) => (
+              <button key={m} className="btn sm primary" onClick={() => run(() => post(`users/${id}/extend`, { months: m }), tr('users.extended_by_mo', { m }))}><Trans k="users.mo_2" v={{ m: m }} /></button>
+            ))}
+          </div>
+          <div className="row" style={{ marginTop: 10, gap: 6, flexWrap: 'wrap' }}>
+            {toggleBtn}
+            <button className="btn sm danger" onClick={doDelete}><Icon name="trash" />{' '}{tr('common.delete')}</button>
+          </div>
+        </div>
+      </Drawer>
+    )
+  }
+
   return (
     <Drawer title={<>{u.username} <Badge color={st.color} dot>{st.label}</Badge></>} onClose={onClose}
-      actions={<button className="btn sm" onClick={() => setEditing(true)}><Icon name="edit" />{' '}{tr('common.edit')}</button>}>
+      actions={<>
+        <button className="btn sm" onClick={() => setEditing(true)}><Icon name="edit" />{' '}{tr('common.edit')}</button>
+        <Menu title={tr('common.more_actions')} items={[
+          { label: tr('users.reset_traffic'), icon: 'refresh', onClick: () => run(() => post(`users/${id}/reset`), tr('users.traffic_reset_2')) },
+          { label: tr('users.new_link'), icon: 'link', onClick: async () => {
+              if (await confirm(tr('users.the_old_subscription_link_will'), tr('users.issue_a_new_one')))
+                run(() => post(`users/${id}/reissue`, { token: true }), tr('users.new_link_issued'))
+            } },
+          { label: tr('users.change_uuid'), icon: 'key', onClick: async () => {
+              if (await confirm(tr('users.change_the_uuid_all_devices'), tr('common.change')))
+                run(() => post(`users/${id}/reissue`, { uuid: true }), tr('users.uuid_changed'))
+            } },
+          'divider',
+          { label: tr('common.delete'), icon: 'trash', danger: true, onClick: doDelete },
+        ]} />
+      </>}>
 
+      {/* Полоса быстрых действий — самые частые операции под рукой. */}
       <div className="card card-pad">
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className="text-2 small">{tr('users.extend')}</span>
+          {extendBtns}
+          <span className="grow" />
+          {data.subUrl && <button className="btn sm" onClick={scrollToLink}><Icon name="link" />{' '}{tr('users.link')}</button>}
+          {toggleBtn}
+        </div>
+      </div>
+
+      <div className="card card-pad" ref={linkRef}>
         <div className="label" style={{ marginBottom: 8 }}>{tr('users.subscription_link_send_it_to')}<Info>{tr('users.on_a_phone_the_link')}</Info></div>
         {data.subUrl ? (
           <>
@@ -552,36 +698,6 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
           <div className="k">{tr('users.format')}</div><div>{clientTypes[u.clientType] || u.clientType}</div>
           {u.note && <><div className="k">{tr('users.note')}</div><div>{u.note}</div></>}
           <div className="k">{tr('users.created')}</div><div>{dateTime(u.createdAt)}</div>
-        </div>
-      </div>
-
-      <div className="card card-pad">
-        <div className="label" style={{ marginBottom: 10 }}>{tr('common.actions')}</div>
-        <div className="row">
-          <span className="text-2 small">{tr('users.extend')}</span>
-          {[1, 3, 6, 12].map((m) => (
-            <button key={m} className="btn sm primary" onClick={() => run(() => post(`users/${id}/extend`, { months: m }), tr('users.extended_by_mo', { m }))}><Trans k="users.mo_2" v={{ m: m }} /></button>
-          ))}
-        </div>
-        <div className="row" style={{ marginTop: 10 }}>
-          {u.enabled
-            ? <button className="btn sm" onClick={() => run(() => patch(`users/${id}`, { enabled: false }), tr('users.disabled'))}>{tr('users.disable')}</button>
-            : <button className="btn sm primary" onClick={() => run(() => patch(`users/${id}`, { enabled: true }), tr('users.enabled'))}>{tr('users.enable')}</button>}
-          <button className="btn sm" onClick={() => run(() => post(`users/${id}/reset`), tr('users.traffic_reset_2'))}>{tr('users.reset_traffic')}</button>
-          <button className="btn sm" onClick={async () => {
-            if (await confirm(tr('users.the_old_subscription_link_will'), tr('users.issue_a_new_one')))
-              run(() => post(`users/${id}/reissue`, { token: true }), tr('users.new_link_issued'))
-          }}>{tr('users.new_link')}</button>
-          <button className="btn sm" onClick={async () => {
-            if (await confirm(tr('users.change_the_uuid_all_devices'), tr('common.change')))
-              run(() => post(`users/${id}/reissue`, { uuid: true }), tr('users.uuid_changed'))
-          }}>{tr('users.change_uuid')}</button>
-          <button className="btn sm danger" onClick={async () => {
-            if (await confirm(<><Trans k="users.delete_the_user_this_cannot" v={{ username: u.username }} /></>, tr('common.delete'))) {
-              const r = await act(() => del(`users/${id}`), tr('users.user_deleted'))
-              if (r !== undefined) { onChanged(); onClose() }
-            }
-          }}><Icon name="trash" />{' '}{tr('common.delete')}</button>
         </div>
       </div>
 

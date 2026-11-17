@@ -28,6 +28,7 @@ export default {
   grant: 'Grant',
   grant_a_cascade_or_subscription: '+ grant a cascade or subscription…',
   granted: 'Granted',
+  granted_via: 'Granted to users, groups and templates via “Cascades and subscriptions” in the user, group or template card.',
   https_sub_example_com_s: 'https://sub.example.com/s/…\nor vless://…',
   link: 'Link',
   name_in_the_panel: 'Name in the panel',

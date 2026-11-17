@@ -16,6 +16,7 @@ import profiles from './profiles'
 import routing from './routing'
 import serverload from './serverload'
 import settings from './settings'
+import setup from './setup'
 import stats from './stats'
 import subscription from './subscription'
 import telegram from './telegram'
@@ -29,5 +30,5 @@ import code from './code'
 import integrations from './integrations'
 import xray from './xray'
 
-const en: Catalog = { account, audit, billing, charts, common, dashboard, extras, groups, insights, login, main, nodes, overview, profiles, routing, serverload, settings, stats, subscription, telegram, templates, ui, updates, users, format, code, api, integrations, xray }
+const en: Catalog = { account, audit, billing, charts, common, dashboard, extras, groups, insights, login, main, nodes, overview, profiles, routing, serverload, settings, setup, stats, subscription, telegram, templates, ui, updates, users, format, code, api, integrations, xray }
 export default en
