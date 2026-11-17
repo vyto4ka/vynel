@@ -1,5 +1,4 @@
 export default {
-  a_group_decides_which_servers: 'A group decides which servers end up in the subscription. A user sees everything available to at least one of their groups.',
   access: 'Access',
   access_added: 'Access added',
   access_removed: 'Access removed',

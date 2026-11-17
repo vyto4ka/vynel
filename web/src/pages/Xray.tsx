@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { get, post, put } from '../api'
 import { CodeEditor, pretty } from '../code'
-import { Badge, copyText, Icon, Info, Loading, Modal, PageInfo, useAction, useConfirm, useLoad, useToast } from '../ui'
+import { Badge, copyText, Icon, Info, Loading, Modal, useAction, useConfirm, useLoad, useToast } from '../ui'
 import { splitConfig } from '../xrayImport'
 import { Linked, LinkProvider, useActiveLink } from '../jsonlink'
 import { Key, t, Trans } from '../i18n'
@@ -119,7 +119,6 @@ function XrayEditor({ info, reload }: { info: BaseInfo; reload: () => Promise<vo
             <button key={t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>{t.title}</button>
           ))}
         </div>
-        <PageInfo><Trans k="xray.the_common_config_is_the" /></PageInfo>
       </div>
 
       {tab === 'base' && (

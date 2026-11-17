@@ -25,7 +25,6 @@ export default {
   the_check_runs_xray_on: 'The check runs Xray on this server.',
   the_common_config_has_a: 'The common config has a JSON error — the section is unavailable until it is fixed. Open the “Common config” tab: the error is underlined, with the line and column under the text.',
   the_common_config_has_an: 'The common config has an error — the result cannot be shown.',
-  the_common_config_is_the: 'The common config is the part of Xray on every node other than the inbounds: outbound connections, routing rules, DNS and everything else Xray can do. Inbounds are built from profiles, while the <c>api</c>, <c>stats</c>, <c>policy</c> sections and the log level are set by the panel itself. The sections are the same data cut by top-level keys: an edit anywhere changes the one config.',
   the_config_a_node_will: 'The config a node will run with your common config as it is in the editor now (unsaved too). Inbounds from profiles, the panel’s <c>api</c>/<c>stats</c>/<c>policy</c> and the exit rules are in place; users and Reality keys are hidden.',
   the_standard_config: 'The standard config. ',
   there_are_unsaved_changes: 'There are unsaved changes. ',

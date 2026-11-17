@@ -1,20 +1,20 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { del, get, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap, Variable } from '../api'
+import { del, get, Group, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap, Variable } from '../api'
 import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ProviderIcon } from './Billing'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
-import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans, Key } from '../i18n'
-import { useAdvanced } from '../mode'
+import { useAdvanced, useAtLeast } from '../mode'
 import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000)
   const selfHost = useLoad(() => get<SelfHost>('self-host'), [], 30000)
   const profiles = useLoad(() => get<Profile[]>('profiles'))
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useState(() => location.hash.startsWith('#/nodes/new'))
   const [join, setJoin] = useState<JoinInfo | null>(null)
   const [checkOf, setCheckOf] = useState<Node | null>(null)
   const [editNode, setEditNode] = useState<Node | null>(null)
@@ -28,6 +28,7 @@ export function Nodes() {
   const updates = useUpdates(15000)
   const [updLog, setUpdLog] = useState<{ id: number; name: string } | null>(null)
   const upd = useRunUpdate(updates.data, () => { updates.reload(); reload() })
+  const light = !useAtLeast('standard')
   // У локальной ноды версия панели: она обновляется вместе с панелью.
   const updOf = (n: Node) => n.local ? updates.data?.panel : updates.data?.nodes.find((x) => x.id === n.id)
 
@@ -41,7 +42,7 @@ export function Nodes() {
   return (
     <>
       <div className="toolbar">
-        <PageInfo>{t('nodes.nodes_are_servers_with_xray')}</PageInfo>
+        <div className="grow" />
         {(updates.data?.count || 0) > 0 && <button className="btn" onClick={async () => {
           if (await confirm(<><Trans k="nodes.update_all_outdated_servers" v={{ latest: updates.data!.latest }} /></>, t('nodes.update_all'), false))
             upd.run('all')
@@ -51,7 +52,9 @@ export function Nodes() {
 
       {selfHost.data && <SelfHostCard sh={selfHost.data} />}
 
-      {!nodes.data ? <Loading error={nodes.error} /> : nodes.data.length === 0 ? <div className="card"><Empty icon="🛰">{t('nodes.no_nodes')}</Empty></div> : (
+      {!nodes.data ? <Loading error={nodes.error} /> : nodes.data.length === 0 ? <div className="card"><Empty icon="🛰" action={
+        <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" />{' '}{t('nodes.add_a_server')}</button>
+      }>{t('nodes.no_nodes')}</Empty></div> : (
         <div className="cards">
           {nodes.data.map((n) => {
             const st = nodeStateInfo[n.state] || { label: n.state, color: '' }
@@ -80,9 +83,13 @@ export function Nodes() {
                     {n.setupStep > 0 && <Badge color="amber" dot>{t('nodes.without_profiles')}</Badge>}
                     <Badge color={st.color} dot>{st.label}</Badge>
                     <Switch checked={n.enabled} onChange={(v) => act(() => patch(`nodes/${n.id}`, { enabled: v }), v ? t('nodes.node_turned_on') : t('nodes.node_turned_off')).then(reload)} />
-                    <button className="btn ghost icon sm" title={t('nodes.check_connection_config_dns')} onClick={() => setCheckOf(n)}><Icon name="search" /></button>
-                    <button className="btn ghost icon sm" title={t('common.edit')} onClick={() => setEditNode(n)}><Icon name="edit" /></button>
+                    {light ? (
+                      <button className="btn ghost icon sm" title={t('nodes.check_connection_config_dns')} onClick={() => setCheckOf(n)}><Icon name="search" /></button>
+                    ) : (
                     <Menu title={t('common.actions')} items={[
+                      { label: t('nodes.check_connection_config_dns'), icon: 'search', onClick: () => setCheckOf(n) },
+                      { label: t('common.edit'), icon: 'edit', onClick: () => setEditNode(n) },
+                      'divider',
                       { label: t('nodes.restart_xray'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'xray', t('nodes.xray_restarted')) },
                       ...(!n.manual ? [{ label: t('nodes.restart_the_web_server'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', t('nodes.web_server_restarted')) }] : []),
                       { label: t('nodes.resend_the_config'), icon: 'nodes', disabled: !online, onClick: () => nodeAction(n, 'resync', t('nodes.config_sent')) },
@@ -111,6 +118,7 @@ export function Nodes() {
                             act(() => del(`nodes/${n.id}`), t('nodes.node_deleted')).then(reload)
                         } }] : []),
                     ]} />
+                    )}
                   </div>
                 </div>
                 <div className="card-pad">
@@ -134,7 +142,7 @@ export function Nodes() {
                       <button className="btn sm" onClick={() => setWizardOf(n)}><Icon name="edit" />{' '}{t('nodes.continue_setup')}</button>
                     </div>
                   )}
-                  <div className="cards" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+                  <div className="cards" style={{ gridTemplateColumns: light ? '1fr' : 'repeat(auto-fit, minmax(260px, 1fr))' }}>
                     <div>
                       {m ? (
                         <>
@@ -155,6 +163,7 @@ export function Nodes() {
                         </div>
                       )}
                     </div>
+                    {!light && (
                     <div>
                       <div className="row between" style={{ marginBottom: 8 }}>
                         <span className="label">{t('nodes.inbounds')}</span>
@@ -173,24 +182,28 @@ export function Nodes() {
                             <Switch checked={i.enabled} onChange={(v) => act(() => patch(`inbounds/${i.id}`, { enabled: v }), v ? t('nodes.inbound_turned_on') : t('nodes.inbound_turned_off')).then(reload)} />
                           </div>
                           <div className="row" style={{ marginTop: 8, gap: 6 }}>
-                            <button className="btn sm" onClick={() => setHostOf(i)}><Icon name="edit" />{' '}{t('nodes.connection_point')}</button>
                             <button className="btn sm primary" onClick={() => setConfigOf(i)}><Icon name="code" />{' '}{t('nodes.configure')}</button>
-                            <button className="btn sm" title={t('nodes.duplicate_the_inbound_a_copy')} onClick={() => {
-                              act(() => post<{ id: number; tag: string }>(`inbounds/${i.id}/duplicate`))
-                                .then((r) => { if (r) { act(() => Promise.resolve(true), t('nodes.inbound_duplicated', { tag: r.tag })); reload() } })
-                            }}><Icon name="copy" />{' '}{t('common.duplicate')}</button>
-                            <button className="btn sm" onClick={async () => {
-                              if (await confirm(t('nodes.generate_new_reality_keys_and'), t('nodes.generate')))
-                                act(() => patch(`inbounds/${i.id}`, { regenerateKeys: true }), t('nodes.keys_updated')).then(reload)
-                            }}><Icon name="key" />{' '}{t('nodes.new_keys')}</button>
-                            <button className="btn sm danger" onClick={async () => {
-                              if (await confirm(<><Trans k="nodes.remove_the_inbound_from_the" v={{ tag: i.tag }} /></>, t('common.remove')))
-                                act(() => del(`inbounds/${i.id}`), t('nodes.inbound_removed')).then(reload)
-                            }}><Icon name="trash" /></button>
+                            <Menu title={t('common.actions')} items={[
+                              { label: t('nodes.connection_point'), icon: 'edit', onClick: () => setHostOf(i) },
+                              { label: t('common.duplicate'), icon: 'copy', onClick: () => {
+                                act(() => post<{ id: number; tag: string }>(`inbounds/${i.id}/duplicate`))
+                                  .then((r) => { if (r) { act(() => Promise.resolve(true), t('nodes.inbound_duplicated', { tag: r.tag })); reload() } })
+                              } },
+                              { label: t('nodes.new_keys'), icon: 'key', onClick: async () => {
+                                if (await confirm(t('nodes.generate_new_reality_keys_and'), t('nodes.generate')))
+                                  act(() => patch(`inbounds/${i.id}`, { regenerateKeys: true }), t('nodes.keys_updated')).then(reload)
+                              } },
+                              'divider',
+                              { label: t('common.remove'), icon: 'trash', danger: true, onClick: async () => {
+                                if (await confirm(<><Trans k="nodes.remove_the_inbound_from_the" v={{ tag: i.tag }} /></>, t('common.remove')))
+                                  act(() => del(`inbounds/${i.id}`), t('nodes.inbound_removed')).then(reload)
+                              } },
+                            ]} />
                           </div>
                         </div>
                       ))}
                     </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -201,7 +214,7 @@ export function Nodes() {
 
       {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setJoin(j); reload() }} />}
       {join && <NodeSetup j={join} onClose={() => { setJoin(null); reload() }} onDone={(n) => { setJoin(null); setWizardOf(n); reload() }} />}
-      {wizardOf && <NodeWizardModal node={wizardOf} profiles={profiles.data || []} onClose={() => { setWizardOf(null); reload() }} />}
+      {wizardOf && <NodeWizardModal node={wizardOf} profiles={profiles.data || []} onClose={() => { setWizardOf(null); reload() }} onProfilesChanged={profiles.reload} />}
       {updLog && <UpdateLog id={updLog.id} name={updLog.name} onClose={() => { setUpdLog(null); updates.reload() }} />}
       {checkOf && <NodeSetup node={checkOf} onClose={() => { setCheckOf(null); reload() }} />}
       {editNode && <EditNode n={editNode} onClose={() => setEditNode(null)} onSaved={() => { setEditNode(null); reload() }} />}
@@ -306,7 +319,7 @@ const stepIcon = { ok: '✓', wait: '', fail: '!', skip: '–' }
 // хранится не отдельно, а выводится из данных ноды: нет профилей = шаг 2, пустые переменные
 // ноды = шаг 3, требования не подтверждены = шаг 4. Закрыл диалог — открыл снова через
 // «Продолжить настройку» на карточке: попадаешь на тот же шаг.
-function NodeWizardModal({ node: initial, profiles, onClose }: { node: Node; profiles: Profile[]; onClose: () => void }) {
+function NodeWizardModal({ node: initial, profiles, onClose, onProfilesChanged }: { node: Node; profiles: Profile[]; onClose: () => void; onProfilesChanged: () => void }) {
   const [node, setNode] = useState(initial)
   const [at, setAt] = useState(() => Math.max(2, initial.setupStep > 0 ? initial.setupStep : 2))
   const { data: wizard, error } = useLoad(() => get<NodeWizard>(`nodes/${node.id}/wizard`), [node.id, at], at >= 4 ? 5000 : 0)
@@ -337,7 +350,7 @@ function NodeWizardModal({ node: initial, profiles, onClose }: { node: Node; pro
         {step === 5 && <button className="btn primary" onClick={onClose}>{t('common.done')}</button>}
       </>}>
       <WizardSteps at={step - 1} all />
-      {!nodes.data ? <Loading error={nodes.error} /> : step === 2 ? <StepProfiles node={cur} profiles={profiles} onDone={(n) => { toNode(n); next() }} /> :
+      {!nodes.data ? <Loading error={nodes.error} /> : step === 2 ? <StepProfiles node={cur} profiles={profiles} onDone={(n) => { toNode(n); next() }} onProfilesChanged={onProfilesChanged} /> :
         step === 3 ? <StepVars node={cur} profiles={profiles} tpls={tpls.data || []} onDone={(n) => { toNode(n); next() }} onBack={back} /> :
           step === 4 ? <StepChecks node={cur} wizard={wizard} error={error} onDone={(n) => { toNode(n); next() }} onBack={back} /> :
             <StepApply node={cur} act={act} onBack={back} onDone={onClose} />}
@@ -346,7 +359,8 @@ function NodeWizardModal({ node: initial, profiles, onClose }: { node: Node; pro
 }
 
 // Шаг 2: выбор профилей галочками. Привязка (AttachProfile) сразу по кнопке.
-function StepProfiles({ node, profiles, onDone }: { node: Node; profiles: Profile[]; onDone: (n?: Node) => void }) {
+// Если профилей нет — создаём прямо здесь, не отправляя админа на другую страницу.
+function StepProfiles({ node, profiles, onDone, onProfilesChanged }: { node: Node; profiles: Profile[]; onDone: (n?: Node) => void; onProfilesChanged: () => void }) {
   const act = useAction()
   const [busy, setBusy] = useState(false)
   const toggle = async (p: Profile, on: boolean) => {
@@ -362,7 +376,9 @@ function StepProfiles({ node, profiles, onDone }: { node: Node; profiles: Profil
   return (
     <div>
       <p className="text-2" style={{ marginTop: 0 }}>{t('nodes.pick_profiles_for_node')}</p>
-      {profiles.length === 0 ? <div className="alert amber">{t('nodes.first_create_a_profile_on')}</div> : (
+      {profiles.length === 0 ? (
+        <InlineCreateProfile node={node} onCreated={() => { onProfilesChanged(); onDone() }} />
+      ) : (
         <>
           {node.manual && <div className="alert amber">{t('nodes.manual_node_nginx_note')}</div>}
           {profiles.map((p) => (
@@ -376,6 +392,38 @@ function StepProfiles({ node, profiles, onDone }: { node: Node; profiles: Profil
           </button>
         </>
       )}
+    </div>
+  )
+}
+
+// InlineCreateProfile — создание профиля внутри мастера: шаблон + кнопка, без ухода со шага.
+// Профиль сразу привязывается к ноде и получает доступ группы «Основная».
+function InlineCreateProfile({ node, onCreated }: { node: Node; onCreated: () => void }) {
+  const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
+  const groups = useLoad(() => get<Group[]>('groups'))
+  const [templateId, setTemplateId] = useState('')
+  const act = useAction()
+  const usable = (tpls.data || []).filter((x) => !x.broken)
+  const chosen = templateId || usable[0]?.id || ''
+  const create = async () => {
+    if (!chosen) return
+    const gids = (groups.data || []).filter((g) => g.name === 'Основная').map((g) => g.id)
+    const r = await act(() => post<{ id: number }>('profiles', { name: 'Reality', templateId: chosen, values: {}, groupIds: gids }), t('profiles.profile_created'))
+    if (r) {
+      await act(() => post('inbounds', { nodeId: node.id, profileId: r.id }), t('nodes.profile_added_to_the_node'))
+      onCreated()
+    }
+  }
+  if (!tpls.data || !groups.data) return <Loading />
+  return (
+    <div className="card card-pad" style={{ background: 'var(--container-low)' }}>
+      <div className="label" style={{ marginBottom: 8 }}>{t('nodes.no_profiles_yet_inline')}</div>
+      <Field label={t('common.template')} info={usable.find((x) => x.id === chosen)?.summary || undefined}>
+        <select className="input" value={chosen} onChange={(e) => setTemplateId(e.target.value)}>
+          {usable.map((x) => <option key={x.id} value={x.id}>{x.title}{x.custom ? t('profiles.own') : ''}</option>)}
+        </select>
+      </Field>
+      <button className="btn primary" disabled={!chosen} onClick={create}><Icon name="plus" />{' '}{t('nodes.create_profile_and_continue')}</button>
     </div>
   )
 }

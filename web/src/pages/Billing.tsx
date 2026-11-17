@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { Billing as BillingT, BillingNode, del, get, patch, post, Provider, put } from '../api'
 import { bytes, date, fromDateInput, GiB, toDateInput } from '../format'
-import { Bar, Empty, Field, Icon, Info, Loading, Menu, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
+import { Bar, Empty, Field, Icon, Info, Loading, Menu, Modal, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
 
 // Биллинг — где арендованы серверы, сколько стоят, до когда оплачены и сколько трафика им можно.
@@ -41,10 +41,7 @@ export function Billing() {
   return (
     <>
       <div className="toolbar">
-        <PageInfo>
-          <p>{t('billing.providers_are_where_the_servers')}</p>
-          <p><Trans k="billing.each_node_has_a_provider" v={{ remindDays: data.remindDays, v: bytes(data.margin) }} /></p>
-        </PageInfo>
+        <div className="grow muted small" style={{ alignSelf: 'center' }}>{t('billing.providers_are_where_the_servers')}</div>
         <button className="btn primary" onClick={() => setEditProvider('new')}><Icon name="plus" />{' '}{t('common.provider')}</button>
       </div>
 

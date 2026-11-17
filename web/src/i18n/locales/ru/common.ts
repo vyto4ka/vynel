@@ -34,6 +34,7 @@ export default {
   in_90_days: 'за 90 дней',
   loading: 'Загрузка…',
   login: 'Логин',
+  more_actions: 'Ещё действия',
   n24_hours: '24 часа',
   n30_days: '30 дней',
   n7_days: '7 дней',

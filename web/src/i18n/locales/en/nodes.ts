@@ -71,7 +71,6 @@ export default {
   node_domain: 'Node domain',
   node_turned_off: 'Node turned off',
   node_turned_on: 'Node turned on',
-  nodes_are_servers_with_xray: 'Nodes are servers with Xray. On each node a profile gives its own inbound with its own keys; the common settings come from the profile.',
   none_nothing_to_connect_to: 'None — nothing to connect to on this node. Add a profile.',
   not_on_the_interface: ' (not on the interface)',
   null_removes_the_field_empty: 'null removes the field; empty — no edits',
@@ -82,7 +81,6 @@ export default {
   primary: ' (primary)',
   profile: '· profile {name}',
   profile_added_to_the_node: 'Profile added to the node',
-  duplicate_the_inbound_a_copy: 'Duplicate the inbound — a copy with fresh keys and a suffixed tag',
   inbound_duplicated: 'Inbound duplicated: {tag}',
   profile_on_the_node: 'Profile on the node {code}',
   provider_s_site: 'Provider’s site',
@@ -175,4 +173,6 @@ export default {
   finish_setup: 'Finish',
   finish_later: 'Finish later',
   next_step_setup: 'Next: node setup',
+  no_profiles_yet_inline: 'No profiles yet — create the first one right here:',
+  create_profile_and_continue: 'Create the profile and continue',
 }

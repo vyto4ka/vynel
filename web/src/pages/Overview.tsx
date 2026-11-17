@@ -1,5 +1,6 @@
 import { get, Overview as OverviewT } from '../api'
 import { bytes, nodeStateInfo } from '../format'
+import { SetupChecklist } from '../setup'
 import { Badge, ChartLegend, Empty, Loading, TrafficChart, useLoad } from '../ui'
 import { UpdateBanner } from '../updates'
 import { t, Trans } from '../i18n'
@@ -10,6 +11,7 @@ export function Overview() {
   const u = data.users
   return (
     <>
+      <SetupChecklist />
       <UpdateBanner />
       <div className="stats">
         <div className="card stat">
