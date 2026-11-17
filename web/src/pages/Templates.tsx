@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { del, get, Group, post, put, Template, TemplateGrant } from '../api'
 import { TemplateExtras } from '../extras'
 import { clientTypes, GiB, resetLabels } from '../format'
-import { Badge, Empty, Field, Icon, Loading, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 import { templateSummary } from './Users'
 import { t as tr, Trans } from '../i18n'
 
@@ -16,7 +16,7 @@ export function Templates() {
   return (
     <>
       <div className="toolbar">
-        <PageInfo>{tr('templates.a_template_is_a_set')}</PageInfo>
+        <div className="grow" />
         <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{tr('common.template')}</button>
       </div>
       <div className="card">

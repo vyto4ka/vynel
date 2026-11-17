@@ -71,7 +71,6 @@ export default {
   node_domain: 'Домен ноды',
   node_turned_off: 'Нода выключена',
   node_turned_on: 'Нода включена',
-  nodes_are_servers_with_xray: 'Ноды — серверы с Xray. На каждой ноде из профиля получается свой инбаунд со своими ключами; общие настройки берутся из профиля.',
   none_nothing_to_connect_to: 'Нет — на ноде нечего подключать. Добавьте профиль.',
   not_on_the_interface: ' (нет на интерфейсе)',
   null_removes_the_field_empty: 'null удаляет поле; пусто — без правок',
@@ -82,7 +81,6 @@ export default {
   primary: ' (основной)',
   profile: '· профиль {name}',
   profile_added_to_the_node: 'Профиль добавлен на ноду',
-  duplicate_the_inbound_a_copy: 'Дублировать инбаунд — копия с новыми ключами и тегом с суффиксом',
   inbound_duplicated: 'Инбаунд продублирован: {tag}',
   profile_on_the_node: 'Профиль на ноду {code}',
   provider_s_site: 'Сайт провайдера',
@@ -175,4 +173,6 @@ export default {
   finish_setup: 'Завершить',
   finish_later: 'Закончить позже',
   next_step_setup: 'Дальше: настройка ноды',
+  no_profiles_yet_inline: 'Профилей пока нет — создайте первый прямо здесь:',
+  create_profile_and_continue: 'Создать профиль и продолжить',
 }

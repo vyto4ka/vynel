@@ -1,5 +1,4 @@
 export default {
-  about: 'The API connects a billing system, a Telegram bot, another panel or your own script to the panel: they create, extend and switch off subscriptions themselves. A program shows its token and gets exactly the rights you gave it. Everything it does is written to the log under the name of the token.',
   add_webhook: 'Add a webhook',
   anywhere: 'anywhere',
   base_url: 'API address',

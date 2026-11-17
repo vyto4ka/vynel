@@ -2,7 +2,7 @@ import { ReactElement, StrictMode, useCallback, useEffect, useState } from 'reac
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
-import { ConfirmProvider, Icon, Info, Logo, ToastProvider, useAction, useLoad } from './ui'
+import { ConfirmProvider, Drawer, Icon, Logo, Modal, ToastProvider, useAction, useLoad } from './ui'
 import { openExternal } from './telegram'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
@@ -16,47 +16,52 @@ import { Profiles } from './pages/Profiles'
 import { Xray } from './pages/Xray'
 import { Settings } from './pages/Settings'
 import { Subscription } from './pages/Subscription'
+import { Externals } from './pages/Externals'
 import { Audit } from './pages/Audit'
 import { Telegram } from './pages/Telegram'
 import { Api } from './pages/Api'
 import { Account } from './pages/Account'
 import { languages, lang, setLang, t } from './i18n'
-import { ModeProvider, useMode } from './mode'
+import { Mode, ModeProvider, isMigrant, markModeChosen, modeChosen, modeRank, setMigrant, useMode } from './mode'
 import { confirmPageLeave } from './unsaved'
 
 // short is the label under the icon when the menu is collapsed into a rail.
-type Page = { id: string; title: string; short?: string; icon: string; advanced?: boolean; el: () => ReactElement }
+// min — минимальный режим видимости: страница показывается «от уровня min и выше».
+type Page = { id: string; title: string; short?: string; icon: string; min?: Mode; el: () => ReactElement }
 
 const sections: { title: string; pages: Page[] }[] = [
   { title: t('main.overview'), pages: [
     { id: 'overview', title: t('main.dashboard'), icon: 'dashboard', el: () => <Dashboard /> },
-    { id: 'insights', title: t('main.analytics'), icon: 'chart', el: () => <Insights /> },
+    { id: 'insights', title: t('main.analytics'), icon: 'chart', min: 'standard', el: () => <Insights /> },
   ] },
   {
-    title: t('common.users'),
+    title: t('main.access'),
     pages: [
       { id: 'users', title: t('common.users'), icon: 'users', el: () => <Users /> },
-      { id: 'groups', title: t('common.groups'), icon: 'groups', el: () => <Groups /> },
-      { id: 'templates', title: t('main.user_templates'), short: t('main.templates'), icon: 'templates', el: () => <Templates /> },
-      { id: 'subscription', title: t('common.subscription'), icon: 'sub', el: () => <Subscription /> },
+      { id: 'groups', title: t('common.groups'), icon: 'groups', min: 'standard', el: () => <Groups /> },
+      { id: 'templates', title: t('main.user_templates'), short: t('main.templates'), icon: 'templates', min: 'standard', el: () => <Templates /> },
+      { id: 'externals', title: t('main.external_subscriptions'), short: t('main.external'), icon: 'sub', min: 'standard', el: () => <Externals /> },
     ],
   },
   {
-    title: t('common.servers'),
+    title: t('main.infrastructure'),
     pages: [
       { id: 'nodes', title: t('common.nodes'), icon: 'nodes', el: () => <Nodes /> },
-      { id: 'profiles', title: t('common.profiles'), icon: 'profiles', el: () => <Profiles /> },
-      { id: 'xray', title: 'Xray', icon: 'xray', advanced: true, el: () => <Xray /> },
-      { id: 'billing', title: t('main.billing'), icon: 'wallet', el: () => <Billing /> },
+      { id: 'profiles', title: t('common.profiles'), icon: 'profiles', min: 'standard', el: () => <Profiles /> },
+      { id: 'xray', title: 'Xray', icon: 'xray', min: 'pro', el: () => <Xray /> },
+      { id: 'billing', title: t('main.billing'), icon: 'wallet', min: 'standard', el: () => <Billing /> },
     ],
   },
+  { title: t('common.subscription'), pages: [
+    { id: 'subscription', title: t('common.subscription'), icon: 'sub', el: () => <Subscription /> },
+  ] },
   {
     title: t('main.system'),
     pages: [
       { id: 'settings', title: t('common.settings'), icon: 'settings', el: () => <Settings /> },
       { id: 'telegram', title: 'Telegram', icon: 'telegram', el: () => <Telegram /> },
-      { id: 'api', title: t('integrations.title'), icon: 'plug', el: () => <Api /> },
-      { id: 'audit', title: t('main.log'), icon: 'audit', el: () => <Audit /> },
+      { id: 'api', title: t('integrations.title'), icon: 'plug', min: 'pro', el: () => <Api /> },
+      { id: 'audit', title: t('main.log'), icon: 'audit', min: 'pro', el: () => <Audit /> },
       { id: 'account', title: t('main.account'), icon: 'account', el: () => <Account /> },
     ],
   },
@@ -147,6 +152,11 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
     document.title = `${p.title} · vynel`
   }, [p])
 
+  // Видимость пункта: режим достаточного уровня, либо это текущая страница
+  // (прямая ссылка не должна пропадать из меню).
+  const rankOf = modeRank[mode]
+  const visible = (x: Page) => x.id === page || rankOf >= modeRank[x.min ?? 'light']
+
   const toggle = () => {
     setCollapsed((c) => {
       save('vynel.sidebar', c ? 'open' : 'collapsed')
@@ -162,19 +172,23 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
           <div className="brand-name">vyn<span>el</span></div>
         </div>
         <nav className="nav">
-          {sections.map((s) => (
-            <div key={s.title}>
-              <div className="nav-section">{s.title}</div>
-              {s.pages.filter((x) => !x.advanced || mode === 'advanced' || x.id === page).map((x) => (
-                <a key={x.id} href={'#/' + x.id} className={'nav-item' + (x.id === page ? ' active' : '')} title={x.title}>
-                  <Icon name={x.icon} />
-                  <span className="nav-label">{x.title}</span>
-                  <span className="nav-short">{x.short || x.title}</span>
-                  {x.id === 'nodes' && (updates.data?.count || 0) > 0 && <span className="nav-badge" title={t('main.update_available')}>{updates.data!.count}</span>}
-                </a>
-              ))}
-            </div>
-          ))}
+          {sections.map((s) => {
+            const pages = s.pages.filter(visible)
+            if (pages.length === 0) return null
+            return (
+              <div key={s.title}>
+                <div className="nav-section">{s.title}</div>
+                {pages.map((x) => (
+                  <a key={x.id} href={'#/' + x.id} className={'nav-item' + (x.id === page ? ' active' : '')} title={x.title}>
+                    <Icon name={x.icon} />
+                    <span className="nav-label">{x.title}</span>
+                    <span className="nav-short">{x.short || x.title}</span>
+                    {x.id === 'nodes' && (updates.data?.count || 0) > 0 && <span className="nav-badge" title={t('main.update_available')}>{updates.data!.count}</span>}
+                  </a>
+                ))}
+              </div>
+            )
+          })}
         </nav>
         <div className="side-foot">
           <div className="side-foot-text">{login} · {version}</div>
@@ -196,6 +210,7 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
           <button className="btn ghost icon burger" onClick={() => setMobileOpen(true)} aria-label={t('main.menu')}><Icon name="menu" /></button>
           <h1>{p.title}</h1>
           <div className="spacer" />
+          <HelpButton pageId={p.id} />
           <ModeSwitch />
           <LangSwitch />
           {inTelegram && <BrowserButton />}
@@ -206,17 +221,17 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
   )
 }
 
-// ModeSwitch — «Простой / Расширенный»: только формы или формы с сырым конфигом Xray.
+// ModeSwitch — «Лёгкий / Стандарт / Про»: сколько панель показывает сущностей и кнопок.
 function ModeSwitch() {
   const { mode, setMode } = useMode()
   return (
     <div className="row mode-switch" style={{ gap: 6 }}>
       <span className="muted small hide-sm">{t('main.mode')}</span>
       <div className="seg sm">
-        <button className={mode === 'simple' ? 'on' : ''} onClick={() => setMode('simple')}>{t('main.mode_simple')}</button>
-        <button className={mode === 'advanced' ? 'on' : ''} onClick={() => setMode('advanced')}>{t('main.mode_advanced')}</button>
+        <button className={mode === 'light' ? 'on' : ''} title={t('main.mode_light_info')} onClick={() => setMode('light')}>{t('main.mode_light')}</button>
+        <button className={mode === 'standard' ? 'on' : ''} title={t('main.mode_standard_info')} onClick={() => setMode('standard')}>{t('main.mode_standard')}</button>
+        <button className={mode === 'pro' ? 'on' : ''} title={t('main.mode_pro_info')} onClick={() => setMode('pro')}>{t('main.mode_pro')}</button>
       </div>
-      <span className="hide-sm"><Info label={t('main.mode')}>{t('main.mode_info')}</Info></span>
     </div>
   )
 }
@@ -247,9 +262,82 @@ function BrowserButton() {
   )
 }
 
+// HelpButton — «?» в топбаре: справка по текущей странице в drawer.
+function HelpButton({ pageId }: { pageId: string }) {
+  const [open, setOpen] = useState(false)
+  const text = (pageHelp as Record<string, string>)[pageId]
+  return (
+    <>
+      <button className="btn ghost icon" title={t('main.page_help')} aria-label={t('main.page_help')} onClick={() => setOpen(true)}><Icon name="help" /></button>
+      {open && (
+        <Drawer title={t('main.page_help')} onClose={() => setOpen(false)}>
+          <div className="card card-pad">
+            <p style={{ marginTop: 0 }}>{text || t('main.page_help_generic')}</p>
+            <p className="muted small" style={{ marginBottom: 0 }}>{t('main.page_help_modes')}</p>
+          </div>
+        </Drawer>
+      )}
+    </>
+  )
+}
+
+// pageHelp — короткая справка по каждой странице (ключи main.help_*).
+const pageHelp: Record<string, string> = {
+  overview: t('main.help_overview'),
+  insights: t('main.help_insights'),
+  users: t('main.help_users'),
+  groups: t('main.help_groups'),
+  templates: t('main.help_templates'),
+  externals: t('main.help_externals'),
+  nodes: t('main.help_nodes'),
+  profiles: t('main.help_profiles'),
+  xray: t('main.help_xray'),
+  billing: t('main.help_billing'),
+  subscription: t('main.help_subscription'),
+  settings: t('main.help_settings'),
+  telegram: t('main.help_telegram'),
+  api: t('main.help_api'),
+  audit: t('main.help_audit'),
+  account: t('main.help_account'),
+}
+
+// Onboarding — одноразовый выбор режима при первом входе.
+function Onboarding({ onDone }: { onDone: () => void }) {
+  const { setMode } = useMode()
+  const [migrant, setMigrantFlag] = useState(isMigrant())
+  const pick = (m: Mode) => {
+    setMode(m)
+    setMigrant(migrant)
+    markModeChosen()
+    onDone()
+  }
+  const card = (m: Mode, icon: string, title: string, text: string) => (
+    <button key={m} className="onboard-card" onClick={() => pick(m)}>
+      <span className="onboard-icon"><Icon name={icon} size={28} /></span>
+      <b>{title}</b>
+      <span className="small text-2">{text}</span>
+    </button>
+  )
+  return (
+    <Modal title={t('main.onboarding_title')} onClose={() => pick('standard')}>
+      <p className="text-2" style={{ marginTop: 0 }}>{t('main.onboarding_intro')}</p>
+      <div className="onboard-cards">
+        {card('light', 'dashboard', t('main.mode_light'), t('main.onboarding_light'))}
+        {card('standard', 'settings', t('main.mode_standard'), t('main.onboarding_standard'))}
+        {card('pro', 'code', t('main.mode_pro'), t('main.onboarding_pro'))}
+      </div>
+      <label className="check" style={{ marginTop: 14 }}>
+        <input type="checkbox" checked={migrant} onChange={(e) => setMigrantFlag(e.target.checked)} />
+        {' '}{t('main.onboarding_migrant')}
+      </label>
+    </Modal>
+  )
+}
+
 function App() {
   const [session, setSession] = useState<{ login: string; version: string; method?: string } | null | undefined>(undefined)
   const [magicError, setMagicError] = useState('')
+  const [onboarding, setOnboarding] = useState(() => !modeChosen())
   const check = useCallback(() => {
     get('session').then(setSession, () => setSession(null))
   }, [])
@@ -288,8 +376,11 @@ function App() {
   if (session === undefined) return null
   if (session === null) return <Login onLogin={() => { setMagicError(''); check() }} error={magicError} />
   return (
-    <Shell login={session.login} version={session.version} inTelegram={session.method === 'telegram'}
-      onLogout={() => post('logout').finally(() => setSession(null))} />
+    <>
+      <Shell login={session.login} version={session.version} inTelegram={session.method === 'telegram'}
+        onLogout={() => post('logout').finally(() => setSession(null))} />
+      {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
+    </>
   )
 }
 

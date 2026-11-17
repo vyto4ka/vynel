@@ -34,6 +34,7 @@ export default {
   in_90_days: 'in 90 days',
   loading: 'Loading…',
   login: 'Login',
+  more_actions: 'More actions',
   n24_hours: '24 hours',
   n30_days: '30 days',
   n7_days: '7 days',

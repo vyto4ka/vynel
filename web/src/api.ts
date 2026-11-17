@@ -342,6 +342,7 @@ export interface Profile {
   tagPattern: string
   remarkPattern: string
   inbounds: string[]
+  clientCustom?: boolean
 }
 
 export interface Setting {

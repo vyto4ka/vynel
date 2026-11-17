@@ -15,3 +15,6 @@ __pycache__/
 # Notes for Claude Code live outside the repository
 CLAUDE.md
 CLAUDE.local.md
+
+# Local working docs (not committed)
+*.local.md

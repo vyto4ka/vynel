@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { del, get, GrantRow, Group, Node, patch, post, Profile } from '../api'
 import { GroupExtras } from '../extras'
-import { Empty, Field, Icon, Loading, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
+import { Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
 
 const kindLabel: Record<string, string> = { profile: t('groups.profile'), node: t('common.node_2'), node_inbound: t('groups.inbound'), all: t('groups.all') }
@@ -25,10 +25,12 @@ export function Groups() {
   return (
     <>
       <div className="toolbar">
-        <PageInfo>{t('groups.a_group_decides_which_servers')}</PageInfo>
+        <div className="grow" />
         <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{t('groups.group')}</button>
       </div>
-      {!groups.data ? <Loading error={groups.error} /> : groups.data.length === 0 ? <div className="card"><Empty>{t('groups.no_groups')}</Empty></div> : (
+      {!groups.data ? <Loading error={groups.error} /> : groups.data.length === 0 ? <div className="card"><Empty action={
+        <button className="btn primary" onClick={() => setEdit('new')}><Icon name="plus" />{' '}{t('groups.group')}</button>
+      }>{t('groups.no_groups')}</Empty></div> : (
         <div className="cards cols">
           {groups.data.map((g) => (
             <div key={g.id} className="card">

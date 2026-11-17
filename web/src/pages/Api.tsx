@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ApiToken, del, get, Integrations, patch, post } from '../api'
 import { ago, date, dateTime } from '../format'
-import { Badge, CopyField, Empty, Field, Info, Loading, Modal, PageInfo, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, CopyField, Empty, Field, Info, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 import { Icon } from '../ui'
 import { Key, t, Trans } from '../i18n'
 import { snippet } from '../apiSnippets'
@@ -44,7 +44,6 @@ export function Api() {
         <div className="seg">
           {tabs.map((x) => <button key={x.id} className={tab === x.id ? 'on' : ''} onClick={() => setTab(x.id)}>{x.label()}</button>)}
         </div>
-        <PageInfo>{t('integrations.about')}</PageInfo>
       </div>
       {tab === 'start' && <Start d={d} go={setTab} />}
       {tab === 'tokens' && <Tokens d={d} reload={info.reload} />}

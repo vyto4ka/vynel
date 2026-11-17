@@ -4,7 +4,7 @@ import { CascadeList } from '../extras'
 import { RoutingForm } from '../routing'
 import { CodeEditor, parseObject, pretty, placeholderPositions } from '../code'
 import { blankStarter, templateStarter } from '../templateStarter'
-import { Badge, Empty, Field, Icon, Info, Loading, Modal, PageInfo, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t as tr, Trans } from '../i18n'
 import { useAdvanced } from '../mode'
 import { Link, LinkProvider, Linked, pathsWith, useActiveLink } from '../jsonlink'
@@ -26,12 +26,6 @@ export function Profiles() {
           {adv && <button className={tab === 'templates' ? 'on' : ''} onClick={() => setTab('templates')}>{tr('profiles.profile_templates')}</button>}
           <button className={tab === 'cascades' ? 'on' : ''} onClick={() => setTab('cascades')}>{tr('profiles.cascades')}</button>
         </div>
-        <PageInfo>
-          {tab === 'profiles'
-            ? tr('profiles.a_profile_is_the_common')
-            : tab === 'cascades' ? tr('profiles.a_cascade_is_a_server')
-            : tr('profiles.a_template_is_a_profile')}
-        </PageInfo>
       </div>
       {tab === 'profiles' ? <ProfileList /> : tab === 'cascades' ? <CascadeList /> : <TemplateList />}
     </>
@@ -55,7 +49,9 @@ function ProfileList() {
       <div className="row" style={{ marginBottom: 14, justifyContent: 'flex-end' }}>
         <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" />{' '}{tr('common.profile')}</button>
       </div>
-      {profiles.data.length === 0 ? <div className="card"><Empty>{tr('profiles.no_profiles')}</Empty></div> : (
+      {profiles.data.length === 0 ? <div className="card"><Empty action={
+        <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" />{' '}{tr('common.profile')}</button>
+      }>{tr('profiles.no_profiles')}</Empty></div> : (
         <div className="cards cols">
           {profiles.data.map((p) => {
             const t = tpls.data!.find((x) => x.id === p.templateId)
@@ -69,15 +65,18 @@ function ProfileList() {
                   </div>
                   <div className="row" style={{ gap: 4 }}>
                     <button className="btn sm" onClick={() => setEdit(p.id)}><Icon name="edit" />{' '}{tr('common.edit')}</button>
-                    <button className="btn sm" title={tr('profiles.duplicate')} onClick={() => {
-                      act(() => post<{ id: number; name: string }>(`profiles/${p.id}/duplicate`), undefined)
-                        .then((r) => { if (r) { act(() => Promise.resolve(true), tr('profiles.profile_copied', { name: r.name })); profiles.reload() } })
-                    }}><Icon name="copy" /></button>
-                    <button className="btn sm" onClick={() => setApplyTo(p)}><Icon name="nodes" />{' '}{tr('profiles.apply_to_nodes')}</button>
-                    <button className="btn ghost icon sm" title={tr('common.delete')} onClick={async () => {
-                      if (await confirm(<><Trans k="profiles.delete_the_profile" v={{ name: p.name }} />{' '}{p.inbounds.length > 0 && tr('profiles.it_is_used_on_nodes', { join: p.inbounds.join(', ') })}</>, tr('common.delete')))
-                        act(() => del(`profiles/${p.id}`), tr('profiles.profile_deleted')).then((r) => { if (r !== undefined) profiles.reload() })
-                    }}><Icon name="trash" /></button>
+                    <Menu title={tr('common.more_actions')} items={[
+                      { label: tr('profiles.duplicate'), icon: 'copy', onClick: () => {
+                          act(() => post<{ id: number; name: string }>(`profiles/${p.id}/duplicate`), undefined)
+                            .then((r) => { if (r) { act(() => Promise.resolve(true), tr('profiles.profile_copied', { name: r.name })); profiles.reload() } })
+                        } },
+                      { label: tr('profiles.apply_to_nodes'), icon: 'nodes', onClick: () => setApplyTo(p) },
+                      'divider',
+                      { label: tr('common.delete'), icon: 'trash', danger: true, onClick: async () => {
+                          if (await confirm(<><Trans k="profiles.delete_the_profile" v={{ name: p.name }} />{' '}{p.inbounds.length > 0 && tr('profiles.it_is_used_on_nodes', { join: p.inbounds.join(', ') })}</>, tr('common.delete')))
+                            act(() => del(`profiles/${p.id}`), tr('profiles.profile_deleted')).then((r) => { if (r !== undefined) profiles.reload() })
+                        } },
+                    ]} />
                   </div>
                 </div>
                 <div className="card-pad">
@@ -196,9 +195,12 @@ function ValueRow({ k, v, def }: { k: string; v: any; def?: any }) {
   )
 }
 
+// Создание профиля — мини-мастер: шаг 1 — выбор шаблона карточками и имя,
+// шаг 2 — обязательные параметры и доступ группам.
 function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; onClose: () => void; onCreated: (id: number) => void }) {
   const groups = useLoad(() => get<Group[]>('groups'))
   const usable = tpls.filter((t) => !t.broken)
+  const [step, setStep] = useState<1 | 2>(1)
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState(usable[0]?.id || '')
   const [groupIds, setGroupIds] = useState<number[] | null>(null)
@@ -208,37 +210,69 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
   const required = (t?.variables || []).filter((v) => v.scope === 'profile' && v.source === 'input' && v.default == null && !v.optional)
   const [values, setValues] = useState<Record<string, string>>({})
 
+  const pick = (id: string, title: string) => {
+    setTemplateId(id)
+    if (!name.trim()) setName(title.replace(/\s*[·(].*$/, ''))
+  }
+
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const r = await act(() => post<{ id: number }>('profiles', { name, templateId, values, groupIds: gids }), tr('profiles.profile_created'))
     if (r) onCreated(r.id)
   }
+
   return (
     <Modal title={tr('profiles.new_profile')} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" form="new-profile" disabled={!name.trim() || !templateId}>{tr('common.create')}</button></>}>
-      <form id="new-profile" onSubmit={submit}>
-        <Field label={tr('common.name')}><input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Reality" /></Field>
-        <Field label={tr('common.template')} info={t?.summary || undefined}>
-          <select className="input" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-            {usable.map((x) => <option key={x.id} value={x.id}>{x.title}{x.custom ? tr('profiles.own') : ''}</option>)}
-          </select>
-        </Field>
-        {required.map((v) => (
-          <Field key={v.name} label={<span className="mono">{v.name}</span>} info={v.description || undefined}>
-            <input className="input" value={values[v.name] || ''} onChange={(e) => setValues({ ...values, [v.name]: e.target.value })} />
+      footer={step === 1 ? (
+        <><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
+        <button className="btn primary" disabled={!name.trim() || !templateId} onClick={() => setStep(2)}>{tr('common.next')}</button></>
+      ) : (
+        <><button className="btn ghost" onClick={() => setStep(1)}>{tr('common.back')}</button>
+        <button className="btn primary" form="new-profile" disabled={!name.trim() || !templateId}>{tr('common.create')}</button></>
+      )}>
+      {step === 1 ? (
+        <>
+          <Field label={tr('profiles.what_kind_of_access')} help={tr('profiles.the_template_determines_the_protocol')}>
+            <div className="cards cols" style={{ marginTop: 4 }}>
+              {usable.map((x) => (
+                <div key={x.id} className={'card clickable tpl-pick' + (x.id === templateId ? ' selected' : '')} onClick={() => pick(x.id, x.title)}>
+                  <div className="card-pad">
+                    <div className="row between" style={{ flexWrap: 'nowrap' }}>
+                      <b>{x.title}</b>
+                      {x.id === templateId && <span className="tpl-pick-check"><Icon name="check" size={16} /></span>}
+                    </div>
+                    <div className="small text-2" style={{ marginTop: 4 }}>{x.summary}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </Field>
-        ))}
-        <Field label={tr('profiles.give_access_to_groups')} info={tr('profiles.users_of_these_groups_get')}>
-          <div className="row">
-            {(groups.data || []).map((g) => (
-              <label key={g.id} className="check">
-                <input type="checkbox" checked={gids.includes(g.id)} onChange={(e) => setGroupIds(e.target.checked ? [...gids, g.id] : gids.filter((x) => x !== g.id))} />
-                {g.name}
-              </label>
-            ))}
-          </div>
-        </Field>
-      </form>
+          <Field label={tr('common.name')}>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Reality" />
+          </Field>
+        </>
+      ) : (
+        <form id="new-profile" onSubmit={submit}>
+          {required.length > 0 && (
+            <div className="label" style={{ marginBottom: 8 }}>{tr('profiles.required_parameters')}</div>
+          )}
+          {required.map((v) => (
+            <Field key={v.name} label={<span className="mono">{v.name}</span>} info={v.description || undefined}>
+              <input className="input" autoFocus={v.name === required[0]?.name} value={values[v.name] || ''} onChange={(e) => setValues({ ...values, [v.name]: e.target.value })} />
+            </Field>
+          ))}
+          <Field label={tr('profiles.give_access_to_groups')} info={tr('profiles.users_of_these_groups_get')}>
+            <div className="row">
+              {(groups.data || []).map((g) => (
+                <label key={g.id} className="check">
+                  <input type="checkbox" checked={gids.includes(g.id)} onChange={(e) => setGroupIds(e.target.checked ? [...gids, g.id] : gids.filter((x) => x !== g.id))} />
+                  {g.name}
+                </label>
+              ))}
+            </div>
+          </Field>
+        </form>
+      )}
     </Modal>
   )
 }
@@ -464,6 +498,7 @@ function ClientEditor({ c, set, base, error }: { c: ProfileClient; set: (c: Prof
         </span>
       </label>
       {c.custom && <>
+        <div className="alert amber" style={{ marginBottom: 12 }}>{tr('profiles.custom_routing_warn')}</div>
         <div className="seg" style={{ marginBottom: 12 }}>
           <button className={mode === 'routing' ? 'on' : ''} onClick={() => set({ ...c, mode: 'routing', routing: c.routing ?? base })}>{tr('common.settings')}</button>
           {(adv || mode === 'json') && <button className={mode === 'json' ? 'on' : ''} onClick={() => set({ ...c, mode: 'json', config: c.config || pretty(clientExample) })}>{tr('profiles.json_config')}</button>}
