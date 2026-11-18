@@ -358,7 +358,7 @@ func Run(o Options) (*Answers, error) {
 				}, &a.Domain))
 		if a.Mode == "aio" {
 			fields = append(fields,
-				huh.NewInput().Title("Отдельный домен подписок и панели").Placeholder("пусто — тот же домен").Value(&a.SubDomain).
+				huh.NewInput().Title("Отдельный домен подписок").Placeholder("пусто — тот же домен").Value(&a.SubDomain).
 					Validate(func(s string) error {
 						if strings.TrimSpace(s) == "" {
 							if a.VPNIP != a.SubIP {
@@ -372,7 +372,7 @@ func Run(o Options) (*Answers, error) {
 						if m := cache.check(a.SubDomain, publicOf(a.SubIP)); m != "" {
 							return m
 						}
-						return "Не обязательно: одного домена достаточно"
+						return "Не обязательно: одного домена достаточно. Панель останется на домене сервера"
 					}, &a.SubDomain))
 		}
 		fields = append(fields, huh.NewInput().Title("Email для Let's Encrypt").Value(&a.Email).
@@ -599,6 +599,9 @@ func summary(a *Answers, domain string, nodes bool, sec []string, cache *dnsCach
 		if a.Mode == "aio" {
 			line("В клиентах", or(a.Name, countryName(a.Country))+" "+a.Country)
 			line("Ноды", map[bool]string{true: "можно подключать (порт 9443)", false: "только этот сервер"}[nodes])
+			if a.SubDomain != "" && a.VPNIP == a.SubIP {
+				line("Домен панели", domain+"  (панель остаётся на нём)")
+			}
 		}
 		line("Подписки", "https://"+or(cleanDomain(a.SubDomain), domain)+or(cleanPath(a.SubPath), "/s/")+"<токен>")
 		switch a.LoginMode {

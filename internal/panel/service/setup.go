@@ -11,11 +11,15 @@ import (
 )
 
 // SetupInput describes an all-in-one server (docs/INSTALL_GUIDE.md).
+//
+// SubDomain empty means one domain for everything. When it differs from Domain (and no
+// SubIP), the panel stays on Domain as web.domain: the subscription domain serves
+// subscriptions only.
 type SetupInput struct {
 	NodeName  string
 	Country   string
 	Domain    string // node domain: Reality SNI + self-steal site
-	SubDomain string // subscription domain; empty = Domain (the one-domain minimum)
+	SubDomain string // subscription domain; empty = Domain
 	Email     string // ACME email, optional
 	VPNIP     string // address the VPN inbound listens on; empty = every address
 	SubIP     string // address the subscriptions and the panel answer on; empty = every address
@@ -56,6 +60,13 @@ func (s *Service) SetupAllInOne(ctx context.Context, actor Actor, in SetupInput)
 	res.Node = node
 
 	settings := map[string]string{SettingSubDomain: in.SubDomain, SettingSubAddress: strings.TrimSpace(in.SubIP)}
+	if in.SubDomain != in.Domain && strings.TrimSpace(in.SubIP) == "" {
+		// A subscription domain of its own: the panel keeps the server's main domain
+		// (web.domain) instead of silently following the subscriptions to theirs. With a
+		// dedicated subscription IP the panel cannot answer the main domain (its A record
+		// points at the VPN address), so in that layout it stays on the subscription domain.
+		settings[SettingWebDomain] = in.Domain
+	}
 	if in.Email != "" {
 		settings[SettingCaddyEmail] = in.Email
 	}
