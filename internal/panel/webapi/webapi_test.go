@@ -308,3 +308,31 @@ func TestMagicLogin(t *testing.T) {
 		t.Fatalf("expired token accepted: %d", w.Code)
 	}
 }
+
+func TestSubPrefixSetting(t *testing.T) {
+	c, svc, pw := newServer(t)
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != 200 {
+		t.Fatal("login")
+	}
+	// Empty means the domain root: https://sub.example.com/<token> (the Remnawave layout).
+	if w := c.do("PUT", "/api/settings", `{"key":"sub.prefix","value":""}`, true); w.Code != 200 {
+		t.Fatalf("empty prefix: %d %s", w.Code, w.Body.String())
+	}
+	if p := svc.SubPrefix(context.Background()); p != "/" {
+		t.Fatalf("SubPrefix %q", p)
+	}
+	// A word becomes a "/word/" prefix, slashes trimmed.
+	if w := c.do("PUT", "/api/settings", `{"key":"sub.prefix","value":"/api/v1/"}`, true); w.Code != 200 {
+		t.Fatalf("word prefix: %d %s", w.Code, w.Body.String())
+	}
+	if p := svc.SubPrefix(context.Background()); p != "/api/v1/" {
+		t.Fatalf("SubPrefix %q", p)
+	}
+	// Invalid characters are still rejected and change nothing.
+	if w := c.do("PUT", "/api/settings", `{"key":"sub.prefix","value":"a?b"}`, true); w.Code != 400 {
+		t.Fatalf("bad prefix: %d", w.Code)
+	}
+	if p := svc.SubPrefix(context.Background()); p != "/api/v1/" {
+		t.Fatalf("rejected value changed the prefix: %q", p)
+	}
+}

@@ -14,7 +14,7 @@ import (
 const (
 	SettingSubDomain      = "sub.domain"       // required for subscription URLs
 	SettingSubPort        = "sub.port"         // public port, default 443
-	SettingSubPrefix      = "sub.prefix"       // path prefix, default /s/
+	SettingSubPrefix      = "sub.prefix"       // path prefix, default /s/, "/" = links at the domain root
 	SettingSubListen      = "sub.listen"       // internal listener behind Caddy, default 127.0.0.1:2096
 	SettingSubTitle       = "sub.title"        // profile-title shown by clients
 	SettingSubUpdateHours = "sub.update_hours" // profile-update-interval
@@ -216,11 +216,13 @@ func (s *Service) SetHostOverride(ctx context.Context, actor Actor, niID int64, 
 }
 
 // SubscriptionURL is the user's subscription link.
-// SubPrefix is the path of subscription links, always "/…/" ("/sub" set by hand is "/sub/").
+// SubPrefix is the path of subscription links: "/…/" normally, "/" when the links live at
+// the domain root (a "/sub" set by hand becomes "/sub/").
 func (s *Service) SubPrefix(ctx context.Context) string {
 	p, _ := s.Setting(ctx, SettingSubPrefix, DefaultSubPrefix)
 	if p = normalizePath(p); p == "" {
-		return DefaultSubPrefix
+		// The prefix is set to the domain root: https://sub.example.com/<link end>.
+		return "/"
 	}
 	return p
 }

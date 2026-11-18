@@ -136,11 +136,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	prefix := h.svc.SubPrefix(ctx)
 	if r.Method != http.MethodGet && r.Method != http.MethodHead || !strings.HasPrefix(r.URL.Path, prefix) {
-		h.miss(ip)
+		h.countMiss(ip, strings.TrimPrefix(r.URL.Path, "/"))
 		h.notFound(ctx, w)
 		return
 	}
-	token, explicit, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, prefix), "/")
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
+	token, explicit, _ := strings.Cut(rest, "/")
 	// The ban stops guessing short own links. A long token cannot be guessed, so it works from a
 	// banned address too: one address may be many people (a mobile operator's NAT).
 	if len(token) < unguessable && h.banned(ip) {
@@ -152,7 +153,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, store.ErrNotFound) {
 			h.log.Error("subscription lookup", "err", err)
 		}
-		h.miss(ip)
+		h.countMiss(ip, rest)
 		h.notFound(ctx, w)
 		return
 	}
@@ -290,6 +291,18 @@ func (h *Handler) banned(ip string) bool {
 
 // unguessable is the token length from which guessing is hopeless (random links have 43).
 const unguessable = 32
+
+// countMiss registers a failed token attempt, but only when the path looks like one: a single
+// segment without a dot. Scanner and browser noise (/robots.txt, /favicon.ico,
+// /assets/app.js, /.well-known/…) must not burn the miss budget: one busy crawler would
+// otherwise ban a carrier NAT shared with real users. With links at the domain root every hit
+// reaches the handler, so the discrimination matters even more.
+func (h *Handler) countMiss(ip, path string) {
+	if path == "" || strings.ContainsAny(path, "/.") {
+		return
+	}
+	h.miss(ip)
+}
 
 func (h *Handler) miss(ip string) {
 	// Without the client's address (an old Reality front without PROXY, a local proxy) every
