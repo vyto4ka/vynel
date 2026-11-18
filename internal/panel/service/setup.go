@@ -11,13 +11,15 @@ import (
 )
 
 // SetupInput describes an all-in-one server (docs/INSTALL_GUIDE.md).
+//
+// SubDomain empty means one domain for everything. When it differs from Domain (and no
+// SubIP), the panel stays on Domain as web.domain: the subscription domain serves
+// subscriptions only.
 type SetupInput struct {
 	NodeName  string
 	Country   string
 	Domain    string // node domain: Reality SNI + self-steal site
-	SubDomain string // subscription domain; empty = Domain (the one-domain minimum).
-	// When different from Domain (and no SubIP), the panel stays on Domain as web.domain:
-	// the subscription domain serves subscriptions only.
+	SubDomain string // subscription domain; empty = Domain
 	Email     string // ACME email, optional
 	VPNIP     string // address the VPN inbound listens on; empty = every address
 	SubIP     string // address the subscriptions and the panel answer on; empty = every address
