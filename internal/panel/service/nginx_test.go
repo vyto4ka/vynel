@@ -311,7 +311,8 @@ func TestNginxCDNOrigin(t *testing.T) {
 }
 
 // Template checks run nginx -t: a typo in the template's directives is caught in the editor.
-func TestNginxTemplateCheck(t *testing.T) {	if _, err := os.Stat(NginxCheckBin); err != nil {
+func TestNginxTemplateCheck(t *testing.T) {
+	if _, err := os.Stat(NginxCheckBin); err != nil {
 		t.Skip("nginx not installed")
 	}
 	f := newFixture(t)
