@@ -215,8 +215,33 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 		spec.Sites = append(spec.Sites, site)
 	}
 
-	// SNI routers: the Reality inbound moves to a loopback port and reads the PROXY header nginx
-	// sends; its public (IP, port) becomes nginx's.
+	// Reality inbounds sharing one (IP, port) cannot both bind it: nginx takes the port and the
+	// SNI router splits them by their server names (Reality raw and Reality XHTTP on one 443).
+	// Every front of a shared port moves; the fallback chain still ends at a decoy, because a
+	// front hands a non-Reality connection to its own target, the HTTPS listener behind nginx.
+	byListener := map[string][]*nginxFront{}
+	for _, f := range fronts {
+		k := f.listen + "\x00" + strconv.Itoa(f.port)
+		byListener[k] = append(byListener[k], f)
+	}
+	for _, group := range byListener {
+		if len(group) < 2 {
+			continue
+		}
+		for _, f := range group {
+			if f.localPort == 0 {
+				problems = append(problems, fmt.Sprintf("%s shares port %d with Reality inbound %s but its target is not local, the SNI router needs a local target", f.tag, f.port, group[0].tag))
+				continue
+			}
+			f.routed = true
+		}
+	}
+
+	// SNI routers: the Reality inbounds move to loopback ports and read the PROXY header nginx
+	// sends; their public (IP, port) becomes nginx's. Fronts of one (IP, port) share a single
+	// router, each with its own loopback backend.
+	routers := map[string]*nginxconf.Stream{}
+	var routerKeys []string
 	for _, f := range fronts {
 		if !f.routed {
 			continue
@@ -236,9 +261,14 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 		if bind == "0.0.0.0" {
 			bind = ""
 		}
-		spec.Streams = append(spec.Streams, nginxconf.Stream{Bind: bind, Port: f.port,
-			Backends: []nginxconf.Backend{{Names: f.names, Addr: "127.0.0.1:" + strconv.Itoa(internal)}},
-			Default:  "127.0.0.1:" + strconv.Itoa(f.localPort)})
+		key := bind + "\x00" + strconv.Itoa(f.port)
+		st := routers[key]
+		if st == nil {
+			st = &nginxconf.Stream{Bind: bind, Port: f.port, Default: "127.0.0.1:" + strconv.Itoa(f.localPort)}
+			routers[key] = st
+			routerKeys = append(routerKeys, key)
+		}
+		st.Backends = append(st.Backends, nginxconf.Backend{Names: f.names, Addr: "127.0.0.1:" + strconv.Itoa(internal)})
 		f.inbound["listen"] = "127.0.0.1"
 		f.inbound["port"] = internal
 		ss, _ := f.inbound["streamSettings"].(map[string]any)
@@ -248,6 +278,9 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 			ss["sockopt"] = sock
 		}
 		sock["acceptProxyProtocol"] = true
+	}
+	for _, key := range routerKeys {
+		spec.Streams = append(spec.Streams, *routers[key])
 	}
 	for l, tag := range xrayListens {
 		if spec.HTTPPort != 0 && l.port == strconv.Itoa(spec.HTTPPort) && (len(spec.Sites) > 0 || len(spec.Streams) > 0) {

@@ -1,0 +1,136 @@
+# Template E — VLESS + XHTTP + REALITY self-steal, стандартные настройки XHTTP (docs/PROFILES.md §10).
+# Отличается от шаблона C тем, что использует «голый» XHTTP без обфускации разметки
+# (placements, ключи сессии/последовательности): режим auto и набивка 100-1342 прямо в extra,
+# как в типовых конфигах сообщества. Работает на любом клиенте с ядром Xray 25.8.9+ (KeqDroid,
+# Happ, v2rayN, v2RayTun) и в Mihomo 1.19+. Порт 443 снаружи делит с обычным Reality (шаблон A)
+# через SNI-роутер nginx: каждый фронт получает свои имена (свой домен/SNI).
+id: vless-xhttp-reality-std
+version: 1
+title: VLESS XHTTP + REALITY (стандартный)
+summary: Стандартный XHTTP (auto, набивка 100-1342) поверх REALITY на 443. Простой и совместимый. Без Vision.
+tag_pattern: XH_${NODE_CODE}
+remark_pattern: ${NODE_FLAG} ${NODE_NAME} · XHTTP
+protocol: vless
+client:
+  flow: ""
+lint:
+  - xhttp_no_nested_extra
+
+variables:
+  - name: NODE_DOMAIN
+    scope: node
+    source: input
+    default_from: node.domain
+    validate: domain
+    description: Домен ноды (A-запись на IP инбаунда). Идёт в serverNames, SNI и адрес точки подключения. Должен отличаться от домена обычного Reality на том же IP:443 — роутер разводит их по SNI.
+  - name: REALITY_PRIVATE_KEY
+    scope: node
+    source: generate
+    generator: x25519
+    secret: true
+    description: Приватный ключ REALITY, свой на каждой ноде.
+  - name: REALITY_PUBLIC_KEY
+    scope: node
+    source: derived
+    from: x25519_public(REALITY_PRIVATE_KEY)
+    description: Публичный ключ (password / pbk), уходит в подписку.
+  - name: REALITY_SHORT_ID
+    scope: node
+    source: generate
+    generator: shortid
+    description: shortId (8 байт hex).
+  - name: SELFSTEAL_PORT
+    scope: profile
+    source: const
+    default: 8443
+    validate: port
+    description: Локальный порт nginx с собственным сайтом (TLS 1.3 + HTTP/2). Как у шаблона A — один общий сайт-заглушка.
+  - name: PORT
+    scope: profile
+    source: const
+    default: 443
+    validate: port
+    description: Порт снаружи (TCP). При совпадении с портом обычного Reality nginx разводит их по SNI.
+  - name: XHTTP_PATH
+    scope: profile
+    source: const
+    default: /
+    description: Путь XHTTP. «/» — как в типовых конфигах; можно задать свой (например /api/stream). Одинаковый на сервере и в подписке.
+  - name: XHTTP_MODE
+    scope: profile
+    source: const
+    default: auto
+    options: [auto, stream-up, packet-up]
+    description: auto — Xray сам выбирает stream-up/packet-up по сети; stream-up — длинный POST вверх; packet-up — отдельные POST-пакеты. Один режим на IP:443.
+  - name: FINGERPRINT
+    scope: profile
+    source: const
+    default: firefox
+    options: [chrome, firefox, safari, ios, android, edge, "360", qq, random, randomized]
+    description: TLS-отпечаток клиента (uTLS), под какой браузер маскируется подключение. Уходит в подписку.
+  - name: DECOY_SITE
+    scope: node
+    source: generate
+    generator: path
+    options: [cloud, studio, docs, coffee, journal]
+    default: cloud
+    description: Сайт, который видит всё, что не является REALITY-клиентом.
+
+# Server and client share one extra: it has no server-only keys. Matches the usual community
+# config: {"mode":"auto","xPaddingBytes":"100-1342"}.
+xhttp_extra: |
+  {
+    "mode": "${XHTTP_MODE}",
+    "xPaddingBytes": "100-1342"
+  }
+
+xray_inbound: |
+  {
+    "tag": "${TAG}",
+    "port": "${PORT}",
+    "listen": "${LISTEN_IP}",
+    "protocol": "vless",
+    "settings": { "clients": [], "decryption": "none" },
+    "sniffing": { "enabled": true, "routeOnly": true, "destOverride": ["http", "tls", "quic"] },
+    "streamSettings": {
+      "network": "xhttp",
+      "security": "reality",
+      "sockopt": { "tcpFastOpen": true, "tcpcongestion": "bbr" },
+      "realitySettings": {
+        "xver": 0,
+        "target": "127.0.0.1:${SELFSTEAL_PORT}",
+        "serverNames": ["${NODE_DOMAIN}"],
+        "privateKey": "${REALITY_PRIVATE_KEY}",
+        "shortIds": ["${REALITY_SHORT_ID}"]
+      },
+      "xhttpSettings": {
+        "path": "${XHTTP_PATH}",
+        "mode": "${XHTTP_MODE}",
+        "extra": "${XHTTP_EXTRA}"
+      }
+    }
+  }
+
+host:
+  address: ${NODE_DOMAIN}
+  port: ${INBOUND_PORT}
+  security: reality
+  sni: ${NODE_DOMAIN}
+  path: ${XHTTP_PATH}
+  fingerprint: ${FINGERPRINT}
+  public_key: ${REALITY_PUBLIC_KEY}
+  short_id: ${REALITY_SHORT_ID}
+  # Mihomo 1.19.x understands xhttp-opts; older Clash cores do not, so it is opt-in per template.
+  mihomo: true
+  mihomo_x25519mlkem768: true
+
+nginx:
+  role: selfsteal
+  domain: ${NODE_DOMAIN}
+  local_port: ${SELFSTEAL_PORT}
+  decoy: ${DECOY_SITE}
+
+node_requirements:
+  ports: [443/tcp, 80/tcp]
+  dns: [{ type: A, name: "${NODE_DOMAIN}" }]
+  sysctl: [bbr, fq, tcp_fastopen]

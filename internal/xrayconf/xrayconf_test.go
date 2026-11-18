@@ -95,8 +95,8 @@ func TestTemplatesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 3 {
-		t.Fatalf("want 3 templates, got %d", len(ts))
+	if len(ts) != 4 {
+		t.Fatalf("want 4 templates, got %d", len(ts))
 	}
 	if IsBuiltin("vless-xhttp-vkcdn") {
 		t.Fatal("the VK CDN template is no longer built in")
