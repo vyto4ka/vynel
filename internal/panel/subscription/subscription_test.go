@@ -286,16 +286,30 @@ func TestXrayJSONAcceptedByXray(t *testing.T) {
 func TestUnknownTokenLooksLikeAWebsite(t *testing.T) {
 	e := newEnv(t)
 	e.h.MaxMisses = 3
-	for _, p := range []string{"/", "/s/wrong", "/admin", "/s/"} {
+	for _, p := range []string{"/", "/s/wrong", "/admin", "/s/", "/robots.txt", "/assets/app.js", "/.well-known/security.txt"} {
 		rec := e.get(p, "curl/8", "")
 		if rec.Code != 404 || !strings.Contains(rec.Body.String(), "404") || strings.Contains(rec.Body.String(), "vless") {
 			t.Fatalf("%s: %d %s", p, rec.Code, rec.Body.String())
 		}
 	}
-	// After too many misses the IP is banned for short own links, which could be guessed.
+	// Scanner noise must not burn the miss budget: a burst of dotted and deep paths bans no one.
+	for i := 0; i < 10; i++ {
+		for _, p := range []string{"/robots.txt", "/favicon.ico", "/assets/app.js", "/.well-known/x"} {
+			if rec := e.get(p, "curl/8", ""); rec.Code != 404 {
+				t.Fatalf("%s: %d", p, rec.Code)
+			}
+		}
+	}
 	short, err := e.svc.SetSubToken(context.Background(), actor, e.user.ID, "vasya-phone")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if rec := e.get(service.DefaultSubPrefix+short.SubToken, "Happ/3", "hw-1"); rec.Code != 200 {
+		t.Fatalf("scanner noise banned the address: short link got %d", rec.Code)
+	}
+	// Too many token-looking misses ban short own links, which could be guessed.
+	for i := 0; i < 3; i++ {
+		e.get("/s/wrong"+strconv.Itoa(i), "curl/8", "")
 	}
 	if rec := e.get(service.DefaultSubPrefix+short.SubToken, "Happ/3", "hw-1"); rec.Code != 404 {
 		t.Fatalf("banned IP got %d for a short link", rec.Code)
@@ -307,6 +321,51 @@ func TestUnknownTokenLooksLikeAWebsite(t *testing.T) {
 	}
 	if rec := e.get(service.DefaultSubPrefix+long.SubToken, "Happ/3", "hw-1"); rec.Code != 200 {
 		t.Fatalf("banned IP got %d for a long link", rec.Code)
+	}
+}
+
+// Links at the domain root (the Remnawave layout, https://sub.example.com/<token>): the token
+// is the whole path, and scanner noise at the root must not burn the miss budget.
+func TestRootPrefixSubscription(t *testing.T) {
+	e := newEnv(t)
+	if err := e.svc.SetSetting(e.ctx, actor, service.SettingSubPrefix, "/"); err != nil {
+		t.Fatal(err)
+	}
+	if p := e.svc.SubPrefix(e.ctx); p != "/" {
+		t.Fatalf("SubPrefix %q", p)
+	}
+	url, err := e.svc.SubscriptionURL(e.ctx, e.user)
+	if err != nil || !strings.HasSuffix(url, "/"+e.user.SubToken) {
+		t.Fatalf("url %q err %v", url, err)
+	}
+	if rec := e.get("/"+e.user.SubToken, "Happ/3", "hw-1"); rec.Code != 200 {
+		t.Fatalf("root link: %d", rec.Code)
+	}
+	if rec := e.get("/"+e.user.SubToken+"/json", "Happ/3", "hw-1"); rec.Code != 200 {
+		t.Fatalf("root link with a format: %d", rec.Code)
+	}
+	// Crawler noise at the root: 404, but it does not count towards the ban.
+	e.h.MaxMisses = 3
+	for i := 0; i < 10; i++ {
+		for _, p := range []string{"/robots.txt", "/favicon.ico", "/.well-known/x", "/assets/app.js", "/"} {
+			if rec := e.get(p, "curl/8", ""); rec.Code != 404 {
+				t.Fatalf("%s: %d", p, rec.Code)
+			}
+		}
+	}
+	short, err := e.svc.SetSubToken(context.Background(), actor, e.user.ID, "vasya-phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.get("/"+short.SubToken, "Happ/3", "hw-1"); rec.Code != 200 {
+		t.Fatalf("scanner noise banned the address: short link got %d", rec.Code)
+	}
+	// Token-looking misses still ban (the ban needs one more than MaxMisses).
+	for i := 0; i < 4; i++ {
+		e.get("/guess"+strconv.Itoa(i), "curl/8", "")
+	}
+	if rec := e.get("/"+short.SubToken, "Happ/3", "hw-1"); rec.Code != 404 {
+		t.Fatalf("banned IP got %d for a short link", rec.Code)
 	}
 }
 

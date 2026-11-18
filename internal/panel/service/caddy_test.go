@@ -312,3 +312,31 @@ func TestSetupSeparateSubDomain(t *testing.T) {
 		t.Fatalf("dedicated sub IP, web.domain %q", d)
 	}
 }
+
+// At the domain root the panel's route must precede the subscription catch-all, otherwise
+// Caddy would send the panel's secret path to subscriptions too.
+func TestCaddyRootPrefixPanelFirst(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "nl.example.com")
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.SetSetting(f.ctx, ActorCLI, SettingSubPrefix, "/"); err != nil {
+		t.Fatal(err)
+	}
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	cfg := string(ds.Caddy)
+	sub := strings.Index(cfg, `"handler":"subroute"`)
+	if sub < 0 {
+		t.Fatal(cfg)
+	}
+	site := cfg[sub:]
+	panel := strings.Index(site, `"dial":"`+DefaultWebListen+`"`)
+	root := strings.Index(site, `"match":[{"path":["/*"]}]`)
+	if panel < 0 || root < 0 || panel > root {
+		t.Fatalf("the panel's route must come before the root subscription route (panel %d, root %d):\n%s", panel, root, site)
+	}
+}
