@@ -32,7 +32,7 @@ var settingDefs = []settingDef{
 	{Key: service.SettingSubDomain, Section: "Подписки", Title: "Домен подписок", Type: "string",
 		Help: "Ссылки подписок строятся на этом домене. A-запись должна вести на сервер панели."},
 	{Key: service.SettingSubPrefix, Section: "Подписки", Title: "Путь подписок", Type: "string", Default: service.DefaultSubPrefix,
-		Hint: "После смены старые ссылки перестанут работать", Help: "Начало пути ссылки подписки, например /s/."},
+		Hint: "После смены старые ссылки перестанут работать", Help: "Начало пути ссылки подписки, например /s/. Пусто — ссылка с корня домена: sub.example.com/<свой-конец>."},
 	{Key: service.SettingSubDecoy, Section: "Подписки", Title: "Сайт-заглушка домена подписок", Type: "select", Options: decoy.Names(),
 		Help: "Что видит человек, открывший домен в браузере."},
 	{Key: service.SettingSubPort, Section: "Подписки", Title: "Порт подписок", Type: "int", Default: "443"},

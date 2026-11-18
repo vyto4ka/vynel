@@ -436,66 +436,23 @@ func locationPath(prefix string) string {
 func locations(w func(int, string, ...any), rs []Route) error {
 	decoy := ""
 	seen := map[string]bool{}
+	// Real routes go before decoys for the same path: with subscription links at the domain
+	// root the subscription proxy's "location /" must not be eaten by a decoy of another site
+	// merged into the same server (the self-steal on the shared Reality target). The decoys
+	// stay for the error pages.
+	var decoyRoutes []Route
 	for _, r := range rs {
-		p := r.PathPrefix
-		if p != "" && !prefixRe.MatchString(p) {
-			return fmt.Errorf("path %q is not a URL path", p)
+		if r.Kind == KindDecoy {
+			decoyRoutes = append(decoyRoutes, r)
+			continue
 		}
-		if p == "/" {
-			p = ""
+		if err := location(w, r, &decoy, seen); err != nil {
+			return err
 		}
-		if r.Kind == KindDecoy && r.Decoy == "" {
-			return fmt.Errorf("decoy route without a site")
-		}
-		if r.Kind == KindDecoy && decoy == "" {
-			// The error pages, also when another route took the decoy's path (the web panel
-			// on the whole domain).
-			decoy = r.Decoy
-		}
-		if seen[p] {
-			continue // the first route for a path wins, like the order of Caddy routes did
-		}
-		seen[p] = true
-		switch r.Kind {
-		case KindDecoy:
-			decoyLocation(w, 2, p, r.Decoy)
-		case KindProxy:
-			if err := checkAddr(r.Upstream); err != nil {
-				return err
-			}
-			w(2, "location %s {", locationPath(p))
-			w(3, "proxy_pass http://%s;", r.Upstream)
-			proxyHeaders(w, 3)
-			if r.InterceptErrors {
-				w(3, "proxy_intercept_errors on;")
-			}
-			w(3, "client_max_body_size 16m;")
-			w(2, "}")
-		case KindStream:
-			if err := checkAddr(r.Upstream); err != nil {
-				return err
-			}
-			w(2, "location %s {", locationPath(p))
-			w(3, "proxy_pass http://%s;", r.Upstream)
-			proxyHeaders(w, 3)
-			w(3, "proxy_buffering off;")
-			w(3, "proxy_request_buffering off;")
-			w(3, "proxy_read_timeout 1h;")
-			w(3, "proxy_send_timeout 1h;")
-			w(3, "client_max_body_size 0;")
-			w(3, "client_body_timeout 1h;")
-			w(2, "}")
-		case KindRaw:
-			if err := checkSnippet(r.Raw); err != nil {
-				return fmt.Errorf("location %s: %w", locationPath(p), err)
-			}
-			w(2, "location %s {", locationPath(p))
-			for _, line := range strings.Split(strings.TrimSpace(r.Raw), "\n") {
-				w(3, "%s", strings.TrimRight(line, " \t"))
-			}
-			w(2, "}")
-		default:
-			return fmt.Errorf("unknown route kind %q", r.Kind)
+	}
+	for _, r := range decoyRoutes {
+		if err := location(w, r, &decoy, seen); err != nil {
+			return err
 		}
 	}
 	if !seen[""] {
@@ -503,6 +460,70 @@ func locations(w func(int, string, ...any), rs []Route) error {
 	}
 	if decoy != "" {
 		errorPages(w, 2, decoy)
+	}
+	return nil
+}
+
+func location(w func(int, string, ...any), r Route, decoy *string, seen map[string]bool) error {
+	p := r.PathPrefix
+	if p != "" && !prefixRe.MatchString(p) {
+		return fmt.Errorf("path %q is not a URL path", p)
+	}
+	if p == "/" {
+		p = ""
+	}
+	if r.Kind == KindDecoy && r.Decoy == "" {
+		return fmt.Errorf("decoy route without a site")
+	}
+	if r.Kind == KindDecoy && *decoy == "" {
+		// The error pages, also when another route took the decoy's path (the web panel
+		// on the whole domain).
+		*decoy = r.Decoy
+	}
+	if seen[p] {
+		return nil // the first route for a path wins, like the order of Caddy routes did
+	}
+	seen[p] = true
+	switch r.Kind {
+	case KindDecoy:
+		decoyLocation(w, 2, p, r.Decoy)
+	case KindProxy:
+		if err := checkAddr(r.Upstream); err != nil {
+			return err
+		}
+		w(2, "location %s {", locationPath(p))
+		w(3, "proxy_pass http://%s;", r.Upstream)
+		proxyHeaders(w, 3)
+		if r.InterceptErrors {
+			w(3, "proxy_intercept_errors on;")
+		}
+		w(3, "client_max_body_size 16m;")
+		w(2, "}")
+	case KindStream:
+		if err := checkAddr(r.Upstream); err != nil {
+			return err
+		}
+		w(2, "location %s {", locationPath(p))
+		w(3, "proxy_pass http://%s;", r.Upstream)
+		proxyHeaders(w, 3)
+		w(3, "proxy_buffering off;")
+		w(3, "proxy_request_buffering off;")
+		w(3, "proxy_read_timeout 1h;")
+		w(3, "proxy_send_timeout 1h;")
+		w(3, "client_max_body_size 0;")
+		w(3, "client_body_timeout 1h;")
+		w(2, "}")
+	case KindRaw:
+		if err := checkSnippet(r.Raw); err != nil {
+			return fmt.Errorf("location %s: %w", locationPath(p), err)
+		}
+		w(2, "location %s {", locationPath(p))
+		for _, line := range strings.Split(strings.TrimSpace(r.Raw), "\n") {
+			w(3, "%s", strings.TrimRight(line, " \t"))
+		}
+		w(2, "}")
+	default:
+		return fmt.Errorf("unknown route kind %q", r.Kind)
 	}
 	return nil
 }
