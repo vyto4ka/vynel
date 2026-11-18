@@ -131,10 +131,11 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 	}
 
 	if n.Local {
-		panelSites, err := s.panelSites(ctx)
+		panelSites, siteProblems, err := s.panelSites(ctx)
 		if err != nil {
 			return caddyconf.Spec{}, nil, err
 		}
+		problems = append(problems, siteProblems...)
 		sites = withPanelSites(sites, panelSites, slices.Clone)
 	}
 
@@ -200,25 +201,27 @@ func (s *Service) nodeSetting(ctx context.Context, key, code, def string) (strin
 // panelSites are the sites of the panel's own server: the subscription domain with the web
 // panel under its secret path, or the web panel on its own domain (web.domain), port
 // (web.port) or IP (web.address), each with its own decoy (docs/STEALTH.md §1).
-func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
+// Alongside the sites it returns problems: a root subscription prefix can conflict with the
+// panel's session paths, which need the whole domain for themselves.
+func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, []string, error) {
 	domain, err := s.Setting(ctx, SettingSubDomain, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	webDomain, _ := s.Setting(ctx, SettingWebDomain, "")
 	webDomain = strings.ToLower(strings.TrimSpace(webDomain))
 	if domain == "" && webDomain == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	bind, _ := s.Setting(ctx, SettingSubAddress, "")
 	portStr, _ := s.Setting(ctx, SettingSubPort, "443")
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return nil, invalid("sub.port %q is not a number", portStr)
+		return nil, nil, invalid("sub.port %q is not a number", portStr)
 	}
 	webPort, err := strconv.Atoi(s.webPort(ctx))
 	if err != nil || webPort <= 0 || webPort > 65535 {
-		return nil, invalid("web.port %q is not a port", s.webPort(ctx))
+		return nil, nil, invalid("web.port %q is not a port", s.webPort(ctx))
 	}
 	webBind, _ := s.Setting(ctx, SettingWebAddress, "")
 	if webBind == "" {
@@ -247,21 +250,35 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, error) {
 	}
 	// The panel shares the subscription site only when domain, IP and port are all the same.
 	shared := webDomain == domain && webPort == port && webBind == bind
+	var problems []string
 	var sites []caddyconf.Site
 	if domain != "" {
 		prefix := s.SubPrefix(ctx)
 		listen, _ := s.Setting(ctx, SettingSubListen, DefaultSubListen)
-		site := caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: []caddyconf.Route{{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix, InterceptErrors: true}}}
+		subRoute := caddyconf.Route{Kind: caddyconf.KindProxy, Upstream: listen, PathPrefix: prefix, InterceptErrors: true}
+		routes := []caddyconf.Route{subRoute}
 		if webRoute != nil && shared {
-			site.Routes = append(site.Routes, *webRoute)
+			if prefix == "/" {
+				if webRoute.PathPrefix == "" {
+					// Session paths give the panel the whole domain, which root subscription
+					// links need too: nothing is left to route them by.
+					problems = append(problems, fmt.Sprintf("%s: subscription links at the domain root conflict with session paths (the panel needs the whole domain)", domain))
+				} else {
+					// The subscription route matches every path at the root: the panel's route
+					// goes first, like a longer nginx location winning over "location /".
+					routes = []caddyconf.Route{*webRoute, subRoute}
+				}
+			} else {
+				routes = append(routes, *webRoute)
+			}
 		}
-		site.Routes = append(site.Routes, decoyRoute)
+		site := caddyconf.Site{Domain: domain, Bind: bind, Port: port, Routes: append(routes, decoyRoute)}
 		sites = append(sites, site)
 	}
 	if webRoute != nil && !shared {
 		sites = append(sites, caddyconf.Site{Domain: webDomain, Bind: webBind, Port: webPort, Routes: []caddyconf.Route{*webRoute, webDecoyRoute}})
 	}
-	return sites, nil
+	return sites, problems, nil
 }
 
 // withPanelSites adds the panel's sites to a node's. A site where the panel takes the whole

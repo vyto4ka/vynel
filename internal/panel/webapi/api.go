@@ -1425,12 +1425,16 @@ func (s *Server) setSetting(r *http.Request) (any, error) {
 			return nil, badRequest("ожидается IP-адрес")
 		}
 	}
-	if in.Key == service.SettingSubPrefix && in.Value != "" {
+	if in.Key == service.SettingSubPrefix {
 		p := strings.Trim(in.Value, "/ ")
-		if p == "" || strings.ContainsAny(p, "?#% ") {
-			return nil, badRequest("путь подписок: например s или api/v1/client, без ? # % и пробелов")
+		if strings.ContainsAny(p, "?#% ") {
+			return nil, badRequest("путь подписок: например s или api/v1/client, без ? # % и пробелов; пусто — корень домена")
 		}
-		in.Value = "/" + p + "/"
+		if p == "" {
+			in.Value = "/"
+		} else {
+			in.Value = "/" + p + "/"
+		}
 	}
 	if in.Key == service.SettingWebPath {
 		p := strings.Trim(in.Value, "/ ")
