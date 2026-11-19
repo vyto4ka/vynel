@@ -98,6 +98,7 @@ host:
   public_key: ${REALITY_PUBLIC_KEY}
   short_id: ${REALITY_SHORT_ID}
   flow: xtls-rprx-vision
+  mihomo_x25519mlkem768: true
 
 # The site nginx serves as Reality's target.
 nginx:

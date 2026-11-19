@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -45,22 +46,22 @@ func ParseFormat(s string) (Format, bool) {
 	return "", false
 }
 
-// Supports reports whether a format can express a host. sing-box gets plain TCP hosts only: it
-// has no XHTTP. Mihomo gets XHTTP hosts only when the template opts in (host.mihomo): xhttp-opts
-// needs Mihomo 1.19+, and an older core rejects the whole profile over one unknown network, so a
-// half-working point is worse than none (docs/PROFILES.md §4.5).
+// Supports reports whether a format can express a host. Upstream sing-box gets plain TCP/Hysteria2
+// hosts only: it has no XHTTP. Karing's sing-box-extended fork supports VLESS XHTTP. Mihomo gets
+// XHTTP hosts only when the template opts in (host.mihomo). Hosts with REALITY ML-DSA-65 (pqv)
+// require an Xray core and are not downgraded to cores that cannot verify pqv.
 func (f Format) Supports(h service.Host) bool {
 	switch f {
 	case FormatMihomo:
-		return h.Raw == "" && (h.Network == "tcp" || h.Network == "hysteria" || (h.Network == "xhttp" && h.Mihomo))
+		return h.Raw == "" && h.PQV == "" && (h.Network == "tcp" || h.Network == "hysteria" || (h.Network == "xhttp" && h.Mihomo))
 	case FormatSingBox:
-		return h.Raw == "" && (h.Network == "tcp" || h.Network == "hysteria")
+		return h.Raw == "" && h.PQV == "" && (h.Network == "tcp" || h.Network == "hysteria")
 	case FormatKaring:
 		if h.Raw != "" {
-			_, ok := singBoxLink(h.Raw)
+			_, ok := karingLink(h.Raw)
 			return ok
 		}
-		return h.Network == "tcp" || h.Network == "hysteria"
+		return h.PQV == "" && (h.Network == "tcp" || h.Network == "hysteria" || h.Network == "xhttp")
 	}
 	return h.Raw == "" || f == FormatBase64
 }
@@ -76,6 +77,29 @@ func Stub(message string) service.Host {
 // Link renders a vless:// link, or hysteria2:// for Hysteria2 hosts (the UUID is the password).
 func Link(h service.Host, uuid string) string {
 	return service.HostLink(h, cred(h, uuid))
+}
+
+// linkForUA renders a URI link for the requesting client. v2RayTun supports the fm query parameter
+// carrying a JSON finalmask object; other link clients receive the standard URI unchanged.
+func linkForUA(h service.Host, uuid, ua string) string {
+	l := Link(h, uuid)
+	if h.Raw != "" || h.Protocol != "vless" || len(h.FinalMask) == 0 || !v2rayTunClient.MatchString(ua) {
+		return l
+	}
+	b, err := json.Marshal(h.FinalMask)
+	if err != nil {
+		return l
+	}
+	fmParam := "fm=" + strings.ReplaceAll(url.QueryEscape(string(b)), "+", "%20")
+	base, frag, hasFrag := strings.Cut(l, "#")
+	sep := "&"
+	if !strings.Contains(base, "?") {
+		sep = "?"
+	}
+	if hasFrag {
+		return base + sep + fmParam + "#" + frag
+	}
+	return base + sep + fmParam
 }
 
 // Base64 renders links for v2ray-style clients.
@@ -113,11 +137,23 @@ func uniqueNames(hosts []service.Host, reserved ...string) []string {
 
 // Mihomo renders a Clash Meta / Mihomo profile.
 func Mihomo(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte, error) {
-	proxies, names := mihomoProxies(hosts, uuid)
+	proxies, names := mihomoProxies(hosts, uuid, "VPN", "Auto", "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL")
+	vpnProxies := names
+	groups := []map[string]any{}
+	if len(names) > 0 {
+		vpnProxies = append([]string{"Auto"}, names...)
+		groups = append(groups,
+			map[string]any{"name": "VPN", "type": "select", "proxies": vpnProxies},
+			map[string]any{"name": "Auto", "type": "url-test", "url": "https://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": names},
+		)
+	} else {
+		groups = append(groups, map[string]any{"name": "VPN", "type": "select", "proxies": vpnProxies})
+	}
 	doc := map[string]any{
 		"mixed-port": 7890, "allow-lan": false, "mode": "rule", "log-level": "warning", "ipv6": false,
+		"unified-delay": true, "tcp-concurrent": true,
 		"proxies":      proxies,
-		"proxy-groups": []map[string]any{{"name": "VPN", "type": "select", "proxies": names}},
+		"proxy-groups": groups,
 		"rules":        mihomoRules(r, "VPN"),
 	}
 	if dns := mihomoDNS(r, "VPN"); dns != nil {
@@ -127,8 +163,8 @@ func Mihomo(hosts []service.Host, uuid string, r service.ClientRouting) ([]byte,
 }
 
 // mihomoProxies renders the hosts as Mihomo proxies, with their (unique) names.
-func mihomoProxies(hosts []service.Host, uuid string) ([]map[string]any, []string) {
-	names := uniqueNames(hosts)
+func mihomoProxies(hosts []service.Host, uuid string, reserved ...string) ([]map[string]any, []string) {
+	names := uniqueNames(hosts, reserved...)
 	proxies := make([]map[string]any, 0, len(hosts))
 	for i, h := range hosts {
 		uuid := cred(h, uuid)
@@ -241,7 +277,93 @@ func mihomoXHTTP(h service.Host) map[string]any {
 			o["reuse-settings"] = rs
 		}
 	}
+	if ds, ok := h.Extra["downloadSettings"].(map[string]any); ok {
+		if mds := mihomoDownloadSettings(ds, h.MLKEM); len(mds) > 0 {
+			o["download-settings"] = mds
+		}
+	}
 	return o
+}
+
+// mihomoDownloadSettings translates Xray's streamSettings-shaped downloadSettings into Mihomo's
+// flat XHTTPDownloadSettings (MetaCubeX/mihomo adapter/outbound/vless.go).
+func mihomoDownloadSettings(ds map[string]any, mlkem bool) map[string]any {
+	out := map[string]any{}
+	if v, ok := ds["address"].(string); ok && v != "" {
+		out["server"] = v
+	}
+	if v, ok := ds["port"]; ok {
+		out["port"] = v
+	}
+	sec, _ := ds["security"].(string)
+	switch sec {
+	case "tls":
+		out["tls"] = true
+		if ts, ok := ds["tlsSettings"].(map[string]any); ok {
+			if sni, ok := ts["serverName"].(string); ok && sni != "" {
+				out["servername"] = sni
+			}
+			if fp, ok := ts["fingerprint"].(string); ok && fp != "" {
+				out["client-fingerprint"] = mihomoFingerprint(fp)
+			}
+			if alpn, ok := ts["alpn"]; ok {
+				out["alpn"] = alpn
+			}
+		}
+	case "reality":
+		out["tls"] = true
+		if rs, ok := ds["realitySettings"].(map[string]any); ok {
+			if sni, ok := rs["serverName"].(string); ok && sni != "" {
+				out["servername"] = sni
+			}
+			if fp, ok := rs["fingerprint"].(string); ok && fp != "" {
+				out["client-fingerprint"] = mihomoFingerprint(fp)
+			}
+			ro := map[string]any{}
+			if pbk, ok := rs["publicKey"].(string); ok && pbk != "" {
+				ro["public-key"] = pbk
+			}
+			if sid, ok := rs["shortId"].(string); ok {
+				ro["short-id"] = sid
+			}
+			if mlkem {
+				ro["support-x25519mlkem768"] = true
+			}
+			if len(ro) > 0 {
+				out["reality-opts"] = ro
+			}
+		}
+	}
+	if xs, ok := ds["xhttpSettings"].(map[string]any); ok {
+		if path, ok := xs["path"].(string); ok && path != "" {
+			if !strings.HasSuffix(path, "/") && !strings.Contains(path, "?") {
+				path += "/"
+			}
+			out["path"] = path
+		}
+		if host, ok := xs["host"].(string); ok && host != "" {
+			out["host"] = host
+		}
+		if extra, ok := xs["extra"].(map[string]any); ok {
+			for k, v := range extra {
+				if mk, ok := mihomoXHTTPKeys[k]; ok {
+					out[mk] = mihomoValue(v, mk != "x-padding-obfs-mode" && mk != "no-grpc-header" && mk != "headers")
+				}
+			}
+			if xm, ok := extra["xmux"].(map[string]any); ok {
+				rs := map[string]any{}
+				for k, v := range xm {
+					if mk, ok := mihomoXmuxKeys[k]; ok {
+						rs[mk] = mihomoValue(v, mk != "h-keep-alive-period")
+					}
+				}
+				if len(rs) > 0 {
+					out["reuse-settings"] = rs
+				}
+			}
+		}
+	}
+	return out
 }
 
 // mihomoValue renders numbers as strings for Mihomo's string range fields.
@@ -254,6 +376,17 @@ func mihomoValue(v any, asString bool) any {
 		return fmt.Sprint(n)
 	}
 	return v
+}
+
+// singBoxFingerprint normalizes Xray uTLS fingerprint names for sing-box / Karing.
+func singBoxFingerprint(fp string) string {
+	switch fp {
+	case "":
+		return "chrome"
+	case "randomized", "randomizednoalpn":
+		return "random"
+	}
+	return fp
 }
 
 // SingBox renders a sing-box (1.12+) profile with a TUN inbound.
@@ -297,13 +430,13 @@ func singBoxOutbounds(hosts []service.Host, uuid string) ([]map[string]any, []st
 		case "reality":
 			o["tls"] = map[string]any{
 				"enabled": true, "server_name": h.SNI,
-				"utls":    map[string]any{"enabled": true, "fingerprint": h.Fingerprint},
+				"utls":    map[string]any{"enabled": true, "fingerprint": singBoxFingerprint(h.Fingerprint)},
 				"reality": map[string]any{"enabled": true, "public_key": h.PublicKey, "short_id": h.ShortID},
 			}
 		case "tls":
 			tls := map[string]any{"enabled": true, "server_name": h.SNI}
 			if h.Fingerprint != "" {
-				tls["utls"] = map[string]any{"enabled": true, "fingerprint": h.Fingerprint}
+				tls["utls"] = map[string]any{"enabled": true, "fingerprint": singBoxFingerprint(h.Fingerprint)}
 			}
 			if len(h.ALPN) > 0 {
 				tls["alpn"] = h.ALPN

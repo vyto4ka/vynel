@@ -52,6 +52,8 @@ type Host struct {
 	Flow        string
 	PublicKey   string
 	ShortID     string
+	PQV         string         // mldsa65Verify (REALITY post-quantum certificate verification)
+	SpiderX     string         // spiderX (spx)
 	Extra       map[string]any // xhttp extra for the client (server extra + client-only xmux, or the template's full client extra)
 	Hidden      bool
 	// Mihomo: the host may be given to Mihomo/Clash Meta even when it is not plain TCP
@@ -171,6 +173,19 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 	if h.Network == "xhttp" {
 		xs, _ := ss["xhttpSettings"].(map[string]any)
 		h.Mode = str(xs["mode"])
+		if _, overridden := ni.Host["path"]; !overridden {
+			if xp := str(xs["path"]); xp != "" && (h.Path == "" || xhttpOverrideHas(p.Inbound, "path") || xhttpOverrideHas(p.Override, "path") || xhttpOverrideHas(ni.Override, "path")) {
+				if strings.HasSuffix(h.Path, "/") && !strings.HasSuffix(xp, "/") && !strings.Contains(xp, "?") {
+					xp += "/"
+				}
+				h.Path = xp
+			}
+		}
+		if _, overridden := ni.Host["host"]; !overridden {
+			if xh := str(xs["host"]); xh != "" && (h.HostHeader == "" || xhttpOverrideHas(p.Inbound, "host") || xhttpOverrideHas(p.Override, "host") || xhttpOverrideHas(ni.Override, "host")) {
+				h.HostHeader = xh
+			}
+		}
 		extra, _ := xs["extra"].(map[string]any)
 		h.Extra = copyMap(extra)
 		if full, ok := hm["xhttp_client_extra"].(map[string]any); ok {
@@ -189,10 +204,17 @@ func (s *Service) HostFor(ctx context.Context, ni *store.NodeInbound) (Host, err
 	return h, nil
 }
 
+func xhttpOverrideHas(override map[string]any, key string) bool {
+	ss, _ := override["streamSettings"].(map[string]any)
+	xs, _ := ss["xhttpSettings"].(map[string]any)
+	_, ok := xs[key]
+	return ok
+}
+
 // SetHostOverride changes the connection point overrides of a node inbound
-// (keys: remark, address, port, sni, fingerprint, hidden; null deletes).
+// (keys: remark, address, port, sni, host, path, fingerprint, hidden; null deletes).
 func (s *Service) SetHostOverride(ctx context.Context, actor Actor, niID int64, patch map[string]any) error {
-	allowed := map[string]bool{"remark": true, "address": true, "port": true, "sni": true, "host": true, "fingerprint": true, "hidden": true, "alpn": true,
+	allowed := map[string]bool{"remark": true, "address": true, "port": true, "sni": true, "host": true, "path": true, "fingerprint": true, "hidden": true, "alpn": true,
 		"mihomo": true, "mihomo_x25519mlkem768": true, "finalmask": true}
 	for k := range patch {
 		if !allowed[k] {
@@ -259,7 +281,7 @@ type DeviceVerdict struct {
 	OK     bool   `json:"ok"`
 	Off    bool   `json:"off"`
 	NoHWID bool   `json:"noHwid"`
-	Links  bool   `json:"links"` // compatibility fallback is allowed; Karing retains its format
+	Links  bool   `json:"links"` // legacy flag, kept for API compatibility
 	Full   bool   `json:"full"`
 	Reason string `json:"reason"`
 	Count  int    `json:"count"`
@@ -281,17 +303,17 @@ func (s *Service) devicePolicy(ctx context.Context, u *store.User, d DeviceInfo)
 		limit = int(*u.HWIDLimit)
 	}
 	if d.HWID == "" {
-		// No device limit: an app without HWID has nothing to count against, so it gets the
-		// servers as plain links, which any app can import.
+		// No device limit: an app without HWID has nothing to count against, so let it in
+		// while preserving its native subscription format (Mihomo, sing-box, Xray, Karing…).
 		if limit == 0 {
-			return DeviceVerdict{OK: true, NoHWID: true, Links: true}, true
+			return DeviceVerdict{OK: true, NoHWID: true}, true
 		}
 		allow, _ := s.Setting(ctx, SettingHWIDAllowNone, "false")
 		if allow == "true" {
 			return DeviceVerdict{OK: true, NoHWID: true, Limit: limit}, true
 		}
 		return DeviceVerdict{NoHWID: true, Limit: limit,
-			Reason: "Приложение не передаёт HWID: включите его в настройках профиля (Karing: X-HWID) или используйте Happ, v2RayTun, KeqDroid"}, true
+			Reason: "Приложение не передаёт HWID: включите отправку HWID в настройках профиля (Karing, FlClashX, v2rayNG/v2rayN) или используйте Happ, v2RayTun, KeqDroid"}, true
 	}
 	return DeviceVerdict{Limit: limit}, false
 }
