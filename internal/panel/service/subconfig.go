@@ -221,6 +221,7 @@ var SubVariables = []SubVariable{
 	{"page_url", "Страница для «открыть в браузере» (Основное → Страница)", "https://example.com/s/…"},
 	{"url", "То же, что sub_url (для ссылок приложений)", "https://example.com/s/…"},
 	{"url_enc", "Ссылка подписки, закодированная для ?url=", "https%3A%2F%2F…"},
+	{"url_mihomo_enc", "Ссылка подписки с суффиксом /mihomo, закодированная для ?url=", "https%3A%2F%2F…%2Fmihomo"},
 	{"url_b64", "Ссылка подписки в base64", "aHR0cHM6Ly9…"},
 	{"title_url", "Название, закодированное для URL", "VPN"},
 	{"title_query", "Название подписки для параметра URL", "VPN"},
@@ -237,11 +238,13 @@ type SubHeaderPreset struct {
 
 // Clients matching in the catalog; the User-Agents come from the apps themselves.
 const (
-	uaHapp  = `(?i)\bhapp\b`
-	uaIncy  = `(?i)\bincy\b`
-	uaHappI = `(?i)\b(happ|incy)\b`
-	uaV2T   = `(?i)v2raytun`
-	uaClash = `(?i)clash|mihomo|stash|flclash|koala`
+	uaHapp      = `(?i)\bhapp\b`
+	uaIncy      = `(?i)\bincy\b`
+	uaHappI     = `(?i)\b(happ|incy)\b`
+	uaHappKeq   = `(?i)\b(happ|incy|keqdroid|keqdis)\b`
+	uaV2T       = `(?i)v2raytun`
+	uaClash     = `(?i)clash|mihomo|stash|flclash|koala`
+	uaFlClashX  = `(?i)flclashx`
 )
 
 // SubHeaderCatalog lists the headers popular clients understand. The first ones are the
@@ -266,16 +269,20 @@ var SubHeaderCatalog = []SubHeaderPreset{
 
 	{SubHeader{Name: "Update-Always", Value: "true", Clients: uaV2T},
 		"v2RayTun", "Обновлять подписку при каждом открытии приложения"},
+	{SubHeader{Name: "Network-Filter", Value: "true", Clients: uaV2T},
+		"v2RayTun", "Фильтровать серверы с метками LTE / WiFi по типу сети"},
 	{SubHeader{Name: "Hide-Settings", Value: "1", Clients: uaHappI},
 		"Happ, INCY", "Скрыть настройки серверов (адрес, ключи) от пользователя"},
-	{SubHeader{Name: "Routing", Value: "happ://routing/onadd/…", Clients: `(?i)\b(happ|incy|keqdroid|keqdis)\b`},
-		"Happ, INCY, KeqDroid 0.34+", "Свой профиль вместо маршрутов панели. Выключенная строка отключает автоматический Routing"},
+	{SubHeader{Name: "Routing", Value: "happ://routing/onadd/…", Clients: `(?i)\b(happ|incy|keqdroid|keqdis)\b|v2raytun`},
+		"Happ, INCY, KeqDroid 0.34+, v2RayTun", "Свой профиль вместо маршрутов панели. Выключенная строка отключает автоматический Routing"},
 	{SubHeader{Name: "Routing-Enable", Value: "true", Clients: uaHapp},
 		"Happ", "Включить присланную маршрутизацию"},
+	{SubHeader{Name: "No-Limit-Xhttp-Enabled", Value: "1", Clients: uaHappI},
+		"Happ, INCY (iOS)", "Снимает ограничения XHTTP на iOS и снижает риск OOM NetworkExtension"},
 	{SubHeader{Name: "ProviderID", Value: "", Clients: uaHappI},
 		"Happ, INCY", "ID провайдера из кабинета Happ: открывает расширенные заголовки"},
-	{SubHeader{Name: "Notification-Subs-Expire", Value: "1", Clients: uaHapp},
-		"Happ", "Напоминать об окончании подписки"},
+	{SubHeader{Name: "Notification-Subs-Expire", Value: "1", Clients: uaHappKeq},
+		"Happ, INCY, KeqDroid", "Напоминать об окончании подписки"},
 	{SubHeader{Name: "Sub-Expire", Value: "1", Clients: uaHapp},
 		"Happ", "Показывать плашку, когда подписка истекает"},
 	{SubHeader{Name: "Sub-Expire-Button-Link", Value: "{support_url}", Clients: uaHapp},
@@ -298,10 +305,12 @@ var SubHeaderCatalog = []SubHeaderPreset{
 		"Happ", "К какому серверу: lastused или lowestdelay"},
 	{SubHeader{Name: "Color-Profile", Value: "", Clients: uaHapp},
 		"Happ", "Цветовая тема приложения (JSON из документации Happ)"},
-	{SubHeader{Name: "Fallback-Url", Value: "", Clients: uaHapp},
-		"Happ", "Запасной адрес подписки, если основной недоступен"},
-	{SubHeader{Name: "New-Url", Value: "", Clients: uaHapp},
-		"Happ", "Переезд: приложение заменит адрес подписки на этот"},
+	{SubHeader{Name: "Fallback-Url", Value: "", Clients: uaHappKeq},
+		"Happ, INCY, KeqDroid", "Запасной адрес подписки, если основной недоступен"},
+	{SubHeader{Name: "New-Url", Value: "", Clients: uaHappKeq},
+		"Happ, INCY, KeqDroid", "Переезд: приложение заменит адрес подписки на этот"},
+	{SubHeader{Name: "New-Domain", Value: "", Clients: uaHappKeq},
+		"Happ, INCY, KeqDroid", "Переезд домена подписки без смены пути и токена"},
 	{SubHeader{Name: "Socks-Auth-Mode", Value: "", Clients: uaHapp},
 		"Happ", "Пароль на локальный SOCKS (чтобы другие приложения не узнали адрес сервера)"},
 	{SubHeader{Name: "Per-App-Proxy-Mode", Value: "bypass", Clients: uaHapp},
@@ -310,6 +319,12 @@ var SubHeaderCatalog = []SubHeaderPreset{
 		"Happ", "Список приложений через запятую (com.example.app)"},
 	{SubHeader{Name: "Tun-Mode", Value: "", Clients: uaHapp},
 		"Happ", "Режим TUN (значение из документации Happ)"},
+	{SubHeader{Name: "flclashx-view", Value: "card", Clients: uaFlClashX},
+		"FlClashX", "Режим отображения профиля во FlClashX: card или compact"},
+	{SubHeader{Name: "flclashx-servicename", Value: "{title}", Clients: uaFlClashX},
+		"FlClashX", "Название сервиса на карточке во FlClashX"},
+	{SubHeader{Name: "flclashx-newdomain", Value: "", Clients: uaFlClashX},
+		"FlClashX", "Переезд домена подписки во FlClashX"},
 }
 
 // DefaultSubHeaders are the headers sent when none are configured.
@@ -337,12 +352,14 @@ var SubAppCatalog = []SubApp{
 		Platforms: []string{"ios", "macos"}, Enabled: true},
 	{ID: "clash", Name: "Clash / Mihomo", Link: "clash://install-config?url={url_enc}", Download: "https://github.com/clash-verge-rev/clash-verge-rev/releases/latest",
 		Platforms: []string{"android", "windows", "macos", "linux"}, Enabled: true},
-	{ID: "v2rayng", Name: "v2rayNG", Link: "v2rayng://install-config?url={url_enc}", Download: "https://github.com/2dust/v2rayNG/releases/latest",
+	{ID: "v2rayng", Name: "v2rayNG", Link: "v2rayng://install-config?url={url_enc}&name={title_query}", Download: "https://github.com/2dust/v2rayNG/releases/latest",
 		Platforms: []string{"android"}, Enabled: true},
-	{ID: "flclashx", Name: "FlClashX", Link: "flclashx://install-config?url={url_enc}",
+	{ID: "v2rayn", Name: "v2rayN", Link: "", Download: "https://github.com/2dust/v2rayN/releases/latest",
+		Platforms: []string{"windows", "linux", "macos"}},
+	{ID: "flclashx", Name: "FlClashX", Link: "flclashx://install-config?url={url_mihomo_enc}", Download: "https://github.com/pluralplay/FlClashX/releases/latest",
 		Platforms: []string{"android", "windows", "macos", "linux"}},
 	{ID: "karing", Name: "Karing", Link: DefaultKaringLink, Download: "https://karing.app/",
-		Platforms: []string{"android", "ios", "windows", "macos"}},
+		Platforms: []string{"android", "ios", "windows", "macos", "linux"}},
 	{ID: "singbox", Name: "sing-box", Link: "sing-box://import-remote-profile?url={url_enc}#{title_url}", Download: "https://sing-box.sagernet.org/",
 		Platforms: []string{"android", "ios", "macos"}},
 	{ID: "shadowrocket", Name: "Shadowrocket", Link: "sub://{url_b64}",

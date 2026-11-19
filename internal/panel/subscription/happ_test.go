@@ -67,7 +67,10 @@ func TestHappRoutingSubscription(t *testing.T) {
 	if p2["Name"] != p["Name"] || len(p2["DirectSites"].([]any)) != 0 {
 		t.Fatalf("profile not updated: %v", p2)
 	}
-	for _, req := range []struct{ path, ua string }{{e.path() + "/json", "Happ/4"}, {e.path(), "karing/1.2"}, {e.path(), "v2rayNG/2"}} {
+	if got := e.get(e.path()+"/json", "Happ/4", "phone").Header().Get("Routing"); !strings.HasPrefix(got, "happ://routing/onadd/") {
+		t.Fatalf("expected routing header for Happ /json, got %q", got)
+	}
+	for _, req := range []struct{ path, ua string }{{e.path(), "karing/1.2"}, {e.path(), "v2rayNG/2"}} {
 		if got := e.get(req.path, req.ua, "phone").Header().Get("Routing"); got != "" {
 			t.Fatalf("unexpected routing for %s %s", req.ua, req.path)
 		}

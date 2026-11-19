@@ -18,10 +18,13 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
 
-// singBoxCore matches apps built on sing-box: they have no VLESS XHTTP, whatever format they get.
-var singBoxCore = regexp.MustCompile(`(?i)karing|sing-?box|\bSF[AIMT]\b`)
+// singBoxCore matches apps built on upstream sing-box (without XHTTP support).
+// Karing uses its own sing-box-extended fork with VLESS XHTTP support.
+var singBoxCore = regexp.MustCompile(`(?i)sing-?box|\bSF[AIMT]\b`)
 
+var karingClient = regexp.MustCompile(`(?i)karing`)
 var keqClient = regexp.MustCompile(`(?i)keqdroid|keqdis`)
+var v2rayTunClient = regexp.MustCompile(`(?i)v2raytun`)
 
 // ruleRes caches compiled rule patterns; rules change rarely and are few.
 var ruleRes sync.Map // pattern → *regexp.Regexp (nil when invalid)
@@ -225,11 +228,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(header.Name, header.Value)
 	}
 	hosts = service.WithFragment(hosts, routing.Fragment)
+	hs, _ := h.svc.SubHeaders(ctx)
 	if LinkRouting(format, r.UserAgent(), hosts) {
-		hs, _ := h.svc.SubHeaders(ctx)
 		for _, hv := range RoutingHeaders(hs, nil, r.UserAgent(), h.svc.SubBasicsGet(ctx).Title, routing) {
 			w.Header().Set(hv.Name, hv.Value)
 		}
+	}
+	for _, hv := range FragmentHeaders(hs, nil, r.UserAgent(), format, routing) {
+		w.Header().Set(hv.Name, hv.Value)
 	}
 	var subURL string
 	if format == FormatKaring {
@@ -297,7 +303,7 @@ func RenderBody(format Format, hosts []service.Host, reason, uuid, ua, subURL st
 	default:
 		lines := make([]string, 0, len(hosts))
 		for _, h := range hosts {
-			lines = append(lines, Link(h, uuid))
+			lines = append(lines, linkForUA(h, uuid, ua))
 		}
 		decodedUris = strings.Join(lines, "\n")
 		body = []byte(base64.StdEncoding.EncodeToString([]byte(decodedUris)))

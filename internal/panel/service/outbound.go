@@ -34,7 +34,11 @@ func HostOutbound(h Host, uuid, tag string) map[string]any {
 	}
 	switch h.Security {
 	case "reality":
-		ss["realitySettings"] = map[string]any{"serverName": h.SNI, "fingerprint": h.Fingerprint, "publicKey": h.PublicKey, "shortId": h.ShortID, "spiderX": ""}
+		rs := map[string]any{"serverName": h.SNI, "fingerprint": h.Fingerprint, "publicKey": h.PublicKey, "shortId": h.ShortID, "spiderX": h.SpiderX}
+		if h.PQV != "" {
+			rs["mldsa65Verify"] = h.PQV
+		}
+		ss["realitySettings"] = rs
 	case "tls":
 		tls := map[string]any{"serverName": h.SNI, "fingerprint": h.Fingerprint}
 		if len(h.ALPN) > 0 {
@@ -74,7 +78,7 @@ func HostLink(h Host, uuid string) string {
 			q.Set("alpn", strings.Join(h.ALPN, ","))
 		}
 		q.Set("insecure", "0")
-		return fmt.Sprintf("hysteria2://%s@%s/?%s#%s", uuid, net.JoinHostPort(h.Address, strconv.Itoa(h.Port)), q.Encode(), url.PathEscape(h.Remark))
+		return fmt.Sprintf("hysteria2://%s@%s/?%s#%s", uuid, net.JoinHostPort(h.Address, strconv.Itoa(h.Port)), encodeQuery(q), url.PathEscape(h.Remark))
 	}
 	q := url.Values{}
 	q.Set("encryption", "none")
@@ -90,6 +94,12 @@ func HostLink(h Host, uuid string) string {
 	case "reality":
 		q.Set("pbk", h.PublicKey)
 		q.Set("sid", h.ShortID)
+		if h.PQV != "" {
+			q.Set("pqv", h.PQV)
+		}
+		if h.SpiderX != "" {
+			q.Set("spx", h.SpiderX)
+		}
 	case "tls":
 		if len(h.ALPN) > 0 {
 			q.Set("alpn", strings.Join(h.ALPN, ","))
@@ -111,5 +121,9 @@ func HostLink(h Host, uuid string) string {
 			q.Set("extra", string(b))
 		}
 	}
-	return fmt.Sprintf("vless://%s@%s?%s#%s", uuid, net.JoinHostPort(h.Address, strconv.Itoa(h.Port)), q.Encode(), url.PathEscape(h.Remark))
+	return fmt.Sprintf("vless://%s@%s?%s#%s", uuid, net.JoinHostPort(h.Address, strconv.Itoa(h.Port)), encodeQuery(q), url.PathEscape(h.Remark))
+}
+
+func encodeQuery(q url.Values) string {
+	return strings.ReplaceAll(q.Encode(), "+", "%20")
 }

@@ -56,7 +56,8 @@ func UserVars(u *store.User, subURL string, b service.SubBasics, now time.Time) 
 		"status": statusText[u.Status], "update_hours": hours,
 		"support_url": b.SupportURL, "announce": b.Announce, "announce_url": b.AnnounceURL,
 		"sub_url": subURL, "page_url": pageURL, "url": subURL,
-		"url_enc": url.QueryEscape(subURL), "url_b64": base64.StdEncoding.EncodeToString([]byte(subURL)),
+		"url_enc": url.QueryEscape(subURL), "url_mihomo_enc": url.QueryEscape(strings.TrimRight(subURL, "/") + "/mihomo"),
+		"url_b64": base64.StdEncoding.EncodeToString([]byte(subURL)),
 		"title_url": url.PathEscape(b.Title), "title_query": url.QueryEscape(b.Title),
 	}
 }

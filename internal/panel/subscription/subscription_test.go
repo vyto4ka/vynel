@@ -420,17 +420,16 @@ func TestIPLimitStub(t *testing.T) {
 	}
 }
 
-// With no device limit an app without HWID is let in and gets plain links, with the usual
-// headers; a format in the link or set for the user still wins, and an app with HWID gets its
-// own format as before.
+// With no device limit an app without HWID is let in and keeps its native format with the usual
+// headers, without registering a device; an explicit format or user client type still wins.
 func TestNoDeviceLimitGivesLinksWithoutHWID(t *testing.T) {
 	e := newEnv(t)
 	if err := e.svc.SetSetting(e.ctx, actor, service.SettingHWIDLimit, "0"); err != nil {
 		t.Fatal(err)
 	}
 	rec := e.get(e.path(), "FlClashX/0.9", "")
-	if ls := links(t, rec); len(ls) != 2 || strings.Contains(ls[0], StubUUID) || !strings.HasPrefix(ls[0], "vless://") {
-		t.Fatalf("an app without HWID must get links: %v", ls)
+	if body := rec.Body.String(); !strings.Contains(body, "proxies:") || strings.Contains(body, StubUUID) {
+		t.Fatalf("an app without HWID must keep its native Mihomo format:\n%.300s", body)
 	}
 	h := rec.Header()
 	if !strings.HasPrefix(h.Get("Subscription-Userinfo"), "upload=") || h.Get("Profile-Update-Interval") == "" || h.Get("Profile-Title") == "" {

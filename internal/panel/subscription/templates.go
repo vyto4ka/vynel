@@ -30,7 +30,26 @@ func MihomoFromTemplate(hosts []service.Host, uuid, tpl string) ([]byte, error) 
 	if err := yaml.Unmarshal([]byte(tpl), &doc); err != nil {
 		return nil, err
 	}
-	proxies, names := mihomoProxies(hosts, uuid)
+	var reserved = []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"}
+	if own, ok := doc["proxies"].([]any); ok {
+		for _, item := range own {
+			if m, ok := item.(map[string]any); ok {
+				if name, ok := m["name"].(string); ok && name != "" {
+					reserved = append(reserved, name)
+				}
+			}
+		}
+	}
+	if groups, ok := doc["proxy-groups"].([]any); ok {
+		for _, g := range groups {
+			if m, ok := g.(map[string]any); ok {
+				if name, ok := m["name"].(string); ok && name != "" {
+					reserved = append(reserved, name)
+				}
+			}
+		}
+	}
+	proxies, names := mihomoProxies(hosts, uuid, reserved...)
 	delete(doc, "remnawave")
 	own, _ := doc["proxies"].([]any)
 	all := append([]any(nil), own...)

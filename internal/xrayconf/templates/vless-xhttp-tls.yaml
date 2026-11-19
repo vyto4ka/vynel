@@ -1,0 +1,116 @@
+# Template F — VLESS + XHTTP + TLS на собственном сертификате ноды.
+# Работает на Xray 26.9.8+ со всеми клиентами, включая Karing 1.2.26+ (sing-box-extended),
+# которым недоступен REALITY на свежих Xray из-за отсутствия X25519MLKEM768 в ClientHello.
+# Использует сертификат ноды (как Hysteria2) и может делить TCP 443 с Reality через SNI-роутер nginx
+# на отдельном домене/поддомене.
+id: vless-xhttp-tls
+version: 1
+title: VLESS XHTTP + TLS (сертификат ноды)
+summary: XHTTP поверх обычного TLS на сертификате ноды. Работает в Karing 1.2.26+, Mihomo 1.19+ и Xray-клиентах на любом Xray 26+.
+tag_pattern: XHTTP_TLS_${NODE_CODE}
+remark_pattern: ${NODE_FLAG} ${NODE_NAME} · XHTTP TLS
+protocol: vless
+client:
+  flow: ""
+lint:
+  - xhttp_no_nested_extra
+
+variables:
+  - name: NODE_DOMAIN
+    scope: node
+    source: input
+    default_from: node.domain
+    validate: domain
+    description: Домен ноды (A-запись на IP инбаунда). На него нода получает сертификат, его же видит клиент в SNI и HTTP Host.
+  - name: SELFSTEAL_PORT
+    scope: profile
+    source: const
+    default: 8443
+    validate: port
+    description: Локальный порт nginx с сайтом-заглушкой (для выпуска сертификата и совместимости с остальными профилями).
+  - name: PORT
+    scope: profile
+    source: const
+    default: 443
+    validate: port
+    description: Порт снаружи (TCP). При совпадении с портом Reality на другом домене nginx разведёт их по SNI.
+  - name: XHTTP_PATH
+    scope: profile
+    source: generate
+    generator: path
+    options: [/assets/sync, /api/stream, /static/chunks, /media/feed]
+    validate: path
+    description: Путь XHTTP без завершающего слеша. Одинаковый на сервере и в подписке.
+  - name: XHTTP_MODE
+    scope: profile
+    source: const
+    default: auto
+    options: [auto, stream-up, packet-up]
+    description: auto — клиент сам выбирает режим; stream-up — длинный POST вверх; packet-up — отдельные POST-пакеты.
+  - name: FINGERPRINT
+    scope: profile
+    source: const
+    default: chrome
+    options: [chrome, firefox, safari, ios, android, edge, "360", qq, random, randomized]
+    description: TLS-отпечаток клиента (uTLS), под какой браузер маскируется подключение. Уходит в подписку.
+  - name: DECOY_SITE
+    scope: node
+    source: generate
+    generator: path
+    options: [cloud, studio, docs, coffee, journal]
+    default: cloud
+    description: Сайт-заглушка на локальном nginx.
+
+xhttp_extra: |
+  {
+    "mode": "${XHTTP_MODE}",
+    "xPaddingBytes": "100-1342"
+  }
+
+xray_inbound: |
+  {
+    "tag": "${TAG}",
+    "port": "${PORT}",
+    "listen": "${LISTEN_IP}",
+    "protocol": "vless",
+    "settings": { "clients": [], "decryption": "none" },
+    "sniffing": { "enabled": true, "routeOnly": true, "destOverride": ["http", "tls", "quic"] },
+    "streamSettings": {
+      "network": "xhttp",
+      "security": "tls",
+      "sockopt": { "tcpFastOpen": true, "tcpcongestion": "bbr" },
+      "tlsSettings": {
+        "alpn": ["h2", "http/1.1"],
+        "certificates": [
+          { "certificateFile": "vynel:cert:${NODE_DOMAIN}", "keyFile": "vynel:key:${NODE_DOMAIN}" }
+        ]
+      },
+      "xhttpSettings": {
+        "path": "${XHTTP_PATH}",
+        "mode": "${XHTTP_MODE}",
+        "extra": "${XHTTP_EXTRA}"
+      }
+    }
+  }
+
+host:
+  address: ${NODE_DOMAIN}
+  port: ${INBOUND_PORT}
+  security: tls
+  sni: ${NODE_DOMAIN}
+  host: ${NODE_DOMAIN}
+  path: ${XHTTP_PATH}/
+  alpn: [h2, http/1.1]
+  fingerprint: ${FINGERPRINT}
+  mihomo: true
+
+nginx:
+  role: certificate
+  domain: ${NODE_DOMAIN}
+  local_port: ${SELFSTEAL_PORT}
+  decoy: ${DECOY_SITE}
+
+node_requirements:
+  ports: [443/tcp, 80/tcp]
+  dns: [{ type: A, name: "${NODE_DOMAIN}" }]
+  sysctl: [bbr, fq, tcp_fastopen]

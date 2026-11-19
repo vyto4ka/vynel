@@ -131,7 +131,7 @@ export default {
   reset_to_defaults: 'Reset to defaults',
   response: 'Response',
   routes: 'Routes',
-  routes_go_along_with_the: 'Xray JSON, Mihomo and sing-box include routes in the config. Happ, INCY and KeqDroid 0.34+ also receive routes through the Routing header alongside links. Link routing profiles cannot carry process: or torrent rules; KeqDroid uses app DNS settings. All settings travel in full Xray JSON. Karing receives a separate profile with rule sets; enable subscription rules in the app.',
+  routes_go_along_with_the: 'Xray JSON, Mihomo and sing-box include routes in the config. Happ, INCY, v2RayTun and KeqDroid 0.34+ also receive routes through the Routing header alongside links. Link routing profiles cannot carry process: or torrent rules; KeqDroid uses app DNS settings. All settings travel in full Xray JSON. Karing receives a separate profile with rule sets; enable subscription rules in the app.',
   routes_in_apps: 'Routes in apps',
   rules_without_a_field_on: 'Rules without a field on the “Routes” tab: {length} (they work in the template)',
   russia_direct: ', Russia direct',

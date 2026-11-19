@@ -374,12 +374,14 @@ func parseLink(l string) (Host, bool) {
 					return Host{}, false
 				}
 			}
+			h.Mihomo = true
 		default:
 			return Host{}, false // ws, grpc…: passed on as links
 		}
 		switch h.Security {
 		case "reality":
-			h.PublicKey, h.ShortID = q.Get("pbk"), q.Get("sid")
+			h.PublicKey, h.ShortID, h.PQV, h.SpiderX = q.Get("pbk"), q.Get("sid"), q.Get("pqv"), q.Get("spx")
+			h.MLKEM = true
 			if h.PublicKey == "" {
 				return Host{}, false
 			}

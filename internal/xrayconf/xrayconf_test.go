@@ -95,8 +95,8 @@ func TestTemplatesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 4 {
-		t.Fatalf("want 4 templates, got %d", len(ts))
+	if len(ts) != 5 {
+		t.Fatalf("want 5 templates, got %d", len(ts))
 	}
 	if IsBuiltin("vless-xhttp-vkcdn") {
 		t.Fatal("the VK CDN template is no longer built in")
@@ -195,6 +195,11 @@ func TestGoldenXHTTPRealityMatchesGuide(t *testing.T) {
 		t.Fatal("sockopt missing")
 	}
 	delete(ss, "sockopt")
+	rs := ss["realitySettings"].(map[string]any)
+	if rs["minClientVer"] != "1.0.0" {
+		t.Fatalf("minClientVer = %v, want 1.0.0", rs["minClientVer"])
+	}
+	delete(rs, "minClientVer")
 	assertJSONEqual(t, readFixture(t, "guide_xhttp_reality_inbound.json"), in)
 
 	spec := xhttpRealitySpec()

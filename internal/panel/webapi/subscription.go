@@ -234,10 +234,11 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	subURL := s.subURLFor(r, u)
 	vars := subscription.UserVars(u, subURL, b, time.Now())
 	headers := subscription.RenderClientHeaders(hs, vars, in.UserAgent, format, routing)
-	// Automatic provider routing for link-based subscriptions (Happ, INCY, KeqDroid).
-	if subscription.LinkRouting(format, in.UserAgent, nil) {
+	// Automatic provider routing for link-based subscriptions (Happ, INCY, KeqDroid, v2RayTun).
+	if subscription.LinkRouting(format, in.UserAgent, selection.Hosts) {
 		headers = subscription.RoutingHeaders(hs, headers, in.UserAgent, b.Title, routing)
 	}
+	headers = subscription.FragmentHeaders(hs, headers, in.UserAgent, format, routing)
 	page, err := s.svc.SubPage(ctx)
 	if err != nil {
 		return nil, err

@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/vyto4ka/vynel/internal/panel/service"
 )
 
 func decodeLinkBase64(s string) ([]byte, bool) {
@@ -18,10 +20,20 @@ func decodeLinkBase64(s string) ([]byte, bool) {
 	return nil, false
 }
 
+// karingLink translates external URI servers into Karing (sing-box-extended) outbound fields,
+// additionally supporting VLESS XHTTP which upstream sing-box rejects.
+func karingLink(raw string) (map[string]any, bool) {
+	return singBoxLinkWith(raw, true)
+}
+
 // singBoxLink translates external URI servers into sing-box outbound fields. Keep this
 // separate from service.Host: Xray's streamSettings/encryption/UUID fields are not sing-box's
 // transport/tls/password fields. Unsupported transports are rejected, never changed to TCP.
 func singBoxLink(raw string) (map[string]any, bool) {
+	return singBoxLinkWith(raw, false)
+}
+
+func singBoxLinkWith(raw string, allowXHTTP bool) (map[string]any, bool) {
 	if strings.HasPrefix(raw, "vmess://") {
 		return singBoxVMess(strings.TrimPrefix(raw, "vmess://"))
 	}
@@ -45,8 +57,8 @@ func singBoxLink(raw string) (map[string]any, bool) {
 		return nil, false
 	}
 	q := u.Query()
-	if q.Get("pinSHA256") != "" || q.Get("ech") != "" {
-		return nil, false // do not discard certificate constraints or ECH configuration
+	if q.Get("pinSHA256") != "" || q.Get("ech") != "" || q.Get("pqv") != "" {
+		return nil, false // do not discard certificate constraints, ECH, or ML-DSA-65 verification
 	}
 	port, err := strconv.Atoi(u.Port())
 	if u.Port() == "" && (u.Scheme == "hy2" || u.Scheme == "hysteria2" || u.Scheme == "trojan" || u.Scheme == "anytls") {
@@ -151,7 +163,7 @@ func singBoxLink(raw string) (map[string]any, bool) {
 			tls["server_name"] = u.Hostname()
 		}
 		if fp := q.Get("fp"); fp != "" && o["type"] != "hysteria2" && o["type"] != "tuic" {
-			tls["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": singBoxFingerprint(fp)}
 		}
 		if alpn := q.Get("alpn"); alpn != "" {
 			tls["alpn"] = strings.Split(alpn, ",")
@@ -174,7 +186,15 @@ func singBoxLink(raw string) (map[string]any, bool) {
 		return nil, false
 	}
 	if o["type"] == "vless" || o["type"] == "trojan" {
-		if !singBoxTransport(o, q.Get("type"), q.Get("host"), q.Get("path"), q.Get("serviceName"), q.Get("headerType")) {
+		if allowXHTTP && o["type"] == "vless" && q.Get("type") == "xhttp" {
+			h := service.Host{Network: "xhttp", Path: q.Get("path"), HostHeader: q.Get("host"), Mode: q.Get("mode")}
+			if x := q.Get("extra"); x != "" {
+				if json.Unmarshal([]byte(x), &h.Extra) != nil {
+					return nil, false
+				}
+			}
+			o["transport"] = karingXHTTP(h)
+		} else if !singBoxTransport(o, q.Get("type"), q.Get("host"), q.Get("path"), q.Get("serviceName"), q.Get("headerType")) {
 			return nil, false
 		}
 	}
