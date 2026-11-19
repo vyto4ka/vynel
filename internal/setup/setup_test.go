@@ -65,3 +65,33 @@ func TestStateKeepsAnswersButFlagsWin(t *testing.T) {
 		t.Fatal("missing file")
 	}
 }
+
+func TestShellStripsLineBreaksAndSubPathRoot(t *testing.T) {
+	a := &Answers{Mode: "panel", Domain: "panel.example.com", SubDomain: "sub.example.com", SubPath: "/", Name: "line1\nline2\r\nline3"}
+	var buf bytes.Buffer
+	if err := a.Shell(&buf); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	if len(lines) != 24 {
+		t.Fatalf("expected 24 single-line assignments, got %d:\n%s", len(lines), buf.String())
+	}
+	if cleanSubPath("/") != "/" || cleanSubPath("sub") != "/sub/" || cleanSubPath("") != "" {
+		t.Fatalf("cleanSubPath: %q %q %q", cleanSubPath("/"), cleanSubPath("sub"), cleanSubPath(""))
+	}
+	cache := &dnsCache{m: map[string]DNSStatus{
+		"panel.example.com@203.0.113.10": {OK: true, Message: "✓ 203.0.113.10"},
+		"sub.example.com@203.0.113.10":   {OK: true, Message: "✓ 203.0.113.10"},
+	}}
+	sum := summary(a, "panel.example.com", true, []string{"firewall"}, cache, func(string) string { return "203.0.113.10" })
+	for _, want := range []string{
+		"Домен        panel.example.com",
+		"Домен ссылок sub.example.com",
+		"Домен панели panel.example.com",
+		"Подписки     https://sub.example.com/<токен>",
+	} {
+		if !strings.Contains(sum, want) {
+			t.Fatalf("summary missing %q:\n%s", want, sum)
+		}
+	}
+}

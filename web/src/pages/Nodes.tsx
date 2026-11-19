@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { del, get, Group, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap, Variable } from '../api'
 import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
@@ -212,7 +212,7 @@ export function Nodes() {
         </div>
       )}
 
-      {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setJoin(j); reload() }} />}
+      {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setAdding(false); setJoin(j); reload() }} />}
       {join && <NodeSetup j={join} onClose={() => { setJoin(null); reload() }} onDone={(n) => { setJoin(null); setWizardOf(n); reload() }} />}
       {wizardOf && <NodeWizardModal node={wizardOf} profiles={profiles.data || []} onClose={() => { setWizardOf(null); reload() }} onProfilesChanged={profiles.reload} />}
       {updLog && <UpdateLog id={updLog.id} name={updLog.name} onClose={() => { setUpdLog(null); updates.reload() }} />}
@@ -316,43 +316,47 @@ function WizardSteps({ at, all }: { at: number; all?: boolean }) {
 const stepIcon = { ok: '✓', wait: '', fail: '!', skip: '–' }
 
 // Мастер донастройки ноды: шаги 2–5 (профили → переменные → проверки → применение). Шаг
-// хранится не отдельно, а выводится из данных ноды: нет профилей = шаг 2, пустые переменные
-// ноды = шаг 3, требования не подтверждены = шаг 4. Закрыл диалог — открыл снова через
-// «Продолжить настройку» на карточке: попадаешь на тот же шаг.
+// хранится не отдельно, а выводится из данных ноды при открытии: нет профилей = шаг 2, пустые
+// переменные ноды = шаг 3, требования не подтверждены = шаг 4. Закрыл диалог — открыл снова
+// через «Продолжить настройку» на карточке: попадаешь на тот же шаг.
 function NodeWizardModal({ node: initial, profiles, onClose, onProfilesChanged }: { node: Node; profiles: Profile[]; onClose: () => void; onProfilesChanged: () => void }) {
   const [node, setNode] = useState(initial)
-  const [at, setAt] = useState(() => Math.max(2, initial.setupStep > 0 ? initial.setupStep : 2))
-  const { data: wizard, error } = useLoad(() => get<NodeWizard>(`nodes/${node.id}/wizard`), [node.id, at], at >= 4 ? 5000 : 0)
+  const [step, setStep] = useState(() => Math.max(2, initial.setupStep > 0 ? initial.setupStep : 2))
+  const { data: wizard, error } = useLoad(() => (step === 4 ? get<NodeWizard>(`nodes/${initial.id}/wizard`) : Promise.resolve(null)), [initial.id, step === 4], step === 4 ? 5000 : 0)
   const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
-  const nodes = useLoad(() => get<Node[]>('nodes'), [node.id, at], 6000)
+  const nodes = useLoad(() => get<Node[]>('nodes'), [initial.id], 6000)
   const act = useAction()
 
-  const cur = nodes.data?.find((n) => n.id === node.id) || node
-  // The step derived from the node's data (backend's number): follow it forward, keep the
-  // admin's place when he stepped back.
-  const derived = cur.setupStep > 0 ? cur.setupStep : 0
-  const step = Math.min(at, Math.max(derived, 2))
-  useEffect(() => { if (derived > at) setAt(derived) }, [derived, at])
+  const cur = nodes.data?.find((n) => n.id === initial.id) || node
+  useEffect(() => {
+    const found = nodes.data?.find((n) => n.id === initial.id)
+    if (found) setNode(found)
+  }, [nodes.data, initial.id])
 
-  const back = () => setAt(Math.max(2, step - 1))
-  const next = () => setAt(step + 1)
-  const toNode = (n?: Node): Node | undefined => {
-    if (n) setNode(n)
-    return n
+  const refreshNode = async (): Promise<Node | undefined> => {
+    try {
+      const list = await get<Node[]>('nodes')
+      const found = list.find((n) => n.id === initial.id)
+      if (found) setNode(found)
+      return found
+    } catch {
+      return undefined
+    }
   }
 
+  const back = () => setStep((s) => Math.max(2, s - 1))
+  const next = () => setStep((s) => Math.min(5, s + 1))
+
   return (
-    <Modal title={t('nodes.node', { code: node.code })} onClose={onClose} wide
+    <Modal title={t('nodes.node', { code: cur.code })} onClose={onClose} wide
       footer={<>
         <span className="muted small grow">{t('nodes.wizard_saved_on_each_step')}</span>
-        {step > 2 && <button className="btn ghost" onClick={back}>{t('common.back')}</button>}
-        {step < 5 && <button className="btn primary" onClick={next}>{t('common.next')}</button>}
-        {step === 5 && <button className="btn primary" onClick={onClose}>{t('common.done')}</button>}
+        <button className="btn ghost" onClick={onClose}>{step === 5 ? t('common.done') : t('common.close')}</button>
       </>}>
       <WizardSteps at={step - 1} all />
-      {!nodes.data ? <Loading error={nodes.error} /> : step === 2 ? <StepProfiles node={cur} profiles={profiles} onDone={(n) => { toNode(n); next() }} onProfilesChanged={onProfilesChanged} /> :
-        step === 3 ? <StepVars node={cur} profiles={profiles} tpls={tpls.data || []} onDone={(n) => { toNode(n); next() }} onBack={back} /> :
-          step === 4 ? <StepChecks node={cur} wizard={wizard} error={error} onDone={(n) => { toNode(n); next() }} onBack={back} /> :
+      {!nodes.data && !cur ? <Loading error={nodes.error} /> : step === 2 ? <StepProfiles node={cur} profiles={profiles} onChanged={refreshNode} onDone={next} onProfilesChanged={onProfilesChanged} /> :
+        step === 3 ? <StepVars node={cur} profiles={profiles} tpls={tpls.data || []} onChanged={refreshNode} onDone={next} onBack={back} /> :
+          step === 4 ? <StepChecks node={cur} wizard={wizard} error={error} onChanged={refreshNode} onDone={next} onBack={back} /> :
             <StepApply node={cur} act={act} onBack={back} onDone={onClose} />}
     </Modal>
   )
@@ -360,16 +364,45 @@ function NodeWizardModal({ node: initial, profiles, onClose, onProfilesChanged }
 
 // Шаг 2: выбор профилей галочками. Привязка (AttachProfile) сразу по кнопке.
 // Если профилей нет — создаём прямо здесь, не отправляя админа на другую страницу.
-function StepProfiles({ node, profiles, onDone, onProfilesChanged }: { node: Node; profiles: Profile[]; onDone: (n?: Node) => void; onProfilesChanged: () => void }) {
+function StepProfiles({ node, profiles, onChanged, onDone, onProfilesChanged }: { node: Node; profiles: Profile[]; onChanged: () => Promise<Node | undefined>; onDone: () => void; onProfilesChanged: () => void }) {
   const act = useAction()
   const [busy, setBusy] = useState(false)
+  const [optimistic, setOptimistic] = useState<Record<number, boolean>>({})
+
+  const isChecked = (pid: number) => optimistic[pid] !== undefined ? optimistic[pid] : node.inbounds.some((i) => i.profileId === pid)
+  const anySelected = profiles.some((p) => isChecked(p.id))
+
   const toggle = async (p: Profile, on: boolean) => {
+    setOptimistic((prev) => ({ ...prev, [p.id]: on }))
     setBusy(true)
+    let ok = false
     if (on) {
-      await act(() => post('inbounds', { nodeId: node.id, profileId: p.id }), t('nodes.profile_added_to_the_node'))
+      const r = await act(() => post('inbounds', { nodeId: node.id, profileId: p.id }), t('nodes.profile_added_to_the_node'))
+      ok = r !== undefined
     } else {
-      const i = node.inbounds.find((x) => x.profileId === p.id)
-      if (i) await act(() => del(`inbounds/${i.id}`), t('nodes.inbound_removed'))
+      const fresh = node.inbounds.find((x) => x.profileId === p.id) || (await onChanged())?.inbounds.find((x) => x.profileId === p.id)
+      if (fresh) {
+        const r = await act(() => del(`inbounds/${fresh.id}`), t('nodes.inbound_removed'))
+        ok = r !== undefined
+      } else {
+        ok = true
+      }
+    }
+    if (ok) {
+      const updated = await onChanged()
+      if (updated) {
+        setOptimistic((prev) => {
+          const copy = { ...prev }
+          delete copy[p.id]
+          return copy
+        })
+      }
+    } else {
+      setOptimistic((prev) => {
+        const copy = { ...prev }
+        delete copy[p.id]
+        return copy
+      })
     }
     setBusy(false)
   }
@@ -377,18 +410,18 @@ function StepProfiles({ node, profiles, onDone, onProfilesChanged }: { node: Nod
     <div>
       <p className="text-2" style={{ marginTop: 0 }}>{t('nodes.pick_profiles_for_node')}</p>
       {profiles.length === 0 ? (
-        <InlineCreateProfile node={node} onCreated={() => { onProfilesChanged(); onDone() }} />
+        <InlineCreateProfile node={node} onCreated={async () => { onProfilesChanged(); await onChanged(); onDone() }} />
       ) : (
         <>
           {node.manual && <div className="alert amber">{t('nodes.manual_node_nginx_note')}</div>}
           {profiles.map((p) => (
             <label key={p.id} className="check" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0' }}>
-              <input type="checkbox" disabled={busy} checked={node.inbounds.some((i) => i.profileId === p.id)} onChange={(e) => toggle(p, e.target.checked)} />
+              <input type="checkbox" disabled={busy} checked={isChecked(p.id)} onChange={(e) => toggle(p, e.target.checked)} />
               <span><b>{p.name}</b> <span className="muted small">· {p.templateTitle}</span></span>
             </label>
           ))}
-          <button className="btn primary" style={{ marginTop: 14 }} disabled={node.inbounds.length === 0} onClick={() => onDone()}>
-            {node.inbounds.length === 0 ? t('nodes.skip_for_now') : t('nodes.next_variables')}{' →'}
+          <button className="btn primary" style={{ marginTop: 14 }} disabled={busy || !anySelected} onClick={onDone}>
+            {!anySelected ? t('nodes.skip_for_now') : t('nodes.next_variables')}{' →'}
           </button>
         </>
       )}
@@ -398,7 +431,7 @@ function StepProfiles({ node, profiles, onDone, onProfilesChanged }: { node: Nod
 
 // InlineCreateProfile — создание профиля внутри мастера: шаблон + кнопка, без ухода со шага.
 // Профиль сразу привязывается к ноде и получает доступ группы «Основная».
-function InlineCreateProfile({ node, onCreated }: { node: Node; onCreated: () => void }) {
+function InlineCreateProfile({ node, onCreated }: { node: Node; onCreated: () => void | Promise<void> }) {
   const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
   const groups = useLoad(() => get<Group[]>('groups'))
   const [templateId, setTemplateId] = useState('')
@@ -411,7 +444,7 @@ function InlineCreateProfile({ node, onCreated }: { node: Node; onCreated: () =>
     const r = await act(() => post<{ id: number }>('profiles', { name: 'Reality', templateId: chosen, values: {}, groupIds: gids }), t('profiles.profile_created'))
     if (r) {
       await act(() => post('inbounds', { nodeId: node.id, profileId: r.id }), t('nodes.profile_added_to_the_node'))
-      onCreated()
+      await onCreated()
     }
   }
   if (!tpls.data || !groups.data) return <Loading />
@@ -430,8 +463,9 @@ function InlineCreateProfile({ node, onCreated }: { node: Node; onCreated: () =>
 
 // Шаг 3: переменные выбранных профилей (scope=node, source=input) + «сгенерировать» для
 // generate-переменных (регенерация — существующий механизм regenerateKeys).
-function StepVars({ node, profiles, tpls, onDone, onBack }: { node: Node; profiles: Profile[]; tpls: ProfileTemplate[]; onDone: (n?: Node) => void; onBack: () => void }) {
+function StepVars({ node, profiles, tpls, onChanged, onDone, onBack }: { node: Node; profiles: Profile[]; tpls: ProfileTemplate[]; onChanged: () => Promise<Node | undefined>; onDone: () => void; onBack: () => void }) {
   const act = useAction()
+  const [busy, setBusy] = useState(false)
   const [values, setValues] = useState<Record<string, number | string>>(() => {
     const out: Record<string, number | string> = {}
     for (const i of node.inbounds) for (const [k, v] of Object.entries(i.values || {})) out[k] = v == null ? '' : (typeof v === 'number' ? v : String(v))
@@ -444,12 +478,17 @@ function StepVars({ node, profiles, tpls, onDone, onBack }: { node: Node; profil
     return (p?.variables || []).filter((v) => v.scope === 'node' && (v.source === 'input' || v.source === 'generate'))
   }
   const save = async () => {
+    setBusy(true)
     for (const i of node.inbounds) {
       const mine: Record<string, number | string> = {}
       for (const v of varsOf(i)) if (v.source === 'input' && values[v.name] !== undefined && values[v.name] !== '') mine[v.name] = values[v.name]
-      const r = await act(() => patch(`inbounds/${i.id}`, { values: mine, ...(regen ? { regenerateKeys: true } : {}) }), t('nodes.inbound_saved_the_node_applies'))
-      if (r === undefined) return
+      if (Object.keys(mine).length > 0 || regen) {
+        const r = await act(() => patch(`inbounds/${i.id}`, { values: mine, ...(regen ? { regenerateKeys: true } : {}) }), t('nodes.inbound_saved_the_node_applies'))
+        if (r === undefined) { setBusy(false); return }
+      }
     }
+    await onChanged()
+    setBusy(false)
     onDone()
   }
   const hasGen = node.inbounds.some((i) => varsOf(i).some((v) => v.source === 'generate'))
@@ -472,8 +511,8 @@ function StepVars({ node, profiles, tpls, onDone, onBack }: { node: Node; profil
           <input type="checkbox" checked={regen} onChange={(e) => setRegen(e.target.checked)} />{' '}{t('nodes.generate_keys_and_other_values')}</label>
       )}
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn ghost" onClick={onBack}>{t('common.back')}</button>
-        <button className="btn primary" onClick={save}>{t('nodes.next_checks')}</button>
+        <button className="btn ghost" disabled={busy} onClick={onBack}>{t('common.back')}</button>
+        <button className="btn primary" disabled={busy} onClick={save}>{t('nodes.next_checks')}</button>
       </div>
     </div>
   )
@@ -481,13 +520,20 @@ function StepVars({ node, profiles, tpls, onDone, onBack }: { node: Node; profil
 
 // Шаг 4: требования node_requirements выбранных профилей: ✓/✗ от панели (DNS уже проверяет
 // панель), для manual-нод — «проверьте сами».
-function StepChecks({ node, wizard, error, onDone, onBack }: { node: Node; wizard: NodeWizard | null; error?: unknown; onDone: (n?: Node) => void; onBack: () => void }) {
+function StepChecks({ node, wizard, error, onChanged, onDone, onBack }: { node: Node; wizard: NodeWizard | null; error?: unknown; onChanged: () => Promise<Node | undefined>; onDone: () => void; onBack: () => void }) {
   const act = useAction()
-  const [confirmed, setConfirmed] = useState(false)
+  const [busy, setBusy] = useState(false)
   const hasFail = !!wizard?.steps.some((x) => x.state === 'fail')
   const confirm = async () => {
+    setBusy(true)
     const r = await act(() => post(`nodes/${node.id}/confirm-requirements`, { confirm: true }), t('common.saved'))
-    if (r !== undefined) { setConfirmed(true); onDone() }
+    if (r !== undefined) {
+      await onChanged()
+      setBusy(false)
+      onDone()
+      return
+    }
+    setBusy(false)
   }
   return (
     <div>
@@ -507,8 +553,8 @@ function StepChecks({ node, wizard, error, onDone, onBack }: { node: Node; wizar
       )}
       {node.manual && <div className="alert amber" style={{ marginTop: 12 }}>{t('nodes.manual_node_check_note')}</div>}
       <div className="row" style={{ gap: 8, marginTop: 14 }}>
-        <button className="btn ghost" onClick={onBack}>{t('common.back')}</button>
-        <button className="btn primary" onClick={confirm} disabled={!node.manual && hasFail && !confirmed}>
+        <button className="btn ghost" disabled={busy} onClick={onBack}>{t('common.back')}</button>
+        <button className="btn primary" onClick={confirm} disabled={busy || (!wizard && !error)}>
           {node.manual ? t('nodes.confirm_checked') : hasFail ? t('nodes.confirm_anyway') : t('nodes.confirm_checks')}
         </button>
       </div>
@@ -535,18 +581,50 @@ function StepApply({ node, act, onBack, onDone }: { node: Node; act: ReturnType<
   )
 }
 
+const installStepKeys = new Set(['joined', 'online', 'applied', 'xray', 'web'])
+
 // Мастер, шаг 2: команда установки и живой чеклист, пока нода не заработает.
 function NodeSetup({ j, node, onClose, onDone }: { j?: JoinInfo; node?: Node; onClose: () => void; onDone?: (n: Node) => void }) {
   const id = j?.id ?? node!.id
   const title = j ? t('nodes.add_a_server_step_2') : t('nodes.checking_the_node', { name: node!.name })
-  const { data, error } = useLoad(() => get<Step[]>(`nodes/${id}/checklist`), [id], 4000)
+  const { data, error } = useLoad(() => get<Step[]>(`nodes/${id}/checklist`), [id], 5000)
   const nodes = useLoad(() => get<Node[]>('nodes'), [id], 5000)
   const cur = nodes.data?.find((n) => n.id === id)
+  const visible = j ? data?.filter((s) => s.key !== 'inbounds' && s.key !== 'site') : data
   const done = data?.every((s) => s.state === 'ok' || s.state === 'skip')
-  const firstOpen = data?.findIndex((s) => s.state !== 'ok' && s.state !== 'skip') ?? -1
+  const installReady = !!j && !!onDone && !!data && data.filter((s) => installStepKeys.has(s.key)).every((s) => s.state === 'ok' || s.state === 'skip')
+  const firstOpen = visible?.findIndex((s) => s.state !== 'ok' && s.state !== 'skip') ?? -1
+  const advanced = useRef(false)
+
+  const proceed = async () => {
+    if (!onDone || advanced.current) return
+    advanced.current = true
+    if (cur) {
+      onDone(cur)
+      return
+    }
+    try {
+      const list = await get<Node[]>('nodes')
+      const found = list.find((n) => n.id === id)
+      if (found) {
+        onDone(found)
+        return
+      }
+    } catch {
+      // allow manual retry via button if fetching nodes failed transiently
+    }
+    advanced.current = false
+  }
+
+  useEffect(() => {
+    if (installReady) {
+      void proceed()
+    }
+  }, [installReady, cur])
+
   return (
-    <Modal title={title} onClose={onClose} wide footer={done && onDone && cur
-      ? <><button className="btn ghost" onClick={onClose}>{t('nodes.finish_later')}</button><button className="btn primary" onClick={() => onDone(cur)}>{t('nodes.next_step_setup')}</button></>
+    <Modal title={title} onClose={onClose} wide footer={(done || installReady) && onDone
+      ? <><button className="btn ghost" onClick={onClose}>{t('nodes.finish_later')}</button><button className="btn primary" onClick={proceed}>{t('nodes.next_step_setup')}</button></>
       : <button className="btn primary" onClick={onClose}>{done ? t('common.done') : t('common.close')}</button>}>
       {j && <WizardSteps at={1} all />}
       {j?.warnings && j.warnings.length > 0 && <div className="alert amber" style={{ marginBottom: 14 }}>{j.warnings.join('; ')}</div>}
@@ -558,7 +636,7 @@ function NodeSetup({ j, node, onClose, onDone }: { j?: JoinInfo; node?: Node; on
         </>
       ))}
       <div className="checklist">
-        {!data ? <Loading error={error} /> : data.map((s, i) => (
+        {!visible ? <Loading error={error} /> : visible.map((s, i) => (
           <div key={s.key} className={'check-step ' + s.state + (i === firstOpen && s.state === 'wait' ? ' current' : '')}>
             <span className="check-icon">{i === firstOpen && s.state === 'wait' ? <span className="spinner" /> : stepIcon[s.state]}</span>
             <div>
@@ -568,7 +646,7 @@ function NodeSetup({ j, node, onClose, onDone }: { j?: JoinInfo; node?: Node; on
           </div>
         ))}
       </div>
-      {done && <div className="alert green" style={{ marginTop: 12 }}>{t('nodes.the_node_works_users_get')}</div>}
+      {done && !j && <div className="alert green" style={{ marginTop: 12 }}>{t('nodes.the_node_works_users_get')}</div>}
     </Modal>
   )
 }

@@ -71,8 +71,8 @@ Modes:
   uninstall  remove the services (--purge also deletes all data and binaries)
 
 Options:
-  --domain DOMAIN        aio: node domain; panel: panel and subscription domain (A record -> this server)
-  --sub-domain DOMAIN    aio: separate subscription domain (optional)
+  --domain DOMAIN        aio: node domain; panel: panel domain (A record -> this server)
+  --sub-domain DOMAIN    aio/panel: separate subscription domain (optional)
   --email EMAIL          email for Let's Encrypt (default admin@DOMAIN)
   --name NAME            aio: server name shown in VPN clients
   --country CC           aio: 2-letter country code for the flag (default: detected)
@@ -87,7 +87,7 @@ Options:
   --login-mode MODE      aio/panel: password (default), link (no password: one-time links from the bot
                          or vynel admin login-link), miniapp (Telegram Mini App only, needs --bot-token)
   --session-paths        with --login-mode link: a random panel address for every session
-  --sub-path PATH        aio/panel: path of subscription links (default /s/), e.g. sub or api/v1/client
+  --sub-path PATH        aio/panel: path of subscription links (default /s/), e.g. sub, api/v1/client or /
   --panel-path PATH      aio/panel: secret path of the web panel (default: random, 12 characters)
   --token TOKEN          node: join token from the panel
   --manual               node: manual mode — only Xray is installed and managed by the panel;
@@ -337,7 +337,8 @@ do_uninstall() {
   systemctl daemon-reload
   if [[ $PURGE -eq 1 ]]; then
     systemctl disable vynel-ips 2>/dev/null || true
-    rm -f /etc/systemd/system/vynel-ips.service
+    rm -f /etc/systemd/system/vynel-ips.service /etc/modprobe.d/vynel-no-sctp.conf \
+      /etc/apt/sources.list.d/vynel-nginx.list /etc/apt/preferences.d/99vynel-nginx /usr/share/keyrings/vynel-nginx-archive-keyring.gpg
     rm -rf "$DATA" "$NODE_DATA" /etc/sysctl.d/90-vynel.conf "$SRC" /etc/vynel \
       /usr/local/bin/vynel /usr/local/bin/vynel.prev /usr/local/bin/xray /usr/local/bin/caddy /usr/local/share/xray /var/www/vynel /var/www/vynel-node
   fi
@@ -1165,25 +1166,138 @@ install_xray() {
   green "  $(/usr/local/bin/xray version 2>/dev/null | head -1)"
 }
 
-# install_nginx: nginx from the distribution with the stream module (SNI routing on a shared
-# port). vynel runs its own nginx instance; the distribution's nginx.service must not hold ports
-# 80/443, so it is not started by the package and stays disabled.
+# disable_sctp_autoload: blocks unprivileged autoloading of the kernel sctp module (used in
+# NGINX2Root worker sandbox/privilege-escalation chains) when SCTP is not already loaded.
+disable_sctp_autoload() {
+  if ! awk 'NR>1 {print $1}' /proc/modules 2>/dev/null | grep -qx sctp; then
+    mkdir -p /etc/modprobe.d
+    printf '# written by vynel: prevent unprivileged autoload of kernel sctp\ninstall sctp /bin/false\nblacklist sctp\n' >/etc/modprobe.d/vynel-no-sctp.conf 2>/dev/null || true
+  fi
+}
+
+# nginx_is_patched: 0 when installed nginx includes fixes for CVE-2026-123007..CVE-2026-113425
+# (upstream 1.30.7+ / 1.31.9+, Debian security changelog, or Ubuntu USN-9159-1).
+nginx_is_patched() {
+  command -v nginx >/dev/null 2>&1 || return 1
+  local v maj min pat cl pkg ver
+  v="$(nginx -v 2>&1 || true)"
+  if [[ "$v" =~ nginx/([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+    maj="${BASH_REMATCH[1]}" min="${BASH_REMATCH[2]}" pat="${BASH_REMATCH[3]}"
+    if (( maj > 1 )) || (( maj == 1 && min == 30 && pat >= 7 )) || (( maj == 1 && min == 31 && pat >= 9 )) || (( maj == 1 && min >= 32 )); then
+      return 0
+    fi
+  fi
+  for cl in /usr/share/doc/nginx*/changelog.Debian.gz; do
+    [[ -f "$cl" ]] && zgrep -q "CVE-2026-123007" "$cl" 2>/dev/null && return 0
+  done
+  for pkg in nginx-core nginx nginx-common nginx-full nginx-light nginx-extras; do
+    ver="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)"
+    [[ -n "$ver" ]] || continue
+    case "$ver" in
+      1.18.0-0ubuntu1.*) dpkg --compare-versions "$ver" ge "1.18.0-0ubuntu1.7+esm5" && return 0 ;;
+      1.18.0-6ubuntu14.*) dpkg --compare-versions "$ver" ge "1.18.0-6ubuntu14.23" && return 0 ;;
+      1.24.0-2ubuntu7.*) dpkg --compare-versions "$ver" ge "1.24.0-2ubuntu7.20" && return 0 ;;
+      1.28.3-2ubuntu1.*) dpkg --compare-versions "$ver" ge "1.28.3-2ubuntu1.13" && return 0 ;;
+      1.30.4-7ubuntu1.*) dpkg --compare-versions "$ver" ge "1.30.4-7ubuntu1.2" && return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# install_nginx_upstream: installs official nginx 1.30.7+ (built with --with-stream) from nginx.org
+# when the distribution repository has not yet published a backport for NGINX2Root.
+install_nginx_upstream() {
+  local os_id="" codename="" key_tmp fprs f count=0 p drop=()
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    os_id="$(. /etc/os-release && printf '%s' "${ID:-}")"
+    # shellcheck disable=SC1091
+    codename="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")"
+  fi
+  case "$os_id" in debian|ubuntu) ;; *) return 1 ;; esac
+  [[ "$codename" =~ ^[a-z0-9-]+$ ]] || return 1
+  STEP_SOFT=1 try_packages ca-certificates gpg || return 1
+  key_tmp="$(mktemp -d)"
+  if ! curl -fsSL --max-time 20 https://nginx.org/keys/nginx_signing.key -o "$key_tmp/nginx.asc" 2>/dev/null ||
+     ! gpg --batch --dearmor -o "$key_tmp/nginx.gpg" "$key_tmp/nginx.asc" 2>/dev/null; then
+    rm -rf "$key_tmp"
+    return 1
+  fi
+  fprs="$(gpg --batch --no-default-keyring --keyring "$key_tmp/nginx.gpg" --with-colons --fingerprint 2>/dev/null |
+    awk -F: '$1=="pub"{p=1; next} $1=="sub"{p=0} $1=="fpr" && p{print $10}')"
+  for f in $fprs; do
+    case "$f" in
+      8540A6F18833A80E9C1653A42FD21310B49F6B46|573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62|9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3)
+        count=$((count + 1)) ;;
+      *)
+        red "  unexpected fingerprint in nginx.org key ($f) — keeping distribution nginx"
+        rm -rf "$key_tmp"
+        return 1 ;;
+    esac
+  done
+  if (( count == 0 )); then
+    rm -rf "$key_tmp"
+    return 1
+  fi
+  mkdir -p /usr/share/keyrings /etc/apt/sources.list.d /etc/apt/preferences.d
+  install -m 644 "$key_tmp/nginx.gpg" /usr/share/keyrings/vynel-nginx-archive-keyring.gpg
+  rm -rf "$key_tmp"
+  printf 'deb [signed-by=/usr/share/keyrings/vynel-nginx-archive-keyring.gpg] https://nginx.org/packages/%s %s nginx\n' "$os_id" "$codename" >/etc/apt/sources.list.d/vynel-nginx.list
+  printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' >/etc/apt/preferences.d/99vynel-nginx
+  wait_apt_idle
+  if ! STEP_SOFT=1 apt_update; then
+    rm -f /etc/apt/sources.list.d/vynel-nginx.list /etc/apt/preferences.d/99vynel-nginx
+    return 1
+  fi
+  for p in libnginx-mod-stream libnginx-mod-http-geoip2 libnginx-mod-http-image-filter libnginx-mod-http-xslt-filter libnginx-mod-mail nginx-core nginx-full nginx-light nginx-extras nginx-common; do
+    [[ "$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null || true)" == *"install ok installed"* ]] && drop+=("${p}-")
+  done
+  if ! STEP_SOFT=1 apt_install nginx "${drop[@]}"; then
+    rm -f /etc/apt/sources.list.d/vynel-nginx.list /etc/apt/preferences.d/99vynel-nginx
+    STEP_SOFT=1 apt_update || true
+    return 1
+  fi
+  return 0
+}
+
+# install_nginx: nginx with the stream module (SNI routing on a shared port), patched against
+# NGINX2Root. vynel runs its own nginx instance; the distribution's nginx.service must not hold
+# ports 80/443, so it is not started by the package and stays disabled.
 install_nginx() {
   info "nginx"
-  local policy=0
+  disable_sctp_autoload
+  local policy=0 mod
   if [[ ! -e /usr/sbin/policy-rc.d ]]; then
     # The package would start nginx.service, which fails while our web server holds :80.
     printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d && chmod +x /usr/sbin/policy-rc.d && policy=1
   fi
-  # try_packages skips what is installed; a removed package with its config left counts as missing.
-  try_packages nginx libnginx-mod-stream || { [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d; die "cannot install nginx: see $APT_LOG"; }
-  # The package is there but its module is not (files deleted by hand): put them back.
-  local mod
-  mod="$(nginx_stream_missing)"
-  if [[ -n "$mod" ]]; then
-    echo "  $mod is missing — reinstalling libnginx-mod-stream"
-    wait_apt_idle
-    apt_install --reinstall libnginx-mod-stream || true
+  if [[ -f /etc/apt/sources.list.d/vynel-nginx.list ]]; then
+    if ! nginx_is_patched; then
+      wait_apt_idle
+      STEP_SOFT=1 apt_update || true
+      apt_install nginx || { [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d; die "cannot install nginx: see $APT_LOG"; }
+    else
+      try_packages nginx || { [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d; die "cannot install nginx: see $APT_LOG"; }
+    fi
+  else
+    # try_packages skips what is installed; a removed package with its config left counts as missing.
+    try_packages nginx libnginx-mod-stream || { [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d; die "cannot install nginx: see $APT_LOG"; }
+    if ! nginx_is_patched; then
+      wait_apt_idle
+      STEP_SOFT=1 apt_update || true
+      STEP_SOFT=1 apt_install nginx libnginx-mod-stream || true
+    fi
+    if ! nginx_is_patched; then
+      info "nginx: distribution build is not patched for CVE-2026-123007 — installing patched nginx from nginx.org"
+      install_nginx_upstream || red "  could not install nginx from nginx.org — vynel disables HTTP/2 until nginx is updated"
+    fi
+    # The package is there but its module is not (files deleted by hand): put them back.
+    mod="$(nginx_stream_missing)"
+    if [[ -n "$mod" && ! -f /etc/apt/sources.list.d/vynel-nginx.list ]]; then
+      echo "  $mod is missing — reinstalling libnginx-mod-stream"
+      wait_apt_idle
+      apt_install --reinstall libnginx-mod-stream || true
+    fi
   fi
   [[ $policy -eq 1 ]] && rm -f /usr/sbin/policy-rc.d
   systemctl disable --now nginx >/dev/null 2>&1 || true
@@ -1258,13 +1372,19 @@ script_command() {
 
 admin() { vynel admin --data-dir "$DATA" "$@"; }
 
+ensure_ntp() {
+  if command -v timedatectl >/dev/null 2>&1; then
+    timedatectl set-ntp true >/dev/null 2>&1 || true
+  fi
+}
+
 write_panel_unit() {
   local extra="$1"
   cat >"$PANEL_UNIT" <<EOF
 [Unit]
 Description=vynel panel${extra:+ with a local node (Xray + nginx)}
-After=network-online.target
-Wants=network-online.target
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
 
 [Service]
 ExecStart=/usr/local/bin/vynel panel --data-dir $DATA --gateway-listen $GATEWAY_LISTEN --public-addr $PUBLIC_IP:${GATEWAY_LISTEN##*:}$extra
@@ -1281,8 +1401,8 @@ write_node_unit() {
   cat >"$NODE_UNIT" <<EOF
 [Unit]
 Description=vynel node (Xray + nginx)
-After=network-online.target
-Wants=network-online.target
+After=network-online.target time-sync.target
+Wants=network-online.target time-sync.target
 
 [Service]
 ExecStart=/usr/local/bin/vynel node run --data-dir $NODE_DATA$([[ "$MODE" == node-manual ]] && echo " --manual")
@@ -1301,7 +1421,7 @@ start_unit() {
   systemctl restart "$1"
 }
 
-# wait_cert DOMAIN -> sets CERT_OK
+# wait_cert DOMAIN [IP] -> sets CERT_OK and returns 0 when https://DOMAIN/ answers 200.
 CERT_OK=0
 # While waiting it shows how long it has been and the node's last step from the journal
 # ("certificate: asking Let's Encrypt", "waiting for Let's Encrypt to check http://…", errors).
@@ -1331,16 +1451,25 @@ wait_cert() {
     if ((now - start >= 300)); then break; fi
     sleep 2
   done
+  CERT_OK=0
   red "https://$1/ does not answer yet (DNS or port 80 not reachable?). The certificate is retried by itself; see journalctl -u vynel | grep certificate"
+  return 1
 }
 
 # set_paths: the subscription link path and the panel's secret path, when given.
 set_paths() {
   local p
   if [[ -n "$SUB_PATH" ]]; then
-    p="${SUB_PATH#/}"; p="${p%/}"
-    [[ "$p" =~ ^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$ ]] || die "--sub-path: latin letters, digits, _ - and /"
-    admin setting sub.prefix "/$p/" >/dev/null
+    if [[ "$SUB_PATH" == "/" ]]; then
+      if [[ "$SESSION_PATHS" == yes && "${LOGIN_MODE:-password}" == link && "${SUB_DOMAIN:-$DOMAIN}" == "$DOMAIN" ]]; then
+        die "--sub-path / cannot be combined with --session-paths on the same domain (pass --sub-domain)"
+      fi
+      admin setting sub.prefix "/" >/dev/null
+    else
+      p="${SUB_PATH#/}"; p="${p%/}"
+      [[ "$p" =~ ^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$ ]] || die "--sub-path: latin letters, digits, _ - and /"
+      admin setting sub.prefix "/$p/" >/dev/null
+    fi
   fi
   if [[ -n "$PANEL_PATH" ]]; then
     p="${PANEL_PATH#/}"; p="${p%/}"
@@ -1551,6 +1680,7 @@ do_aio() {
     echo "  Сервер:    $PUBLIC_IP"
     [[ -n "$VPN_IP" && "$VPN_IP" != "$SUB_IP" ]] && echo "  IP:        VPN $VPN_IP, панель и подписки $SUB_IP"
     echo "  Домен:     $DOMAIN"
+    [[ "$SUB_DOMAIN" != "$DOMAIN" && -z "$SUB_IP" ]] && echo "  Панель:    https://$DOMAIN/…"
     echo "  Подписки:  https://$SUB_DOMAIN/s/…"
     echo "  Клиенты:   ${NAME} (${COUNTRY:-без флага})"
     echo "  Email:     ${EMAIL:-—}"
@@ -1599,6 +1729,7 @@ do_aio() {
   setup_bot
   login_mode
 
+  ensure_ntp
   write_panel_unit " --with-node"
   start_unit vynel
 
@@ -1610,7 +1741,12 @@ do_aio() {
   done
   admin node list || true
   [[ $ok -eq 1 ]] || red "the node is not in sync yet: journalctl -u vynel -e"
-  wait_cert "$SUB_DOMAIN" "${SUB_IP:-$PUBLIC_IP}"
+  local all_certs_ok=1
+  if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then
+    wait_cert "$DOMAIN" "${VPN_IP:-$PUBLIC_IP}" || all_certs_ok=0
+  fi
+  wait_cert "$SUB_DOMAIN" "${SUB_IP:-$PUBLIC_IP}" || all_certs_ok=0
+  CERT_OK=$all_certs_ok
   apply_firewall
   apply_ssh
 
@@ -1658,15 +1794,22 @@ do_panel() {
     echo "  Enter — оставить значение в скобках."
     echo
     ask PUBLIC_IP "Публичный IP сервера" "$PUBLIC_IP"
-    ask_domain DOMAIN "Домен панели и подписок (A-запись на этот IP)" "$DOMAIN"
+    ask_domain DOMAIN "Домен панели (A-запись на этот IP)" "$DOMAIN"
+    if ask_yes "Отдельный домен для подписок? (не обязательно, одного домена достаточно)" n; then
+      ask_domain SUB_DOMAIN "Домен подписок (A-запись на этот IP)" "$SUB_DOMAIN"
+    else
+      SUB_DOMAIN="$DOMAIN"
+    fi
     default_email "$DOMAIN"
     ask EMAIL "Email для Let's Encrypt" "$EMAIL"
     ask ADMIN_LOGIN "Логин для веб-панели (пароль сгенерируется сам)" "$ADMIN_LOGIN"
     ask_bot_and_restore
     ask_security
+    SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
     echo
     echo "  Сервер:    $PUBLIC_IP, ноды подключаются на порт ${GATEWAY_LISTEN##*:}"
-    echo "  Домен:     $DOMAIN (панель по секретному пути, подписки, сайт-заглушка)"
+    echo "  Домен:     $DOMAIN (панель по секретному пути, сайт-заглушка)"
+    echo "  Подписки:  https://$SUB_DOMAIN/s/…"
     echo "  Email:     ${EMAIL:-—}"
     echo "  Панель:    логин $ADMIN_LOGIN, пароль будет показан в конце"
     echo
@@ -1675,8 +1818,9 @@ do_panel() {
   [[ -n "$DOMAIN" ]] || { usage; die "--domain is required"; }
   [[ "$ADMIN_LOGIN" =~ ^[A-Za-z0-9_.@-]{1,64}$ ]] || die "the login may contain latin letters, digits and _ . - @"
   [[ "$GATEWAY_LISTEN" == 127.0.0.1:* ]] && die "a panel without its own node needs the node port open (--gateway-listen :9443)"
+  SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
   FIREWALL="${FIREWALL:-on}"
-  check_dns "$DOMAIN"
+  if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then check_dns "$DOMAIN" "$SUB_DOMAIN"; else check_dns "$DOMAIN"; fi
   ensure_packages "${BASE_PKGS[@]}"
   check_ports
 
@@ -1688,7 +1832,12 @@ do_panel() {
   restore_backup
   import_users
   info "configuring the panel"
-  admin setting sub.domain "$DOMAIN" >/dev/null
+  admin setting sub.domain "$SUB_DOMAIN" >/dev/null
+  if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then
+    admin setting web.domain "$DOMAIN" >/dev/null
+  else
+    admin setting web.domain "" >/dev/null
+  fi
   default_email "$DOMAIN"
   [[ -n "$EMAIL" ]] && admin setting caddy.email "$EMAIL" >/dev/null
   admin setting install.command "$(script_command)" >/dev/null
@@ -1704,7 +1853,12 @@ do_panel() {
   write_panel_unit ""
   start_unit vynel
   sleep 2
-  wait_cert "$DOMAIN"
+  local all_certs_ok=1
+  wait_cert "$DOMAIN" || all_certs_ok=0
+  if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then
+    wait_cert "$SUB_DOMAIN" || all_certs_ok=0
+  fi
+  CERT_OK=$all_certs_ok
   apply_firewall
   apply_ssh
 
@@ -1717,7 +1871,7 @@ do_panel() {
   line "Сайт-заглушка" "https://$DOMAIN/"
   local sub_prefix
   sub_prefix="$(admin setting sub.prefix 2>/dev/null || true)"
-  line "Подписки" "https://$DOMAIN${sub_prefix:-/s/}<токен>"
+  line "Подписки" "https://$SUB_DOMAIN${sub_prefix:-/s/}<токен>"
   line "Ноды подключаются" "$PUBLIC_IP:${GATEWAY_LISTEN##*:}"
   line "Данные" "$DATA  (бэкап: скопировать папку)"
   echo
@@ -1779,6 +1933,7 @@ do_node() {
     detect_country
     vynel node join --data-dir "$NODE_DATA" ${COUNTRY:+--country "$COUNTRY"} "$TOKEN" || die "the panel did not accept the token: is it fresh (24 h, single use) and is port 9443 open on the panel?"
   fi
+  [[ "$MODE" != node-manual ]] && ensure_ntp
   write_node_unit
   start_unit vynel-node
   info "starting the node"
@@ -1857,8 +2012,23 @@ do_update() {
   if [[ $PANEL_WITH_NODE -eq 1 || $NODE_INSTALLED -eq 1 ]]; then install_xray force; fi
   # nginx replaces Caddy: the new agent switches as soon as it runs; Caddy's binary and
   # certificates stay for a rollback to the previous vynel.
-  install_nginx
+  if [[ $PANEL_INSTALLED -eq 1 ]] || ! grep -q -- '--manual' "$NODE_UNIT" 2>/dev/null; then
+    install_nginx
+  fi
   drop_temp_swap
+
+  local unit_changed=0 uf
+  for uf in "$PANEL_UNIT" "$NODE_UNIT"; do
+    if [[ -f "$uf" ]] && ! grep -q 'time-sync\.target' "$uf"; then
+      sed -i -e 's/^After=network-online\.target$/After=network-online.target time-sync.target/' \
+             -e 's/^Wants=network-online\.target$/Wants=network-online.target time-sync.target/' "$uf"
+      unit_changed=1
+    fi
+  done
+  [[ $unit_changed -eq 1 ]] && systemctl daemon-reload
+  if [[ $PANEL_WITH_NODE -eq 1 ]] || { [[ $NODE_INSTALLED -eq 1 ]] && ! grep -q -- '--manual' "$NODE_UNIT" 2>/dev/null; }; then
+    ensure_ntp
+  fi
 
   local units=() u failed=()
   [[ $PANEL_INSTALLED -eq 1 ]] && units+=(vynel)
@@ -1923,6 +2093,7 @@ do_harden() {
     write_sshd "$SSH_PORT" && SSH_NOTE="порт $SSH_PORT"
     SSH_PORT=""
   fi
+  disable_sctp_autoload
   apply_firewall
   apply_ssh
   echo
@@ -1938,20 +2109,58 @@ do_harden() {
 }
 
 # ================================================================== the form
-# setup_binary: a vynel that has the form — the installed one if it is new enough, else this
-# release's, downloaded and checked like an install (and reused by it).
+SETUP_DIR=""
+cleanup_setup_dir() {
+  if [[ -n "$SETUP_DIR" ]]; then
+    rm -rf "$SETUP_DIR"
+  fi
+}
+trap cleanup_setup_dir EXIT
+
+# valid_shell_out FILE: checks that FILE is non-empty and holds only single-quoted VAR='...' lines
+# produced by internal/setup Answers.Shell.
+valid_shell_out() {
+  local q="'"
+  [[ -s "$1" ]] && ! grep -qvE "^[A-Z][A-Z0-9_]*=(${q}[^${q}]*${q})(\\\\${q}(${q}[^${q}]*${q}))*$" "$1"
+}
+
+# setup_binary: a vynel that has the form — --binary when given, else this release's binary
+# (reusing /usr/local/bin/vynel when its checksum already matches, or falling back to it offline).
 setup_binary() {
+  if [[ -n "$LOCAL_BIN" ]]; then
+    [[ -f "$LOCAL_BIN" ]] || die "--binary: no such file: $LOCAL_BIN"
+    chmod 755 "$LOCAL_BIN" 2>/dev/null || true
+    if "$LOCAL_BIN" setup-tui --help >/dev/null 2>&1; then
+      SETUP_BIN="$LOCAL_BIN"
+      return 0
+    fi
+    return 1
+  fi
+  local dir want have
+  dir="$(mktemp -d /tmp/vynel-setup.XXXXXX)"
+  SETUP_DIR="$dir"
+  if release_sums "$dir"; then
+    want="$(awk -v f="vynel-linux-$GOARCH" '$2 == f {print $1}' "$dir/SHA256SUMS")"
+    have="$(sha256sum /usr/local/bin/vynel 2>/dev/null | awk '{print $1}' || true)"
+    if [[ -n "$want" && "$have" == "$want" ]] && /usr/local/bin/vynel setup-tui --help >/dev/null 2>&1; then
+      rm -rf "$dir"
+      SETUP_DIR=""
+      SETUP_BIN=/usr/local/bin/vynel
+      return 0
+    fi
+    info "downloading vynel for the setup form"
+    if release_binary "$dir" && "$dir/vynel" setup-tui --help >/dev/null 2>&1; then
+      SETUP_BIN="$dir/vynel"
+      return 0
+    fi
+  fi
+  rm -rf "$dir"
+  SETUP_DIR=""
   if [[ -x /usr/local/bin/vynel ]] && /usr/local/bin/vynel setup-tui --help >/dev/null 2>&1; then
     SETUP_BIN=/usr/local/bin/vynel
     return 0
   fi
-  local dir
-  dir="$(mktemp -d /tmp/vynel-setup.XXXXXX)"
-  info "downloading vynel for the setup form"
-  release_sums "$dir" || return 1
-  release_binary "$dir" || return 1
-  "$dir/vynel" setup-tui --help >/dev/null 2>&1 || return 1
-  SETUP_BIN="$dir/vynel"
+  return 1
 }
 
 # run_tui: the form; its answers become the flags of an unattended run.
@@ -1968,13 +2177,13 @@ run_tui() {
   clear_screen
   "$SETUP_BIN" setup-tui --out "$out" --installed "$installed" --version "$version" \
     --public-ip "$PUBLIC_IP" --country "$COUNTRY" --domain "$DOMAIN" --email "$EMAIL" --token "$TOKEN" \
-    --state "$STATE_FILE" </dev/tty >/dev/tty || rc=$?
+    --state "$STATE_FILE" </dev/tty >/dev/tty 2>/dev/tty || rc=$?
   if [[ $rc -eq 2 ]]; then rm -f "$out"; die "отменено"; fi
-  if [[ $rc -ne 0 ]]; then rm -f "$out"; return 1; fi
-  # Only known names, single-quoted values (internal/setup Answers.Shell).
-  if grep -qvE "^(MODE|DOMAIN|SUB_DOMAIN|EMAIL|NAME|COUNTRY|PUBLIC_IP|VPN_IP|SUB_IP|GATEWAY_LISTEN|ADMIN_LOGIN|BOT_TOKEN|RESTORE|USERS_FILE|TOKEN|FIREWALL|SSH_KEYS_ONLY|SSH_PORT|PURGE|SUB_PATH|PANEL_PATH|LOGIN_MODE|SESSION_PATHS|MANUAL)='" "$out"; then
+  if [[ $rc -eq 3 ]]; then rm -f "$out"; return 1; fi
+  if [[ $rc -ne 0 ]]; then rm -f "$out"; exit "$rc"; fi
+  if ! valid_shell_out "$out"; then
     rm -f "$out"
-    return 1
+    die "setup form returned invalid configuration"
   fi
   # shellcheck disable=SC1090
   source "$out"

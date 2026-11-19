@@ -346,6 +346,7 @@
  "ручная нода: веб-сервер настраивает администратор": "manual node: the web server is set up by the admin",
  "ручная нода: сайт и сертификат настраивает администратор": "manual node: the site and its certificate are set up by the admin",
  "с таким конфигом сломаются ноды: %s": "nodes would break with this config: %s",
+ "сайт поднимется после выбора профиля": "the site comes up once a profile is chosen",
  "свой шаблон бывает у Mihomo, sing-box и Xray JSON, у формата %q его нет": "an own template exists for Mihomo, sing-box and Xray JSON; the %q format has none",
  "сейчас слишком много попыток входа — повторите через несколько секунд": "there are too many sign-in attempts right now — try again in a few seconds",
  "секретный путь: минимум 6 символов, без / ? # % и пробелов": "secret path: at least 6 characters, without / ? # % and spaces",

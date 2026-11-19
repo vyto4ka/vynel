@@ -28,9 +28,14 @@ func TestNodeChecklist(t *testing.T) {
 	defer func() { Resolver, SiteCheck = old, oldSite }()
 	Resolver = fakeResolver{"de.example.com": {"198.51.100.7"}}
 	siteErr := errors.New("refused")
-	SiteCheck = func(context.Context, string) error { return siteErr }
+	siteCalls := 0
+	SiteCheck = func(context.Context, string) error {
+		siteCalls++
+		return siteErr
+	}
 
-	// The node joined, connected and applied its config.
+	// The node joined, connected and applied its empty config: before any profile is attached,
+	// site check is skipped without blocking on HTTPS timeouts.
 	if err := store.SetNodeCert(f.ctx, f.s.st.DB, n.ID, "serial"); err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +50,22 @@ func TestNodeChecklist(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := states(true)
-	if st["joined"] != StepOK || st["online"] != StepOK || st["applied"] != StepOK || st["dns"] != StepOK || st["site"] != StepFail || st["inbounds"] != StepFail {
-		t.Fatalf("joined node: %v", st)
+	if st["joined"] != StepOK || st["online"] != StepOK || st["applied"] != StepOK || st["dns"] != StepOK || st["site"] != StepSkip || st["inbounds"] != StepFail || siteCalls != 0 {
+		t.Fatalf("joined node before profiles (siteCalls=%d): %v", siteCalls, st)
+	}
+
+	// Once a profile is attached, site and inbound checks become active.
+	prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: prof.ID, Values: map[string]any{"NODE_DOMAIN": "de.example.com"}}))
+	if err := store.SetNodeDesired(f.ctx, f.s.st.DB, n.ID, 2, "h2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodeRuntime(f.ctx, f.s.st.DB, n.ID, store.NodeRuntime{AppliedHash: "h2", XrayVersion: "26.1.1", AgentVersion: "dev"}); err != nil {
+		t.Fatal(err)
+	}
+	st = states(true)
+	if st["inbounds"] != StepOK || st["site"] != StepFail || siteCalls == 0 {
+		t.Fatalf("joined node with profile: %v", st)
 	}
 	siteErr = nil
 	if st := states(true); st["site"] != StepOK {

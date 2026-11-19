@@ -328,16 +328,18 @@ func LocalDialer(ctx context.Context, rec *reconciler.Reconciler, nodeID int64) 
 func panelNginxLoop(ctx context.Context, svc *service.Service, m *nginx.Manager, log *slog.Logger) error {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
-	var lastErr string
+	certKick := make(chan struct{}, 1)
+	var lastConf, lastErr string
 	go func() {
 		for {
-			if err := m.RenewCerts(ctx); err != nil {
-				log.Warn("panel certificates", "err", err)
-			}
 			select {
 			case <-ctx.Done():
 				return
+			case <-certKick:
 			case <-time.After(time.Minute):
+			}
+			if err := m.RenewCerts(ctx); err != nil {
+				log.Warn("panel certificates", "err", err)
 			}
 		}
 	}()
@@ -345,6 +347,13 @@ func panelNginxLoop(ctx context.Context, svc *service.Service, m *nginx.Manager,
 		conf, err := svc.PanelNginxConfig(ctx)
 		if err == nil {
 			err = m.Apply(ctx, conf)
+		}
+		if err == nil && conf != "" && conf != lastConf {
+			lastConf = conf
+			select {
+			case certKick <- struct{}{}:
+			default:
+			}
 		}
 		if err != nil && err.Error() != lastErr {
 			log.Error("panel nginx", "err", err)

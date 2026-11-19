@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -33,7 +34,15 @@ func adminSettingCmd() *cobra.Command {
 		Use: "setting KEY [VALUE]", Short: "Read or change a setting", Args: cobra.RangeArgs(1, 2),
 		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
 			if len(args) == 2 {
-				return s.SetSetting(ctx, service.ActorCLI, args[0], args[1])
+				val := args[1]
+				if args[0] == service.SettingSubPrefix && strings.Trim(strings.TrimSpace(val), "/") == "" {
+					val = "/"
+				}
+				return s.SetSetting(ctx, service.ActorCLI, args[0], val)
+			}
+			if args[0] == service.SettingSubPrefix {
+				fmt.Fprintln(cmd.OutOrStdout(), s.SubPrefix(ctx))
+				return nil
 			}
 			v, err := s.Setting(ctx, args[0], "")
 			if err != nil {

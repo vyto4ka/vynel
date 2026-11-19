@@ -547,16 +547,22 @@ func checkAddr(a string) error {
 }
 
 // forbiddenNames are directives a template may not use: they load code, read or write files
-// outside the generated config, or serve the server's own files.
+// outside the generated config, serve the server's own files, or enable nginx subsystems
+// affected by NGINX2Root (DNS resolver + subrequests CVE-2026-123634, HTTP/3 QUIC
+// CVE-2026-121810, mail auth_http CVE-2026-113425, or overriding HTTP/2 mitigation).
 var forbiddenNames = map[string]bool{
 	"include": true, "load_module": true, "pid": true, "user": true, "daemon": true, "env": true,
 	"error_log": true, "access_log": true, "root": true, "alias": true, "ssl_engine": true,
 	"ssl_dhparam": true, "ssl_crl": true, "ssl_session_ticket_key": true,
 	"proxy_store": true, "fastcgi_store": true, "uwsgi_store": true, "scgi_store": true,
+	"resolver": true, "resolver_timeout": true,
+	"mirror": true, "mirror_request_body": true, "ssi": true, "auth_request": true,
+	"addition_before_body": true, "addition_after_body": true,
+	"listen": true, "http2": true, "http3": true, "mail": true,
 }
 
 var (
-	forbiddenPrefix = []string{"perl", "lua", "js_", "njs"}
+	forbiddenPrefix = []string{"perl", "lua", "js_", "njs", "http2_", "http3", "quic_", "auth_http", "ssi_"}
 	// …_file, …_temp_path, …_certificate(_key), …_crl: they name files on the node.
 	forbiddenSuffix = []string{"_file", "_temp_path", "_cache_path", "_certificate", "_certificate_key", "_crl"}
 )

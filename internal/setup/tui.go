@@ -24,6 +24,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 
 	"github.com/vyto4ka/vynel/internal/node/agent"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
@@ -57,6 +58,9 @@ type Answers struct {
 // ErrAborted is returned when the admin leaves the form.
 var ErrAborted = errors.New("aborted")
 
+// ErrNoTTY is returned when /dev/tty cannot be opened as an interactive terminal.
+var ErrNoTTY = errors.New("no terminal")
+
 var pathRe = regexp.MustCompile(`^/?[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*/?$`)
 
 // cleanPath turns "sub", "/sub", "sub/" into "/sub/"; empty stays empty.
@@ -66,6 +70,15 @@ func cleanPath(p string) string {
 		return ""
 	}
 	return "/" + p + "/"
+}
+
+// cleanSubPath is like cleanPath, except an explicit "/" stays "/" (root subscription links).
+func cleanSubPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "/" {
+		return "/"
+	}
+	return cleanPath(p)
 }
 
 var (
@@ -164,6 +177,14 @@ var (
 
 // Run shows the form and returns the answers.
 func Run(o Options) (*Answers, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil, ErrNoTTY
+	}
+	defer tty.Close()
+	if !term.IsTerminal(int(tty.Fd())) {
+		return nil, ErrNoTTY
+	}
 	// Never ask the terminal for its background colour: some SSH clients do not answer and the
 	// form would hang before it is drawn. Servers are administered from dark terminals anyway.
 	lipgloss.SetHasDarkBackground(true)
@@ -179,10 +200,11 @@ func Run(o Options) (*Answers, error) {
 			nodes = *saved.Nodes
 		}
 	}
+	skipSave := false
 	// Whatever happens next (done, cancelled, Ctrl+C, the SSH session dropped), the answers so far
 	// survive a restart.
 	save := func() {
-		if a.Mode != "update" && a.Mode != "uninstall" {
+		if !skipSave && a.Mode != "update" && a.Mode != "uninstall" {
 			saveState(o.State, &state{Answers: *a, Security: sec, Nodes: &nodes})
 		}
 	}
@@ -200,7 +222,10 @@ func Run(o Options) (*Answers, error) {
 	go func() { detected <- DetectDomain(context.Background(), a.PublicIP) }()
 	th := termui.Theme()
 	run := func(groups ...*huh.Group) error {
-		err := huh.NewForm(groups...).WithTheme(th).WithShowHelp(true).Run()
+		// WithProgramOptions() clears huh's default WithReportFocus() and stderr output so
+		// everything reads and draws directly on /dev/tty without leaking focus sequences.
+		err := huh.NewForm(groups...).WithTheme(th).WithShowHelp(true).
+			WithProgramOptions().WithInput(tty).WithOutput(tty).Run()
 		if errors.Is(err, huh.ErrUserAborted) {
 			return ErrAborted
 		}
@@ -222,6 +247,9 @@ func Run(o Options) (*Answers, error) {
 			huh.NewOption("Защитить сервер                     · файрвол, SSH по ключу, порт SSH", "harden"))
 		if o.Installed == "aio" {
 			modes = append(modes, huh.NewOption("Перенастроить                       · домены, IP, бот (данные сохранятся)", "aio"))
+		}
+		if o.Installed == "panel" {
+			modes = append(modes, huh.NewOption("Перенастроить                       · домены, бот (данные сохранятся)", "panel"))
 		}
 	}
 	modes = append(modes, huh.NewOption("Удалить", "uninstall"))
@@ -250,6 +278,7 @@ func Run(o Options) (*Answers, error) {
 	// vynel-nginx itself is listening.
 	if (a.Mode == "aio" || a.Mode == "panel") && !installed && saved == nil {
 		if err := CheckPortsFree(); err != nil {
+			skipSave = true
 			_ = run(huh.NewGroup(
 				huh.NewNote().Title("Порты 80 и/или 443 заняты").Next(true).Description(err.Error()),
 			))
@@ -284,7 +313,6 @@ func Run(o Options) (*Answers, error) {
 		return a, nil
 	}
 
-	var groups []*huh.Group
 	cache := &dnsCache{m: map[string]DNSStatus{}}
 	ips := localIPs()
 	publicOf := func(ip string) string {
@@ -301,67 +329,68 @@ func Run(o Options) (*Answers, error) {
 	}
 	domainOf := func() string { return or(cleanDomain(a.Domain), found) }
 
-	// 2. Server and domains.
-	switch a.Mode {
-	case "aio", "panel":
-		fields := []huh.Field{
-			huh.NewInput().Title("Публичный IP сервера").Value(&a.PublicIP).Validate(func(s string) error {
-				if net.ParseIP(strings.TrimSpace(s)).To4() == nil {
-					return errors.New("нужен IPv4-адрес")
+	for {
+		var groups []*huh.Group
+
+		// 2. Server and domains.
+		switch a.Mode {
+		case "aio", "panel":
+			fields := []huh.Field{
+				huh.NewInput().Title("Публичный IP сервера").Value(&a.PublicIP).Validate(func(s string) error {
+					if net.ParseIP(strings.TrimSpace(s)).To4() == nil {
+						return errors.New("нужен IPv4-адрес")
+					}
+					return nil
+				}),
+			}
+			if a.Mode == "aio" && len(ips) > 1 {
+				opts := []huh.Option[string]{huh.NewOption("все адреса", "")}
+				for i, ip := range ips {
+					label := ip
+					if i == 0 {
+						label += "  · основной"
+					}
+					if isPrivate(ip) {
+						label += "  · за NAT"
+					}
+					opts = append(opts, huh.NewOption(label, ip))
 				}
-				return nil
-			}),
-		}
-		if a.Mode == "aio" && len(ips) > 1 {
-			opts := []huh.Option[string]{huh.NewOption("все адреса", "")}
-			for i, ip := range ips {
-				label := ip
-				if i == 0 {
-					label += "  · основной"
-				}
-				if isPrivate(ip) {
-					label += "  · за NAT"
-				}
-				opts = append(opts, huh.NewOption(label, ip))
+				fields = append(fields,
+					huh.NewSelect[string]().Title("IP для VPN").Description("На сервере несколько адресов: VPN и панель можно развести — заблокируют один, второй продолжит работать").
+						Options(opts...).Value(&a.VPNIP),
+					huh.NewSelect[string]().Title("IP для подписок и веб-панели").Options(opts...).Value(&a.SubIP))
+			}
+			domainTitle := "Домен сервера"
+			domainHelp := "A-запись на этот сервер. На нём VPN, сайт-заглушка, подписки и панель"
+			if a.Mode == "panel" {
+				domainTitle, domainHelp = "Домен панели и подписок", "A-запись на этот сервер"
+			}
+			placeholder := "nl.example.com"
+			if found != "" {
+				placeholder = found
+				domainHelp = "Найден домен сервера — Enter оставит его, или введите свой"
 			}
 			fields = append(fields,
-				huh.NewSelect[string]().Title("IP для VPN").Description("На сервере несколько адресов: VPN и панель можно развести — заблокируют один, второй продолжит работать").
-					Options(opts...).Value(&a.VPNIP),
-				huh.NewSelect[string]().Title("IP для подписок и веб-панели").Options(opts...).Value(&a.SubIP))
-		}
-		domainTitle := "Домен сервера"
-		domainHelp := "A-запись на этот сервер. На нём VPN, сайт-заглушка, подписки и панель"
-		if a.Mode == "panel" {
-			domainTitle, domainHelp = "Домен панели и подписок", "A-запись на этот сервер"
-		}
-		placeholder := "nl.example.com"
-		if found != "" {
-			placeholder = found
-			domainHelp = "Найден домен сервера — Enter оставит его, или введите свой"
-		}
-		fields = append(fields,
-			huh.NewInput().Title(domainTitle).Placeholder(placeholder).Value(&a.Domain).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" && found != "" {
-						return nil
-					}
-					return validDomain(s)
-				}).
-				DescriptionFunc(func() string {
-					if a.Domain == "" && found != "" {
+				huh.NewInput().Title(domainTitle).Placeholder(placeholder).Value(&a.Domain).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" && found != "" {
+							return nil
+						}
+						return validDomain(s)
+					}).
+					DescriptionFunc(func() string {
+						if a.Domain == "" && found != "" {
+							return domainHelp
+						}
+						if m := cache.check(a.Domain, publicOf(a.VPNIP)); m != "" {
+							return m
+						}
 						return domainHelp
-					}
-					if m := cache.check(a.Domain, publicOf(a.VPNIP)); m != "" {
-						return m
-					}
-					return domainHelp
-				}, &a.Domain))
-		if a.Mode == "aio" {
-			fields = append(fields,
+					}, &a.Domain),
 				huh.NewInput().Title("Отдельный домен подписок").Placeholder("пусто — тот же домен").Value(&a.SubDomain).
 					Validate(func(s string) error {
 						if strings.TrimSpace(s) == "" {
-							if a.VPNIP != a.SubIP {
+							if a.Mode == "aio" && a.VPNIP != a.SubIP {
 								return errors.New("VPN и панель на разных IP: нужен второй домен (A-запись на IP панели)")
 							}
 							return nil
@@ -372,185 +401,214 @@ func Run(o Options) (*Answers, error) {
 						if m := cache.check(a.SubDomain, publicOf(a.SubIP)); m != "" {
 							return m
 						}
+						if a.Mode == "panel" {
+							return "Не обязательно: одного домена достаточно. Панель останется на основном домене"
+						}
 						return "Не обязательно: одного домена достаточно. Панель останется на домене сервера"
-					}, &a.SubDomain))
-		}
-		fields = append(fields, huh.NewInput().Title("Email для Let's Encrypt").Value(&a.Email).
-			PlaceholderFunc(func() string {
-				if d := domainOf(); d != "" {
-					return "admin@" + d
-				}
-				return "можно пусто"
-			}, a).
-			Description("Enter — оставить подсказку. На него Let's Encrypt пишет о проблемах с сертификатами"))
-		groups = append(groups, huh.NewGroup(fields...).Title("Сервер и домены").
-			Description("Tab / ↓ — следующее поле, Shift+Tab — назад, Enter — дальше"))
-	case "node", "node-manual":
-		a.Manual = a.Mode == "node-manual"
-		groups = append(groups, huh.NewGroup(
-			huh.NewInput().Title("Токен подключения").Placeholder("vyn1.…").Value(&a.Token).
-				Description("Панель → «Ноды» → «Добавить сервер». Одноразовый, действует 24 часа").
-				Validate(func(s string) error {
-					if !strings.HasPrefix(strings.TrimSpace(s), "vyn1.") {
-						return errors.New("токен должен начинаться с vyn1")
-					}
-					return nil
-				}),
-		).Title(map[bool]string{true: "VPN-нода (ручная)", false: "VPN-нода"}[a.Manual]))
-	}
-
-	// 3. Panel, VPN name, bot.
-	if a.Mode == "aio" || a.Mode == "panel" {
-		var fields []huh.Field
-		if a.Mode == "aio" {
-			fields = append(fields,
-				huh.NewInput().Title("Код страны (флаг в приложениях)").Placeholder("NL").Value(&a.Country).CharLimit(2).
+					}, &a.SubDomain),
+				huh.NewInput().Title("Email для Let's Encrypt").Value(&a.Email).
+					PlaceholderFunc(func() string {
+						if d := domainOf(); d != "" {
+							return "admin@" + d
+						}
+						return "можно пусто"
+					}, a).
+					Description("Enter — оставить подсказку. На него Let's Encrypt пишет о проблемах с сертификатами"))
+			groups = append(groups, huh.NewGroup(fields...).Title("Сервер и домены").
+				Description("Tab / ↓ — следующее поле, Shift+Tab — назад, Enter — дальше"))
+		case "node", "node-manual":
+			a.Manual = a.Mode == "node-manual"
+			groups = append(groups, huh.NewGroup(
+				huh.NewInput().Title("Токен подключения").Placeholder("vyn1.…").Value(&a.Token).
+					Description("Панель → «Ноды» → «Добавить сервер». Одноразовый, действует 24 часа").
 					Validate(func(s string) error {
-						if s != "" && !countryRe.MatchString(s) {
-							return errors.New("две латинские буквы, например NL")
+						if !strings.HasPrefix(strings.TrimSpace(s), "vyn1.") {
+							return errors.New("токен должен начинаться с vyn1")
 						}
 						return nil
 					}),
-				huh.NewInput().Title("Название сервера в приложениях").Value(&a.Name).
-					PlaceholderFunc(func() string { return countryName(a.Country) }, &a.Country),
-				huh.NewConfirm().Title("Подключать другие серверы (ноды) в будущем?").Description("Откроет порт 9443 для нод").
-					Affirmative("Да").Negative("Нет").Value(&nodes))
+			).Title(map[bool]string{true: "VPN-нода (ручная)", false: "VPN-нода"}[a.Manual]))
 		}
-		fields = append(fields,
-			huh.NewInput().Title("Путь ссылок подписки").Placeholder("/s/").Value(&a.SubPath).
-				DescriptionFunc(func() string {
-					d := cleanDomain(a.SubDomain)
-					if d == "" {
-						d = or(domainOf(), "домен")
-					}
-					return "Ссылки будут вида https://" + d + or(cleanPath(a.SubPath), "/s/") + "<токен>. Пусто — /s/"
-				}, a).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) != "" && !pathRe.MatchString(strings.TrimSpace(s)) {
-						return errors.New("латиница, цифры, _ - и /, например sub или api/v1/client")
-					}
-					return nil
-				}),
-			huh.NewInput().Title("Секретный путь веб-панели").Placeholder("случайный, например /k9Qm2xT7aB3c/").Value(&a.PanelPath).
-				Description("Без него панель не найти. Пусто — случайный (надёжнее)").
-				Validate(func(s string) error {
-					p := strings.Trim(strings.TrimSpace(s), "/")
-					if p == "" {
-						return nil
-					}
-					if !pathRe.MatchString(p) || len(p) < 6 {
-						return errors.New("от 6 символов: латиница, цифры, _ -")
-					}
-					if cleanPath(p) == or(cleanPath(a.SubPath), "/s/") {
-						return errors.New("совпадает с путём подписок")
-					}
-					return nil
-				}),
-			huh.NewSelect[string]().Title("Вход в панель").Value(&a.LoginMode).
-				Options(huh.NewOption("Логин и пароль", "password"),
-					huh.NewOption("Без пароля: одноразовая ссылка из бота или vynel admin login-link", "link"),
-					huh.NewOption("Только через Telegram (Mini App в боте)", "miniapp")).
-				Description("Без пароля его нельзя подобрать; режим меняется потом в панели (Аккаунт)"),
-			huh.NewInput().Title("Логин веб-панели").Value(&a.AdminLogin).
-				DescriptionFunc(func() string {
-					if a.LoginMode != "password" {
-						return "При входе без пароля не нужен — можно оставить"
-					}
-					return "Пароль сгенерируется сам и будет показан в конце"
-				}, &a.LoginMode).
-				Validate(func(s string) error {
-					if !loginRe.MatchString(s) {
-						return errors.New("латиница, цифры и _ . - @")
-					}
-					return nil
-				}),
-			huh.NewInput().Title("Токен Telegram-бота").Placeholder("от @BotFather, можно потом в панели").Value(&a.BotToken).
-				Description("Пользователи из чата, вход без пароля, ночные бэкапы, уведомления").
-				Validate(func(s string) error {
-					if s != "" && !botRe.MatchString(strings.TrimSpace(s)) {
-						return errors.New("токен вида 123456789:AA…")
-					}
-					if strings.TrimSpace(s) == "" && a.LoginMode == "miniapp" {
-						return errors.New("для входа только через Telegram нужен бот")
-					}
-					return nil
-				}),
-			huh.NewInput().Title("Восстановить из бэкапа").Placeholder("путь к .tar.gz или .age, обычно пусто").Value(&a.Restore).
-				Validate(func(s string) error {
-					if s = strings.TrimSpace(s); s != "" {
-						if _, err := os.Stat(s); err != nil {
-							return errors.New("файла нет")
-						}
-					}
-					return nil
-				}),
-			huh.NewInput().Title("Перенести пользователей").Placeholder("путь к users-export.json, обычно пусто").Value(&a.UsersFile).
-				Validate(func(s string) error {
-					if s = strings.TrimSpace(s); s != "" {
-						if _, err := os.Stat(s); err != nil {
-							return errors.New("файла нет")
-						}
-					}
-					return nil
-				}))
-		groups = append(groups, huh.NewGroup(fields...).Title("Панель"))
-		groups = append(groups, huh.NewGroup(
-			huh.NewSelect[string]().Title("Случайный адрес панели на каждую сессию?").Value(&a.SessionPaths).
-				Options(huh.NewOption("Нет, постоянный секретный путь", ""), huh.NewOption("Да", "yes")).
-				Description("Да — у панели не будет постоянного адреса: каждая ссылка открывает свой случайный путь,\nвсё остальное на домене — сайт-заглушка"),
-		).Title("Вход по ссылке").WithHideFunc(func() bool { return a.LoginMode != "link" }))
-	}
 
-	// 4. Security: check boxes. A manual node keeps the admin's firewall untouched.
-	if a.Mode != "node-manual" {
-		keys, password, sshPorts := sshFacts()
-		if sec == nil {
-			sec = []string{"firewall"}
-			if keys && password {
-				sec = append(sec, "keys")
+		// 3. Panel, VPN name, bot.
+		if a.Mode == "aio" || a.Mode == "panel" {
+			var fields []huh.Field
+			if a.Mode == "aio" {
+				fields = append(fields,
+					huh.NewInput().Title("Код страны (флаг в приложениях)").Placeholder("NL").Value(&a.Country).CharLimit(2).
+						Validate(func(s string) error {
+							if s != "" && !countryRe.MatchString(s) {
+								return errors.New("две латинские буквы, например NL")
+							}
+							return nil
+						}),
+					huh.NewInput().Title("Название сервера в приложениях").Value(&a.Name).
+						PlaceholderFunc(func() string { return countryName(a.Country) }, &a.Country),
+					huh.NewConfirm().Title("Подключать другие серверы (ноды) в будущем?").Description("Откроет порт 9443 для нод").
+						Affirmative("Да").Negative("Нет").Value(&nodes))
+			}
+			fields = append(fields,
+				huh.NewInput().Title("Путь ссылок подписки").Placeholder("/s/").Value(&a.SubPath).
+					DescriptionFunc(func() string {
+						d := cleanDomain(a.SubDomain)
+						if d == "" {
+							d = or(domainOf(), "домен")
+						}
+						return "Ссылки будут вида https://" + d + or(cleanSubPath(a.SubPath), "/s/") + "<токен>. Пусто — /s/, / — корень домена"
+					}, a).
+					Validate(func(s string) error {
+						s = strings.TrimSpace(s)
+						if s != "" && s != "/" && !pathRe.MatchString(s) {
+							return errors.New("латиница, цифры, _ - и /, например sub, api/v1/client или /")
+						}
+						return nil
+					}),
+				huh.NewInput().Title("Секретный путь веб-панели").Placeholder("случайный, например /k9Qm2xT7aB3c/").Value(&a.PanelPath).
+					Description("Без него панель не найти. Пусто — случайный (надёжнее)").
+					Validate(func(s string) error {
+						p := strings.Trim(strings.TrimSpace(s), "/")
+						if p == "" {
+							return nil
+						}
+						if !pathRe.MatchString(p) || len(p) < 6 {
+							return errors.New("от 6 символов: латиница, цифры, _ -")
+						}
+						if cleanPath(p) == or(cleanSubPath(a.SubPath), "/s/") {
+							return errors.New("совпадает с путём подписок")
+						}
+						return nil
+					}),
+				huh.NewSelect[string]().Title("Вход в панель").Value(&a.LoginMode).
+					Options(huh.NewOption("Логин и пароль", "password"),
+						huh.NewOption("Без пароля: одноразовая ссылка из бота или vynel admin login-link", "link"),
+						huh.NewOption("Только через Telegram (Mini App в боте)", "miniapp")).
+					Description("Без пароля его нельзя подобрать; режим меняется потом в панели (Аккаунт)"),
+				huh.NewInput().Title("Логин веб-панели").Value(&a.AdminLogin).
+					DescriptionFunc(func() string {
+						if a.LoginMode != "password" {
+							return "При входе без пароля не нужен — можно оставить"
+						}
+						return "Пароль сгенерируется сам и будет показан в конце"
+					}, &a.LoginMode).
+					Validate(func(s string) error {
+						if !loginRe.MatchString(s) {
+							return errors.New("латиница, цифры и _ . - @")
+						}
+						return nil
+					}),
+				huh.NewInput().Title("Токен Telegram-бота").Placeholder("от @BotFather, можно потом в панели").Value(&a.BotToken).
+					Description("Пользователи из чата, вход без пароля, ночные бэкапы, уведомления").
+					Validate(func(s string) error {
+						if s != "" && !botRe.MatchString(strings.TrimSpace(s)) {
+							return errors.New("токен вида 123456789:AA…")
+						}
+						if strings.TrimSpace(s) == "" && a.LoginMode == "miniapp" {
+							return errors.New("для входа только через Telegram нужен бот")
+						}
+						return nil
+					}),
+				huh.NewInput().Title("Восстановить из бэкапа").Placeholder("путь к .tar.gz или .age, обычно пусто").Value(&a.Restore).
+					Validate(func(s string) error {
+						if s = strings.TrimSpace(s); s != "" {
+							if _, err := os.Stat(s); err != nil {
+								return errors.New("файла нет")
+							}
+						}
+						return nil
+					}),
+				huh.NewInput().Title("Перенести пользователей").Placeholder("путь к users-export.json, обычно пусто").Value(&a.UsersFile).
+					Validate(func(s string) error {
+						if s = strings.TrimSpace(s); s != "" {
+							if _, err := os.Stat(s); err != nil {
+								return errors.New("файла нет")
+							}
+						}
+						return nil
+					}))
+			groups = append(groups, huh.NewGroup(fields...).Title("Панель"))
+			groups = append(groups, huh.NewGroup(
+				huh.NewSelect[string]().Title("Случайный адрес панели на каждую сессию?").Value(&a.SessionPaths).
+					Options(huh.NewOption("Нет, постоянный секретный путь", ""), huh.NewOption("Да", "yes")).
+					Description("Да — у панели не будет постоянного адреса: каждая ссылка открывает свой случайный путь,\nвсё остальное на домене — сайт-заглушка").
+					Validate(func(v string) error {
+						if v == "yes" && cleanSubPath(a.SubPath) == "/" {
+							sub := cleanDomain(a.SubDomain)
+							shared := sub == "" || sub == domainOf() || (a.Mode == "aio" && a.VPNIP != a.SubIP)
+							if shared {
+								return errors.New("при ссылках подписки в корне (/) случайный путь на сессию требует отдельного домена подписок")
+							}
+						}
+						return nil
+					}),
+			).Title("Вход по ссылке").WithHideFunc(func() bool { return a.LoginMode != "link" }))
+		}
+
+		// 4. Security: check boxes. A manual node keeps the admin's firewall untouched.
+		if a.Mode != "node-manual" {
+			keys, password, sshPorts := sshFacts()
+			if sec == nil {
+				sec = []string{"firewall"}
+				if keys && password {
+					sec = append(sec, "keys")
+				}
+			}
+			secOpts := []huh.Option[string]{huh.NewOption("Файрвол: открыты только SSH и то, что обслуживает vynel; сканеры портов блокируются", "firewall")}
+			switch {
+			case keys && password:
+				secOpts = append(secOpts, huh.NewOption("SSH только по ключу (пароль выключить) — ключи на сервере есть", "keys"))
+			case !keys && password:
+				secOpts = append(secOpts, huh.NewOption("SSH только по ключу — недоступно: на сервере нет ключей (ssh-copy-id)", "nokeys"))
+			}
+			portNow := fmt.Sprint(sshPorts)
+			secOpts = append(secOpts, huh.NewOption("SSH на случайный порт вместо "+strings.Trim(portNow, "[]")+" — старый закроется после проверки входа", "port"))
+			sec = slices.DeleteFunc(sec, func(v string) bool {
+				return !slices.ContainsFunc(secOpts, func(o huh.Option[string]) bool { return o.Value == v })
+			})
+			groups = append(groups, huh.NewGroup(
+				huh.NewMultiSelect[string]().Title("Защита сервера").Description("Пробел или x — отметить, Enter — дальше").
+					Options(secOpts...).Value(&sec).Validate(func(v []string) error {
+					for _, x := range v {
+						if x == "nokeys" {
+							return errors.New("сначала добавьте SSH-ключ на сервер (ssh-copy-id root@сервер)")
+						}
+					}
+					return nil
+				}),
+			).Title("Безопасность"))
+		} else {
+			sec = nil
+		}
+
+		if len(groups) > 0 {
+			if err := run(groups...); err != nil {
+				return nil, err
 			}
 		}
-		secOpts := []huh.Option[string]{huh.NewOption("Файрвол: открыты только SSH и то, что обслуживает vynel; сканеры портов блокируются", "firewall")}
-		switch {
-		case keys && password:
-			secOpts = append(secOpts, huh.NewOption("SSH только по ключу (пароль выключить) — ключи на сервере есть", "keys"))
-		case !keys && password:
-			secOpts = append(secOpts, huh.NewOption("SSH только по ключу — недоступно: на сервере нет ключей (ssh-copy-id)", "nokeys"))
-		}
-		portNow := fmt.Sprint(sshPorts)
-		secOpts = append(secOpts, huh.NewOption("SSH на случайный порт вместо "+strings.Trim(portNow, "[]")+" — старый закроется после проверки входа", "port"))
-		sec = slices.DeleteFunc(sec, func(v string) bool {
-			return !slices.ContainsFunc(secOpts, func(o huh.Option[string]) bool { return o.Value == v })
-		})
-		groups = append(groups, huh.NewGroup(
-			huh.NewMultiSelect[string]().Title("Защита сервера").Description("Пробел или x — отметить, Enter — дальше").
-				Options(secOpts...).Value(&sec).Validate(func(v []string) error {
-				for _, x := range v {
-					if x == "nokeys" {
-						return errors.New("сначала добавьте SSH-ключ на сервер (ssh-copy-id root@сервер)")
-					}
-				}
-				return nil
-			}),
-		).Title("Безопасность"))
-	} else {
-		sec = nil
-	}
 
-	// 5. Summary.
-	ok := true
-	groups = append(groups, huh.NewGroup(
-		huh.NewNote().Title("Проверьте").DescriptionFunc(func() string { return summary(a, domainOf(), nodes, sec, cache, publicOf) }, a),
-		huh.NewConfirm().Title("Устанавливаем?").Affirmative("Установить").Negative("Отмена").Value(&ok),
-	))
-	if a.Mode == "harden" {
-		groups[len(groups)-1] = huh.NewGroup(huh.NewConfirm().Title("Применить?").Affirmative("Применить").Negative("Отмена").Value(&ok))
-	}
-	if err := run(groups...); err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, ErrAborted
+		// 5. Summary — run as its own single-select form after answers are finalized so huh never
+		// clips a Note+Confirm pair in small viewports or drops Enter on the final group.
+		action := "install"
+		title, yesLabel := "Проверьте параметры установки", "Установить"
+		if a.Mode == "harden" {
+			title, yesLabel = "Применить защиту сервера?", "Применить"
+		}
+		sum := summary(a, domainOf(), nodes, sec, cache, publicOf)
+		if err := run(huh.NewGroup(
+			huh.NewSelect[string]().Title(title).Description(sum).Value(&action).Options(
+				huh.NewOption(yesLabel, "install"),
+				huh.NewOption("Изменить ответы", "edit"),
+				huh.NewOption("Отмена", "cancel"),
+			),
+		)); err != nil {
+			return nil, err
+		}
+		if action == "edit" {
+			continue
+		}
+		if action != "install" {
+			return nil, ErrAborted
+		}
+		break
 	}
 
 	a.Domain, a.SubDomain = domainOf(), cleanDomain(a.SubDomain)
@@ -579,7 +637,7 @@ func Run(o Options) (*Answers, error) {
 		}
 	}
 	a.BotToken, a.Restore, a.UsersFile, a.Token = strings.TrimSpace(a.BotToken), strings.TrimSpace(a.Restore), strings.TrimSpace(a.UsersFile), strings.TrimSpace(a.Token)
-	a.SubPath, a.PanelPath = cleanPath(a.SubPath), cleanPath(a.PanelPath)
+	a.SubPath, a.PanelPath = cleanSubPath(a.SubPath), cleanPath(a.PanelPath)
 	return a, nil
 }
 
@@ -593,17 +651,18 @@ func summary(a *Answers, domain string, nodes bool, sec []string, cache *dnsCach
 			line("IP", "VPN "+or(a.VPNIP, "все")+", панель "+or(a.SubIP, "все"))
 		}
 		line("Домен", domain+"  "+cache.check(domain, publicOf(a.VPNIP)))
-		if a.SubDomain != "" {
-			line("Домен ссылок", cleanDomain(a.SubDomain)+"  "+cache.check(a.SubDomain, publicOf(a.SubIP)))
+		subDom := cleanDomain(a.SubDomain)
+		if subDom != "" && subDom != domain {
+			line("Домен ссылок", subDom+"  "+cache.check(subDom, publicOf(a.SubIP)))
 		}
 		if a.Mode == "aio" {
 			line("В клиентах", or(a.Name, countryName(a.Country))+" "+a.Country)
 			line("Ноды", map[bool]string{true: "можно подключать (порт 9443)", false: "только этот сервер"}[nodes])
-			if a.SubDomain != "" && a.VPNIP == a.SubIP {
-				line("Домен панели", domain+"  (панель остаётся на нём)")
-			}
 		}
-		line("Подписки", "https://"+or(cleanDomain(a.SubDomain), domain)+or(cleanPath(a.SubPath), "/s/")+"<токен>")
+		if subDom != "" && subDom != domain && (a.Mode == "panel" || a.VPNIP == a.SubIP) {
+			line("Домен панели", domain+"  (панель остаётся на нём)")
+		}
+		line("Подписки", "https://"+or(subDom, domain)+or(cleanSubPath(a.SubPath), "/s/")+"<токен>")
 		switch a.LoginMode {
 		case "link":
 			line("Панель", "вход по одноразовой ссылке (бот, vynel admin login-link)"+map[bool]string{true: ", адрес случайный на каждую сессию", false: ""}[a.SessionPaths == "yes"])
@@ -647,9 +706,13 @@ func trim(s string, n int) string {
 	return s
 }
 
-// Shell writes the answers as shell assignments the script sources. Values are single-quoted.
+// Shell writes the answers as shell assignments the script sources. Values are single-quoted
+// and stripped of line breaks so each assignment always fits on a single line.
 func (a *Answers) Shell(w io.Writer) error {
-	q := func(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+	q := func(s string) string {
+		s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
 	vals := map[string]string{
 		"MODE": a.Mode, "DOMAIN": a.Domain, "SUB_DOMAIN": a.SubDomain, "EMAIL": a.Email, "NAME": a.Name, "COUNTRY": a.Country,
 		"PUBLIC_IP": a.PublicIP, "VPN_IP": a.VPNIP, "SUB_IP": a.SubIP, "GATEWAY_LISTEN": a.GatewayListen,

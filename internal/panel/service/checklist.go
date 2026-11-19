@@ -183,22 +183,6 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 			add("dns", rest[4][1], StepOK, n.Domain+" → "+strings.Join(ips, ", "))
 		}
 	}
-	// 7. The site opens from outside with a real certificate.
-	switch {
-	case n.Manual:
-		add("site", rest[5][1], StepSkip, "ручная нода: сайт и сертификат настраивает администратор")
-	case n.Domain == "":
-		add("site", rest[5][1], StepSkip, "у ноды нет домена")
-	case !dnsOK || web == "":
-		add("site", rest[5][1], StepWait, "")
-	default:
-		if err := SiteCheck(ctx, n.Domain); err != nil {
-			add("site", rest[5][1], StepFail, siteError(err))
-		} else {
-			add("site", rest[5][1], StepOK, "https://"+n.Domain+"/")
-		}
-	}
-	// 8. Users get something from this node.
 	nis, err := store.ListNodeInbounds(ctx, s.st.DB, n.ID, 0)
 	if err != nil {
 		return nil, err
@@ -209,6 +193,24 @@ func (s *Service) NodeChecklist(ctx context.Context, id int64, connected func(in
 			tags = append(tags, ni.Tag)
 		}
 	}
+	// 7. The site opens from outside with a real certificate.
+	switch {
+	case n.Manual:
+		add("site", rest[5][1], StepSkip, "ручная нода: сайт и сертификат настраивает администратор")
+	case n.Domain == "":
+		add("site", rest[5][1], StepSkip, "у ноды нет домена")
+	case !n.Local && len(tags) == 0:
+		add("site", rest[5][1], StepSkip, "сайт поднимется после выбора профиля")
+	case !dnsOK || web == "":
+		add("site", rest[5][1], StepWait, "")
+	default:
+		if err := SiteCheck(ctx, n.Domain); err != nil {
+			add("site", rest[5][1], StepFail, siteError(err))
+		} else {
+			add("site", rest[5][1], StepOK, "https://"+n.Domain+"/")
+		}
+	}
+	// 8. Users get something from this node.
 	if len(tags) == 0 {
 		add("inbounds", rest[6][1], StepFail, "добавьте профиль: «Ноды» → «+ Профиль»")
 	} else {

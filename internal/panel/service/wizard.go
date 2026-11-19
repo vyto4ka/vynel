@@ -166,56 +166,65 @@ func (s *Service) NodeSetupStep(ctx context.Context, id int64) (int, error) {
 // NodeWizard describes the node's setup wizard: where it stands and the requirement checks
 // of the profiles the node already has (ports, DNS A records, sysctl).
 func (s *Service) NodeWizard(ctx context.Context, id int64) (step int, steps []WizardStep, err error) {
+	var (
+		n                 *store.Node
+		ports, dns, sctls []string
+		want              []string
+	)
 	err = s.st.Tx(ctx, func(q store.DBTX) error {
-		n, err := store.GetNode(ctx, q, id)
-		if err != nil {
-			return err
+		var txErr error
+		n, txErr = store.GetNode(ctx, q, id)
+		if txErr != nil {
+			return txErr
 		}
-		st, _, ports, dns, sysctl, _, _, err := s.nodeWizard(ctx, q, n)
-		if err != nil {
-			return err
+		step, _, ports, dns, sctls, _, _, txErr = s.nodeWizard(ctx, q, n)
+		if txErr != nil {
+			return txErr
 		}
-		step = st
-		steps = []WizardStep{}
-		if n.Manual {
-			steps = append(steps, WizardStep{Key: "manual", Title: "Manual node: check ports, DNS and sysctl on the server yourself",
-				State: StepSkip, Detail: "the panel manages only the Xray config"})
-		} else {
-			for _, p := range ports {
-				steps = append(steps, WizardStep{Key: "port " + p, Title: "Port " + p + " is free on the server and open in the firewall",
-					State: StepSkip, Detail: "check on the server: ss -ltnup | grep :" + p[:strings.IndexByte(p, '/')]})
-			}
-			var want []string
+		if !n.Manual {
 			for _, a := range mustListAddresses(ctx, q, n.ID) {
 				want = append(want, a.IP)
 			}
-			for _, name := range dns {
-				name = strings.ReplaceAll(name, "${NODE_DOMAIN}", n.Domain)
-				if n.Domain == "" {
-					steps = append(steps, WizardStep{Key: "dns " + name, Title: "A-запись " + name + " → IP сервера", State: StepFail,
-						Detail: "the node has no domain — set it in the node’s settings"})
-					continue
-				}
-				detail, state := "", StepOK
-				lctx, cancel := context.WithTimeout(ctx, 4*time.Second)
-				ips, err := Resolver.LookupHost(lctx, name)
-				cancel()
-				switch {
-				case err != nil:
-					detail, state = name+" is not found in DNS: add an A record to the server’s IP", StepFail
-				case len(want) > 0 && !containsAny(ips, want):
-					detail, state = name+" → "+strings.Join(ips, ", ")+", but the server has "+strings.Join(want, ", ")+" (in Cloudflare the cloud must be grey)", StepFail
-				default:
-					detail = name + " → " + strings.Join(ips, ", ")
-				}
-				steps = append(steps, WizardStep{Key: "dns " + name, Title: "A-запись " + name + " → IP сервера", State: state, Detail: detail})
-			}
-			steps = append(steps, WizardStep{Key: "sysctl", Title: "sysctl: " + strings.Join(sysctl, ", "), State: StepSkip,
-				Detail: "the vynel installer enables them itself; with your own setup, do it manually"})
 		}
 		return nil
 	})
-	return step, steps, err
+	if err != nil {
+		return 0, nil, err
+	}
+	steps = []WizardStep{}
+	if n.Manual {
+		steps = append(steps, WizardStep{Key: "manual", Title: "Manual node: check ports, DNS and sysctl on the server yourself",
+			State: StepSkip, Detail: "the panel manages only the Xray config"})
+		return step, steps, nil
+	}
+	for _, p := range ports {
+		steps = append(steps, WizardStep{Key: "port " + p, Title: "Port " + p + " is free on the server and open in the firewall",
+			State: StepSkip, Detail: "check on the server: ss -ltnup | grep :" + p[:strings.IndexByte(p, '/')]})
+	}
+	for _, name := range dns {
+		name = strings.ReplaceAll(name, "${NODE_DOMAIN}", n.Domain)
+		if n.Domain == "" {
+			steps = append(steps, WizardStep{Key: "dns " + name, Title: "A-запись " + name + " → IP сервера", State: StepFail,
+				Detail: "the node has no domain — set it in the node’s settings"})
+			continue
+		}
+		detail, state := "", StepOK
+		lctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		ips, lerr := Resolver.LookupHost(lctx, name)
+		cancel()
+		switch {
+		case lerr != nil:
+			detail, state = name+" is not found in DNS: add an A record to the server’s IP", StepFail
+		case len(want) > 0 && !containsAny(ips, want):
+			detail, state = name+" → "+strings.Join(ips, ", ")+", but the server has "+strings.Join(want, ", ")+" (in Cloudflare the cloud must be grey)", StepFail
+		default:
+			detail = name + " → " + strings.Join(ips, ", ")
+		}
+		steps = append(steps, WizardStep{Key: "dns " + name, Title: "A-запись " + name + " → IP сервера", State: state, Detail: detail})
+	}
+	steps = append(steps, WizardStep{Key: "sysctl", Title: "sysctl: " + strings.Join(sctls, ", "), State: StepSkip,
+		Detail: "the vynel installer enables them itself; with your own setup, do it manually"})
+	return step, steps, nil
 }
 
 // containsAny reports whether any of ips is in want.

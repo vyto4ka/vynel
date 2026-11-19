@@ -5,9 +5,11 @@ package nginx
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -47,6 +49,7 @@ type Manager struct {
 	mu       sync.Mutex
 	cmd      *exec.Cmd
 	done     chan struct{}
+	binStamp string // size:mtime:ino of m.bin() when m.cmd started
 	current  string // config as received (before Finalize)
 	stopping bool
 	closed   bool
@@ -59,6 +62,14 @@ func (m *Manager) bin() string {
 		return DefaultBin
 	}
 	return m.Bin
+}
+
+func fileStamp(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d:%d", fi.Size(), fi.ModTime().UnixNano(), fileInode(fi))
 }
 
 // Available reports whether the nginx binary exists.
@@ -148,7 +159,11 @@ func (m *Manager) Apply(ctx context.Context, conf string) error {
 		m.current = ""
 		return nil
 	}
-	if m.cmd != nil && conf == m.current {
+	upgraded := m.cmd != nil && m.binStamp != "" && fileStamp(m.bin()) != m.binStamp
+	if upgraded {
+		m.local = nil
+	}
+	if m.cmd != nil && !upgraded && conf == m.current {
 		return nil
 	}
 	if !m.Available() {
@@ -193,6 +208,13 @@ func (m *Manager) Apply(ctx context.Context, conf string) error {
 		}
 		if err := writeAtomic(path, prev); err != nil {
 			m.Log.Error("cannot put the previous nginx config back", "err", err)
+		}
+	}
+	if m.cmd != nil && upgraded {
+		m.Log.Info("nginx binary changed on disk, restarting to load updated binary")
+		m.stopLocked()
+		if m.closed {
+			return errors.New("nginx manager closed")
 		}
 	}
 	if m.cmd != nil {
@@ -272,7 +294,7 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// detect finds the stream module, the worker user and IPv6 support.
+// detect finds the stream module, the worker user, IPv6 support and NGINX2Root patch status.
 func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 	out, err := exec.CommandContext(ctx, m.bin(), "-V").CombinedOutput()
 	if err != nil {
@@ -280,9 +302,20 @@ func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 	}
 	l := &nginxconf.Local{}
 	m.noStream = ""
+	vOutBytes, _ := exec.CommandContext(ctx, m.bin(), "-v").CombinedOutput()
+	vOut := string(vOutBytes)
+	if vOut == "" {
+		vOut = string(out)
+	}
 	// ssl_reject_handshake appeared in nginx 1.19.4 (Ubuntu 22.04 and Debian 11 ship 1.18).
-	if v, _ := exec.CommandContext(ctx, m.bin(), "-v").CombinedOutput(); versionAtLeast(string(v), 1, 19, 4) {
+	if versionAtLeast(vOut, 1, 19, 4) {
 		l.RejectHandshake = true
+	}
+	if !isNginx2RootPatched(ctx, m.bin(), vOut) {
+		l.NoHTTP2 = true
+		m.Log.Warn("nginx is not patched for CVE-2026-123007/CVE-2026-123633 (NGINX2Root); disabling HTTP/2 until nginx is upgraded", "version", strings.TrimSpace(vOut))
+	} else if versionAtLeast(vOut, 1, 25, 1) {
+		l.ModernHTTP2 = true
 	}
 	// The stream module is either built in (--with-stream) or a file in the modules dir. Do
 	// not go by --with-stream=dynamic: Ubuntu 22.04 builds its modules in a separate pass and
@@ -327,15 +360,23 @@ func (m *Manager) detect(ctx context.Context) (*nginxconf.Local, error) {
 
 var nginxVersionRe = regexp.MustCompile(`nginx/(\d+)\.(\d+)\.(\d+)`)
 
-func versionAtLeast(out string, major, minor, patch int) bool {
+func parseNginxVersion(out string) (int, int, int, bool) {
 	m := nginxVersionRe.FindStringSubmatch(out)
 	if m == nil {
+		return 0, 0, 0, false
+	}
+	maj, _ := strconv.Atoi(m[1])
+	min, _ := strconv.Atoi(m[2])
+	pat, _ := strconv.Atoi(m[3])
+	return maj, min, pat, true
+}
+
+func versionAtLeast(out string, major, minor, patch int) bool {
+	maj, min, pat, ok := parseNginxVersion(out)
+	if !ok {
 		return false
 	}
-	v := [3]int{}
-	for i := range v {
-		v[i], _ = strconv.Atoi(m[i+1])
-	}
+	v := [3]int{maj, min, pat}
 	want := [3]int{major, minor, patch}
 	for i := range v {
 		if v[i] != want[i] {
@@ -343,6 +384,91 @@ func versionAtLeast(out string, major, minor, patch int) bool {
 		}
 	}
 	return true
+}
+
+func upstreamNginx2RootPatched(vOut string) bool {
+	maj, min, pat, ok := parseNginxVersion(vOut)
+	if !ok {
+		return false
+	}
+	// Upstream fixed NGINX2Root in stable 1.30.7 and mainline 1.31.9 (1.31.0..1.31.8 are unpatched).
+	if maj == 1 && min == 30 && pat >= 7 {
+		return true
+	}
+	return versionAtLeast(vOut, 1, 31, 9)
+}
+
+var ubuntuUSN9159 = []struct {
+	prefix string
+	minVer string
+}{
+	{prefix: "1.18.0-0ubuntu1.", minVer: "1.18.0-0ubuntu1.7+esm5"},
+	{prefix: "1.18.0-6ubuntu14.", minVer: "1.18.0-6ubuntu14.23"},
+	{prefix: "1.24.0-2ubuntu7.", minVer: "1.24.0-2ubuntu7.20"},
+	{prefix: "1.28.3-2ubuntu1.", minVer: "1.28.3-2ubuntu1.13"},
+	{prefix: "1.30.4-7ubuntu1.", minVer: "1.30.4-7ubuntu1.2"},
+}
+
+func ubuntuVersionPatched(ctx context.Context, pkgVer string) bool {
+	pkgVer = strings.TrimSpace(pkgVer)
+	if pkgVer == "" {
+		return false
+	}
+	for _, u := range ubuntuUSN9159 {
+		if strings.HasPrefix(pkgVer, u.prefix) {
+			return exec.CommandContext(ctx, "dpkg", "--compare-versions", pkgVer, "ge", u.minVer).Run() == nil
+		}
+	}
+	return false
+}
+
+func changelogHasCVE(paths []string, cve string) bool {
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			_ = f.Close()
+			continue
+		}
+		b, _ := io.ReadAll(io.LimitReader(gz, 2<<20))
+		_ = gz.Close()
+		_ = f.Close()
+		if strings.Contains(string(b), cve) {
+			return true
+		}
+	}
+	return false
+}
+
+var systemChangelogs = []string{
+	"/usr/share/doc/nginx/changelog.Debian.gz",
+	"/usr/share/doc/nginx-common/changelog.Debian.gz",
+	"/usr/share/doc/nginx-core/changelog.Debian.gz",
+	"/usr/share/doc/nginx-full/changelog.Debian.gz",
+	"/usr/share/doc/nginx-light/changelog.Debian.gz",
+	"/usr/share/doc/nginx-extras/changelog.Debian.gz",
+}
+
+func isNginx2RootPatched(ctx context.Context, bin, vOut string) bool {
+	if upstreamNginx2RootPatched(vOut) {
+		return true
+	}
+	if filepath.Clean(bin) != DefaultBin {
+		return false
+	}
+	if changelogHasCVE(systemChangelogs, "CVE-2026-123007") {
+		return true
+	}
+	for _, pkg := range []string{"nginx-core", "nginx", "nginx-common", "nginx-full", "nginx-light", "nginx-extras"} {
+		out, err := exec.CommandContext(ctx, "dpkg-query", "-W", "-f=${Version}", pkg).Output()
+		if err == nil && ubuntuVersionPatched(ctx, string(out)) {
+			return true
+		}
+	}
+	return false
 }
 
 func lookup(name string) bool {
@@ -362,6 +488,7 @@ func (m *Manager) test(ctx context.Context, path string) error {
 
 func (m *Manager) startLocked() error {
 	errLog := filepath.Join(m.stateDir(), "error.log")
+	stamp := fileStamp(m.bin())
 	cmd := exec.Command(m.bin(), "-p", m.runDir(), "-c", m.confPath(), "-g", "daemon off;")
 	tail := &lineLog{log: m.Log}
 	cmd.Stdout, cmd.Stderr = tail, tail
@@ -373,7 +500,7 @@ func (m *Manager) startLocked() error {
 		return fmt.Errorf("start nginx: %w", err)
 	}
 	done := make(chan struct{})
-	m.cmd, m.done, m.stopping = cmd, done, false
+	m.cmd, m.done, m.binStamp, m.stopping = cmd, done, stamp, false
 	go m.wait(cmd, done)
 	// nginx writes its pid file once every listener is bound; a busy port makes it retry for a
 	// few seconds and exit.
@@ -411,13 +538,20 @@ func (m *Manager) reloadLocked() error {
 	return nil
 }
 
-// Reload re-reads the config, e.g. after certificates changed.
+// Reload re-reads the config, e.g. after certificates changed. If the nginx binary on disk was
+// upgraded since the running master started, Reload re-finalizes and restarts into the new binary.
 func (m *Manager) Reload() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.cmd == nil {
+		m.mu.Unlock()
 		return nil
 	}
+	if m.binStamp != "" && fileStamp(m.bin()) != m.binStamp && m.current != "" {
+		conf := m.current
+		m.mu.Unlock()
+		return m.Apply(context.Background(), conf)
+	}
+	defer m.mu.Unlock()
 	return m.reloadLocked()
 }
 
@@ -452,6 +586,7 @@ func (m *Manager) wait(cmd *exec.Cmd, done chan struct{}) {
 		return
 	}
 	m.cmd = nil
+	m.binStamp = ""
 	if m.stopping || m.closed {
 		return
 	}
@@ -485,6 +620,7 @@ func (m *Manager) stopLocked() {
 	m.mu.Lock()
 	if m.cmd == cmd {
 		m.cmd = nil
+		m.binStamp = ""
 	}
 }
 
