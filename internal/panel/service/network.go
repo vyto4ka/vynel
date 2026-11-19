@@ -166,6 +166,23 @@ func (s *Service) Network(ctx context.Context) (*Network, error) {
 		if webDomain != "" && webDomain != subDomain {
 			out.Domains = append(out.Domains, DomainCheck{Name: webDomain, Purpose: "panel", Node: local.Code, Expected: expect(local, webIP)})
 		}
+	} else {
+		pub := hostIPs(true)
+		if gwHost != "" && net.ParseIP(gwHost) != nil && !slices.Contains(pub, gwHost) {
+			pub = append(pub, gwHost)
+		}
+		expectPanel := func(ip string) []string {
+			if ip != "" {
+				return []string{ip}
+			}
+			return pub
+		}
+		if subDomain != "" {
+			out.Domains = append(out.Domains, DomainCheck{Name: subDomain, Purpose: "sub", Expected: expectPanel(subIP)})
+		}
+		if webDomain != "" && webDomain != subDomain {
+			out.Domains = append(out.Domains, DomainCheck{Name: webDomain, Purpose: "panel", Expected: expectPanel(webIP)})
+		}
 	}
 	for i := range out.Nodes {
 		nn := &out.Nodes[i]
@@ -209,6 +226,25 @@ func (s *Service) Network(ctx context.Context) (*Network, error) {
 	return out, nil
 }
 
+func hostIPs(publicOnly bool) []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var ips []string
+	for _, a := range addrs {
+		in, ok := a.(*net.IPNet)
+		if !ok || in.IP == nil || in.IP.IsLoopback() || in.IP.IsLinkLocalUnicast() || in.IP.IsMulticast() || in.IP.IsUnspecified() {
+			continue
+		}
+		if publicOnly && (in.IP.IsPrivate() || (in.IP.To4() != nil && in.IP.To4()[0] == 100 && in.IP.To4()[1]&0xc0 == 64)) {
+			continue
+		}
+		ips = append(ips, in.IP.String())
+	}
+	return ips
+}
+
 // LocalIPs lists the addresses of the panel's own server.
 func (s *Service) LocalIPs(ctx context.Context) ([]string, error) {
 	nodes, err := store.ListNodes(ctx, s.st.DB)
@@ -227,6 +263,9 @@ func (s *Service) LocalIPs(ctx context.Context) ([]string, error) {
 		for _, a := range as {
 			ips = append(ips, a.IP)
 		}
+	}
+	if len(ips) == 0 {
+		ips = hostIPs(false)
 	}
 	return ips, nil
 }

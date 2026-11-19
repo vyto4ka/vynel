@@ -123,3 +123,38 @@ func TestStreamAndFinalize(t *testing.T) {
 		t.Fatal("IPv6 listen not enabled")
 	}
 }
+
+func TestHTTP2ModesAndNginx2RootSnippetHardening(t *testing.T) {
+	c, err := Build(Spec{Sites: []Site{{Domain: "a.example.com", Routes: []Route{{Kind: KindDecoy, Decoy: "cloud"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noH2 := Finalize(c, Local{NoHTTP2: true, IPv6: true, RejectHandshake: true})
+	if strings.Contains(noH2, "http2") {
+		t.Fatalf("NoHTTP2 left http2 active:\n%s", noH2)
+	}
+	modH2 := Finalize(c, Local{ModernHTTP2: true, IPv6: true, RejectHandshake: true})
+	if strings.Contains(modH2, "ssl http2") || strings.Count(modH2, "http2 on;") != 2 {
+		t.Fatalf("ModernHTTP2 expected two http2 on; (default_server + site) and no listen ... http2:\n%s", modH2)
+	}
+	for _, bad := range []string{
+		"resolver 1.1.1.1;",
+		"resolver_timeout 5s;",
+		"mirror /sub;",
+		"ssi on;",
+		"ssi_types text/html;",
+		"auth_request /auth;",
+		"addition_before_body /hdr;",
+		"listen 8443 ssl http2;",
+		"http2 on;",
+		"http2_chunk_size 8k;",
+		"http3 on;",
+		"quic_retry on;",
+		"mail { }",
+		"auth_http 127.0.0.1:9000;",
+	} {
+		if checkSnippet(bad) == nil {
+			t.Fatalf("NGINX2Root vector accepted in snippet: %q", bad)
+		}
+	}
+}

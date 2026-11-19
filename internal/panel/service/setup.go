@@ -66,6 +66,8 @@ func (s *Service) SetupAllInOne(ctx context.Context, actor Actor, in SetupInput)
 		// dedicated subscription IP the panel cannot answer the main domain (its A record
 		// points at the VPN address), so in that layout it stays on the subscription domain.
 		settings[SettingWebDomain] = in.Domain
+	} else {
+		settings[SettingWebDomain] = ""
 	}
 	if in.Email != "" {
 		settings[SettingCaddyEmail] = in.Email

@@ -326,3 +326,61 @@ func TestApplyRollback(t *testing.T) {
 		t.Fatalf("next apply: %v", err)
 	}
 }
+
+func TestNginx2RootPatchDetection(t *testing.T) {
+	for ver, want := range map[string]bool{
+		"nginx version: nginx/1.18.0 (Ubuntu)": false,
+		"nginx version: nginx/1.22.1":          false,
+		"nginx version: nginx/1.24.0":          false,
+		"nginx version: nginx/1.30.6":          false,
+		"nginx version: nginx/1.30.7":          true,
+		"nginx version: nginx/1.30.8":          true,
+		"nginx version: nginx/1.31.0":          false,
+		"nginx version: nginx/1.31.8":          false,
+		"nginx version: nginx/1.31.9":          true,
+		"nginx version: nginx/1.32.0":          true,
+		"nginx version: nginx/2.0.0":           true,
+	} {
+		if got := upstreamNginx2RootPatched(ver); got != want {
+			t.Fatalf("upstreamNginx2RootPatched(%q) = %v, want %v", ver, got, want)
+		}
+	}
+
+	dir := t.TempDir()
+	mods := filepath.Join(dir, "modules")
+	_ = os.MkdirAll(mods, 0o755)
+	_ = os.WriteFile(filepath.Join(mods, "ngx_stream_module.so"), nil, 0o644)
+	bin := filepath.Join(dir, "nginx")
+	writeFake := func(version string) {
+		script := "#!/bin/sh\necho 'nginx version: nginx/" + version + "' >&2\n" +
+			"[ \"$1\" = -V ] && echo 'configure arguments: --modules-path=" + mods + " --with-stream' >&2\nexit 0\n"
+		if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conf, err := nginxconf.Build(nginxconf.Spec{Issuer: "internal",
+		Sites: []nginxconf.Site{{Domain: "a.example.com", Bind: "127.0.0.1", Port: 8443,
+			Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "cloud"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Bin: bin, DataDir: filepath.Join(dir, "data"), WWWDir: filepath.Join(dir, "www"), User: "nobody",
+		Log: slog.New(slog.DiscardHandler)}
+	if err := m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = m.Certs.Ensure(nginxconf.CertDomains(conf))
+
+	writeFake("1.22.1")
+	unpatched, err := m.finalize(context.Background(), conf)
+	if err != nil || strings.Contains(unpatched, "http2") {
+		t.Fatalf("expected HTTP/2 disabled on unpatched 1.22.1: err=%v\n%s", err, unpatched)
+	}
+
+	m.local = nil
+	writeFake("1.30.7")
+	patched, err := m.finalize(context.Background(), conf)
+	if err != nil || !strings.Contains(patched, "http2 on;") || strings.Contains(patched, "ssl http2") {
+		t.Fatalf("expected modern HTTP/2 on patched 1.30.7: err=%v\n%s", err, patched)
+	}
+}

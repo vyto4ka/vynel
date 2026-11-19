@@ -18,6 +18,9 @@ func setupTUICmd() *cobra.Command {
 		Use: "setup-tui", Short: "Installer form: answers are written as shell variables", Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			a, err := setup.Run(o)
+			if errors.Is(err, setup.ErrNoTTY) {
+				os.Exit(3)
+			}
 			if errors.Is(err, setup.ErrAborted) {
 				fmt.Fprintln(os.Stderr, "отменено")
 				os.Exit(2)
