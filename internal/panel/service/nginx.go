@@ -150,10 +150,11 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 		}
 	}
 	if n.Local {
-		ps, err := s.panelSites(ctx)
+		ps, siteProblems, err := s.panelSites(ctx)
 		if err != nil {
 			return nginxconf.Spec{}, nil, err
 		}
+		problems = append(problems, siteProblems...)
 		sites = withPanelSites(sites, ps, nginxSites)
 	}
 

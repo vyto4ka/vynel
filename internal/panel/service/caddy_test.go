@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -210,5 +211,132 @@ func TestSetupTwoIPs(t *testing.T) {
 	res = must(f.s.SetupAllInOne(f.ctx, ActorCLI, SetupInput{Domain: "nl.example.com"}))
 	if res.Inbound.ListenAddressID != nil {
 		t.Fatal("listen address kept")
+	}
+}
+
+// dialsByHost maps every Caddy host to the upstreams of its routes (recursing into subroutes).
+func dialsByHost(t *testing.T, raw []byte) map[string][]string {
+	t.Helper()
+	if raw == nil {
+		return nil
+	}
+	type route struct {
+		Handle []struct {
+			Upstreams []struct {
+				Dial string `json:"dial"`
+			} `json:"upstreams"`
+			Routes []route `json:"routes"`
+		} `json:"handle"`
+		Match []struct {
+			Host []string `json:"host"`
+		} `json:"match"`
+	}
+	var cfg struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]struct {
+					Routes []route `json:"routes"`
+				} `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string][]string{}
+	var walk func(r route) []string
+	walk = func(r route) []string {
+		var dials []string
+		for _, hd := range r.Handle {
+			for _, u := range hd.Upstreams {
+				dials = append(dials, u.Dial)
+			}
+			for _, sub := range hd.Routes {
+				dials = append(dials, walk(sub)...)
+			}
+		}
+		for _, m := range r.Match {
+			for _, h := range m.Host {
+				out[h] = append(out[h], dials...)
+			}
+		}
+		return dials
+	}
+	for _, s := range cfg.Apps.HTTP.Servers {
+		for _, r := range s.Routes {
+			walk(r)
+		}
+	}
+	return out
+}
+
+// A separate subscription domain keeps the panel on the server's main domain: the
+// subscription domain serves subscriptions only. With a dedicated subscription IP the panel
+// cannot answer the main domain (its A record points at the VPN address), so it stays on the
+// subscription domain.
+func TestSetupSeparateSubDomain(t *testing.T) {
+	f := newFixture(t)
+	res := must(f.s.SetupAllInOne(f.ctx, ActorCLI, SetupInput{Domain: "nl.example.com", SubDomain: "sub.example.com"}))
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := f.s.Setting(f.ctx, SettingWebDomain, ""); d != "nl.example.com" {
+		t.Fatalf("web.domain %q, want the main domain", d)
+	}
+	if u := must(f.s.WebURL(f.ctx)); !strings.HasPrefix(u, "https://nl.example.com/") {
+		t.Fatalf("web URL %s", u)
+	}
+	ds := must(f.s.DesiredState(f.ctx, res.Node.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	dials := dialsByHost(t, ds.Caddy)
+	if !slices.Contains(dials["sub.example.com"], DefaultSubListen) || slices.Contains(dials["sub.example.com"], DefaultWebListen) {
+		t.Fatalf("the sub domain must serve subscriptions only, dials %v", dials["sub.example.com"])
+	}
+	if !slices.Contains(dials["nl.example.com"], DefaultWebListen) {
+		t.Fatalf("the main domain must serve the panel, dials %v", dials["nl.example.com"])
+	}
+
+	// One domain for everything: the panel shares it, web.domain stays empty.
+	f = newFixture(t)
+	must(f.s.SetupAllInOne(f.ctx, ActorCLI, SetupInput{Domain: "nl.example.com"}))
+	if d, _ := f.s.Setting(f.ctx, SettingWebDomain, ""); d != "" {
+		t.Fatalf("one domain, web.domain %q", d)
+	}
+
+	// A dedicated subscription IP keeps the panel on the subscription domain.
+	f = newFixture(t)
+	must(f.s.SetupAllInOne(f.ctx, ActorCLI, SetupInput{Domain: "nl.example.com", SubDomain: "sub.example.com", VPNIP: "203.0.113.12", SubIP: "203.0.113.10"}))
+	if d, _ := f.s.Setting(f.ctx, SettingWebDomain, ""); d != "" {
+		t.Fatalf("dedicated sub IP, web.domain %q", d)
+	}
+}
+
+// At the domain root the panel's route must precede the subscription catch-all, otherwise
+// Caddy would send the panel's secret path to subscriptions too.
+func TestCaddyRootPrefixPanelFirst(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "nl.example.com")
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.SetSetting(f.ctx, ActorCLI, SettingSubPrefix, "/"); err != nil {
+		t.Fatal(err)
+	}
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	cfg := string(ds.Caddy)
+	sub := strings.Index(cfg, `"handler":"subroute"`)
+	if sub < 0 {
+		t.Fatal(cfg)
+	}
+	site := cfg[sub:]
+	panel := strings.Index(site, `"dial":"`+DefaultWebListen+`"`)
+	root := strings.Index(site, `"match":[{"path":["/*"]}]`)
+	if panel < 0 || root < 0 || panel > root {
+		t.Fatalf("the panel's route must come before the root subscription route (panel %d, root %d):\n%s", panel, root, site)
 	}
 }

@@ -436,3 +436,72 @@ func TestManualNodeNoWebSpec(t *testing.T) {
 		}
 	}
 }
+
+// Links at the domain root: the subscription upstream takes "location /", the panel's secret
+// path keeps its own location and wins on prefix length.
+func TestNginxRootPrefix(t *testing.T) {
+	for _, domain := range []string{"sub.example.com", "nl.example.com"} { // own domain; one domain for everything
+		t.Run(domain, func(t *testing.T) {
+			f := newFixture(t)
+			n, _ := f.aio(t, domain)
+			f.nginxNode(t, n)
+			if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.s.SetSetting(f.ctx, ActorCLI, SettingSubPrefix, "/"); err != nil {
+				t.Fatal(err)
+			}
+			ds := must(f.s.DesiredState(f.ctx, n.ID))
+			if len(ds.Problems) > 0 {
+				t.Fatal(ds.Problems)
+			}
+			webPath, err := f.s.WebPath(f.ctx)
+			if err != nil || webPath == "" {
+				t.Fatalf("webPath %q err %v", webPath, err)
+			}
+			i := strings.Index(ds.Nginx, "server_name "+domain+";")
+			if i < 0 {
+				t.Fatal(ds.Nginx)
+			}
+			site := ds.Nginx[i:]
+			site = site[:strings.Index(site, "\n    }\n")]
+			contains(t, site,
+				"location / {\n            proxy_pass http://"+DefaultSubListen+";",
+				"location ^~ "+webPath+" {\n            proxy_pass http://"+DefaultWebListen+";")
+		})
+	}
+}
+
+// Root subscription links and session paths both need the whole domain: a problem in the
+// layout, not a silent one where the panel eats every subscription request.
+func TestRootPrefixConflictsWithSessionPaths(t *testing.T) {
+	for _, domain := range []string{"sub.example.com", "nl.example.com"} {
+		t.Run(domain, func(t *testing.T) {
+			f := newFixture(t)
+			n, _ := f.aio(t, domain)
+			f.nginxNode(t, n)
+			if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.s.SetSetting(f.ctx, ActorCLI, SettingSubPrefix, "/"); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.s.SetLoginMode(f.ctx, ActorCLI, ModeLink); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.s.SetSessionPaths(f.ctx, ActorCLI, true); err != nil {
+				t.Fatal(err)
+			}
+			ds := must(f.s.DesiredState(f.ctx, n.ID))
+			found := false
+			for _, p := range ds.Problems {
+				if strings.Contains(p, "session paths") {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("no conflict problem: %v", ds.Problems)
+			}
+		})
+	}
+}
