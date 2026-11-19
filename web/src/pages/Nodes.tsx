@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { del, get, Group, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap, Variable } from '../api'
-import { UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
+import { CertInfo, del, get, Group, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap, Variable } from '../api'
+import { LogTarget, UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ProviderIcon } from './Billing'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
-import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, Tabs, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans, Key } from '../i18n'
 import { useAdvanced } from '../mode'
 import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
@@ -19,7 +19,7 @@ export function Nodes() {
   const [inspectId, setInspectId] = useState<number | null>(null)
   const [join, setJoin] = useState<JoinInfo | null>(null)
   const [checkOf, setCheckOf] = useState<Node | null>(null)
-  const [editNode, setEditNode] = useState<Node | null>(null)
+  const [editNode, setEditNode] = useState<{ node: Node; tab?: 'general' | 'certs' } | null>(null)
   const [attachTo, setAttachTo] = useState<Node | null>(null)
   const [wizardOf, setWizardOf] = useState<Node | null>(null)
   const [hostOf, setHostOf] = useState<Inbound | null>(null)
@@ -28,8 +28,8 @@ export function Nodes() {
   const confirm = useConfirm()
   const reload = nodes.reload
   const updates = useUpdates(15000)
-  const [updLog, setUpdLog] = useState<{ id: number; name: string } | null>(null)
-  const upd = useRunUpdate(updates.data, () => { updates.reload(); reload() })
+  const [updLog, setUpdLog] = useState<LogTarget[] | null>(null)
+  const upd = useRunUpdate(updates.data, () => { updates.reload(); reload(); selfHost.reload() }, (targets) => setUpdLog(targets))
   const engineer = useAdvanced()
   const light = false
   // У локальной ноды версия панели: она обновляется вместе с панелью.
@@ -72,7 +72,18 @@ export function Nodes() {
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" />{' '}{t('nodes.add_a_server')}</button>
       </div>
 
-      {selfHost.data && <SelfHostCard sh={selfHost.data} />}
+      {selfHost.data && (
+        <SelfHostCard
+          sh={selfHost.data}
+          panelUpd={updates.data?.panel}
+          latest={updates.data?.latest || ''}
+          onUpdate={async () => {
+            if (await confirm(t('nodes.update_the_panel_and_the'), t('nodes.update'), false)) upd.run('panel')
+          }}
+          onLog={() => setUpdLog([{ id: 0, name: t('common.panel') }])}
+          onReload={() => { selfHost.reload(); reload() }}
+        />
+      )}
 
       {!nodes.data ? <Loading error={nodes.error} /> : nodes.data.length === 0 ? <div className="card"><Empty icon="🛰" action={
         <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" />{' '}{t('nodes.add_a_server')}</button>
@@ -82,6 +93,7 @@ export function Nodes() {
             const st = nodeStateInfo[n.state] || { label: n.state, color: '' }
             const online = n.state === 'in sync' || n.state === 'syncing'
             const m = n.metrics
+            const certsSummary = summarizeCerts(n.certs)
             return (
               <div key={n.id} className="card">
                 <div className="card-head">
@@ -110,7 +122,12 @@ export function Nodes() {
                     </div>
                   </div>
                   <div className="row" style={{ gap: 6 }}>
-                    {updOf(n) && <UpdateChip n={updOf(n)!} latest={updates.data!.latest} onLog={() => setUpdLog({ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name })} />}
+                    {updOf(n) && <UpdateChip n={updOf(n)!} latest={updates.data!.latest} onLog={() => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name }])} />}
+                    {certsSummary && (
+                      <button type="button" className="chip-btn" onClick={() => setEditNode({ node: n, tab: 'certs' })} title={t('nodes.certs_title')}>
+                        <Badge color={certsSummary.color} dot>{certsSummary.label}</Badge>
+                      </button>
+                    )}
                     {n.setupStep > 0 && <Badge color="amber" dot>{t('nodes.without_profiles')}</Badge>}
                     <Badge color={st.color} dot>{st.label}</Badge>
                     {engineer && (
@@ -120,7 +137,8 @@ export function Nodes() {
                     )}
                     <Menu title={t('common.actions')} items={[
                       { label: t('nodes.check_connection_config_dns'), icon: 'search', onClick: () => setCheckOf(n) },
-                      { label: t('common.edit'), icon: 'edit', onClick: () => setEditNode(n) },
+                      { label: t('common.edit'), icon: 'edit', onClick: () => setEditNode({ node: n, tab: 'general' }) },
+                      ...(!n.manual ? [{ label: t('nodes.certs_title'), icon: 'shield', onClick: () => setEditNode({ node: n, tab: 'certs' }) }] : []),
                       { label: n.enabled ? t('nodes.node_turned_off') : t('nodes.node_turned_on'), icon: 'power', onClick: async () => {
                         if (n.enabled && !(await confirm(`${n.name}: ${t('nodes.node_turned_off')}?`, t('common.yes')))) return
                         act(() => patch(`nodes/${n.id}`, { enabled: !n.enabled }), !n.enabled ? t('nodes.node_turned_on') : t('nodes.node_turned_off')).then(reload)
@@ -135,7 +153,7 @@ export function Nodes() {
                           if (await confirm(n.local ? t('nodes.update_the_panel_and_the') : <><Trans k="nodes.update_the_node_it_will" v={{ name: n.name }} /></>, t('nodes.update'), false))
                             upd.run(n.local ? 'panel' : 'node', n.id)
                         } },
-                      { label: t('nodes.update_log'), icon: 'audit', onClick: () => setUpdLog({ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name }) },
+                      { label: t('nodes.update_log'), icon: 'audit', onClick: () => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name }]) },
                       { label: n.local ? t('nodes.restart_the_service_and_the') : t('nodes.restart_the_vynel_service'), icon: 'power', disabled: !online,
                         onClick: () => nodeAction(n, 'service', t('nodes.the_service_is_restarting'),
                           n.local ? t('nodes.restart_the_vynel_service_the') : t('nodes.restart_the_vynel_service_on'), t('nodes.restart')) },
@@ -250,9 +268,17 @@ export function Nodes() {
       {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setAdding(false); setJoin(j); reload() }} />}
       {join && <NodeSetup j={join} onClose={() => { setJoin(null); reload() }} onDone={(n) => { setJoin(null); setWizardOf(n); reload() }} />}
       {wizardOf && <NodeWizardModal node={wizardOf} profiles={profiles.data || []} onClose={() => { setWizardOf(null); reload() }} onProfilesChanged={profiles.reload} />}
-      {updLog && <UpdateLog id={updLog.id} name={updLog.name} onClose={() => { setUpdLog(null); updates.reload() }} />}
+      {updLog && updLog.length > 0 && <UpdateLog id={updLog[0].id} name={updLog[0].name} targets={updLog} onClose={() => { setUpdLog(null); updates.reload() }} />}
       {checkOf && <NodeSetup node={checkOf} onClose={() => { setCheckOf(null); reload() }} />}
-      {editNode && <EditNode n={editNode} onClose={() => setEditNode(null)} onSaved={() => { setEditNode(null); reload() }} />}
+      {editNode && (
+        <EditNode
+          n={nodes.data?.find((x) => x.id === editNode.node.id) || editNode.node}
+          initialTab={editNode.tab}
+          onClose={() => setEditNode(null)}
+          onSaved={() => { setEditNode(null); reload(); selfHost.reload() }}
+          onReload={() => { reload(); selfHost.reload() }}
+        />
+      )}
       {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}
       {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
       {configOf && <InboundEditor i={configOf} onClose={() => setConfigOf(null)} onSaved={reload} />}
@@ -260,9 +286,102 @@ export function Nodes() {
   )
 }
 
-// Карточка панели-хоста: этот сервер в списке нод, но без действий ноды.
-function SelfHostCard({ sh }: { sh: SelfHost }) {
-  const certOf = (d: string) => sh.certs.find((c) => c.domain === d)
+function certRoleLabel(role: string): string {
+  if (role === 'panel') return t('nodes.cert_role_panel')
+  if (role === 'sub') return t('nodes.cert_role_sub')
+  if (role === 'node') return t('nodes.cert_role_node')
+  return role
+}
+
+function certStatusBadge(c: CertInfo): { color: string; label: string } {
+  if (!c.ok) return { color: 'red', label: t('nodes.cert_missing') }
+  if (c.placeholder) return { color: 'amber', label: t('nodes.panel_cert_placeholder') }
+  if (c.daysLeft <= 7) return { color: 'red', label: t('nodes.cert_days_left', { n: Math.max(0, c.daysLeft) }) }
+  if (c.daysLeft < 30) return { color: 'amber', label: t('nodes.cert_days_left', { n: c.daysLeft }) }
+  return { color: 'green', label: t('nodes.cert_days_left', { n: c.daysLeft }) }
+}
+
+function summarizeCerts(certs?: CertInfo[]): { color: string; label: string } | null {
+  if (!certs || certs.length === 0) return null
+  const bad = certs.find((c) => !c.ok || c.placeholder)
+  if (bad) {
+    return { color: bad.ok ? 'amber' : 'red', label: bad.ok ? t('nodes.cert_badge_pending') : t('nodes.cert_badge_missing') }
+  }
+  const minDays = Math.min(...certs.map((c) => c.daysLeft))
+  const color = minDays <= 7 ? 'red' : minDays < 30 ? 'amber' : 'green'
+  return { color, label: t('nodes.cert_badge_days', { n: Math.max(0, minDays) }) }
+}
+
+function CertsList({ certs, canRenew, busyDomain, onRenew }: {
+  certs: CertInfo[]
+  canRenew: boolean
+  busyDomain: string | null
+  onRenew: (domain: string) => void
+}) {
+  if (certs.length === 0) {
+    return <div className="muted small">{t('nodes.certs_empty')}</div>
+  }
+  return (
+    <div className="cert-list">
+      {certs.map((c) => {
+        const st = certStatusBadge(c)
+        const busy = busyDomain === c.domain || busyDomain === '*'
+        return (
+          <div key={c.domain} className="cert-row">
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                <b className="mono">{c.domain}</b>
+                <Badge color={st.color} dot>{st.label}</Badge>
+                {(c.roles || []).map((r) => <span key={r} className="chip static">{certRoleLabel(r)}</span>)}
+              </div>
+              <div className="muted small cert-meta">
+                {c.ok && !c.placeholder && c.notAfter > 0 && (
+                  <>
+                    <Trans k="nodes.panel_cert_expires" v={{ v: new Date(c.notAfter * 1000).toLocaleDateString() }} />
+                    {c.issuer ? ` · ${c.issuer}` : ''}
+                  </>
+                )}
+                {c.ok && c.placeholder && t('nodes.cert_placeholder_hint')}
+                {!c.ok && t('nodes.cert_missing_hint')}
+              </div>
+              {c.lastError && (
+                <div className="small pink-text" style={{ marginTop: 4 }}>{c.lastError}</div>
+              )}
+            </div>
+            {canRenew && (
+              <button type="button" className="btn sm" disabled={busyDomain !== null} onClick={() => onRenew(c.domain)}>
+                {busy ? <span className="spinner" /> : <Icon name="refresh" />} {t('nodes.cert_reissue')}
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Карточка панели-хоста: этот сервер в списке нод, со своими сертификатами и обновлением (в panel-only режиме).
+function SelfHostCard({ sh, panelUpd, latest, onUpdate, onLog, onReload }: {
+  sh: SelfHost
+  panelUpd?: import('../api').UpdateNode
+  latest: string
+  onUpdate: () => void
+  onLog: () => void
+  onReload: () => void
+}) {
+  const act = useAction()
+  const confirm = useConfirm()
+  const [busyDomain, setBusyDomain] = useState<string | null>(null)
+
+  const renew = async (domain: string) => {
+    const label = domain || sh.domains.join(', ')
+    if (!(await confirm(t('nodes.cert_reissue_confirm', { v: label }), t('nodes.cert_reissue'), false))) return
+    setBusyDomain(domain || '*')
+    const r = await act(() => post('self-host/certs/renew', { domain }), t('nodes.cert_reissued'))
+    setBusyDomain(null)
+    if (r !== undefined) onReload()
+  }
+
   return (
     <div className="card">
       <div className="card-head">
@@ -276,27 +395,34 @@ function SelfHostCard({ sh }: { sh: SelfHost }) {
           </div>
         </div>
         <div className="row" style={{ gap: 6 }}>
+          {!sh.withNode && panelUpd && <UpdateChip n={panelUpd} latest={latest} onLog={onLog} />}
           {sh.withNode ? <Badge color="green" dot>{t('nodes.panel_with_node')}</Badge> : <Badge dot>{t('nodes.panel_without_node')}</Badge>}
+          {!sh.withNode && (
+            <Menu title={t('common.actions')} items={[
+              { label: panelUpd?.available ? t('nodes.update_to', { latest }) : t('nodes.update_vynel_xray_and_nginx'), icon: 'refresh', disabled: !!panelUpd?.updating, onClick: onUpdate },
+              { label: t('nodes.update_log'), icon: 'audit', onClick: onLog },
+            ]} />
+          )}
         </div>
       </div>
       <div className="card-pad">
         <div className="kv small" style={{ gridTemplateColumns: '110px 1fr' }}>
           <div className="k">{t('nodes.panel_version')}</div><div>v{sh.version}</div>
           <div className="k">{t('nodes.uptime')}</div><div>{uptime(sh.uptime)}</div>
-          {sh.domains.map((d) => {
-            const c = certOf(d)
-            return (
-              <div key={d} style={{ display: 'contents' }}>
-                <div className="k">{t('nodes.panel_certificate')}</div>
-                <div>
-                  {!c || !c.ok ? <span className="muted">{t('nodes.panel_cert_placeholder')}</span> :
-                    c.placeholder ? <>{d} — <span className="amber-text">{t('nodes.panel_cert_placeholder')}</span></> :
-                      <Trans k="nodes.panel_cert_expires" v={{ v: new Date(c.notAfter * 1000).toLocaleDateString() }} />}{c?.ok && !c.placeholder && c.issuer ? ` · ${c.issuer}` : ''}
-                </div>
-              </div>
-            )
-          })}
         </div>
+        {sh.certs.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="row between" style={{ marginBottom: 8 }}>
+              <span className="label">{t('nodes.certs_title')}</span>
+              {sh.renewSupported && sh.certs.length > 1 && (
+                <button type="button" className="btn sm ghost" disabled={busyDomain !== null} onClick={() => renew('')}>
+                  {busyDomain === '*' ? <span className="spinner" /> : <Icon name="refresh" />} {t('nodes.cert_reissue_all')}
+                </button>
+              )}
+            </div>
+            <CertsList certs={sh.certs} canRenew={!!sh.renewSupported} busyDomain={busyDomain} onRenew={renew} />
+          </div>
+        )}
         <div className="muted small" style={{ marginTop: 10 }}>{t('nodes.panel_hosts_the_web')}</div>
       </div>
     </div>
@@ -686,13 +812,27 @@ function NodeSetup({ j, node, onClose, onDone }: { j?: JoinInfo; node?: Node; on
   )
 }
 
-function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSaved: () => void }) {
+function EditNode({ n, initialTab = 'general', onClose, onSaved, onReload }: {
+  n: Node
+  initialTab?: 'general' | 'certs'
+  onClose: () => void
+  onSaved: () => void
+  onReload: () => void
+}) {
+  const [tab, setTab] = useState<'general' | 'certs'>(!n.manual && initialTab === 'certs' ? 'certs' : 'general')
   const [name, setName] = useState(n.name)
   const [country, setCountry] = useState(n.country)
   const [domain, setDomain] = useState(n.domain)
   const [providerId, setProviderId] = useState(n.provider?.id || 0)
+  const [busyDomain, setBusyDomain] = useState<string | null>(null)
+  const [liveCerts, setLiveCerts] = useState<CertInfo[] | null>(null)
   const providers = useLoad(() => get<{ providers: Provider[] }>('billing'))
   const act = useAction()
+  const confirm = useConfirm()
+  const certs = liveCerts ?? n.certs ?? []
+  const online = n.state === 'in sync' || n.state === 'syncing'
+  const canRenew = !n.manual && !!n.certsSupported && (n.local || online)
+
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const r = await act(async () => {
@@ -702,24 +842,73 @@ function EditNode({ n, onClose, onSaved }: { n: Node; onClose: () => void; onSav
     }, t('common.saved'))
     if (r !== undefined) onSaved()
   }
+
+  const renew = async (targetDomain: string) => {
+    const label = targetDomain || certs.map((c) => c.domain).join(', ')
+    if (!(await confirm(t('nodes.cert_reissue_confirm', { v: label }), t('nodes.cert_reissue'), false))) return
+    setBusyDomain(targetDomain || '*')
+    const r = await act(() => post<{ detail?: string; certs?: CertInfo[] }>(`nodes/${n.id}/certs/renew`, { domain: targetDomain }), t('nodes.cert_reissued'))
+    setBusyDomain(null)
+    if (r) {
+      if (r.certs) setLiveCerts(r.certs)
+      onReload()
+    }
+  }
+
   return (
-    <Modal title={t('nodes.node', { code: n.code })} onClose={onClose}
-      footer={<><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="edit-node">{t('common.save')}</button></>}>
-      <form id="edit-node" onSubmit={submit}>
-        <div className="grid2">
-          <Field label={t('common.name')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label={t('nodes.country_code')}><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} /></Field>
+    <Modal title={t('nodes.node', { code: n.code })} onClose={onClose} wide={tab === 'certs'}
+      footer={tab === 'general' ? (
+        <><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="edit-node">{t('common.save')}</button></>
+      ) : (
+        <>
+          {canRenew && certs.length > 1 && (
+            <button type="button" className="btn" disabled={busyDomain !== null} onClick={() => renew('')}>
+              {busyDomain === '*' ? <span className="spinner" /> : <Icon name="refresh" />} {t('nodes.cert_reissue_all')}
+            </button>
+          )}
+          <button className="btn primary" onClick={onClose}>{t('common.close')}</button>
+        </>
+      )}>
+      {!n.manual && (
+        <Tabs
+          value={tab}
+          onChange={(v) => setTab(v as 'general' | 'certs')}
+          items={[
+            { id: 'general', label: t('nodes.tab_general') },
+            { id: 'certs', label: t('nodes.certs_title'), count: certs.length },
+          ]}
+        />
+      )}
+      {tab === 'general' ? (
+        <form id="edit-node" onSubmit={submit}>
+          <div className="grid2">
+            <Field label={t('common.name')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+            <Field label={t('nodes.country_code')}><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} /></Field>
+          </div>
+          <Field label={t('nodes.domain')} info={t('nodes.changing_the_domain_changes')}>
+            <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} />
+          </Field>
+          <Field label={t('common.provider')} help={<><Trans k="nodes.price_payment_and_traffic_limit" v={{ v: <a href="#/billing" onClick={onClose}>{t('nodes.billing')}</a> }} /></>}>
+            <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
+              <option value={0}>{t('common.not_set')}</option>
+              {(providers.data?.providers || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </Field>
+        </form>
+      ) : (
+        <div>
+          {!n.certsSupported && (
+            <div className="alert amber" style={{ marginBottom: 14 }}>{t('nodes.certs_update_node_hint')}</div>
+          )}
+          {n.certsSupported && !n.local && !online && (
+            <div className="alert amber" style={{ marginBottom: 14 }}>{t('nodes.certs_offline_hint')}</div>
+          )}
+          <CertsList certs={certs} canRenew={canRenew} busyDomain={busyDomain} onRenew={renew} />
+          {certs.length > 0 && (
+            <div className="muted small" style={{ marginTop: 12 }}>{t('nodes.certs_le_rate_hint')}</div>
+          )}
         </div>
-        <Field label={t('nodes.domain')} info={t('nodes.changing_the_domain_changes')}>
-          <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} />
-        </Field>
-        <Field label={t('common.provider')} help={<><Trans k="nodes.price_payment_and_traffic_limit" v={{ v: <a href="#/billing" onClick={onClose}>{t('nodes.billing')}</a> }} /></>}>
-          <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
-            <option value={0}>{t('common.not_set')}</option>
-            {(providers.data?.providers || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </Field>
-      </form>
+      )}
     </Modal>
   )
 }

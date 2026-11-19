@@ -4,7 +4,7 @@ import { CascadeList } from '../extras'
 import { RoutingForm } from '../routing'
 import { CodeEditor, parseObject, pretty, placeholderPositions } from '../code'
 import { blankStarter, templateStarter } from '../templateStarter'
-import { Badge, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad, useRangeSelection } from '../ui'
 import { t as tr, Trans } from '../i18n'
 import { useAdvanced } from '../mode'
 import { Link, LinkProvider, Linked, pathsWith, useActiveLink } from '../jsonlink'
@@ -116,6 +116,8 @@ function ApplyToNodes({ profile, onClose, onDone }: { profile: Profile; onClose:
 
   // Free nodes: the profile is not on them yet; the rest would be skipped anyway.
   const free = nodes.data.filter((n) => !n.inbounds.some((i) => i.profileId === profile.id))
+  const freeIds = free.map((n) => n.id)
+  const { toggleItem } = useRangeSelection(freeIds, picked, setPicked)
   const withoutDomain = free.filter((n) => !n.domain && picked.includes(n.id))
   const done = result?.results || []
   const okN = done.filter((r) => r.tag).length
@@ -135,13 +137,14 @@ function ApplyToNodes({ profile, onClose, onDone }: { profile: Profile; onClose:
       {free.length === 0 ? <div className="muted">{tr('profiles.no_fit_nodes')}</div> : (
         <>
           <div className="label" style={{ marginBottom: 8 }}>{tr('profiles.pick_nodes')}</div>
-          {free.map((n) => (
-            <label key={n.id} className="check">
-              <input type="checkbox" checked={picked.includes(n.id)}
-                onChange={(e) => setPicked(e.target.checked ? [...picked, n.id] : picked.filter((x) => x !== n.id))} />
-              {n.name} <span className="muted small">({n.code})</span>{!n.domain && <span className="amber-text small"> — {tr('nodes.no_domain')}</span>}
-            </label>
-          ))}
+          <div className="check-list">
+            {free.map((n) => (
+              <label key={n.id} className="check" onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }} onClick={(e) => { e.preventDefault(); toggleItem(n.id, e.shiftKey) }}>
+                <input type="checkbox" checked={picked.includes(n.id)} onChange={() => {}} />
+                {n.name} <span className="muted small">({n.code})</span>{!n.domain && <span className="amber-text small"> — {tr('nodes.no_domain')}</span>}
+              </label>
+            ))}
+          </div>
         </>
       )}
     </>
@@ -222,7 +225,7 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
   }
 
   return (
-    <Modal title={tr('profiles.new_profile')} onClose={onClose}
+    <Modal title={tr('profiles.new_profile')} onClose={onClose} wide
       footer={step === 1 ? (
         <><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
         <button className="btn primary" disabled={!name.trim() || !templateId} onClick={() => setStep(2)}>{tr('common.next')}</button></>
@@ -233,7 +236,7 @@ function CreateProfile({ tpls, onClose, onCreated }: { tpls: ProfileTemplate[]; 
       {step === 1 ? (
         <>
           <Field label={tr('profiles.what_kind_of_access')} help={tr('profiles.the_template_determines_the_protocol')}>
-            <div className="cards cols" style={{ marginTop: 4 }}>
+            <div className="preset-grid" style={{ marginTop: 4 }}>
               {usable.map((x) => (
                 <div key={x.id} className={'card clickable tpl-pick' + (x.id === templateId ? ' selected' : '')} onClick={() => pick(x.id, x.title)}>
                   <div className="card-pad">
@@ -673,10 +676,10 @@ function TemplateList() {
 // пустой каркас или импорт из Remnawave.
 function PresetDialog({ tpls, onStarter, onBlank, onBuiltin, onImport, onClose }: { tpls: ProfileTemplate[]; onStarter: () => void; onBlank: () => void; onBuiltin: (t: ProfileTemplate) => () => void; onImport: () => void; onClose: () => void }) {
   return (
-    <Modal title={tr('common.new_template')} onClose={onClose}
+    <Modal title={tr('common.new_template')} onClose={onClose} wide
       footer={<><button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button><button className="btn primary" onClick={onBlank}>{tr('profiles.empty_skeleton')}</button></>}>
       <p className="muted" style={{ marginBottom: 14 }}>{tr('profiles.choose_what_the_new')}</p>
-      <div className="cards cols">
+      <div className="preset-grid">
         {tpls.map((t) => (
           <div key={t.id} className="card clickable" onClick={onBuiltin(t)}>
             <div className="card-head">
@@ -793,7 +796,7 @@ function RemnawaveImport({ onClose, onImported }: { onClose: () => void; onImpor
   const hostErr = fieldError(host)
   const badJson = !!xrayErr || !!hostErr
   return (
-    <Modal title={tr('profiles.import_from_remnawave')} onClose={onClose}
+    <Modal title={tr('profiles.import_from_remnawave')} onClose={onClose} wide
       footer={<>
         {result && !result.ok && <span className="pink-text small grow" style={{ whiteSpace: 'pre-wrap' }}>{result.error}</span>}
         <button className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>

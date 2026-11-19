@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/vyto4ka/vynel/internal/certs"
 	"github.com/vyto4ka/vynel/internal/node/caddy"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
 	"github.com/vyto4ka/vynel/internal/node/metrics"
@@ -78,7 +80,7 @@ type Config struct {
 	Update func(ctx context.Context, release, ref string) error
 	// UpdateStatus reports how the last update went. Default: update.LocalStatus.
 	UpdateStatus func() *update.Status
-	// UpdateEvery is how often a running update is reported, default 2s.
+	// UpdateEvery is how often a running update is reported, default 1s.
 	UpdateEvery time.Duration
 	// FactsInterval is how often sysctl/NTP warnings and nginx version are re-checked and sent
 	// to the panel when they change, default 15s.
@@ -96,22 +98,23 @@ type Agent struct {
 	caddy *caddy.Manager
 	nginx *nginx.Manager
 
-	mu       sync.Mutex
-	cur      *state.State
-	api      *xray.API
-	apiAddr  string
-	xrayVer  string
-	caddyVer string
-	nginxVer string
-	warnings []string
-	metrics  metrics.Collector
-	statsCh  chan struct{} // a batch was queued
-	certKick chan struct{} // a new web config may need certificates: issue now, not at the next tick
-	certs    *certBridge
-	certDoms []string // domains whose certificates the running Xray config uses
-	caddyCfg []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
-	nginxCfg string   // the config nginx runs now; only one of the two web servers runs
-	vpnIPs   []string // addresses of connected VPN users, trusted by the firewall
+	mu           sync.Mutex
+	cur          *state.State
+	api          *xray.API
+	apiAddr      string
+	xrayVer      string
+	caddyVer     string
+	nginxVer     string
+	warnings     []string
+	metrics      metrics.Collector
+	statsCh      chan struct{} // a batch was queued
+	certKick     chan struct{} // a new web config may need certificates: issue now, not at the next tick
+	certReportCh chan struct{} // certificate statuses changed: push a CertStatusReport to the panel
+	certs        *certBridge
+	certDoms     []string // domains whose certificates the running Xray config uses
+	caddyCfg     []byte   // the config Caddy runs now (it may be ahead of a.cur when Xray fails)
+	nginxCfg     string   // the config nginx runs now; only one of the two web servers runs
+	vpnIPs       []string // addresses of connected VPN users, trusted by the firewall
 	// online is the last reading of who is connected from where (onlineLoop): the panel's
 	// limit of addresses and the stats batches both use it, so Xray is asked once.
 	online   *nodev1.OnlineIPs
@@ -152,7 +155,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg.UpdateStatus = update.LocalStatus
 	}
 	if cfg.UpdateEvery == 0 {
-		cfg.UpdateEvery = 2 * time.Second
+		cfg.UpdateEvery = time.Second
 	}
 	if cfg.FactsInterval == 0 {
 		cfg.FactsInterval = 15 * time.Second
@@ -179,7 +182,7 @@ func New(cfg Config) (*Agent, error) {
 		caddy: &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")},
 		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, Log: cfg.Log.With("component", "nginx"),
 			CaddyStorage: filepath.Join(web, "caddy", "caddy")},
-		statsCh: make(chan struct{}, 1), certKick: make(chan struct{}, 1)}
+		statsCh: make(chan struct{}, 1), certKick: make(chan struct{}, 1), certReportCh: make(chan struct{}, 1)}
 	if !cfg.Manual {
 		if err := a.nginx.Init(); err != nil {
 			st.Close()
@@ -188,8 +191,9 @@ func New(cfg Config) (*Agent, error) {
 		a.certs = newCertBridge(cfg.DataDir, a.nginx.Certs.Dir, a.nginx.DecoyDir())
 		a.nginx.OnCerts = func() {
 			a.mu.Lock()
-			defer a.mu.Unlock()
 			a.syncCertsLocked(context.Background())
+			a.mu.Unlock()
+			a.notifyCerts()
 		}
 	} else {
 		// A manual node runs no web server of its own: nginx and certificates are the admin's.
@@ -266,9 +270,77 @@ func (a *Agent) buildHello() *nodev1.Hello {
 	}
 	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit)
 	if !a.cfg.Manual && nginxVer != "" {
-		hello.Capabilities = append(hello.Capabilities, CapNginx)
+		hello.Capabilities = append(hello.Capabilities, CapNginx, CapCerts)
 	}
 	return hello
+}
+
+// CapCerts is the capability of agents that report certificate statuses and accept ACTION_RENEW_CERTS.
+const CapCerts = "certs"
+
+func (a *Agent) notifyCerts() {
+	select {
+	case a.certReportCh <- struct{}{}:
+	default:
+	}
+}
+
+// CertStatus reads the status of a single domain certificate from this node's nginx manager.
+func (a *Agent) CertStatus(domain string) (certs.Status, bool) {
+	if a == nil || a.nginx == nil || a.nginx.Certs == nil {
+		return certs.Status{}, false
+	}
+	st, err := a.nginx.Certs.Status(domain)
+	return st, err == nil
+}
+
+// CertStatuses returns the statuses of all certificate domains managed by this node.
+func (a *Agent) CertStatuses() []certs.Status {
+	if a == nil || a.nginx == nil {
+		return nil
+	}
+	return a.nginx.CertStatuses()
+}
+
+// ForceRenewCerts force-renews certificates for domain (or all configured domains when empty),
+// reloads nginx gracefully, syncs Xray certificates and notifies the panel.
+func (a *Agent) ForceRenewCerts(ctx context.Context, domain string) ([]string, error) {
+	if a == nil || a.cfg.Manual || a.nginx == nil {
+		return nil, errors.New("a manual node runs no managed web server")
+	}
+	done, err := a.nginx.ForceRenewCerts(ctx, domain)
+	a.mu.Lock()
+	if a.certs != nil {
+		a.syncCertsLocked(ctx)
+	}
+	a.mu.Unlock()
+	a.notifyCerts()
+	return done, err
+}
+
+func (a *Agent) certReport() *nodev1.CertStatusReport {
+	sts := a.CertStatuses()
+	if len(sts) == 0 {
+		return nil
+	}
+	rep := &nodev1.CertStatusReport{Certs: make([]*nodev1.CertInfo, 0, len(sts))}
+	for _, st := range sts {
+		ci := &nodev1.CertInfo{
+			Domain:      st.Domain,
+			Issuer:      st.Issuer,
+			Placeholder: st.Placeholder,
+			Ok:          !st.NotAfter.IsZero(),
+			LastError:   st.LastError,
+		}
+		if !st.NotAfter.IsZero() {
+			ci.NotAfter = st.NotAfter.Unix()
+		}
+		if !st.RetryAt.IsZero() {
+			ci.RetryAt = st.RetryAt.Unix()
+		}
+		rep.Certs = append(rep.Certs, ci)
+	}
+	return rep
 }
 
 // Run starts Xray from the saved state and keeps a session with the panel until ctx ends.
@@ -387,7 +459,7 @@ func (a *Agent) session(ctx context.Context) error {
 		return err
 	}
 	// The last update's outcome on every connect (a node restarted by its own update reports how
-	// it ended), then every few seconds while one runs.
+	// it ended), then every second while one runs.
 	var lastUpd *nodev1.UpdateStatus
 	var watchUntil time.Time // right after an update command its "running" record may not be there yet
 	watching := false
@@ -407,6 +479,21 @@ func (a *Agent) session(ctx context.Context) error {
 	if err := sendUpdate(); err != nil {
 		return err
 	}
+	var lastCerts *nodev1.CertStatusReport
+	sendCerts := func() error {
+		rep := a.certReport()
+		if rep == nil {
+			return nil
+		}
+		if lastCerts != nil && proto.Equal(lastCerts, rep) {
+			return nil
+		}
+		lastCerts = rep
+		return conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Certs{Certs: rep}})
+	}
+	if err := sendCerts(); err != nil {
+		return err
+	}
 	updTick := time.NewTicker(a.cfg.UpdateEvery)
 	defer updTick.Stop()
 	onlineTick := time.NewTicker(a.cfg.OnlineInterval)
@@ -416,6 +503,9 @@ func (a *Agent) session(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			if watching {
+				_ = sendUpdate()
+			}
 			return ctx.Err()
 		case <-factsTick.C:
 			if a.refreshFacts(ctx) {
@@ -439,6 +529,10 @@ func (a *Agent) session(ctx context.Context) error {
 				if err := sendUpdate(); err != nil {
 					return err
 				}
+			}
+		case <-a.certReportCh:
+			if err := sendCerts(); err != nil {
+				return err
 			}
 		case err := <-errs:
 			return err
@@ -465,6 +559,14 @@ func (a *Agent) session(ctx context.Context) error {
 				}
 				if c.Command.Action == nodev1.Command_ACTION_UPDATE && res.Error == "" {
 					watching, watchUntil = true, time.Now().Add(30*time.Second)
+					if err := sendUpdate(); err != nil {
+						return err
+					}
+				}
+				if c.Command.Action == nodev1.Command_ACTION_RENEW_CERTS {
+					if err := sendCerts(); err != nil {
+						return err
+					}
 				}
 				if after != nil {
 					// The answer reaches the panel first; then the service goes down.
@@ -558,6 +660,12 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 	case nodev1.Command_ACTION_UPDATE:
 		if err = a.cfg.Update(ctx, c.Release, c.Ref); err == nil {
 			res.Detail = "the update is running"
+		}
+	case nodev1.Command_ACTION_RENEW_CERTS:
+		var done []string
+		done, err = a.ForceRenewCerts(ctx, c.Domain)
+		if len(done) > 0 {
+			res.Detail = strings.Join(done, ", ")
 		}
 	case nodev1.Command_ACTION_REBOOT:
 		res.Detail = "the server reboots now"
@@ -667,6 +775,7 @@ func (a *Agent) applyWebLocked(ctx context.Context, caddyCfg []byte, nginxCfg st
 			return fmt.Errorf("nginx: %w", err)
 		}
 		a.caddyCfg, a.nginxCfg = nil, nginxCfg
+		a.notifyCerts()
 		// A new site waits for its certificate: ask for it now (the periodic check is a minute).
 		select {
 		case a.certKick <- struct{}{}:
@@ -927,20 +1036,20 @@ func (a *Agent) certLoop(ctx context.Context) {
 		a.mu.Lock()
 		a.syncCertsLocked(ctx)
 		a.mu.Unlock()
+		a.notifyCerts()
 	}
 }
 
 func (a *Agent) syncCertsLocked(ctx context.Context) {
 	restart := false
 	for _, d := range a.certDoms {
-		was := a.certs.pending(d)
 		changed, err := a.certs.sync(d)
 		if err != nil {
 			a.log.Warn("cannot sync certificate", "domain", d, "err", err)
 			continue
 		}
-		if changed && was && !a.certs.pending(d) {
-			a.log.Info("certificate issued, restarting xray", "domain", d)
+		if changed && !a.certs.pending(d) {
+			a.log.Info("certificate updated, restarting xray", "domain", d)
 			restart = true
 		}
 	}

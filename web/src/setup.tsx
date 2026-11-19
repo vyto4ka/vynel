@@ -4,16 +4,16 @@ import { Icon, useAction, useLoad } from './ui'
 import { t } from './i18n'
 import { isMigrant, useEngineer } from './mode'
 
-// SetupChecklist — ведущий чеклист на дашборде, пока панель не настроена:
-// сервер → доступ → пользователь → ссылка. Для мигранта шаги 2–4 заменяются переносом.
+// SetupChecklist — ведущий чеклист на дашборде, пока серверной статистике меньше 1 суток.
 // Скрывается кнопкой «Свернуть»; состояние свёртки — в localStorage.
-export function SetupChecklist() {
+export function SetupChecklist({ showWelcome }: { showWelcome?: boolean }) {
   const standard = useEngineer()
-  const nodes = useLoad(() => get<Node[]>('nodes'), [], 15000)
-  const usersTotal = useLoad(() => get<{ total: number }>('users?limit=1'), [], 20000)
   const [dismissed, setDismissed] = useState(loadDismissed)
+  const nodes = useLoad(() => (showWelcome ? get<Node[]>('nodes') : Promise.resolve(null)), [showWelcome], showWelcome ? 15000 : 0)
+  const usersTotal = useLoad(() => (showWelcome ? get<{ total: number }>('users?limit=1') : Promise.resolve(null)), [showWelcome], showWelcome ? 20000 : 0)
   const act = useAction()
 
+  if (!showWelcome || dismissed) return null
   if (!nodes.data || !usersTotal.data) return null
   const list = nodes.data
   const hasNode = list.length > 0
@@ -34,7 +34,6 @@ export function SetupChecklist() {
       ]
 
   const doneAll = steps.every((s) => s.done)
-  if (doneAll && dismissed) return null
 
   const runAuto = async () => {
     const target = list.filter((n) => n.enabled && n.domain)
@@ -50,7 +49,7 @@ export function SetupChecklist() {
           <h3>{doneAll ? t('setup.all_done') : t('setup.title')}</h3>
           <div className="card-sub">{migrant ? t('setup.sub_migrant') : t('setup.sub')}</div>
         </div>
-        {doneAll && <button className="btn sm ghost" onClick={() => { saveDismissed(); setDismissed(true) }}>{t('setup.collapse')}</button>}
+        <button className="btn sm ghost" onClick={() => { saveDismissed(); setDismissed(true) }}>{t('setup.collapse')}</button>
       </div>
       <div className="card-pad setup-steps">
         {steps.map((s, i) => (

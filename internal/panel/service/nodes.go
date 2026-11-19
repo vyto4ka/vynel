@@ -370,6 +370,7 @@ func (s *Service) Node(ctx context.Context, id int64) (*store.Node, error) {
 var NodeActions = map[string]string{
 	"xray": "перезапустить Xray", "caddy": "перезапустить веб-сервер", "resync": "отправить конфиг заново",
 	"service": "перезапустить службу vynel", "reboot": "перезагрузить сервер", "update": "обновить vynel, Xray и nginx",
+	"certs": "перевыпустить сертификаты",
 }
 
 // LogNodeAction records an admin action on a node in the audit log.
@@ -379,6 +380,12 @@ func (s *Service) LogNodeAction(ctx context.Context, actor Actor, nodeID int64, 
 	}
 	return s.mutate(ctx, change{actor: actor, action: "node.action", entity: "node", entityID: func() int64 { return nodeID },
 		diff: map[string]string{"action": action, "result": result}}, func(store.DBTX) error { return nil })
+}
+
+// LogPanelAction records an admin action on the panel itself (update, cert renewal) in the audit log.
+func (s *Service) LogPanelAction(ctx context.Context, actor Actor, action, result string) error {
+	return s.mutate(ctx, change{actor: actor, action: "panel." + action, entity: "panel",
+		diff: map[string]string{"result": result}}, func(store.DBTX) error { return nil })
 }
 
 // NodeByCode loads a node by code.

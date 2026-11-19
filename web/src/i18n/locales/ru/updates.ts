@@ -11,7 +11,6 @@ export default {
   no_update_is_running_now: 'Сейчас обновление не идёт. Ниже — лог последнего.',
   nothing_to_update_everything: 'Обновлять нечего: всё уже на свежей версии',
   outdated_vynel_xray_and_nginx: 'Устарели: {what}. Обновятся vynel, Xray и nginx, данные сохранятся.',
-  panel: 'Панель',
   restarting: 'перезапускается',
   restarting_services: 'Перезапуск служб',
   show_update_log: 'Показать лог обновления',
@@ -32,4 +31,5 @@ export default {
   version_full_log_on_the: 'Версия: {v}. Полный лог на сервере: <code>/var/log/vynel-update.log</code>, ход по шагам: <code>journalctl -u vynel-update -f</code>',
   waiting_for_the_first_log: 'Ждём первые строки лога…',
   command_sent_to: 'Команда обновления отправлена: {v}',
+  reload_page: 'Обновить страницу',
 }

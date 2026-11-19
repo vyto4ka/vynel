@@ -23,6 +23,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/service"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 	"github.com/vyto4ka/vynel/internal/update"
 	"github.com/vyto4ka/vynel/web"
 )
@@ -40,6 +41,10 @@ type Config struct {
 	NodeAction func(ctx context.Context, nodeID int64, action string) (detail string, err error)
 	// UpdateStatus is what a node last reported about its update; nil = never reports.
 	UpdateStatus func(nodeID int64) *update.Status
+	// CertStatus is what a node last reported about its TLS certificates; nil = unavailable.
+	CertStatus func(nodeID int64) []*nodev1.CertInfo
+	// RenewCerts force-renews TLS certificates on a connected node (empty domain = all).
+	RenewCerts func(ctx context.Context, nodeID int64, domain string) (detail string, err error)
 	// XrayTest lets the Xray binary of this server read a config (`xray run -test`); nil = this
 	// server has none, and the «Xray» page checks the structure only.
 	XrayTest func(ctx context.Context, cfg []byte) error

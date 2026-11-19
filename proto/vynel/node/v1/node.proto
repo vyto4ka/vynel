@@ -37,7 +37,23 @@ message NodeMessage {
     CommandResult result = 5;
     UpdateStatus update = 6;
     OnlineIPs online_ips = 7;
+    CertStatusReport certs = 8;
   }
+}
+
+// CertStatusReport reports the TLS certificates managed by the node's web server (nginx/certs).
+message CertStatusReport {
+  repeated CertInfo certs = 1;
+}
+
+message CertInfo {
+  string domain = 1;
+  string issuer = 2;
+  int64 not_after = 3;   // unix seconds
+  bool placeholder = 4;  // temporary self-signed until ACME succeeds
+  bool ok = 5;           // certificate file is present and readable
+  string last_error = 6; // last ACME error, empty when healthy
+  int64 retry_at = 7;    // unix seconds of next scheduled retry (0 = none)
 }
 
 // OnlineIPs is who is connected right now and from where, sent every few seconds by agents
@@ -122,6 +138,7 @@ message Command {
     ACTION_RESTART_AGENT = 3; // restart the vynel service (systemd starts it again)
     ACTION_REBOOT = 4;        // reboot the server
     ACTION_UPDATE = 5;        // update vynel, Xray and nginx (`vynel update`, in the background)
+    ACTION_RENEW_CERTS = 6;   // force-renew TLS certificates (all or one domain)
   }
   string id = 1;
   Action action = 2;
@@ -130,6 +147,8 @@ message Command {
   // (an older panel): the node updates from its own release.
   string release = 3;
   string ref = 4;
+  // ACTION_RENEW_CERTS: domain to force-renew; empty = all certificate domains of the node.
+  string domain = 5;
 }
 
 // CommandResult answers a Command. For a service restart or reboot it is sent before acting.
