@@ -11,7 +11,7 @@ export function Overview() {
   const u = data.users
   return (
     <>
-      <SetupChecklist />
+      <SetupChecklist showWelcome={data.showWelcome} />
       <UpdateBanner />
       <div className="stats">
         <div className="card stat">

@@ -53,9 +53,11 @@ type Manager struct {
 	HTTPClient   *http.Client
 	Log          *slog.Logger
 
-	mu    sync.Mutex
-	retry map[string]time.Time // domain -> earliest next attempt after a failure
-	fails map[string]int
+	renewMu sync.Mutex // serializes ACME renewals across periodic and manual force-renew calls
+	mu      sync.Mutex
+	retry   map[string]time.Time // domain -> earliest next attempt after a failure
+	fails   map[string]int
+	lastErr map[string]string // domain -> last renewal error
 }
 
 // Paths returns the certificate and key files of a domain.
@@ -98,12 +100,18 @@ type Status struct {
 	Placeholder bool
 	Issuer      string
 	NotAfter    time.Time
+	LastError   string
+	RetryAt     time.Time
 }
 
-// Status reads the certificate of a domain.
+// Status reads the certificate of a domain and attaches the latest renewal error/backoff if any.
 func (m *Manager) Status(domain string) (Status, error) {
 	cert, _ := m.Paths(domain)
 	st := Status{Domain: domain}
+	m.mu.Lock()
+	st.LastError = m.lastErr[domain]
+	st.RetryAt = m.retry[domain]
+	m.mu.Unlock()
 	c, err := readCert(cert)
 	if err != nil {
 		return st, err
@@ -130,30 +138,52 @@ func (m *Manager) Due(domain string, now time.Time) bool {
 // Renew issues certificates for the domains that are due and returns the renewed ones. A
 // failure postpones that domain (1 min doubling up to 6 h) and is returned joined with others.
 func (m *Manager) Renew(ctx context.Context, domains []string, email, issuer string) ([]string, error) {
+	return m.renew(ctx, domains, email, issuer, false)
+}
+
+// ForceRenew immediately re-issues certificates for all given domains regardless of their expiry
+// or backoff. Existing certificates on disk stay intact until the new certificate is stored.
+func (m *Manager) ForceRenew(ctx context.Context, domains []string, email, issuer string) ([]string, error) {
+	return m.renew(ctx, domains, email, issuer, true)
+}
+
+func (m *Manager) renew(ctx context.Context, domains []string, email, issuer string, force bool) ([]string, error) {
+	m.renewMu.Lock()
+	defer m.renewMu.Unlock()
 	now := time.Now()
 	var done []string
 	var errs []error
 	for _, d := range domains {
-		if !m.Due(d, now) {
-			continue
-		}
-		m.mu.Lock()
-		next := m.retry[d]
-		m.mu.Unlock()
-		if now.Before(next) {
-			continue
+		if !force {
+			if !m.Due(d, now) {
+				continue
+			}
+			m.mu.Lock()
+			next := m.retry[d]
+			m.mu.Unlock()
+			if now.Before(next) {
+				continue
+			}
+		} else {
+			m.mu.Lock()
+			delete(m.retry, d)
+			delete(m.fails, d)
+			m.mu.Unlock()
 		}
 		var err error
 		start := time.Now()
 		if issuer == "internal" {
 			err = m.issueInternal(d)
 		} else {
-			m.log().Info("certificate: asking Let's Encrypt", "domain", d)
+			m.log().Info("certificate: asking Let's Encrypt", "domain", d, "force", force)
 			err = m.issueACME(ctx, d, email)
 		}
 		m.mu.Lock()
 		if m.retry == nil {
-			m.retry, m.fails = map[string]time.Time{}, map[string]int{}
+			m.retry, m.fails, m.lastErr = map[string]time.Time{}, map[string]int{}, map[string]string{}
+		}
+		if m.lastErr == nil {
+			m.lastErr = map[string]string{}
 		}
 		if err != nil {
 			m.fails[d]++
@@ -162,12 +192,14 @@ func (m *Manager) Renew(ctx context.Context, domains []string, email, issuer str
 				wait = 6 * time.Hour
 			}
 			m.retry[d] = now.Add(wait)
+			m.lastErr[d] = err.Error()
 			errs = append(errs, fmt.Errorf("%s: %w", d, err))
 			m.log().Warn("certificate: failed", "domain", d, "after", time.Since(start).Round(time.Second), "next_try_in", wait, "err", err)
 		} else {
 			m.log().Info("certificate: issued", "domain", d, "took", time.Since(start).Round(time.Second))
 			delete(m.retry, d)
 			delete(m.fails, d)
+			delete(m.lastErr, d)
 			done = append(done, d)
 		}
 		m.mu.Unlock()
@@ -178,7 +210,7 @@ func (m *Manager) Renew(ctx context.Context, domains []string, email, issuer str
 // Retry clears the failure back-off, e.g. after the config changed.
 func (m *Manager) Retry() {
 	m.mu.Lock()
-	m.retry, m.fails = nil, nil
+	m.retry, m.fails, m.lastErr = nil, nil, nil
 	m.mu.Unlock()
 }
 

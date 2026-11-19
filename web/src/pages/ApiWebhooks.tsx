@@ -104,7 +104,7 @@ function HookForm({ d, hook, onClose, onSaved }: { d: Integrations; hook: Webhoo
   }
   return (
     <Modal title={hook ? t('integrations.edit_webhook', { name: hook.name }) : t('integrations.add_webhook')} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>{t('integrations.cancel')}</button><button className="btn primary" disabled={!name.trim() || !url.trim()} onClick={save}>{hook ? t('integrations.save') : t('integrations.add_webhook')}</button></>}>
+      footer={<><button className="btn ghost" onClick={onClose}>{t('integrations.cancel')}</button><button className="btn primary" disabled={!name.trim() || !url.trim()} onClick={save}>{hook ? t('integrations.save') : t('integrations.add_webhook')}</button></>}>
       <Field label={t('integrations.f_name')}>
         <input className="input" value={name} maxLength={64} autoFocus onChange={(e) => setName(e.target.value)} />
       </Field>

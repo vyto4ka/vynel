@@ -19,6 +19,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
 	"github.com/vyto4ka/vynel/internal/panel/usertransfer"
+	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
@@ -65,6 +66,7 @@ func (s *Server) routes() {
 
 	s.handle("GET /api/nodes", s.nodes)
 	s.handle("GET /api/self-host", s.selfHost)
+	s.handle("POST /api/self-host/certs/renew", s.renewSelfCerts)
 	s.handle("POST /api/nodes", s.createNode)
 	s.handle("PATCH /api/nodes/{id}", s.updateNode)
 	s.handle("DELETE /api/nodes/{id}", s.deleteNode)
@@ -73,6 +75,7 @@ func (s *Server) routes() {
 	s.handle("GET /api/nodes/{id}/wizard", s.nodeWizard)
 	s.handle("POST /api/nodes/{id}/confirm-requirements", s.confirmRequirements)
 	s.handle("POST /api/nodes/{id}/action", s.nodeAction)
+	s.handle("POST /api/nodes/{id}/certs/renew", s.renewNodeCerts)
 	s.handle("GET /api/updates", s.getUpdates)
 	s.handle("POST /api/updates/check", s.checkUpdates)
 	s.handle("POST /api/updates/run", s.runUpdates)
@@ -167,8 +170,10 @@ type Node struct {
 	Addresses    []Address `json:"addresses"`
 	// SetupStep is the node's place in the setup wizard: 0 = finished, 2 = choose profiles,
 	// 3 = node variables, 4 = requirements. -1 = unknown (the step could not be computed).
-	SetupStep int       `json:"setupStep"`
-	Provider  *Provider `json:"provider"` // where the node is rented, nil = not set
+	SetupStep      int                `json:"setupStep"`
+	Provider       *Provider          `json:"provider"` // where the node is rented, nil = not set
+	Certs          []service.SelfCert `json:"certs,omitempty"`
+	CertsSupported bool               `json:"certsSupported,omitempty"`
 }
 
 // Metrics are the latest host numbers of a node.
@@ -238,8 +243,9 @@ func (s *Server) session(r *http.Request) (any, error) {
 	hwid, _ := s.svc.Setting(ctx, service.SettingHWIDLimit, "0")
 	hwidDefault, _ := strconv.Atoi(hwid)
 	miniAppFS, _ := s.svc.Setting(ctx, service.SettingBotMiniAppFullscreen, "false")
+	showWelcome, _ := s.svc.ShowWelcome(ctx)
 	return map[string]any{"login": login, "method": s.svc.WebSessionMethod(ctx, current(r).ID), "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase,
-		"ipDefault": s.svc.IPLimitOf(ctx, &store.User{}), "hwidDefault": hwidDefault, "miniAppFullscreen": miniAppFS == "true"}, nil
+		"ipDefault": s.svc.IPLimitOf(ctx, &store.User{}), "hwidDefault": hwidDefault, "miniAppFullscreen": miniAppFS == "true", "showWelcome": showWelcome}, nil
 }
 
 // sessionPing: the open page says it is alive every half a minute, and whether the admin did
@@ -322,11 +328,12 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		top = append(top, map[string]any{"id": t.UserID, "username": t.Username, "bytes": t.Bytes})
 	}
 	url, _ := s.svc.WebURL(ctx)
+	showWelcome, _ := s.svc.ShowWelcome(ctx)
 	return map[string]any{
 		"users": map[string]int{"total": total, "active": o.UsersByStatus[store.StatusActive], "limited": o.UsersByStatus[store.StatusLimited],
 			"expired": o.UsersByStatus[store.StatusExpired], "disabled": o.UsersByStatus[store.StatusDisabled]},
 		"onlineNow": o.OnlineNow, "todayBytes": o.TodayBytes, "monthBytes": o.MonthBytes, "topUsers": top,
-		"daily": dailyDTO(daily), "nodes": nodes, "webUrl": url, "version": s.cfg.Version,
+		"daily": dailyDTO(daily), "nodes": nodes, "webUrl": url, "version": s.cfg.Version, "showWelcome": showWelcome,
 	}, nil
 }
 
@@ -838,6 +845,80 @@ func (s *Server) selfHost(r *http.Request) (any, error) {
 	return s.svc.SelfHost(r.Context())
 }
 
+// renewSelfCerts is POST /api/self-host/certs/renew {"domain": "..."} (empty = all panel domains).
+func (s *Server) renewSelfCerts(r *http.Request) (any, error) {
+	var in struct {
+		Domain string `json:"domain"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	if w, ok := r.Context().Value(writerKey{}).(http.ResponseWriter); ok {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(4 * time.Minute))
+	}
+	renewed, err := s.svc.RenewSelfCerts(r.Context(), actor(r), in.Domain)
+	if err != nil {
+		return nil, err
+	}
+	host, _ := s.svc.SelfHost(r.Context())
+	return map[string]any{"renewed": renewed, "selfHost": host}, nil
+}
+
+// renewNodeCerts is POST /api/nodes/{id}/certs/renew {"domain": "..."} (empty = all node domains).
+func (s *Server) renewNodeCerts(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var in struct {
+		Domain string `json:"domain"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ctx := r.Context()
+	n, err := s.svc.Node(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if n.Manual {
+		return nil, badRequest("на ноде с ручной настройкой сертификатами управляет администратор")
+	}
+	if w, ok := ctx.Value(writerKey{}).(http.ResponseWriter); ok {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(4 * time.Minute))
+	}
+	var detail string
+	if n.Local && s.svc.SelfCertRenew != nil {
+		renewed, rerr := s.svc.SelfCertRenew(ctx, strings.ToLower(strings.TrimSpace(in.Domain)))
+		if rerr != nil {
+			_ = s.svc.LogNodeAction(ctx, actor(r), id, "certs", rerr.Error())
+			return nil, rerr
+		}
+		detail = strings.Join(renewed, ", ")
+		_ = s.svc.LogNodeAction(ctx, actor(r), id, "certs", detail)
+	} else {
+		if s.cfg.RenewCerts == nil {
+			return nil, badRequest("управление сертификатами на нодах недоступно")
+		}
+		detail, err = s.cfg.RenewCerts(ctx, id, strings.ToLower(strings.TrimSpace(in.Domain)))
+		res := "ok"
+		if err != nil {
+			res = err.Error()
+		} else if detail != "" {
+			res = detail
+		}
+		_ = s.svc.LogNodeAction(ctx, actor(r), id, "certs", res)
+		if err != nil {
+			return nil, badRequest(err.Error())
+		}
+	}
+	var reported []*nodev1.CertInfo
+	if s.cfg.CertStatus != nil {
+		reported = s.cfg.CertStatus(id)
+	}
+	return map[string]any{"detail": detail, "certs": s.svc.NodeCerts(ctx, n, reported)}, nil
+}
+
 func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	ctx := r.Context()
 	sts, err := s.svc.NodeStatuses(ctx, s.cfg.Connected)
@@ -899,6 +980,14 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 			}
 			for _, a := range addrs {
 				d.Addresses = append(d.Addresses, Address{ID: a.ID, IP: a.IP, Interface: a.Interface, OnInterface: a.OnInterface, Primary: a.IsPrimary})
+			}
+			if !n.Manual {
+				var reported []*nodev1.CertInfo
+				if s.cfg.CertStatus != nil {
+					reported = s.cfg.CertStatus(n.ID)
+				}
+				d.Certs = s.svc.NodeCerts(ctx, n, reported)
+				d.CertsSupported = (n.Local && s.svc.SelfCertRenew != nil) || (n.NginxVersion != "" && slices.Contains(n.Capabilities, "certs"))
 			}
 		}
 		out = append(out, d)

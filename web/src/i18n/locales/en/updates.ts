@@ -11,7 +11,6 @@ export default {
   no_update_is_running_now: 'No update is running now. Below is the log of the last one.',
   nothing_to_update_everything: 'Nothing to update: everything is already on the latest version',
   outdated_vynel_xray_and_nginx: 'Outdated: {what}. vynel, Xray and nginx will be updated; your data stays.',
-  panel: 'Panel',
   restarting: 'restarting',
   restarting_services: 'Restarting services',
   show_update_log: 'Show update log',
@@ -32,4 +31,5 @@ export default {
   version_full_log_on_the: 'Version: {v}. Full log on the server: <code>/var/log/vynel-update.log</code>, step-by-step progress: <code>journalctl -u vynel-update -f</code>',
   waiting_for_the_first_log: 'Waiting for the first log lines…',
   command_sent_to: 'Update command sent: {v}',
+  reload_page: 'Reload page',
 }

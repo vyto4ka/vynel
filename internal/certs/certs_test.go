@@ -75,6 +75,21 @@ func TestPlaceholderInternalImport(t *testing.T) {
 	if ok, _ := m2.Import("b.example.com", certPEM, keyPEM); ok {
 		t.Fatal("imported a certificate for another name")
 	}
+
+	// ForceRenew reissues a fresh, non-due certificate.
+	serialBefore := leaf.SerialNumber.String()
+	done, err = m.ForceRenew(context.Background(), []string{"a.example.com"}, "", "internal")
+	if err != nil || len(done) != 1 {
+		t.Fatalf("force renew: %v %v", done, err)
+	}
+	pair2, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf2, _ := x509.ParseCertificate(pair2.Certificate[0])
+	if leaf2.SerialNumber.String() == serialBefore {
+		t.Fatal("force renew did not issue a new certificate")
+	}
 }
 
 // dnsStub answers every A query with 127.0.0.1 and everything else with an empty answer.

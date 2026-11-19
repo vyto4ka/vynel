@@ -401,3 +401,17 @@ func TrafficByDay(ctx context.Context, q DBTX, userID, since int64) ([]DayTotal,
 	}
 	return out, rows.Err()
 }
+
+// OldestServerStatsAt returns the earliest unix timestamp of any stored server metrics or
+// node traffic sample, or 0 when no server stats exist yet.
+func OldestServerStatsAt(ctx context.Context, q DBTX) (int64, error) {
+	var oldest int64
+	err := q.QueryRowContext(ctx, `SELECT coalesce(min(t), 0) FROM (
+		SELECT min(ts) AS t FROM (SELECT min(ts) AS ts FROM node_metrics_5m GROUP BY node_id)
+		UNION ALL
+		SELECT min(ts) AS t FROM (SELECT min(ts) AS ts FROM node_metrics GROUP BY node_id)
+		UNION ALL
+		SELECT min(hour) AS t FROM (SELECT min(hour) AS hour FROM node_traffic_hourly GROUP BY node_id)
+	) WHERE t IS NOT NULL AND t > 0`).Scan(&oldest)
+	return oldest, err
+}

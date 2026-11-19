@@ -50,6 +50,7 @@ const paths: Record<string, ReactNode> = {
   grip: <><circle cx="9" cy="6" r="1.2" /><circle cx="15" cy="6" r="1.2" /><circle cx="9" cy="12" r="1.2" /><circle cx="15" cy="12" r="1.2" /><circle cx="9" cy="18" r="1.2" /><circle cx="15" cy="18" r="1.2" /></>,
   qr: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 20h2" /></>,
   fullscreen: <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />,
+  shield: <path d="M12 3 5 6v6c0 4.5 3 7.7 7 9 4-1.3 7-4.5 7-9V6l-7-3z" />,
 }
 
 export function Icon({ name, size }: { name: string; size?: number }) {
@@ -168,14 +169,76 @@ export function Loading({ error }: { error?: string | null }) {
   return <div className="empty">{t('common.loading')}</div>
 }
 
-// ---------- оверлеи ----------
+// ---------- оверлеи и горячие клавиши ----------
+
+const escapeStack: Array<() => void> = []
+let escapeListenerAttached = false
+
+function handleGlobalEscape(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || escapeStack.length === 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  const top = escapeStack[escapeStack.length - 1]
+  top()
+}
+
+// useEscape регистрирует обработчик Escape в общем стеке: закрывается только верхний оверлей.
+export function useEscape(active: boolean, onClose: () => void) {
+  const ref = useRef(onClose)
+  ref.current = onClose
+  useEffect(() => {
+    if (!active) return
+    if (!escapeListenerAttached) {
+      window.addEventListener('keydown', handleGlobalEscape, true)
+      escapeListenerAttached = true
+    }
+    const fn = () => ref.current()
+    escapeStack.push(fn)
+    return () => {
+      const idx = escapeStack.lastIndexOf(fn)
+      if (idx >= 0) escapeStack.splice(idx, 1)
+    }
+  }, [active])
+}
+
+// isEditable — фокус в поле ввода / редакторе, где глобальные хоткеи не должны мешать.
+export function isEditable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target.closest('.cm-editor')
+}
+
+// useRangeSelection — выделение элементов списка с поддержкой Shift+Click (диапазон).
+export function useRangeSelection<T>(items: T[], selected: T[], setSelected: (next: T[] | ((prev: T[]) => T[])) => void) {
+  const anchorRef = useRef<T | null>(null)
+  const toggleItem = useCallback((id: T, shiftKey: boolean) => {
+    const idx = items.indexOf(id)
+    if (shiftKey && anchorRef.current !== null && idx >= 0) {
+      const aIdx = items.indexOf(anchorRef.current)
+      if (aIdx >= 0) {
+        const [from, to] = aIdx <= idx ? [aIdx, idx] : [idx, aIdx]
+        const range = items.slice(from, to + 1)
+        const anchorSelected = selected.includes(anchorRef.current)
+        setSelected((prev) => {
+          const set = new Set(prev)
+          if (anchorSelected) range.forEach((x) => set.add(x))
+          else range.forEach((x) => set.delete(x))
+          return Array.from(set)
+        })
+        return
+      }
+    }
+    anchorRef.current = id
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }, [items, selected, setSelected])
+
+  const resetAnchor = useCallback(() => { anchorRef.current = null }, [])
+  return { toggleItem, resetAnchor }
+}
 
 export function Modal({ title, children, footer, onClose, wide, xl }: { title: ReactNode; children: ReactNode; footer?: ReactNode; onClose: () => void; wide?: boolean; xl?: boolean }) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
+  useEscape(true, onClose)
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={'modal' + (wide ? ' wide' : '') + (xl ? ' xl' : '')} role="dialog">
@@ -191,11 +254,7 @@ export function Modal({ title, children, footer, onClose, wide, xl }: { title: R
 }
 
 export function Drawer({ title, children, onClose, actions }: { title: ReactNode; children: ReactNode; onClose: () => void; actions?: ReactNode }) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
+  useEscape(true, onClose)
   return (
     <>
       <div className="drawer-back" onClick={onClose} />
@@ -236,34 +295,88 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   )
 }
 
-// ---------- меню ----------
+// ---------- меню (портал в body, не обрезается таблицами и drawer) ----------
 
 export type MenuItem = { label: ReactNode; icon?: string; danger?: boolean; disabled?: boolean; onClick: () => void } | 'divider'
 
-// Меню по кнопке (M3 menu): закрывается кликом мимо, Esc и после выбора пункта.
+function useMenuPos(open: boolean, anchor: React.RefObject<HTMLElement | null>, pop: React.RefObject<HTMLDivElement | null>) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open || !anchor.current) return setPos(null)
+    const place = () => {
+      if (!anchor.current) return
+      const r = anchor.current.getBoundingClientRect()
+      const w = pop.current?.offsetWidth || 220
+      const h = pop.current?.offsetHeight || 200
+      const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))
+      const up = r.bottom + 6 + h > window.innerHeight - 8 && r.top - 6 - h > 8
+      const top = up ? Math.max(8, r.top - 6 - h) : Math.min(r.bottom + 6, window.innerHeight - h - 8)
+      setPos({ left, top })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [open, anchor, pop])
+  return pos
+}
+
+// Меню по кнопке: рендерится в портал, закрывается кликом мимо, Esc и после выбора пункта.
 export function Menu({ title, items, icon = 'more' }: { title: string; items: MenuItem[]; icon?: string }) {
   const [open, setOpen] = useState(false)
-  const box = useRef<HTMLDivElement>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const pop = useRef<HTMLDivElement>(null)
+  const pos = useMenuPos(open, btn, pop)
+  useEscape(open, () => setOpen(false))
   useEffect(() => {
     if (!open) return
-    const down = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    const down = (e: MouseEvent) => {
+      if (!btn.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(false)
+    }
     document.addEventListener('mousedown', down)
-    window.addEventListener('keydown', key)
-    return () => { document.removeEventListener('mousedown', down); window.removeEventListener('keydown', key) }
+    return () => document.removeEventListener('mousedown', down)
   }, [open])
   return (
-    <div className="menu-wrap" ref={box}>
-      <button className={'btn ghost icon sm' + (open ? ' on' : '')} title={title} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name={icon} /></button>
-      {open && (
-        <div className="menu" role="menu">
+    <div className="menu-wrap">
+      <button type="button" ref={btn} className={'btn ghost icon sm' + (open ? ' on' : '')} title={title} aria-haspopup="menu" aria-expanded={open}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}><Icon name={icon} /></button>
+      {open && createPortal(
+        <div ref={pop} className="menu portal-menu" role="menu"
+          style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999, visibility: 'hidden' }}
+          onClick={(e) => e.stopPropagation()}>
           {items.map((it, i) => it === 'divider' ? <div key={i} className="menu-divider" /> : (
-            <button key={i} role="menuitem" className={'menu-item' + (it.danger ? ' danger' : '')} disabled={it.disabled}
+            <button key={i} type="button" role="menuitem" className={'menu-item' + (it.danger ? ' danger' : '')} disabled={it.disabled}
               onClick={() => { setOpen(false); it.onClick() }}>
               {it.icon && <Icon name={it.icon} />}<span>{it.label}</span>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
+// SideTooltip — мгновенный портальный тултип справа от иконки в свёрнутом сайдбаре.
+export function SideTooltip({ label, active, children }: { label: string; active: boolean; children: ReactNode }) {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const wrap = useRef<HTMLDivElement>(null)
+  const show = () => {
+    if (!active || !wrap.current) return
+    const r = wrap.current.getBoundingClientRect()
+    setPos({ left: r.right + 10, top: r.top + r.height / 2 })
+  }
+  const hide = () => setPos(null)
+  useEffect(() => { if (!active) setPos(null) }, [active])
+  return (
+    <div ref={wrap} className="side-tip-wrap" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}>
+      {children}
+      {active && pos && createPortal(
+        <div className="side-tooltip" role="tooltip" style={{ left: pos.left, top: pos.top }}>{label}</div>,
+        document.body,
       )}
     </div>
   )
@@ -281,6 +394,7 @@ export function Info({ children, label = t('ui.what_is_this') }: { children: Rea
   const btn = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null)
+  useEscape(open === 'click', () => setOpen(null))
   useLayoutEffect(() => {
     if (!open || !btn.current) return setPos(null)
     const r = btn.current.getBoundingClientRect()
@@ -294,13 +408,10 @@ export function Info({ children, label = t('ui.what_is_this') }: { children: Rea
     const close = (e: Event) => {
       if (!btn.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(null)
     }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(null) }
     document.addEventListener('pointerdown', close)
-    document.addEventListener('keydown', esc)
     window.addEventListener('scroll', close as any, true)
     return () => {
       document.removeEventListener('pointerdown', close)
-      document.removeEventListener('keydown', esc)
       window.removeEventListener('scroll', close as any, true)
     }
   }, [open])
@@ -344,7 +455,7 @@ export function Tabs({ items, value, onChange, right }: { items: TabItem[]; valu
   )
 }
 
-// SplitButton — главное действие + выпадающий список дополнительных вариантов.
+// SplitButton — главное действие + выпадающий список дополнительных вариантов (в портале).
 export function SplitButton({ label, onClick, items, primary, disabled }: {
   label: ReactNode
   onClick: () => void
@@ -354,13 +465,16 @@ export function SplitButton({ label, onClick, items, primary, disabled }: {
 }) {
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
+  const pop = useRef<HTMLDivElement>(null)
+  const pos = useMenuPos(open, box, pop)
+  useEscape(open, () => setOpen(false))
   useEffect(() => {
     if (!open) return
-    const down = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    const down = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node) && !pop.current?.contains(e.target as Node)) setOpen(false)
+    }
     document.addEventListener('mousedown', down)
-    window.addEventListener('keydown', key)
-    return () => { document.removeEventListener('mousedown', down); window.removeEventListener('keydown', key) }
+    return () => document.removeEventListener('mousedown', down)
   }, [open])
   const cls = primary ? 'btn primary sm' : 'btn sm'
   return (
@@ -368,13 +482,15 @@ export function SplitButton({ label, onClick, items, primary, disabled }: {
       <button type="button" className={cls + ' split-main'} disabled={disabled} onClick={onClick}>{label}</button>
       <button type="button" className={cls + ' split-arrow'} disabled={disabled} aria-haspopup="menu" aria-expanded={open}
         onClick={() => setOpen((o) => !o)}><Icon name="chevron" size={14} /></button>
-      {open && (
-        <div className="menu" role="menu">
+      {open && createPortal(
+        <div ref={pop} className="menu portal-menu" role="menu"
+          style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999, visibility: 'hidden' }}>
           {items.map((it, i) => (
             <button key={i} type="button" role="menuitem" className="menu-item"
               onClick={() => { setOpen(false); it.onClick() }}>{it.label}</button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

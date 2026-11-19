@@ -280,6 +280,19 @@ func (s *Service) NodeStatuses(ctx context.Context, connected func(int64) bool) 
 	return out, nil
 }
 
+// ShowWelcome reports whether the first-run welcome / subscription-copy UI should be shown:
+// only while server statistics span less than 24 hours (or no server stats exist yet).
+func (s *Service) ShowWelcome(ctx context.Context) (bool, error) {
+	oldest, err := store.OldestServerStatsAt(ctx, s.st.DB)
+	if err != nil {
+		return false, err
+	}
+	if oldest <= 0 {
+		return true, nil
+	}
+	return s.now().Unix()-oldest < 86400, nil
+}
+
 // UserTrafficByNode returns a user's traffic per node over the last days.
 func (s *Service) UserTrafficByNode(ctx context.Context, userID int64, days int) ([]store.NodeTotal, error) {
 	return store.UserTrafficByNode(ctx, s.st.DB, userID, s.now().AddDate(0, 0, -days).Unix())

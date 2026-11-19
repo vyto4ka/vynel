@@ -410,6 +410,9 @@ run_step() {
   cols="$(tput cols 2>/dev/null || echo 80)"
   printf '\n--- %s %s: %s\n' "$(date '+%F %T')" "$label" "$*" >>"$APT_LOG"
   from="$(wc -c <"$APT_LOG")"
+  if [[ $tty -eq 0 ]]; then
+    echo "  → $label..."
+  fi
   "$@" >>"$APT_LOG" 2>&1 </dev/null &
   local pid=$!
   start=$SECONDS changed=$SECONDS
@@ -426,8 +429,8 @@ run_step() {
     line="$(tail -c +"$((from + 1))" "$APT_LOG" | tr '\r' '\n' | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c1-$((cols - ${#label} - 16)) || true)"
     if [[ $tty -eq 1 ]]; then
       printf '\r\033[K  %s %s %s  \033[2m%s\033[0m' "${spin[i++ % 4]}" "$label" "$(fmt_secs $((SECONDS - start)))" "$line"
-    elif (( (SECONDS - start) % 15 == 14 )); then
-      echo "  … $label $(fmt_secs $((SECONDS - start))): $line"
+    elif (( (SECONDS - start) % 3 == 2 )); then
+      echo "  … $label $(fmt_secs $((SECONDS - start)))${line:+: $line}"
     fi
     sleep 1
   done
@@ -439,6 +442,9 @@ run_step() {
     printf '  \033[2m· %s: %s\033[0m\n' "$label" "$([[ $rc -eq 124 ]] && echo "no progress" || echo "not this way")"
   else
     red "  ✗ $label: $([[ $rc -eq 124 ]] && echo "no progress, stopped" || echo "exit code $rc")"
+    if [[ $tty -eq 0 ]]; then
+      tail -c +"$((from + 1))" "$APT_LOG" | tr '\r' '\n' | grep -v '^[[:space:]]*$' | tail -n 20 | sed 's/^/    /' || true
+    fi
   fi
   return $rc
 }
@@ -885,8 +891,8 @@ fetch() {
   if [[ -n "$label" ]]; then
     echo "  $label: $url"
     if [[ ! -t 1 ]]; then
-      ( while sleep 10; do
-          [[ -f "$out" ]] && echo "  $label: $(stat -c %s "$out" 2>/dev/null | awk '{printf "%.1f", $1 / 1048576}') MB"
+      ( while sleep 3; do
+          [[ -f "$out" ]] && echo "  … $label: $(stat -c %s "$out" 2>/dev/null | awk '{printf "%.1f", $1 / 1048576}') MB"
         done ) &
       watch=$!
     fi
@@ -896,6 +902,9 @@ fetch() {
   if [[ -n "$watch" ]]; then
     kill "$watch" 2>/dev/null || true
     wait "$watch" 2>/dev/null || true
+  fi
+  if [[ $rc -eq 0 && ! -t 1 && -n "$label" && -f "$out" ]]; then
+    echo "  ✓ $label ($(stat -c %s "$out" 2>/dev/null | awk '{if ($1 >= 1048576) printf "%.1f MB", $1 / 1048576; else printf "%.1f KB", $1 / 1024}'))"
   fi
   return $rc
 }
@@ -926,12 +935,13 @@ gh_latest() {
 release_sums() {
   local rc=0
   if [[ -n "$RELEASE_PUBKEY" ]]; then
-    fetch "$(gh "$RELEASE_URL/SHA256SUMS.signed")" "$1/SHA256SUMS.signed" || rc=$?
+    fetch "$(gh "$RELEASE_URL/SHA256SUMS.signed")" "$1/SHA256SUMS.signed" "SHA256SUMS.signed" || rc=$?
     if [[ $rc -eq 0 ]]; then
       verify_signed "$1/SHA256SUMS.signed" "$1/SHA256SUMS" || die "the release signature does not match: the download was changed on the way (proxy?). Nothing installed"
+      [[ ! -t 1 ]] && echo "  ✓ подпись SHA256SUMS проверена"
     fi
   else
-    fetch "$(gh "$RELEASE_URL/SHA256SUMS")" "$1/SHA256SUMS" || rc=$?
+    fetch "$(gh "$RELEASE_URL/SHA256SUMS")" "$1/SHA256SUMS" "SHA256SUMS" || rc=$?
   fi
   [[ $rc -eq 0 ]] && return 0
   [[ $rc -eq 22 ]] && return 1
@@ -953,6 +963,7 @@ release_binary() {
   if [[ -n "$packed" ]] && command -v xz >/dev/null; then
     fetch "$(gh "$RELEASE_URL/vynel-linux-$GOARCH.xz")" "$1/vynel.xz" "vynel" || rc=$?
     if [[ $rc -eq 0 ]]; then
+      [[ ! -t 1 ]] && echo "  → проверка SHA-256 и распаковка vynel.xz..."
       if [[ "$(sha256sum "$1/vynel.xz" | awk '{print $1}')" != "$packed" ]] || ! xz -dc "$1/vynel.xz" >"$1/vynel"; then
         echo "  checksum does not match yet (the release is being updated)"
         return 1
@@ -994,6 +1005,7 @@ install_release_binary() {
     rm -rf "$tmp"
     return $rc
   fi
+  [[ ! -t 1 ]] && echo "  → установка нового бинарника /usr/local/bin/vynel..."
   [[ -x /usr/local/bin/vynel ]] && cp -f /usr/local/bin/vynel /usr/local/bin/vynel.prev
   install -m 755 "$tmp/vynel" /usr/local/bin/vynel.new
   mv -f /usr/local/bin/vynel.new /usr/local/bin/vynel
@@ -1991,6 +2003,7 @@ wait_active() {
 # (/var/lib/vynel/backups, the bot keeps its nightly ones there too).
 backup_before_update() {
   [[ $PANEL_INSTALLED -eq 1 ]] || return 0
+  info "создание бэкапа перед обновлением"
   local dir="$DATA/backups" out
   mkdir -p "$dir"
   if out="$(cd "$dir" && vynel admin --data-dir "$DATA" backup --out "pre-update-$(date +%Y%m%d-%H%M%S).tar.gz" 2>&1)"; then
@@ -2039,7 +2052,11 @@ do_update() {
   for u in "${units[@]}"; do
     info "restarting $u"
     systemctl restart "$u" || true
-    wait_active "$u" 30 || failed+=("$u")
+    if wait_active "$u" 30; then
+      green "  ✓ $u active"
+    else
+      failed+=("$u")
+    fi
   done
   if [[ ${#failed[@]} -gt 0 ]]; then
     red "  did not start: ${failed[*]}"

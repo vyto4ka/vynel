@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
+	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/update"
 )
 
@@ -92,6 +94,74 @@ func (u *updates) dismiss(id int64) {
 	u.hidden[id] = time.Now().Unix()
 }
 
+// hydrate restores jobs and dismissal timestamps from SQLite after a panel restart.
+func (u *updates) hydrate(runs map[int64]*store.UpdateRun, now time.Time) {
+	if len(runs) == 0 {
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.jobs == nil {
+		u.jobs = map[int64]*updJob{}
+	}
+	if u.hidden == nil {
+		u.hidden = map[int64]int64{}
+	}
+	for id, r := range runs {
+		if r.DismissedAt > u.hidden[id] {
+			u.hidden[id] = r.DismissedAt
+		}
+		if _, exists := u.jobs[id]; exists || r.SentAt <= 0 || r.DismissedAt >= r.SentAt {
+			continue
+		}
+		sentAt := time.Unix(r.SentAt, 0)
+		if now.Sub(sentAt) >= updateSentWait+updateShowDone {
+			continue
+		}
+		j := &updJob{sentAt: sentAt, version: r.FromVersion}
+		if r.State == UpdFailed && r.StartedAt == r.SentAt && r.FinishedAt == r.SentAt && r.Log != "" {
+			j.failAt, j.failMsg = sentAt, r.Log
+		}
+		u.jobs[id] = j
+	}
+}
+
+// mergeUpdateStatus combines a live status (from agent or local disk) with the persisted run
+// in SQLite so logs are never lost across restarts or reconnects.
+func mergeUpdateStatus(live *update.Status, run *store.UpdateRun) *update.Status {
+	if live == nil && run == nil {
+		return nil
+	}
+	if run == nil {
+		c := *live
+		return &c
+	}
+	fromDB := &update.Status{
+		Running:    run.State == UpdRunning || run.State == UpdRestarting,
+		OK:         run.OK,
+		StartedAt:  run.StartedAt,
+		FinishedAt: run.FinishedAt,
+		Version:    run.ToVersion,
+		Log:        run.Log,
+	}
+	if live == nil {
+		if fromDB.StartedAt == 0 && fromDB.FinishedAt == 0 && fromDB.Log == "" {
+			return nil
+		}
+		return fromDB
+	}
+	out := *live
+	// If the live status is older than the persisted one, prefer the persisted status.
+	if fromDB.StartedAt > out.StartedAt+5 {
+		return fromDB
+	}
+	// Preserve a non-empty persisted log if the live status hasn't populated it yet.
+	if strings.TrimSpace(out.Log) == "" && strings.TrimSpace(fromDB.Log) != "" {
+		out.Log = fromDB.Log
+	}
+	return &out
+}
+
 // silentNode explains an update the node never reported.
 const silentNode = "Нода не сообщила о начале обновления за 2 минуты. Скорее всего, на ней версия, которая ещё не умеет обновляться из панели: обновите её один раз установщиком (--mode update), дальше обновления из панели будут видны. Лог на ноде: /var/log/vynel-update.log"
 
@@ -122,6 +192,15 @@ func (u *updates) state(id int64, st *update.Status, online bool, version string
 			}
 			return UpdDone, log, started, finished
 		}
+		if strings.TrimSpace(log) != "" {
+			if started == 0 {
+				started = j.sentAt.Unix()
+			}
+			if finished == 0 {
+				finished = j.doneAt.Unix()
+			}
+			return UpdDone, log, started, finished
+		}
 		return UpdDone, "Версия " + j.version + " → " + j.newVersion, j.sentAt.Unix(), j.doneAt.Unix()
 	}
 	switch {
@@ -139,10 +218,13 @@ func (u *updates) state(id int64, st *update.Status, online bool, version string
 			delete(u.jobs, id)
 		case !reported && now.Sub(j.sentAt) < updateSentWait:
 			if !online {
-				return UpdRestarting, "", j.sentAt.Unix(), 0
+				return UpdRestarting, log, j.sentAt.Unix(), 0
 			}
-			return UpdSent, "", j.sentAt.Unix(), 0
+			return UpdSent, log, j.sentAt.Unix(), 0
 		case !reported && now.Sub(j.sentAt) < updateSentWait+updateShowDone:
+			if strings.TrimSpace(log) != "" {
+				return UpdFailed, log + "\n\n" + silentNode, j.sentAt.Unix(), j.sentAt.Add(updateSentWait).Unix()
+			}
 			return UpdFailed, silentNode, j.sentAt.Unix(), j.sentAt.Add(updateSentWait).Unix()
 		case !reported:
 			delete(u.jobs, id)
@@ -200,15 +282,24 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
+	runs, _ := s.svc.UpdateRuns(ctx)
+	s.upd.hydrate(runs, now)
+
 	s.upd.mu.Lock()
 	info := &UpdateInfo{Release: update.LoadSource().Release, Latest: s.upd.latest, CheckErr: s.upd.checkErr, Nodes: []UpdateNode{}}
 	if !s.upd.checkedAt.IsZero() {
 		info.CheckedAt = s.upd.checkedAt.Unix()
 	}
 	s.upd.mu.Unlock()
-	now := time.Now()
+
+	panelLive := update.LocalStatus()
+	if panelLive != nil {
+		_ = s.svc.RecordUpdateStatus(ctx, 0, panelLive)
+	}
+	panelSt := mergeUpdateStatus(panelLive, runs[0])
 	info.Panel = UpdateNode{Name: "Панель", Local: true, Online: true, Version: s.cfg.Version, Available: newer(s.cfg.Version, info.Latest)}
-	info.Panel.setState(s.upd.state(0, update.LocalStatus(), true, s.cfg.Version, now))
+	info.Panel.setState(s.upd.state(0, panelSt, true, s.cfg.Version, now))
 	if info.Panel.Available {
 		info.Count++
 	}
@@ -218,10 +309,11 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 			continue
 		}
 		online := s.cfg.Connected != nil && s.cfg.Connected(n.ID)
-		var st *update.Status
+		var live *update.Status
 		if s.cfg.UpdateStatus != nil {
-			st = s.cfg.UpdateStatus(n.ID)
+			live = s.cfg.UpdateStatus(n.ID)
 		}
+		st := mergeUpdateStatus(live, runs[n.ID])
 		un := UpdateNode{ID: n.ID, Code: n.Code, Name: n.Name, Flag: n.Country, Online: online, Version: n.AgentVersion,
 			Available: newer(n.AgentVersion, info.Latest)}
 		un.setState(s.upd.state(n.ID, st, online, n.AgentVersion, now))
@@ -265,6 +357,7 @@ func (s *Server) dismissUpdate(r *http.Request) (any, error) {
 		return nil, err
 	}
 	s.upd.dismiss(in.ID)
+	_ = s.svc.DismissUpdateRun(r.Context(), in.ID)
 	return nil, nil
 }
 
@@ -276,6 +369,7 @@ func (s *Server) updateLog(r *http.Request) (any, error) {
 		return nil, err
 	}
 	if id == 0 {
+		info.Panel.Name = i18n.T(i18n.FromRequest(r), info.Panel.Name)
 		return info.Panel, nil
 	}
 	for _, n := range info.Nodes {
@@ -302,24 +396,34 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.cfg.NodeAction == nil {
+	if in.Target != "panel" && s.cfg.NodeAction == nil {
 		return nil, badRequest("обновление нод недоступно")
 	}
 	var mu sync.Mutex
-	started, failed := []string{}, map[string]string{}
+	started, startedIDs, failed := []string{}, []int64{}, map[string]string{}
+	panelStarted := false
 	versionOf := map[int64]string{0: info.Panel.Version}
 	for _, n := range info.Nodes {
 		versionOf[n.ID] = n.Version
 	}
 	done := func(name string, id int64, err error) {
 		s.upd.markSent(id, versionOf[id], err)
+		errMsg := ""
+		if err != nil {
+			errMsg = updateError(err)
+		}
+		_ = s.svc.RecordUpdateSent(ctx, id, versionOf[id], errMsg)
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
-			failed[name] = updateError(err)
+			failed[name] = errMsg
 			return
 		}
 		started = append(started, name)
+		startedIDs = append(startedIDs, id)
+		if id == 0 {
+			panelStarted = true
+		}
 	}
 	nodeUpdate := func(n UpdateNode) {
 		_, err := s.cfg.NodeAction(ctx, n.ID, "update")
@@ -330,6 +434,15 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		}
 		_ = s.svc.LogNodeAction(ctx, actor(r), n.ID, "update", res)
 	}
+	panelUpdate := func() {
+		err := update.Start(ctx)
+		done("Панель", 0, err)
+		res := "ok"
+		if err != nil {
+			res = err.Error()
+		}
+		_ = s.svc.LogPanelAction(ctx, actor(r), "update", res)
+	}
 	switch in.Target {
 	case "node":
 		for _, n := range info.Nodes {
@@ -338,7 +451,7 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 			}
 		}
 	case "panel":
-		done("Панель", 0, update.Start(ctx))
+		panelUpdate()
 	case "all":
 		var wg sync.WaitGroup
 		for _, n := range info.Nodes {
@@ -350,12 +463,17 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		wg.Wait()
 		// The panel last: once it restarts, this request and the page go down with it.
 		if info.Panel.Available && !info.Panel.Updating {
-			done("Панель", 0, update.Start(ctx))
+			panelUpdate()
 		}
 	default:
 		return nil, badRequest("что обновлять: all, panel или node")
 	}
-	return map[string]any{"started": started, "failed": failed}, nil
+	return map[string]any{
+		"started":      started,
+		"startedIds":   startedIDs,
+		"panelStarted": panelStarted,
+		"failed":       failed,
+	}, nil
 }
 
 // updateError explains the usual failures in words.
