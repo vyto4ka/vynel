@@ -71,9 +71,9 @@ func (s *Server) botInfo(r *http.Request) (any, error) {
 	get := func(k, def string) string { v, _ := s.svc.Setting(ctx, k, def); return v }
 	out := map[string]any{
 		"hasToken": s.svc.BotToken(ctx) != "", "admins": admins,
-		"backupTime":  get(service.SettingBotBackupTime, service.DefaultBackupTime),
-		"summaryTime": get(service.SettingBotSummaryTime, service.DefaultSummaryTime),
-		"timezone":    get(service.SettingBotTimezone, service.DefaultTimezone),
+		"backupTime":        get(service.SettingBotBackupTime, service.DefaultBackupTime),
+		"summaryTime":       get(service.SettingBotSummaryTime, service.DefaultSummaryTime),
+		"timezone":          get(service.SettingBotTimezone, service.DefaultTimezone),
 		"alerts":            get(service.SettingBotAlerts, "true") != "false",
 		"alertDelay":        get(service.SettingBotAlertDelay, "60"),
 		"miniAppFullscreen": get(service.SettingBotMiniAppFullscreen, "false") == "true",
