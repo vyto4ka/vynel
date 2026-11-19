@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net"
@@ -135,7 +136,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := clientIP(r)
 	prefix := h.svc.SubPrefix(ctx)
-	if r.Method != http.MethodGet && r.Method != http.MethodHead || !strings.HasPrefix(r.URL.Path, prefix) {
+	isGet := r.Method == http.MethodGet || r.Method == http.MethodHead
+	if (!isGet && r.Method != http.MethodPost) || !strings.HasPrefix(r.URL.Path, prefix) {
 		h.countMiss(ip, strings.TrimPrefix(r.URL.Path, "/"))
 		h.notFound(ctx, w)
 		return
@@ -157,6 +159,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.notFound(ctx, w)
 		return
 	}
+	if r.Method == http.MethodPost {
+		h.handleDeviceDelete(ctx, w, r, u, explicit)
+		return
+	}
 	if name, ok := strings.CutPrefix(explicit, "karing-rules/"); ok {
 		// Rule-set requests are metadata, not subscription/device registrations. No
 		// credentials are served here, but the token and user status must still be valid.
@@ -176,7 +182,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("subscription rules", "err", err)
 	}
 	format, rule := Pick(r, explicit, u.ClientType, rules)
-	tpl := templateFor(format, rule)
 	if format == FormatHTML {
 		if on, _ := h.svc.Setting(ctx, service.SettingSubPageEnabled, "true"); on == "false" {
 			// Without the page a browser cannot tell the link from any other missing page.
@@ -207,9 +212,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.log.Error("subscription selection", "err", err)
 		reason = "Временная ошибка, обновите подписку позже"
 	}
-	if format == FormatBase64 {
-		tpl = ""
-	}
 	uuid := u.UUID
 	if reason != "" {
 		// A refused client gets no credentials at all, only a server named after the reason.
@@ -229,49 +231,79 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(hv.Name, hv.Value)
 		}
 	}
-	var body []byte
-	switch {
-	case format == FormatKaring:
-		subURL, urlErr := h.svc.SubscriptionURL(ctx, u)
-		if urlErr != nil {
-			err = urlErr
-		} else {
-			body, err = Karing(hosts, uuid, subURL, routing)
+	var subURL string
+	if format == FormatKaring {
+		subURL, err = h.svc.SubscriptionURL(ctx, u)
+		if err != nil {
+			h.log.Error("render subscription", "err", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-	case format == FormatXray && keqClient.MatchString(r.UserAgent()) && hasRawHosts(hosts):
-		// KeqDroid accepts full configs and URI links in one text payload. Keeping the
-		// links avoids dropping external WS/gRPC, VMess, Trojan, SS, etc. servers.
-		body, err = KeqMixed(hosts, uuid, routing, tpl)
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	case format == FormatMihomo && tpl != "":
-		body, err = MihomoFromTemplate(hosts, uuid, tpl)
-		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	case format == FormatMihomo:
-		body, err = Mihomo(hosts, uuid, routing)
-		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-	case format == FormatSingBox && tpl != "":
-		body, err = SingBoxFromTemplate(hosts, uuid, tpl)
-		w.Header().Set("Content-Type", "application/json")
-	case format == FormatSingBox:
-		body, err = SingBox(hosts, uuid, routing)
-		w.Header().Set("Content-Type", "application/json")
-	case format == FormatXray && tpl != "":
-		body, err = XrayJSONFromTemplate(hosts, uuid, tpl)
-		w.Header().Set("Content-Type", "application/json")
-	case format == FormatXray:
-		body, err = XrayJSON(hosts, uuid, routing)
-		w.Header().Set("Content-Type", "application/json")
-	default:
-		body = Base64(hosts, uuid)
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	}
+	body, contentType, _, err := RenderBody(format, hosts, "", uuid, r.UserAgent(), subURL, rule, routing)
 	if err != nil {
 		h.log.Error("render subscription", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(body)
+}
+
+// RenderBody renders the subscription payload for the given format, hosts, optional refusal reason,
+// user UUID, User-Agent, subscription URL, matched rule, and routing config.
+// For FormatHTML it returns an empty body (HTML previews are served via iframe).
+// For FormatBase64 it also returns decodedUris containing the newline-separated URI list.
+func RenderBody(format Format, hosts []service.Host, reason, uuid, ua, subURL string, rule *service.SubRule, routing service.ClientRouting) (body []byte, contentType string, decodedUris string, err error) {
+	if format == FormatHTML {
+		return nil, "text/html; charset=utf-8", "", nil
+	}
+	tpl := templateFor(format, rule)
+	if format == FormatBase64 {
+		tpl = ""
+	}
+	if reason != "" {
+		// A refused client gets no credentials at all, only a server named after the reason.
+		hosts, uuid = []service.Host{Stub("⛔ " + reason)}, StubUUID
+	}
+	hosts = service.WithFragment(hosts, routing.Fragment)
+	switch {
+	case format == FormatKaring:
+		body, err = Karing(hosts, uuid, subURL, routing)
+		contentType = "application/json"
+	case format == FormatXray && keqClient.MatchString(ua) && hasRawHosts(hosts):
+		// KeqDroid accepts full configs and URI links in one text payload. Keeping the
+		// links avoids dropping external WS/gRPC, VMess, Trojan, SS, etc. servers.
+		body, err = KeqMixed(hosts, uuid, routing, tpl)
+		contentType = "text/plain; charset=utf-8"
+	case format == FormatMihomo && tpl != "":
+		body, err = MihomoFromTemplate(hosts, uuid, tpl)
+		contentType = "text/yaml; charset=utf-8"
+	case format == FormatMihomo:
+		body, err = Mihomo(hosts, uuid, routing)
+		contentType = "text/yaml; charset=utf-8"
+	case format == FormatSingBox && tpl != "":
+		body, err = SingBoxFromTemplate(hosts, uuid, tpl)
+		contentType = "application/json"
+	case format == FormatSingBox:
+		body, err = SingBox(hosts, uuid, routing)
+		contentType = "application/json"
+	case format == FormatXray && tpl != "":
+		body, err = XrayJSONFromTemplate(hosts, uuid, tpl)
+		contentType = "application/json"
+	case format == FormatXray:
+		body, err = XrayJSON(hosts, uuid, routing)
+		contentType = "application/json"
+	default:
+		lines := make([]string, 0, len(hosts))
+		for _, h := range hosts {
+			lines = append(lines, Link(h, uuid))
+		}
+		decodedUris = strings.Join(lines, "\n")
+		body = []byte(base64.StdEncoding.EncodeToString([]byte(decodedUris)))
+		contentType = "text/plain; charset=utf-8"
+	}
+	return body, contentType, decodedUris, err
 }
 
 func (h *Handler) notFound(ctx context.Context, w http.ResponseWriter) {

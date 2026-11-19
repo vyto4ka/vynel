@@ -181,3 +181,104 @@ func TestXrayBaseConfigWithoutNodes(t *testing.T) {
 		t.Fatalf("check: %s (read %d)", w.Body.String(), read)
 	}
 }
+
+func TestNodeXrayBaseAndCompiledAPI(t *testing.T) {
+	c, svc, pw := newServer(t)
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != 200 {
+		t.Fatal("login")
+	}
+	ctx := context.Background()
+	n, _, err := svc.CreateNode(ctx, service.ActorCLI, service.NodeInput{Name: "NL", Country: "nl", Domain: "nl.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, err := svc.CreateProfile(ctx, service.ActorCLI, service.ProfileInput{Name: "R", TemplateID: "vless-reality-selfsteal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AttachProfile(ctx, service.ActorCLI, service.AttachInput{NodeID: n.ID, ProfileID: prof.ID}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := svc.CreateUser(ctx, service.ActorCLI, service.CreateUserInput{Username: "bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// GET default (inherit)
+	w := c.do("GET", "/api/nodes/"+itoa(n.ID)+"/xray-base", "", false)
+	var baseResp struct {
+		Mode       string `json:"mode"`
+		NodeJSON   string `json:"nodeJson"`
+		GlobalJSON string `json:"globalJson"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &baseResp) != nil || baseResp.Mode != "inherit" || baseResp.NodeJSON != "" || baseResp.GlobalJSON == "" {
+		t.Fatalf("get xray-base: %d %s", w.Code, w.Body.String())
+	}
+
+	// Invalid mode / invalid JSON / forbidden section -> 400
+	for _, body := range []string{
+		`{"mode":"bad","json":"{}"}`,
+		`{"mode":"custom","json":"{bad"}`,
+		`{"mode":"custom","json":"{\"inbounds\":[]}"}`,
+	} {
+		if w := c.do("PUT", "/api/nodes/"+itoa(n.ID)+"/xray-base", body, true); w.Code != 400 {
+			t.Fatalf("expected 400 for %s, got %d %s", body, w.Code, w.Body.String())
+		}
+	}
+
+	// PUT custom
+	customPayload, _ := json.Marshal(map[string]string{
+		"mode": "custom",
+		"json": `{"log":{"loglevel":"info","access":"none"},"outbounds":[{"tag":"DIRECT","protocol":"freedom"},{"tag":"NODE_OUT","protocol":"blackhole"}]}`,
+	})
+	if w := c.do("PUT", "/api/nodes/"+itoa(n.ID)+"/xray-base", string(customPayload), true); w.Code != 200 || !strings.Contains(w.Body.String(), `"mode":"custom"`) {
+		t.Fatalf("put custom: %d %s", w.Code, w.Body.String())
+	}
+	w = c.do("GET", "/api/nodes/"+itoa(n.ID)+"/xray-base", "", false)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "NODE_OUT") {
+		t.Fatalf("get custom: %d %s", w.Code, w.Body.String())
+	}
+
+	// GET compiled (secrets=0 vs secrets=1)
+	w = c.do("GET", "/api/nodes/"+itoa(n.ID)+"/compiled?secrets=0", "", false)
+	var comp struct {
+		XrayConfig      string `json:"xrayConfig"`
+		NginxConfig     string `json:"nginxConfig"`
+		Revision        string `json:"revision"`
+		AppliedRevision string `json:"appliedRevision"`
+		LastError       string `json:"lastError"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &comp) != nil {
+		t.Fatalf("compiled masked: %d %s", w.Code, w.Body.String())
+	}
+	if comp.Revision == "" || !strings.Contains(comp.XrayConfig, "NODE_OUT") || !strings.Contains(comp.XrayConfig, `"loglevel": "info"`) {
+		t.Fatalf("compiled xrayConfig unexpected: %s", comp.XrayConfig)
+	}
+	if strings.Contains(comp.XrayConfig, u.UUID) || !strings.Contains(comp.XrayConfig, `"id": "•••"`) || !strings.Contains(comp.XrayConfig, `"privateKey": "•••"`) {
+		t.Fatalf("compiled secrets not masked: %s", comp.XrayConfig)
+	}
+	if comp.NginxConfig != "# nginx is not configured for this node" {
+		t.Fatalf("unexpected nginxConfig: %q", comp.NginxConfig)
+	}
+
+	w = c.do("GET", "/api/nodes/"+itoa(n.ID)+"/compiled?secrets=1", "", false)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &comp) != nil {
+		t.Fatalf("compiled full: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(comp.XrayConfig, u.UUID) || strings.Contains(comp.XrayConfig, `"privateKey": "•••"`) {
+		t.Fatalf("compiled secrets=1 should expose real secrets: %s", comp.XrayConfig)
+	}
+
+	// PUT inherit
+	if w := c.do("PUT", "/api/nodes/"+itoa(n.ID)+"/xray-base", `{"mode":"inherit"}`, true); w.Code != 200 || !strings.Contains(w.Body.String(), `"mode":"inherit"`) {
+		t.Fatalf("put inherit: %d %s", w.Code, w.Body.String())
+	}
+
+	// Missing node -> 404
+	if w := c.do("GET", "/api/nodes/999/xray-base", "", false); w.Code != 404 {
+		t.Fatalf("missing node xray-base: %d", w.Code)
+	}
+	if w := c.do("GET", "/api/nodes/999/compiled", "", false); w.Code != 404 {
+		t.Fatalf("missing node compiled: %d", w.Code)
+	}
+}

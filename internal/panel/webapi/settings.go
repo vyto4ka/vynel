@@ -78,6 +78,7 @@ var hiddenSettings = map[string]bool{
 	service.SettingBotAdmins: true, service.SettingBotBackupTime: true, service.SettingBotTimezone: true,
 	service.SettingBotAlerts: true, service.SettingBotAlertDelay: true, service.SettingBotAlertState: true, "bot.backup_last": true,
 	service.SettingBotSummaryTime: true, service.SettingBotSummaryLast: true, service.SettingBotQuickKeys: true,
+	service.SettingBotMiniAppFullscreen: true,
 	// edited on the «Аккаунт» page
 	service.SettingWebPasswordLogin: true,
 }

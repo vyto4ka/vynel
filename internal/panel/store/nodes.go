@@ -154,6 +154,11 @@ func SetNodeManual(ctx context.Context, q DBTX, id int64, manual bool) error {
 	return execOne(ctx, q, `UPDATE nodes SET manual=? WHERE id=?`, manual, id)
 }
 
+// SetNodeBaseConfig links a node to a custom base config (nil = inherit the default one).
+func SetNodeBaseConfig(ctx context.Context, q DBTX, id int64, baseConfigID *int64) error {
+	return execOne(ctx, q, `UPDATE nodes SET base_config_id=?, updated_at=? WHERE id=?`, nullInt(baseConfigID), unix(), id)
+}
+
 // SetNodeRequirementsConfirmed marks the node's wizard requirements confirmed (ts = 0 unconfirms).
 func SetNodeRequirementsConfirmed(ctx context.Context, q DBTX, id, ts int64) error {
 	return execOne(ctx, q, `UPDATE nodes SET requirements_confirmed_at=? WHERE id=?`, ts, id)

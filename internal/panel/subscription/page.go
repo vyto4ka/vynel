@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,106 +19,361 @@ import (
 
 // The page shows the subscription URL (QR and deep links), never raw server links: those would
 // bypass the HWID limit (docs/ARCHITECTURE.md §8.4). Its look comes from service.SubPage.
-// The look follows the panel: Material 3 components over Catppuccin-style layered neutrals. The accent
-// is the configured color; primary tones are mixed from it so any accent stays readable in both themes.
 var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex"><title>{{.Heading}}</title>
 <style>
 :root{--accent:{{.Accent}}}
-body{--bg:#121b1f;--card:#1b272b;--card2:#243137;--card3:#2b383d;--ink:#d1e1e8;--muted:#9eb2ba;--line:#324045;--outline:#65747b;
- --primary:color-mix(in oklab,var(--accent) 72%,#fff);--on-primary:color-mix(in oklab,var(--accent) 22%,#000);
- --tonal:color-mix(in oklab,var(--accent) 22%,var(--card2));--on-tonal:color-mix(in oklab,var(--accent) 18%,#fff);
- --good:var(--primary);--bad:#ff94ba;--bad-bg:color-mix(in oklab,#ff5fa2 22%,var(--card2));--sh:0 1px 3px rgba(0,0,0,.3),0 4px 8px 3px rgba(0,0,0,.15);color-scheme:dark}
-body.light{--bg:#e5eaeb;--card:#f6f8f8;--card2:#e9eeef;--card3:#dbe1e3;--ink:#1f3136;--muted:#536569;--line:#cad2d4;--outline:#97a3a6;
- --primary:color-mix(in oklab,var(--accent) 68%,#000);--on-primary:#fff;
- --tonal:color-mix(in oklab,var(--accent) 20%,#fff);--on-tonal:color-mix(in oklab,var(--accent) 45%,#000);
- --bad:#b3245f;--bad-bg:color-mix(in oklab,#ff5fa2 16%,#fff);--sh:0 1px 2px rgba(0,0,0,.12),0 2px 6px 2px rgba(0,0,0,.06);color-scheme:light}
-@media (prefers-color-scheme:light){body.auto{--bg:#e5eaeb;--card:#f6f8f8;--card2:#e9eeef;--card3:#dbe1e3;--ink:#1f3136;--muted:#536569;--line:#cad2d4;--outline:#97a3a6;
- --primary:color-mix(in oklab,var(--accent) 68%,#000);--on-primary:#fff;
- --tonal:color-mix(in oklab,var(--accent) 20%,#fff);--on-tonal:color-mix(in oklab,var(--accent) 45%,#000);
- --bad:#b3245f;--bad-bg:color-mix(in oklab,#ff5fa2 16%,#fff);--sh:0 1px 2px rgba(0,0,0,.12),0 2px 6px 2px rgba(0,0,0,.06);color-scheme:light}}
-*{box-sizing:border-box}
-body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1.5 "Roboto Flex",Roboto,Inter,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.1px;-webkit-font-smoothing:antialiased}
-main{max-width:600px;margin:0 auto;padding:24px 16px 40px}
-svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.card{background:var(--card);border-radius:24px;padding:20px;margin-bottom:12px}
-.hero{display:flex;gap:16px;align-items:center;padding:24px 20px;background:linear-gradient(135deg,color-mix(in oklab,var(--accent) 22%,var(--card)) 0%,var(--card) 70%)}
-.avatar{width:56px;height:56px;border-radius:18px;flex:none;display:grid;place-items:center;background:var(--primary);color:var(--on-primary);font-size:24px;font-weight:500}
-h1{font-size:28px;line-height:36px;font-weight:400;margin:0}
-.muted{color:var(--muted);font-size:14px}.desc{color:var(--muted);white-space:pre-line}
-h2{font-size:16px;line-height:24px;font-weight:500;margin:0 0 14px;letter-spacing:.15px}
-.ann{display:flex;gap:12px;align-items:flex-start;border-radius:16px;padding:14px 16px;margin-bottom:12px;background:var(--tonal);color:var(--on-tonal);text-decoration:none;white-space:pre-line}
-a.ann:hover{filter:brightness(1.06)}
-.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:8px;font-size:13px;font-weight:500;background:var(--tonal);color:var(--on-tonal)}
-.chip:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--primary)}
-.chip.bad{background:var(--bad-bg);color:var(--bad)}.chip.bad:before{background:var(--bad)}
-.stat{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0}
-.stat+.stat{border-top:1px solid var(--line)}
-.stat span:first-child{color:var(--muted)}.stat span:last-child{font-weight:500;text-align:right}
-.bar{height:8px;border-radius:4px;background:var(--card3);overflow:hidden;margin:2px 0 8px}.bar i{display:block;height:100%;border-radius:4px;background:var(--primary)}
-.qr{display:block;margin:0 auto 16px;width:216px;height:216px;background:#fff;border-radius:20px;padding:10px}
-.copy{display:flex;gap:8px;align-items:center;background:var(--card3);border-radius:16px;padding:6px 6px 6px 14px}
-.copy input{flex:1;min-width:0;border:0;background:none;color:var(--primary);font:12.5px "JetBrains Mono",ui-monospace,monospace;outline:none;padding:8px 0}
-.btn,button{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 20px;border-radius:999px;border:0;
- background:var(--primary);color:var(--on-primary);text-decoration:none;font:500 14px/1 sans-serif;font-family:inherit;letter-spacing:.1px;cursor:pointer;white-space:nowrap;transition:box-shadow .2s,filter .2s}
-.btn:hover,button:hover{box-shadow:var(--sh);filter:brightness(1.05)}
-.btn:active,button:active{filter:brightness(.95)}
-.btn:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
-.btn.tonal{background:var(--tonal);color:var(--on-tonal)}
-.btn.outlined{background:none;color:var(--primary);box-shadow:inset 0 0 0 1px var(--outline)}
-.btn.text{background:none;color:var(--primary);padding:0 12px;height:36px}.btn.text:hover{box-shadow:none;background:color-mix(in srgb,var(--primary) 8%,transparent)}
-.btn.wide{display:flex;width:100%;height:48px}
-.apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
-.app{position:relative;background:var(--card2);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px}
-.app b{font-size:16px;font-weight:500}.app .note{font-size:12.5px;color:var(--muted);margin-top:-6px}
-.app:not(.rec) .btn:not(.text){background:var(--tonal);color:var(--on-tonal)}
-.app .dl{align-self:flex-start;margin:-4px 0 -6px -12px}
-.app.rec{background:color-mix(in oklab,var(--accent) 12%,var(--card2));box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--primary) 55%,transparent)}
-.app.rec b:after{content:"рекомендуем";margin-left:8px;vertical-align:2px;font-size:11px;font-weight:500;padding:2px 8px;border-radius:6px;background:var(--primary);color:var(--on-primary)}
-details summary{list-style:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--primary);font-weight:500;font-size:14px;margin:14px 0 4px;padding:8px 12px;border-radius:999px}
-details summary::-webkit-details-marker{display:none}
-details summary:hover{background:color-mix(in srgb,var(--primary) 8%,transparent)}
-details summary svg{transition:transform .2s}details[open] summary svg{transform:rotate(180deg)}
-details .apps{margin-top:8px}
-.steps{white-space:pre-line;color:var(--muted)}
-.foot{text-align:center;color:var(--muted);font-size:13px;margin-top:20px;white-space:pre-line}
+body{--bg:#191c20;--card:#23272c;--card2:#2b3036;--card3:#373b3e;--ink:#e6ecf0;--muted:#9ba8b4;--line:#393f46;--outline:#5a646e;
+ --primary:color-mix(in oklab,var(--accent) 78%,#fff);--on-primary:#072224;
+ --primary-soft:color-mix(in oklab,var(--accent) 16%,transparent);
+ --pink:#f04a9d;--pink-soft:rgba(240,74,157,.16);
+ --good:var(--primary);--bad:#f04a9d;--bad-bg:rgba(225,40,133,.16);
+ --sh:0 4px 16px rgba(0,0,0,.28);color-scheme:dark}
+body.light{--bg:#edf0f3;--card:#ffffff;--card2:#f3f5f8;--card3:#e6eaef;--ink:#24292e;--muted:#5c6670;--line:#d8dee5;--outline:#96a1ad;
+ --primary:color-mix(in oklab,var(--accent) 70%,#000);--on-primary:#fff;
+ --primary-soft:color-mix(in oklab,var(--accent) 13%,transparent);
+ --pink:#d6247c;--pink-soft:rgba(214,36,124,.12);
+ --bad:#c81d74;--bad-bg:rgba(200,29,116,.12);
+ --sh:0 2px 10px rgba(36,41,46,.08);color-scheme:light}
+@media (prefers-color-scheme:light){body.auto{--bg:#edf0f3;--card:#ffffff;--card2:#f3f5f8;--card3:#e6eaef;--ink:#24292e;--muted:#5c6670;--line:#d8dee5;--outline:#96a1ad;
+ --primary:color-mix(in oklab,var(--accent) 70%,#000);--on-primary:#fff;
+ --primary-soft:color-mix(in oklab,var(--accent) 13%,transparent);
+ --pink:#d6247c;--pink-soft:rgba(214,36,124,.12);
+ --bad:#c81d74;--bad-bg:rgba(200,29,116,.12);
+ --sh:0 2px 10px rgba(36,41,46,.08);color-scheme:light}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:14.5px/1.5 "Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:640px;margin:0 auto;padding:20px 16px calc(36px + env(safe-area-inset-bottom))}
+svg{width:17px;height:17px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+h1{font-size:21px;line-height:26px;font-weight:600;margin:0;letter-spacing:-.2px}
+h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
+.muted{color:var(--muted);font-size:13px}.desc{color:var(--muted);white-space:pre-line;font-size:14px}
+
+.hero{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.hero-left{display:flex;align-items:center;gap:14px;min-width:0}
+.avatar{width:46px;height:46px;border-radius:10px;flex:none;display:grid;place-items:center;
+ background:linear-gradient(135deg,var(--primary) 0%,var(--pink) 100%);color:#fff;font-size:20px;font-weight:700}
+.chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:7px;font-size:12.5px;font-weight:500;background:var(--primary-soft);color:var(--primary);white-space:nowrap}
+.chip:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.chip.bad{background:var(--bad-bg);color:var(--bad)}
+.chip.pink{background:var(--pink-soft);color:var(--pink)}
+.chip.pink:before{display:none}
+
+.ann{display:flex;gap:11px;align-items:flex-start;border-radius:10px;padding:13px 15px;margin-bottom:14px;
+ background:var(--primary-soft);border:1px solid color-mix(in oklab,var(--primary) 30%,transparent);color:var(--ink);text-decoration:none;white-space:pre-line;font-size:13.5px}
+.ann svg{color:var(--primary);margin-top:2px}
+
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 16px}
+.kpi .k{color:var(--muted);font-size:12px;margin-bottom:4px}
+.kpi .v{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.3}
+.kpi .s{color:var(--muted);font-size:12px;margin-top:4px}
+.bar{height:5px;border-radius:3px;background:var(--card3);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;border-radius:3px;background:var(--primary)}
+
+/* Traffic chart */
+.chart-info{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chart-info b{color:var(--ink);font-weight:600}
+.chart-bars{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:5px;align-items:end;height:108px;padding:6px 0 2px}
+.day-col{display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:flex-end;cursor:pointer;border:0;background:none;padding:0;color:inherit;font:inherit}
+.day-track{width:100%;height:84px;border-radius:5px;background:var(--card2);display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;padding:1px;transition:background .15s,box-shadow .15s}
+.day-col:hover .day-track,.day-col.on .day-track{box-shadow:0 0 0 1.5px var(--pink)}
+.day-up{width:100%;background:var(--pink);border-radius:3px 3px 0 0;min-height:0}
+.day-down{width:100%;background:var(--primary);border-radius:2px 2px 3px 3px;min-height:0}
+.day-lbl{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;line-height:1}
+.day-col.on .day-lbl{color:var(--ink);font-weight:600}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:10px;align-items:center;flex-wrap:wrap}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+
+/* Connect: QR + copy bar */
+.connect-grid{display:grid;grid-template-columns:156px minmax(0,1fr);gap:16px;align-items:center}
+.qr-wrap{background:#fff;padding:8px;border-radius:10px;width:156px;height:156px;margin:0 auto}
+.qr-wrap img{display:block;width:100%;height:100%}
+.copy{display:flex;gap:6px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:5px 5px 5px 11px}
+.copy input{flex:1;min-width:0;border:0;background:none;color:var(--primary);font:12.5px "JetBrains Mono",ui-monospace,monospace;outline:none;padding:6px 0}
+
+.btn,button.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;
+ background:var(--primary);color:var(--on-primary);text-decoration:none;font:600 13.5px/1 inherit;cursor:pointer;white-space:nowrap;transition:filter .15s,background .15s,border-color .15s}
+.btn:hover{filter:brightness(1.06)}
+.btn:active{filter:brightness(.95)}
+.btn.sec{background:var(--card2);color:var(--ink);border-color:var(--line);font-weight:500}
+.btn.sec:hover{border-color:var(--outline);filter:none}
+.btn.ghost{background:transparent;color:var(--muted);padding:0 10px;font-weight:500}
+.btn.ghost:hover{color:var(--ink);background:var(--card2);filter:none}
+.btn.danger{background:transparent;color:var(--bad);border-color:color-mix(in oklab,var(--bad) 40%,transparent);height:32px;padding:0 10px;font-size:12.5px;font-weight:500}
+.btn.danger.arm{background:var(--bad);color:#fff;border-color:transparent}
+.btn.wide{display:flex;width:100%;height:42px}
+.btn.sm{height:32px;padding:0 11px;font-size:13px}
+
+/* OS tabs (subtle Miku pink active highlight like panel sidebar) */
+.os-tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;scrollbar-width:none}
+.os-tabs::-webkit-scrollbar{display:none}
+.os-tab{flex:none;height:34px;padding:0 13px;border-radius:8px;border:1px solid var(--line);background:var(--card2);color:var(--muted);
+ font:500 13px/1 inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .15s,color .15s,border-color .15s}
+.os-tab:hover{color:var(--ink)}
+.os-tab.on{background:var(--pink-soft);border-color:color-mix(in oklab,var(--pink) 45%,transparent);color:var(--ink);font-weight:600}
+.os-dot{width:6px;height:6px;border-radius:50%;background:var(--pink);display:none}
+.os-tab.detected .os-dot{display:inline-block}
+
+.apps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.app{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.app.rec{border-color:color-mix(in oklab,var(--primary) 55%,transparent);background:color-mix(in oklab,var(--accent) 8%,var(--card2))}
+.app-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.app b{font-size:14.5px;font-weight:600}
+.rec-tag{font-size:11px;font-weight:600;padding:2px 7px;border-radius:6px;background:var(--primary-soft);color:var(--primary)}
+.app .note{font-size:12.5px;color:var(--muted);margin-top:-4px;line-height:1.4}
+.app-actions{display:flex;gap:8px;margin-top:auto;flex-wrap:wrap}
+.app-actions .btn{flex:1}
+
+.guide{margin-top:14px;padding:14px 16px;border-radius:10px;background:var(--bg);border:1px solid var(--line)}
+.guide-title{font-size:13px;font-weight:600;margin-bottom:8px;color:var(--ink)}
+.guide ol{margin:0;padding-left:18px;color:var(--muted);font-size:13px;line-height:1.55}
+.guide li+li{margin-top:4px}
+.steps{white-space:pre-line;color:var(--muted);font-size:13px;line-height:1.55}
+
+/* Devices HWID list */
+.dev-list{display:flex;flex-direction:column;gap:8px}
+.dev-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 13px;border-radius:10px;background:var(--card2);border:1px solid var(--line)}
+.dev-info{min-width:0}
+.dev-name{font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dev-meta{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty-dev{color:var(--muted);font-size:13px;padding:8px 2px}
+
+.foot{text-align:center;color:var(--muted);font-size:12.5px;margin-top:18px;white-space:pre-line}
+
+@media (max-width:560px){
+  main{padding:14px 12px calc(28px + env(safe-area-inset-bottom))}
+  .card{padding:15px}
+  .kpis{grid-template-columns:1fr 1fr;gap:10px}
+  .kpi{padding:13px 14px}
+  .kpi .v{font-size:15.5px}
+  .connect-grid{grid-template-columns:1fr;text-align:center}
+  .apps{grid-template-columns:1fr}
+  .chart-bars{gap:3px;height:96px}
+  .day-track{height:72px}
+  .day-lbl{font-size:9px}
+  .copy{flex-wrap:wrap}
+  .copy .btn{width:100%}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head><body class="{{.Theme}}"><main>
-{{if .Preview}}<aside class="card" aria-label="Предпросмотр подписки"><b>Предпросмотр</b><p class="muted">Ссылки открываются отдельно. Для добавления подписки приложение должно быть установлено.</p><a class="btn outlined wide" href="{{.URL}}" target="_blank" rel="noopener noreferrer">Открыть сохранённую страницу</a></aside>{{end}}
-<div class="card hero"><div class="avatar">{{.Initial}}</div><div><h1>{{.Heading}}</h1><div class="muted">{{.Username}}</div></div></div>
+{{if .Preview}}<aside class="card" aria-label="Предпросмотр подписки"><div class="card-head" style="margin-bottom:8px"><h2>Предпросмотр</h2><a class="btn sec sm" href="{{.URL}}" target="_blank" rel="noopener noreferrer">Открыть сохранённую страницу</a></div><div class="muted">Ссылки приложений открываются в новой вкладке. Удаление устройств в предпросмотре отключено.</div></aside>{{end}}
+
+<div class="card hero">
+  <div class="hero-left">
+    <div class="avatar">{{.Initial}}</div>
+    <div style="min-width:0">
+      <h1>{{.Heading}}</h1>
+      <div class="muted" style="overflow:hidden;text-overflow:ellipsis">{{.Username}}</div>
+    </div>
+  </div>
+  <span class="chip{{if not .Active}} bad{{end}}">{{.Status}}</span>
+</div>
+
 {{if .Description}}<div class="card desc">{{.Description}}</div>{{end}}
 {{if .Announce}}{{if .AnnounceURL}}<a class="ann" href="{{.AnnounceURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></a>{{else}}<div class="ann"><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></div>{{end}}{{end}}
-{{if .ShowTraffic}}<div class="card">
-<div class="stat"><span>Статус</span><span class="chip{{if not .Active}} bad{{end}}">{{.Status}}</span></div>
-<div class="stat"><span>Трафик</span><span>{{.Used}} / {{.Limit}}</span></div>{{if .Percent}}<div class="bar"><i style="width:{{.Percent}}%"></i></div>{{end}}
-<div class="stat"><span>Действует до</span><span>{{.Expire}}{{if .DaysLeft}} · {{.DaysLeft}}{{end}}</span></div></div>{{end}}
-<div class="card"><h2>Подключение</h2>
-{{if .QR}}<img class="qr" src="data:image/png;base64,{{.QR}}" alt="QR-код подписки">{{end}}
-<div class="copy"><input id="u" readonly value="{{.URL}}" onclick="this.select()"><button id="c" type="button" class="btn tonal"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Копировать</span></button></div></div>
-{{if .Apps}}<div class="card"><h2 id="mine-h">Приложения</h2><div class="apps" id="mine"></div>
-<details id="rest-box"><summary>Другие приложения <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></summary><div class="apps" id="rest">
-{{range .Apps}}<div class="app{{if .Recommended}} rec{{end}}" data-p="{{.Platforms}}"><b>{{.Name}}</b>{{if .Note}}<span class="note">{{.Note}}</span>{{end}}
-<a class="btn" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить</a>{{if .Download}}<a class="btn text dl" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>Скачать</a>{{end}}</div>
-{{end}}</div></details></div>{{end}}
-{{if .Instructions}}<div class="card"><h2>Как подключиться</h2><div class="steps">{{.Instructions}}</div></div>{{end}}
-{{if .SupportURL}}<a class="btn outlined wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>Поддержка</a>{{end}}
+
+{{if .ShowTraffic}}
+<div class="kpis">
+  <div class="kpi">
+    <div class="k">Трафик</div>
+    <div class="v">{{.Used}} <span class="muted" style="font-weight:400">/ {{.Limit}}</span></div>
+    {{if .Percent}}<div class="bar"><i style="width:{{.Percent}}%"></i></div>{{end}}
+  </div>
+  <div class="kpi">
+    <div class="k">Действует до</div>
+    <div class="v">{{.Expire}}</div>
+    {{if .DaysLeft}}<div class="s">{{.DaysLeft}}</div>{{end}}
+  </div>
+</div>
+{{end}}
+
+{{if .ShowTraffic}}{{if .Daily}}
+<div class="card">
+  <div class="card-head">
+    <h2>Трафик по дням</h2>
+    <div class="chart-info" id="chart-info">{{if .ChartHasData}}Макс: <b>{{.ChartMax}}</b>{{else}}Пока нет данных{{end}}</div>
+  </div>
+  <div class="chart-bars" id="chart-bars">
+    {{range $i, $d := .Daily}}
+    <button type="button" class="day-col" data-date="{{$d.Date}}" data-down="{{$d.HumanDown}}" data-up="{{$d.HumanUp}}" data-total="{{$d.HumanTotal}}" title="{{$d.Date}}: {{$d.HumanTotal}}">
+      <div class="day-track">
+        {{if $d.UpPct}}<div class="day-up" style="height:{{$d.UpPct}}%"></div>{{end}}
+        {{if $d.DownPct}}<div class="day-down" style="height:{{$d.DownPct}}%"></div>{{end}}
+      </div>
+      <span class="day-lbl">{{$d.Label}}</span>
+    </button>
+    {{end}}
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--primary)"></i>Скачивание</span>
+    <span><i style="background:var(--pink)"></i>Отдача</span>
+    <span class="muted" style="margin-left:auto">14 дней</span>
+  </div>
+</div>
+{{end}}{{end}}
+
+<div class="card">
+  <div class="card-head">
+    <h2>Подключение</h2>
+    <span class="muted">Ссылка и QR-код</span>
+  </div>
+  <div class="{{if .QR}}connect-grid{{end}}">
+    {{if .QR}}<div class="qr-wrap"><img src="data:image/png;base64,{{.QR}}" alt="QR-код подписки"></div>{{end}}
+    <div style="min-width:0">
+      <div class="muted" style="margin-bottom:8px">Отсканируйте QR-код в приложении или скопируйте ссылку подписки:</div>
+      <div class="copy">
+        <input id="u" readonly value="{{.URL}}" onclick="this.select()" aria-label="Ссылка подписки">
+        <button id="c" type="button" class="btn sm"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Копировать</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{if .Apps}}
+<div class="card">
+  <div class="card-head">
+    <h2 id="apps-h">Приложения</h2>
+    <span class="chip pink" id="os-badge" style="display:none"></span>
+  </div>
+  <div class="os-tabs" id="os-tabs" role="tablist">
+    <button type="button" class="os-tab" data-os="ios"><span class="os-dot"></span>iOS</button>
+    <button type="button" class="os-tab" data-os="android"><span class="os-dot"></span>Android</button>
+    <button type="button" class="os-tab" data-os="windows"><span class="os-dot"></span>Windows</button>
+    <button type="button" class="os-tab" data-os="macos"><span class="os-dot"></span>macOS</button>
+    <button type="button" class="os-tab" data-os="linux"><span class="os-dot"></span>Linux</button>
+  </div>
+  <div class="apps" id="apps-grid">
+    {{range .Apps}}
+    <div class="app{{if .Recommended}} rec{{end}}" data-p="{{.Platforms}}">
+      <div class="app-top"><b>{{.Name}}</b>{{if .Recommended}}<span class="rec-tag">Рекомендуем</span>{{end}}</div>
+      {{if .Note}}<span class="note">{{.Note}}</span>{{end}}
+      <div class="app-actions">
+        <a class="btn sm" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить</a>
+        {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>Скачать</a>{{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+  <div class="guide">
+    <div class="guide-title" id="guide-title">Как подключиться</div>
+    {{if .Instructions}}<div class="steps">{{.Instructions}}</div>{{else}}
+    <ol id="guide-steps">
+      <li>Установите рекомендованное приложение кнопкой «Скачать».</li>
+      <li>Вернитесь на эту страницу и нажмите «Добавить» — подписка загрузится автоматически.</li>
+      <li>Выберите сервер в приложении и включите подключение.</li>
+    </ol>{{end}}
+  </div>
+</div>
+{{else if .Instructions}}
+<div class="card"><div class="card-head"><h2>Как подключиться</h2></div><div class="steps">{{.Instructions}}</div></div>
+{{end}}
+
+{{if .ShowDevices}}
+<div class="card" id="devices-card" data-base="{{.DeviceActionBase}}">
+  <div class="card-head">
+    <h2>Устройства (HWID)</h2>
+    <span class="muted" id="dev-counter">{{if .HWIDOff}}Проверка отключена{{else if .DeviceLimit}}{{len .Devices}} из {{.DeviceLimit}}{{else}}{{len .Devices}} подключено{{end}}</span>
+  </div>
+  <div class="dev-list" id="dev-list">
+    {{if not .Devices}}
+    <div class="empty-dev">Устройства появятся здесь после первого подключения приложения.</div>
+    {{else}}
+    {{range .Devices}}
+    <div class="dev-row" data-id="{{.ID}}">
+      <div class="dev-info">
+        <div class="dev-name">{{.Title}}</div>
+        <div class="dev-meta">{{.Meta}}{{if .LastSeen}} · {{.LastSeen}}{{end}}</div>
+      </div>
+      {{if $.DeviceActionBase}}
+      <button type="button" class="btn danger dev-del" data-id="{{.ID}}">Удалить</button>
+      {{end}}
+    </div>
+    {{end}}
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{if .SupportURL}}<a class="btn sec wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>Поддержка</a>{{end}}
 {{if .Footer}}<div class="foot">{{.Footer}}</div>{{end}}
 </main>
 <script>
 (function(){
-  var b=document.getElementById('c');
-  if(b){var l=b.querySelector('span');b.onclick=function(){var i=document.getElementById('u');
+  // Копирование ссылки
+  var c=document.getElementById('c');
+  if(c){var s=c.querySelector('span');c.onclick=function(){var i=document.getElementById('u');
     (navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).catch(function(){i.select();document.execCommand('copy')});
-    l.textContent='Скопировано';setTimeout(function(){l.textContent='Копировать'},1500)}}
-  var ua=navigator.userAgent, p=/android/i.test(ua)?'android':/iphone|ipad|ipod/i.test(ua)?'ios':/mac os/i.test(ua)?'macos':/windows/i.test(ua)?'windows':/linux/i.test(ua)?'linux':'';
-  var mine=document.getElementById('mine'), rest=document.getElementById('rest'), box=document.getElementById('rest-box');
-  if(!mine)return;
-  var tiles=[].slice.call(rest.children), moved=0;
-  tiles.forEach(function(t){if(!p||t.getAttribute('data-p').indexOf(p)>=0){mine.appendChild(t);moved++}});
-  if(!moved){tiles.forEach(function(t){mine.appendChild(t)})}
-  if(!rest.children.length){box.style.display='none'}
-  if(p&&moved){document.getElementById('mine-h').textContent='Приложения для вашего устройства'}
+    s.textContent='Скопировано';setTimeout(function(){s.textContent='Копировать'},1600)}}
+
+  // Интерактивный выбор дня на графике трафика
+  var bars=document.getElementById('chart-bars'), info=document.getElementById('chart-info');
+  if(bars&&info){
+    var cols=[].slice.call(bars.querySelectorAll('.day-col'));
+    function showDay(el){
+      cols.forEach(function(x){x.classList.remove('on')});
+      el.classList.add('on');
+      info.innerHTML='<b>'+el.dataset.date+'</b> · ↓ '+el.dataset.down+' · ↑ '+el.dataset.up;
+    }
+    cols.forEach(function(el){
+      el.addEventListener('click',function(){showDay(el)});
+      el.addEventListener('mouseenter',function(){showDay(el)});
+    });
+  }
+
+  // Автодетект ОС и переключение вкладок приложений
+  var ua=navigator.userAgent||'';
+  var detected=/android/i.test(ua)?'android':/iphone|ipad|ipod/i.test(ua)?'ios':/mac os|macintosh/i.test(ua)?'macos':/windows/i.test(ua)?'windows':/linux/i.test(ua)?'linux':'ios';
+  var osNames={ios:'iOS',android:'Android',windows:'Windows',macos:'macOS',linux:'Linux'};
+  var tabsWrap=document.getElementById('os-tabs'), grid=document.getElementById('apps-grid'), badge=document.getElementById('os-badge'), gTitle=document.getElementById('guide-title');
+  if(tabsWrap&&grid){
+    var tabs=[].slice.call(tabsWrap.querySelectorAll('.os-tab'));
+    var cards=[].slice.call(grid.querySelectorAll('.app'));
+    tabs.forEach(function(t){if(t.dataset.os===detected)t.classList.add('detected')});
+    if(badge){badge.textContent='Ваша ОС: '+osNames[detected];badge.style.display='inline-flex'}
+    function selectOS(os){
+      tabs.forEach(function(t){t.classList.toggle('on',t.dataset.os===os)});
+      var shown=0;
+      cards.forEach(function(el){
+        var ps=(el.dataset.p||'').trim();
+        var ok=!ps||ps.indexOf(os)>=0;
+        el.style.display=ok?'':'none';
+        if(ok)shown++;
+      });
+      if(!shown){cards.forEach(function(el){el.style.display=''})}
+      if(gTitle){gTitle.textContent='Как подключиться на '+osNames[os]}
+    }
+    tabs.forEach(function(t){t.onclick=function(){selectOS(t.dataset.os)}});
+    selectOS(detected);
+  }
+
+  // Удаление HWID-устройств (2-шаговое подтверждение прямо на кнопке)
+  var dCard=document.getElementById('devices-card');
+  if(dCard&&dCard.dataset.base){
+    var base=dCard.dataset.base, list=document.getElementById('dev-list'), counter=document.getElementById('dev-counter');
+    dCard.addEventListener('click',function(e){
+      var btn=e.target.closest('.dev-del');
+      if(!btn||btn.disabled)return;
+      if(!btn.classList.contains('arm')){
+        btn.classList.add('arm');btn.textContent='Точно?';
+        setTimeout(function(){if(btn.isConnected&&btn.classList.contains('arm')){btn.classList.remove('arm');btn.textContent='Удалить'}},3500);
+        return;
+      }
+      var id=btn.dataset.id;
+      btn.disabled=true;btn.textContent='…';
+      fetch(base+encodeURIComponent(id)+'/delete',{method:'POST',headers:{'X-Vynel':'1'}}).then(function(r){
+        if(!r.ok)throw new Error('err');
+        var row=btn.closest('.dev-row');if(row)row.remove();
+        var left=list.querySelectorAll('.dev-row').length;
+        if(!left){list.innerHTML='<div class="empty-dev">Привязанных устройств нет.</div>'}
+        if(counter){counter.textContent=counter.textContent.replace(/^\d+/,String(left))}
+      }).catch(function(){btn.disabled=false;btn.classList.remove('arm');btn.textContent='Ошибка'});
+    });
+  }
 })();
 </script></body></html>`))
 
@@ -126,6 +382,23 @@ type pageApp struct {
 	Link                  template.URL
 	Download              template.URL
 	Recommended           bool
+}
+
+type pageDevice struct {
+	ID       int64
+	Title    string
+	Meta     string
+	LastSeen string
+}
+
+type pageDay struct {
+	Date       string
+	Label      string
+	DownPct    int
+	UpPct      int
+	HumanDown  string
+	HumanUp    string
+	HumanTotal string
 }
 
 // PageData is everything the subscription page shows.
@@ -148,6 +421,15 @@ type PageData struct {
 	Apps                                  []pageApp
 	Instructions, Footer                  string
 	SupportURL                            template.URL
+
+	Daily            []pageDay
+	ChartMax         string
+	ChartHasData     bool
+	ShowDevices      bool
+	HWIDOff          bool
+	DeviceLimit      int
+	DeviceActionBase string
+	Devices          []pageDevice
 }
 
 func safeURL(s string) template.URL {
@@ -206,6 +488,102 @@ func BuildPage(u *store.User, subURL string, b service.SubBasics, p service.SubP
 	return d, nil
 }
 
+// PopulatePageExtras attaches HWID devices and daily traffic chart data to PageData.
+func PopulatePageExtras(d *PageData, devices []*store.Device, deviceLimit int, hwidOff bool, daily []service.DayTraffic, actionBase string, now time.Time) {
+	d.ShowDevices = true
+	d.HWIDOff = hwidOff
+	d.DeviceLimit = deviceLimit
+	d.DeviceActionBase = actionBase
+	d.Devices = make([]pageDevice, 0, len(devices))
+	for _, dev := range devices {
+		title := strings.TrimSpace(dev.Model)
+		if title == "" {
+			title = strings.TrimSpace(dev.Platform)
+		}
+		if title == "" {
+			title = "Устройство"
+		}
+		var meta []string
+		if dev.Platform != "" && dev.Platform != title {
+			meta = append(meta, strings.TrimSpace(dev.Platform+" "+dev.OSVersion))
+		} else if dev.OSVersion != "" {
+			meta = append(meta, dev.OSVersion)
+		}
+		if dev.HWID != "" {
+			short := dev.HWID
+			if len(short) > 10 {
+				short = short[:10] + "…"
+			}
+			meta = append(meta, "HWID "+short)
+		}
+		d.Devices = append(d.Devices, pageDevice{
+			ID:       dev.ID,
+			Title:    title,
+			Meta:     strings.Join(meta, " · "),
+			LastSeen: formatAgo(dev.LastSeen, now),
+		})
+	}
+
+	if len(daily) == 0 {
+		return
+	}
+	var maxTotal int64
+	for _, row := range daily {
+		if tot := row.Up + row.Down; tot > maxTotal {
+			maxTotal = tot
+		}
+	}
+	d.ChartHasData = maxTotal > 0
+	if maxTotal > 0 {
+		d.ChartMax = human(maxTotal)
+	}
+	d.Daily = make([]pageDay, 0, len(daily))
+	for _, row := range daily {
+		tm := time.Unix(row.Day, 0).UTC()
+		tot := row.Up + row.Down
+		downPct, upPct := 0, 0
+		if maxTotal > 0 && tot > 0 {
+			downPct = int(row.Down * 100 / maxTotal)
+			upPct = int(row.Up * 100 / maxTotal)
+			if row.Down > 0 && downPct < 4 {
+				downPct = 4
+			}
+			if row.Up > 0 && upPct < 3 {
+				upPct = 3
+			}
+			if downPct+upPct > 100 {
+				downPct = 100 - upPct
+			}
+		}
+		d.Daily = append(d.Daily, pageDay{
+			Date:       tm.Format("02.01"),
+			Label:      tm.Format("02"),
+			DownPct:    downPct,
+			UpPct:      upPct,
+			HumanDown:  human(row.Down),
+			HumanUp:    human(row.Up),
+			HumanTotal: human(tot),
+		})
+	}
+}
+
+func formatAgo(ts int64, now time.Time) string {
+	if ts <= 0 {
+		return ""
+	}
+	diff := now.Sub(time.Unix(ts, 0))
+	if diff < time.Minute {
+		return "только что"
+	}
+	if diff < time.Hour {
+		return fmt.Sprintf("%d мин назад", int(diff.Minutes()))
+	}
+	if diff < 24*time.Hour {
+		return fmt.Sprintf("%d ч назад", int(diff.Hours()))
+	}
+	return fmt.Sprintf("%d дн назад", int(diff.Hours()/24))
+}
+
 func accentRe(s string) bool {
 	if len(s) != 7 || s[0] != '#' {
 		return false
@@ -221,6 +599,31 @@ func accentRe(s string) bool {
 // RenderPage writes the page.
 func RenderPage(w io.Writer, d PageData) error { return pageTmpl.Execute(w, d) }
 
+func (h *Handler) handleDeviceDelete(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User, explicit string) {
+	rest, ok := strings.CutPrefix(explicit, "devices/")
+	if !ok {
+		h.notFound(ctx, w)
+		return
+	}
+	idStr, ok := strings.CutSuffix(rest, "/delete")
+	if !ok {
+		h.notFound(ctx, w)
+		return
+	}
+	devID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || devID <= 0 {
+		h.notFound(ctx, w)
+		return
+	}
+	if err := h.svc.DeleteDevice(ctx, service.Actor{Kind: "user", ID: u.Username}, u.ID, devID); err != nil {
+		http.Error(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
 func (h *Handler) page(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User) {
 	subURL, err := h.svc.SubscriptionURL(ctx, u)
 	if err != nil {
@@ -230,11 +633,25 @@ func (h *Handler) page(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		h.log.Warn("subscription page config", "err", err)
 	}
-	d, err := BuildPage(u, subURL, h.svc.SubBasicsGet(ctx), p, time.Now())
+	now := time.Now()
+	d, err := BuildPage(u, subURL, h.svc.SubBasicsGet(ctx), p, now)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	devs, _ := h.svc.Devices(ctx, u.ID)
+	daily, _ := h.svc.TrafficByDay(ctx, u.ID, 14)
+	hwidEnabled, _ := h.svc.Setting(ctx, service.SettingHWIDEnabled, "true")
+	hwidOff := hwidEnabled != "true" || u.HWIDOff
+	limit := 0
+	if u.HWIDLimit != nil {
+		limit = int(*u.HWIDLimit)
+	} else if v, _ := h.svc.Setting(ctx, service.SettingHWIDLimit, "0"); v != "" {
+		limit, _ = strconv.Atoi(v)
+	}
+	prefix := h.svc.SubPrefix(ctx)
+	PopulatePageExtras(&d, devs, limit, hwidOff, daily, prefix+u.SubToken+"/devices/", now)
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = RenderPage(w, d)
 }

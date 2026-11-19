@@ -21,17 +21,18 @@ import (
 // Telegram bot settings (docs/ARCHITECTURE.md §10). The bot is admin-only: it answers bound
 // admins and nobody else.
 const (
-	SettingBotToken       = "bot.token"        // BotFather token (secret)
-	SettingBotAdmins      = "bot.admins"       // JSON []BotAdmin
-	settingBotBindCode    = "bot.bind_code"    // "<code>|<unix expiry>" (secret)
-	SettingBotBackupTime  = "bot.backup_time"  // HH:MM, empty = no nightly backups
-	SettingBotTimezone    = "bot.timezone"     // IANA name for times in messages and the backup schedule
-	SettingBotAlerts      = "bot.alerts"       // "false" = no node down/up messages
-	SettingBotAlertDelay  = "bot.alert_delay"  // seconds a node must be away before an alert (default 60)
-	SettingBotAlertState  = "bot.alert_state"  // JSON: messages being edited (survives restarts)
-	SettingBotSummaryTime = "bot.summary_time" // HH:MM of the daily summary, "off" = none
-	SettingBotSummaryLast = "bot.summary_last" // date of the last summary
-	SettingBotQuickKeys   = "bot.quick_keys"   // JSON {admin id: version} of the quick buttons each admin has
+	SettingBotToken             = "bot.token"              // BotFather token (secret)
+	SettingBotAdmins            = "bot.admins"             // JSON []BotAdmin
+	settingBotBindCode          = "bot.bind_code"          // "<code>|<unix expiry>" (secret)
+	SettingBotBackupTime        = "bot.backup_time"        // HH:MM, empty = no nightly backups
+	SettingBotTimezone          = "bot.timezone"           // IANA name for times in messages and the backup schedule
+	SettingBotAlerts            = "bot.alerts"             // "false" = no node down/up messages
+	SettingBotAlertDelay        = "bot.alert_delay"        // seconds a node must be away before an alert (default 60)
+	SettingBotAlertState        = "bot.alert_state"        // JSON: messages being edited (survives restarts)
+	SettingBotSummaryTime       = "bot.summary_time"       // HH:MM of the daily summary, "off" = none
+	SettingBotSummaryLast       = "bot.summary_last"       // date of the last summary
+	SettingBotQuickKeys         = "bot.quick_keys"         // JSON {admin id: version} of the quick buttons each admin has
+	SettingBotMiniAppFullscreen = "bot.miniapp_fullscreen" // "true" = request Telegram Mini App fullscreen mode
 	// SettingBackupPassword encrypts backups (Telegram, download, local copies) when set (secret).
 	SettingBackupPassword = "backup.password"
 )
