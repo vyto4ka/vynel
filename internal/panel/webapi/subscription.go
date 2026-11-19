@@ -231,7 +231,8 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 	if err := service.CheckClientRouting(&routing); err != nil {
 		return nil, err
 	}
-	vars := subscription.UserVars(u, s.subURLFor(r, u), b, time.Now())
+	subURL := s.subURLFor(r, u)
+	vars := subscription.UserVars(u, subURL, b, time.Now())
 	headers := subscription.RenderClientHeaders(hs, vars, in.UserAgent, format, routing)
 	// Automatic provider routing for link-based subscriptions (Happ, INCY, KeqDroid).
 	if subscription.LinkRouting(format, in.UserAgent, nil) {
@@ -275,7 +276,21 @@ func (s *Server) subTest(r *http.Request) (any, error) {
 		}
 		ownTemplate = rule.Template != "" && rule.Format == string(format)
 	}
-	return localize(r, map[string]any{"user": u.Username, "format": format, "headers": headers, "client": client, "ownTemplate": ownTemplate, "routingProfile": routingProfile, "appLinks": appLinks, "selection": selection}, "reason"), nil
+	var renderedBody string
+	var decodedUris string
+	if format != subscription.FormatHTML {
+		bodyBytes, _, uris, err := subscription.RenderBody(format, selection.Hosts, selection.Reason, u.UUID, in.UserAgent, subURL, rule, routing)
+		if err != nil {
+			return nil, err
+		}
+		renderedBody = string(bodyBytes)
+		decodedUris = uris
+	}
+	return localize(r, map[string]any{
+		"user": u.Username, "format": format, "headers": headers, "client": client,
+		"ownTemplate": ownTemplate, "routingProfile": routingProfile, "appLinks": appLinks,
+		"selection": selection, "body": renderedBody, "decodedUris": decodedUris,
+	}, "reason"), nil
 }
 
 // subTemplate reads a pasted client template: what is in it and the routing it carries.
@@ -329,12 +344,26 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("user"), 10, 64)
 	u := s.subUser(r, id)
-	d, err := subscription.BuildPage(u, s.subURLFor(r, u), b, page, time.Now())
+	now := time.Now()
+	d, err := subscription.BuildPage(u, s.subURLFor(r, u), b, page, now)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	d.Preview = true
+	if u.ID > 0 {
+		devs, _ := s.svc.Devices(r.Context(), u.ID)
+		daily, _ := s.svc.TrafficByDay(r.Context(), u.ID, 14)
+		hwidEnabled, _ := s.svc.Setting(r.Context(), service.SettingHWIDEnabled, "true")
+		hwidOff := hwidEnabled != "true" || u.HWIDOff
+		limit := 0
+		if u.HWIDLimit != nil {
+			limit = int(*u.HWIDLimit)
+		} else if v, _ := s.svc.Setting(r.Context(), service.SettingHWIDLimit, "0"); v != "" {
+			limit, _ = strconv.Atoi(v)
+		}
+		subscription.PopulatePageExtras(&d, devs, limit, hwidOff, daily, "", now)
+	}
 	var buf bytes.Buffer
 	if err := subscription.RenderPage(&buf, d); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

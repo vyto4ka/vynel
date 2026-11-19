@@ -74,8 +74,9 @@ func (s *Server) botInfo(r *http.Request) (any, error) {
 		"backupTime":  get(service.SettingBotBackupTime, service.DefaultBackupTime),
 		"summaryTime": get(service.SettingBotSummaryTime, service.DefaultSummaryTime),
 		"timezone":    get(service.SettingBotTimezone, service.DefaultTimezone),
-		"alerts":      get(service.SettingBotAlerts, "true") != "false",
-		"alertDelay":  get(service.SettingBotAlertDelay, "60"),
+		"alerts":            get(service.SettingBotAlerts, "true") != "false",
+		"alertDelay":        get(service.SettingBotAlertDelay, "60"),
+		"miniAppFullscreen": get(service.SettingBotMiniAppFullscreen, "false") == "true",
 		// Only whether backups are encrypted; the password never leaves the server.
 		"backupEncrypted": s.svc.BackupPassword(ctx) != "",
 		"status":          map[string]any{"running": false},
@@ -88,12 +89,13 @@ func (s *Server) botInfo(r *http.Request) (any, error) {
 
 func (s *Server) botSave(r *http.Request) (any, error) {
 	var in struct {
-		Token       *string `json:"token"`
-		BackupTime  *string `json:"backupTime"`
-		SummaryTime *string `json:"summaryTime"`
-		Timezone    *string `json:"timezone"`
-		Alerts      *bool   `json:"alerts"`
-		AlertDelay  *int    `json:"alertDelay"`
+		Token             *string `json:"token"`
+		BackupTime        *string `json:"backupTime"`
+		SummaryTime       *string `json:"summaryTime"`
+		Timezone          *string `json:"timezone"`
+		Alerts            *bool   `json:"alerts"`
+		AlertDelay        *int    `json:"alertDelay"`
+		MiniAppFullscreen *bool   `json:"miniAppFullscreen"`
 		// BackupPassword: a new password encrypts backups, "" turns encryption off.
 		BackupPassword *string `json:"backupPassword"`
 	}
@@ -157,6 +159,11 @@ func (s *Server) botSave(r *http.Request) (any, error) {
 			return nil, badRequest("задержка — от 0 до 3600 секунд")
 		}
 		if err := s.svc.SetSetting(ctx, a, service.SettingBotAlertDelay, strconv.Itoa(*in.AlertDelay)); err != nil {
+			return nil, err
+		}
+	}
+	if in.MiniAppFullscreen != nil {
+		if err := s.svc.SetSetting(ctx, a, service.SettingBotMiniAppFullscreen, strconv.FormatBool(*in.MiniAppFullscreen)); err != nil {
 			return nil, err
 		}
 	}

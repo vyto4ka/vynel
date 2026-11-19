@@ -186,11 +186,18 @@ func (s *Service) NodeConfigPreview(ctx context.Context, nodeID int64, raw strin
 		}
 		base = &raw
 	} else {
-		info, err := s.BaseConfig(ctx)
+		n, err := store.GetNode(ctx, s.st.DB, nodeID)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		raw = info.JSON
+		b, err := store.GetBaseConfig(ctx, s.st.DB, n.BaseConfigID)
+		if errors.Is(err, store.ErrNotFound) {
+			raw = xrayconf.DefaultBaseJSON
+		} else if err != nil {
+			return nil, nil, nil, err
+		} else {
+			raw = b.JSON
+		}
 	}
 	all, err := s.desiredStates(ctx, base)
 	if err != nil {
@@ -213,6 +220,191 @@ func (s *Service) NodeConfigPreview(ctx context.Context, nodeID int64, raw strin
 	return cfg, ds.Problems, origins, nil
 }
 
+// NodeBaseConfigInfo describes whether a node inherits the global Xray base config or uses its own.
+type NodeBaseConfigInfo struct {
+	Mode       string `json:"mode"`       // "inherit" | "custom"
+	NodeJSON   string `json:"nodeJson"`   // node's own base config JSON ("" when inheriting)
+	GlobalJSON string `json:"globalJson"` // global default base config JSON
+}
+
+// NodeBaseConfig returns a node's base config inheritance mode, its own JSON (if custom), and the global JSON.
+func (s *Service) NodeBaseConfig(ctx context.Context, nodeID int64) (*NodeBaseConfigInfo, error) {
+	n, err := store.GetNode(ctx, s.st.DB, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	global, err := s.BaseConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := &NodeBaseConfigInfo{
+		Mode:       "inherit",
+		NodeJSON:   "",
+		GlobalJSON: global.JSON,
+	}
+	if n.BaseConfigID != nil {
+		b, err := store.GetBaseConfig(ctx, s.st.DB, n.BaseConfigID)
+		if err == nil {
+			out.Mode = "custom"
+			out.NodeJSON = b.JSON
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// CheckNodeBaseConfig builds a single node's config with raw as its base config without saving.
+func (s *Service) CheckNodeBaseConfig(ctx context.Context, nodeID int64, raw string) (*BaseCheck, error) {
+	if err := parseBase(raw); err != nil {
+		return nil, err
+	}
+	n, err := store.GetNode(ctx, s.st.DB, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	now, err := s.desiredStates(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	next, err := s.desiredStatesWithOverrides(ctx, nil, map[int64]string{nodeID: raw})
+	if err != nil {
+		return nil, invalid("%v", err)
+	}
+	ds, ok := next[nodeID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	was := map[string]bool{}
+	if old := now[nodeID]; old != nil {
+		for _, p := range old.Problems {
+			was[p] = true
+		}
+	}
+	out := &BaseCheck{}
+	for _, p := range ds.Problems {
+		if !was[p] {
+			out.Problems = append(out.Problems, fmt.Sprintf("%s: %s", n.Code, p))
+		}
+	}
+	out.Nodes = []BaseCheckNode{{ID: n.ID, Code: n.Code, Name: n.Name, Config: ds.Config}}
+	return out, nil
+}
+
+// SaveNodeBaseConfig sets a node's Xray base config to "inherit" (NULL base_config_id) or "custom".
+func (s *Service) SaveNodeBaseConfig(ctx context.Context, actor Actor, nodeID int64, mode, raw string) error {
+	if mode != "inherit" && mode != "custom" {
+		return invalid("режим должен быть inherit или custom")
+	}
+	if _, err := store.GetNode(ctx, s.st.DB, nodeID); err != nil {
+		return err
+	}
+	var trimmed string
+	if mode == "custom" {
+		chk, err := s.CheckNodeBaseConfig(ctx, nodeID, raw)
+		if err != nil {
+			return err
+		}
+		if len(chk.Problems) > 0 {
+			return invalid("с таким конфигом сломается нода: %s", strings.Join(chk.Problems, "; "))
+		}
+		trimmed = strings.TrimSpace(raw)
+	}
+	return s.mutate(ctx, change{
+		actor:    actor,
+		action:   "node.xray_base.save",
+		entity:   "node",
+		entityID: func() int64 { return nodeID },
+		event:    EvNodeChanged,
+		diff:     map[string]any{"mode": mode, "bytes": len(trimmed)},
+	}, func(q store.DBTX) error {
+		if mode == "inherit" {
+			return store.SetNodeBaseConfig(ctx, q, nodeID, nil)
+		}
+		b := &store.BaseConfig{
+			Name:      fmt.Sprintf("node-%d", nodeID),
+			JSON:      trimmed,
+			IsDefault: false,
+		}
+		if err := store.UpsertBaseConfig(ctx, q, b); err != nil {
+			return err
+		}
+		return store.SetNodeBaseConfig(ctx, q, nodeID, &b.ID)
+	})
+}
+
+// CompiledNodeConfig is the full compiled Xray + Nginx configuration for a node inspector.
+type CompiledNodeConfig struct {
+	XrayConfig      string `json:"xrayConfig"`
+	NginxConfig     string `json:"nginxConfig"`
+	Revision        string `json:"revision"`
+	AppliedRevision string `json:"appliedRevision"`
+	LastError       string `json:"lastError"`
+}
+
+// CompiledNodeConfig builds the node's final Xray JSON (after nginxSpec mutations and with clients)
+// and rendered nginx.conf. When includeSecrets is false, private keys, passwords, and client UUIDs
+// are masked.
+func (s *Service) CompiledNodeConfig(ctx context.Context, nodeID int64, includeSecrets bool) (*CompiledNodeConfig, error) {
+	n, err := store.GetNode(ctx, s.st.DB, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	ds, err := s.DesiredState(ctx, nodeID)
+	if err != nil {
+		return nil, err
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(ds.Config, &cfg); err != nil {
+		return nil, err
+	}
+	inboundMeta := make(map[string]DesiredInbound, len(ds.Inbounds))
+	for _, in := range ds.Inbounds {
+		inboundMeta[in.Tag] = in
+	}
+	if ins, ok := cfg["inbounds"].([]any); ok {
+		for _, rawIn := range ins {
+			in, ok := rawIn.(map[string]any)
+			if !ok {
+				continue
+			}
+			tag, _ := in["tag"].(string)
+			meta, ok := inboundMeta[tag]
+			if !ok {
+				continue
+			}
+			settings, ok := in["settings"].(map[string]any)
+			if !ok {
+				continue
+			}
+			users := ds.Users[tag]
+			clients := make([]any, 0, len(users))
+			for _, c := range users {
+				clients = append(clients, xrayconf.ClientJSON(c, meta.Protocol, meta.Flow))
+			}
+			settings["clients"] = clients
+		}
+	}
+	if !includeSecrets {
+		maskCompiledConfig(cfg)
+	}
+	pretty, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	nginxCfg := ds.Nginx
+	if nginxCfg == "" {
+		nginxCfg = "# nginx is not configured for this node"
+	}
+	return &CompiledNodeConfig{
+		XrayConfig:      string(pretty),
+		NginxConfig:     nginxCfg,
+		Revision:        ds.Hash,
+		AppliedRevision: n.AppliedHash,
+		LastError:       n.LastError,
+	}, nil
+}
+
 // configOrigins finds the parts of the built config that the base config does not have.
 func configOrigins(cfg, base map[string]any) []ConfigOrigin {
 	var out []ConfigOrigin
@@ -221,7 +413,7 @@ func configOrigins(cfg, base map[string]any) []ConfigOrigin {
 			out = append(out, ConfigOrigin{Path: k, Kind: k})
 		}
 	}
-	if _, ok := cfg["log"]; ok {
+	if _, ok := cfg["log"]; ok && !hasNonEmptyLog(base) {
 		out = append(out, ConfigOrigin{Path: "log", Kind: "log"})
 	}
 	if ins, ok := cfg["inbounds"].([]any); ok {
@@ -295,6 +487,40 @@ func maskConfig(v any) {
 	case []any:
 		for _, x := range t {
 			maskConfig(x)
+		}
+	}
+}
+
+// maskCompiledConfig hides private keys, passwords, and client UUIDs/auth tokens in place.
+func maskCompiledConfig(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, x := range t {
+			if k == "privateKey" || k == "password" {
+				if _, ok := x.(string); ok {
+					t[k] = "•••"
+					continue
+				}
+			}
+			if k == "clients" || k == "users" {
+				if list, ok := x.([]any); ok {
+					for _, item := range list {
+						if m, ok := item.(map[string]any); ok {
+							for _, ck := range []string{"id", "auth", "password"} {
+								if _, ok := m[ck].(string); ok {
+									m[ck] = "•••"
+								}
+							}
+						}
+					}
+					continue
+				}
+			}
+			maskCompiledConfig(x)
+		}
+	case []any:
+		for _, x := range t {
+			maskCompiledConfig(x)
 		}
 	}
 }
