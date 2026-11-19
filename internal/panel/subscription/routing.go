@@ -86,12 +86,12 @@ func xrayDNS(r service.ClientRouting) map[string]any {
 	if len(servers) == 0 {
 		return nil
 	}
-	return map[string]any{"servers": servers, "queryStrategy": "UseIPv4"}
+	return map[string]any{"tag": "dns-in", "servers": servers, "queryStrategy": "UseIPv4"}
 }
 
 // xrayRules builds the routing rules; the last one sends everything else to the proxy.
 func xrayRules(r service.ClientRouting) []any {
-	rules := []any{field("dns-out", "inboundTag", []string{"socks"}, "port", "53")}
+	var rules []any
 	var dnsIPs []string
 	for _, d := range r.DNSDirect {
 		if net.ParseIP(d) != nil {
@@ -99,8 +99,10 @@ func xrayRules(r service.ClientRouting) []any {
 		}
 	}
 	if len(dnsIPs) > 0 {
-		rules = append(rules, field("direct", "ip", dnsIPs, "port", "53"))
+		rules = append(rules, field("direct", "inboundTag", []string{"dns-in"}, "ip", dnsIPs))
 	}
+	rules = append(rules, field("proxy", "inboundTag", []string{"dns-in"}))
+	rules = append(rules, field("dns-out", "port", "53"))
 	add := func(out string, domains, ips []string, apps ...string) {
 		if len(domains) > 0 {
 			rules = append(rules, field(out, "domain", domains))
@@ -286,7 +288,11 @@ func mihomoDNS(r service.ClientRouting, group string) map[string]any {
 		}
 	}
 	for _, d := range r.DNSProxy {
-		proxy = append(proxy, d+"#"+group)
+		sep := "#"
+		if strings.Contains(d, "#") {
+			sep = "&"
+		}
+		proxy = append(proxy, d+sep+group)
 	}
 	if len(boot) == 0 {
 		boot = []string{"77.88.8.8"}

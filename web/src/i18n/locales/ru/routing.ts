@@ -35,8 +35,8 @@ export default {
   chain_profiles_none: 'все профили используют базовые маршруты',
   chain_profiles_override: 'перекрывают базовые:',
   chain_app: 'Приложение',
-  chain_happ_limit: 'списки доменов/IP, обход RU и блокировка рекламы; торренты и фрагментация не передаются.',
-  chain_karing_limit: 'маршруты через формат Mihomo — задаётся во вкладке «Клиенты».',
-  chain_fragment_on: 'Фрагментация ClientHello включена — Happ её не получает, учтите при проверке.',
+  chain_happ_limit: 'списки доменов/IP, обход RU, блокировка рекламы и фрагментация (через заголовки); торренты и process: не передаются.',
+  chain_karing_limit: 'отдельный профиль Karing с наборами правил и XHTTP (1.2.26+).',
+  chain_fragment_on: 'Фрагментация ClientHello включена — передаётся в Xray JSON, Happ (заголовками) и v2RayTun (параметром fm).',
   check_in_app: 'Проверить на приложении',
 }

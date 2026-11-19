@@ -101,7 +101,8 @@ xray_inbound: |
         "target": "127.0.0.1:${SELFSTEAL_PORT}",
         "serverNames": ["${NODE_DOMAIN}"],
         "privateKey": "${REALITY_PRIVATE_KEY}",
-        "shortIds": ["${REALITY_SHORT_ID}"]
+        "shortIds": ["${REALITY_SHORT_ID}"],
+        "minClientVer": "1.0.0"
       },
       "xhttpSettings": {
         "path": "${XHTTP_PATH}",

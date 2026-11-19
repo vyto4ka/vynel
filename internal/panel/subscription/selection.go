@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
@@ -34,7 +33,7 @@ func deviceHeaders(v service.DeviceVerdict) []HeaderValue {
 	var hs []HeaderValue
 	if !v.Off {
 		hs = append(hs, HeaderValue{Name: "x-hwid-active", Value: "true"})
-		if v.NoHWID && !v.Links {
+		if v.NoHWID && !v.OK {
 			hs = append(hs, HeaderValue{Name: "x-hwid-not-supported", Value: "true"})
 		}
 		if v.Full {
@@ -92,11 +91,6 @@ func selectHosts(ctx context.Context, svc *service.Service, u *store.User, r *ht
 		out.Reason = out.HWID.Reason
 		return out, nil
 	}
-	// Karing imports routing profiles: absence of HWID must not strip their rules.
-	// Keep the established link fallback for other clients and respect explicit formats.
-	if out.HWID.Links && mayLink && !strings.Contains(strings.ToLower(r.UserAgent()), "karing") {
-		out.Format = FormatBase64
-	}
 	var hosts []service.Host
 	if register {
 		hosts, err = svc.SubscriptionHosts(ctx, u, service.RequestDepth(r.Header.Get(service.DepthHeader)))
@@ -106,14 +100,19 @@ func selectHosts(ctx context.Context, svc *service.Service, u *store.User, r *ht
 	if err != nil {
 		return out, err
 	}
+	ua := r.UserAgent()
+	oldKaring := karingClient.MatchString(ua) && karingOlderThan(ua, 1, 2, 26)
+	sbCore := singBoxCore.MatchString(ua) && (out.Format == FormatSingBox || (out.Format == FormatBase64 && mayLink))
 	for _, host := range hosts {
 		s := ServerSummary{Name: host.Remark, Node: host.NodeCode, Protocol: host.Protocol, Network: host.Network}
 		// KeqDroid's mixed payload keeps raw external links next to full Xray configs.
-		mixed := mayLink && out.Format == FormatXray && keqClient.MatchString(r.UserAgent())
+		mixed := mayLink && out.Format == FormatXray && keqClient.MatchString(ua)
 		switch {
 		case host.Hidden:
 			s.Excluded = "hidden"
-		case host.Network == "xhttp" && singBoxCore.MatchString(r.UserAgent()):
+		case host.Network == "xhttp" && sbCore:
+			s.Excluded = "xhttp"
+		case host.Network == "xhttp" && oldKaring && karingNeeds1226(host):
 			s.Excluded = "xhttp"
 		case host.Raw != "" && !out.Format.Supports(host) && !mixed:
 			s.Excluded = "raw"

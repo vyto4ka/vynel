@@ -249,11 +249,12 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
   </div>
   <div class="apps" id="apps-grid">
     {{range .Apps}}
-    <div class="app{{if .Recommended}} rec{{end}}" data-p="{{.Platforms}}">
-      <div class="app-top"><b>{{.Name}}</b>{{if .Recommended}}<span class="rec-tag">Рекомендуем</span>{{end}}</div>
+    <div class="app{{if .Recommended}} rec{{end}}" data-id="{{.ID}}" data-p="{{.Platforms}}">
+      <div class="app-top"><b>{{.Name}}</b><span class="rec-tag"{{if not .Recommended}} style="display:none"{{end}}>Рекомендуем</span></div>
       {{if .Note}}<span class="note">{{.Note}}</span>{{end}}
       <div class="app-actions">
-        <a class="btn sm" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить</a>
+        {{if .Link}}<a class="btn sm app-add" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить</a>{{end}}
+        <button type="button" class="btn sm app-copy"{{if .Link}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Скопировать ссылку</span></button>
         {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>Скачать</a>{{end}}
       </div>
     </div>
@@ -342,11 +343,26 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
         var ps=(el.dataset.p||'').trim();
         var ok=!ps||ps.indexOf(os)>=0;
         el.style.display=ok?'':'none';
+        var isRec=ok&&shown===0;
+        el.classList.toggle('rec',isRec);
+        var tag=el.querySelector('.rec-tag');if(tag)tag.style.display=isRec?'':'none';
+        var add=el.querySelector('.app-add'), cp=el.querySelector('.app-copy');
+        if(add&&cp){
+          var noScheme=el.dataset.id==='keqdroid'&&os==='linux';
+          add.style.display=noScheme?'none':'';
+          cp.style.display=noScheme?'':'none';
+        }
         if(ok)shown++;
       });
-      if(!shown){cards.forEach(function(el){el.style.display=''})}
+      if(!shown){cards.forEach(function(el,idx){el.style.display='';el.classList.toggle('rec',idx===0);var tag=el.querySelector('.rec-tag');if(tag)tag.style.display=idx===0?'':'none'})}
       if(gTitle){gTitle.textContent='Как подключиться на '+osNames[os]}
     }
+    grid.addEventListener('click',function(e){
+      var b=e.target.closest('.app-copy');if(!b)return;
+      var i=document.getElementById('u'), sp=b.querySelector('span');
+      if(i)(navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).catch(function(){i.select();document.execCommand('copy')});
+      if(sp){sp.textContent='Скопировано';setTimeout(function(){sp.textContent='Скопировать ссылку'},1600)}
+    });
     tabs.forEach(function(t){t.onclick=function(){selectOS(t.dataset.os)}});
     selectOS(detected);
   }
@@ -378,10 +394,10 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 </script></body></html>`))
 
 type pageApp struct {
-	Name, Note, Platforms string
-	Link                  template.URL
-	Download              template.URL
-	Recommended           bool
+	ID, Name, Note, Platforms string
+	Link                      template.URL
+	Download                  template.URL
+	Recommended               bool
 }
 
 type pageDevice struct {
@@ -481,8 +497,9 @@ func BuildPage(u *store.User, subURL string, b service.SubBasics, p service.SubP
 		if !a.Enabled {
 			continue
 		}
-		d.Apps = append(d.Apps, pageApp{Name: a.Name, Note: a.Note, Platforms: strings.Join(a.Platforms, " "),
-			Link: safeURL(v.Expand(a.Link)), Download: safeURL(a.Download), Recommended: first})
+		link := strings.TrimSuffix(v.Expand(a.Link), "&outbound-dns=")
+		d.Apps = append(d.Apps, pageApp{ID: a.ID, Name: a.Name, Note: a.Note, Platforms: strings.Join(a.Platforms, " "),
+			Link: safeURL(link), Download: safeURL(a.Download), Recommended: first})
 		first = false
 	}
 	return d, nil

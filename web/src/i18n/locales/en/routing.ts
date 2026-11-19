@@ -35,8 +35,8 @@ export default {
   chain_profiles_none: 'all profiles use the base routing',
   chain_profiles_override: 'override the base:',
   chain_app: 'App',
-  chain_happ_limit: 'domain/IP lists, RU bypass and ad blocking; torrents and fragmentation are not delivered.',
-  chain_karing_limit: 'routing via the Mihomo format — set in the “Clients” tab.',
-  chain_fragment_on: 'ClientHello fragmentation is on — Happ does not receive it, keep that in mind when testing.',
+  chain_happ_limit: 'domain/IP lists, RU bypass, ad blocking and fragmentation (via headers); torrents and process: are not delivered.',
+  chain_karing_limit: 'dedicated Karing profile with rule sets and XHTTP (1.2.26+).',
+  chain_fragment_on: 'ClientHello fragmentation is on — delivered to Xray JSON, Happ (headers), and v2RayTun (fm parameter).',
   check_in_app: 'Test on an app',
 }
