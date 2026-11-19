@@ -52,8 +52,8 @@ type Host struct {
 	Flow        string
 	PublicKey   string
 	ShortID     string
-	PQV         string // mldsa65Verify (REALITY post-quantum certificate verification)
-	SpiderX     string // spiderX (spx)
+	PQV         string         // mldsa65Verify (REALITY post-quantum certificate verification)
+	SpiderX     string         // spiderX (spx)
 	Extra       map[string]any // xhttp extra for the client (server extra + client-only xmux, or the template's full client extra)
 	Hidden      bool
 	// Mihomo: the host may be given to Mihomo/Clash Meta even when it is not plain TCP

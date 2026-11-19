@@ -18,12 +18,12 @@ func HappRouting(r service.ClientRouting) string {
 }
 
 var knownDoHBootstrap = map[string]string{
-	"cloudflare-dns.com":       "1.1.1.1",
-	"dns.google":               "8.8.8.8",
-	"dns.quad9.net":            "9.9.9.9",
-	"dns.adguard-dns.com":      "94.140.14.14",
+	"cloudflare-dns.com":        "1.1.1.1",
+	"dns.google":                "8.8.8.8",
+	"dns.quad9.net":             "9.9.9.9",
+	"dns.adguard-dns.com":       "94.140.14.14",
 	"common.dot.dns.yandex.net": "77.88.8.8",
-	"freedns.controld.com":     "76.76.2.0",
+	"freedns.controld.com":      "76.76.2.0",
 }
 
 func buildHappRouting(scheme, name string, r service.ClientRouting) string {

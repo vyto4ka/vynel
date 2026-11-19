@@ -238,13 +238,13 @@ type SubHeaderPreset struct {
 
 // Clients matching in the catalog; the User-Agents come from the apps themselves.
 const (
-	uaHapp      = `(?i)\bhapp\b`
-	uaIncy      = `(?i)\bincy\b`
-	uaHappI     = `(?i)\b(happ|incy)\b`
-	uaHappKeq   = `(?i)\b(happ|incy|keqdroid|keqdis)\b`
-	uaV2T       = `(?i)v2raytun`
-	uaClash     = `(?i)clash|mihomo|stash|flclash|koala`
-	uaFlClashX  = `(?i)flclashx`
+	uaHapp     = `(?i)\bhapp\b`
+	uaIncy     = `(?i)\bincy\b`
+	uaHappI    = `(?i)\b(happ|incy)\b`
+	uaHappKeq  = `(?i)\b(happ|incy|keqdroid|keqdis)\b`
+	uaV2T      = `(?i)v2raytun`
+	uaClash    = `(?i)clash|mihomo|stash|flclash|koala`
+	uaFlClashX = `(?i)flclashx`
 )
 
 // SubHeaderCatalog lists the headers popular clients understand. The first ones are the
