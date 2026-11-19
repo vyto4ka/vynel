@@ -111,6 +111,18 @@ function XrayEditor({ info, reload }: { info: BaseInfo; reload: () => Promise<vo
 
   const blocked = syntax !== null || obj === null
 
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (dirty && !busy && !blocked) void save()
+      }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, busy, blocked, text])
+
   return (
     <>
       <div className="toolbar">

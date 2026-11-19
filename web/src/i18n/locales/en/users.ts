@@ -76,7 +76,6 @@ export default {
   section_access: 'Access',
   transfer_users: 'Transfer users',
   export_info: 'The file has UUIDs and subscription links — treat it like the panel password. Users only: nodes and settings stay with each panel.',
-  import_section: 'Import',
   file: 'Export file',
   file_help: 'users-export.json from another vynel panel',
   mode: 'Existing users',

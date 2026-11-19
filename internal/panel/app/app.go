@@ -121,7 +121,7 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
 		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
-		UpdateStatus: rec.UpdateStatus, XrayTest: xrayTester(cfg.Xray)})
+		UpdateStatus: rec.UpdateStatus, CertStatus: rec.CertStatus, RenewCerts: nodeRenewCerts(rec), XrayTest: xrayTester(cfg.Xray)})
 	return p, func() { st.Close() }, nil
 }
 
@@ -135,6 +135,24 @@ func xrayTester(bin xray.Binary) func(ctx context.Context, cfg []byte) error {
 		return nil
 	}
 	return bin.Test
+}
+
+// nodeRenewCerts asks a connected node to force-renew one domain (or all when domain is empty).
+func nodeRenewCerts(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, domain string) (string, error) {
+	return func(ctx context.Context, nodeID int64, domain string) (string, error) {
+		cctx, cancel := context.WithTimeout(ctx, 3*time.Minute+15*time.Second)
+		defer cancel()
+		res, err := rec.Command(cctx, nodeID, &nodev1.Command{Action: nodev1.Command_ACTION_RENEW_CERTS, Domain: domain})
+		switch {
+		case errors.Is(err, reconciler.ErrNotConnected):
+			return "", errors.New("нода не на связи")
+		case err != nil:
+			return "", err
+		case res.Error != "":
+			return "", errors.New(res.Error)
+		}
+		return res.Detail, nil
+	}
 }
 
 // nodeAction runs the panel's node actions through the node's live session.
@@ -241,6 +259,8 @@ func Run(ctx context.Context, cfg Config) error {
 		defer a.Close()
 		p.LocalNode = a
 		trustedVPN = a.TrustedIPs
+		p.Service.SelfCertStatus = a.CertStatus
+		p.Service.SelfCertRenew = a.ForceRenewCerts
 		cfg.Log.Info("local node enabled", "node", node.Code)
 		run("local node", func() error { return a.Run(ctx) })
 	} else if web := filepath.Join(cfg.DataDir, "web"); (&nginx.Manager{Bin: cfg.NginxBin}).Available() {
@@ -256,6 +276,7 @@ func Run(ctx context.Context, cfg Config) error {
 			st, err := m.Certs.Status(domain)
 			return st, err == nil
 		}
+		p.Service.SelfCertRenew = m.ForceRenewCerts
 		run("nginx", func() error { return panelNginxLoop(ctx, p.Service, m, cfg.Log) })
 		if fw != nil {
 			gw := gatewayPorts(ctx, p.Service, cfg.GatewayListen)

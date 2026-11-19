@@ -2,7 +2,7 @@ import { ReactElement, StrictMode, useCallback, useEffect, useState } from 'reac
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
-import { ConfirmProvider, Icon, Logo, Modal, Tabs, ToastProvider, useAction, useLoad } from './ui'
+import { ConfirmProvider, Icon, Logo, Modal, SideTooltip, Tabs, ToastProvider, useAction, useLoad } from './ui'
 import { initTelegramMiniApp, openExternal } from './telegram'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
@@ -261,14 +261,15 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
         </div>
         <nav className="nav">
           {navPages.filter(visible).map((x) => (
-            <a key={x.id} href={'#/' + x.id} className={'nav-item' + (x.id === route.page ? ' active' : '')} title={x.title}>
-              <Icon name={x.icon} />
-              <span className="nav-label">{x.title}</span>
-              <span className="nav-short">{x.short || x.title}</span>
-              {x.id === 'nodes' && (updates.data?.count || 0) > 0 && (
-                <span className="nav-badge" title={t('main.update_available')}>{updates.data!.count}</span>
-              )}
-            </a>
+            <SideTooltip key={x.id} label={x.title} active={collapsed}>
+              <a href={'#/' + x.id} className={'nav-item' + (x.id === route.page ? ' active' : '')} aria-label={x.title}>
+                <Icon name={x.icon} />
+                <span className="nav-label">{x.title}</span>
+                {x.id === 'nodes' && (updates.data?.count || 0) > 0 && (
+                  <span className="nav-badge" title={t('main.update_available')}>{updates.data!.count}</span>
+                )}
+              </a>
+            </SideTooltip>
           ))}
         </nav>
         <div className="side-foot">
@@ -292,15 +293,18 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
             </div>
           </div>
           <div className="side-actions">
-            <button className="nav-item" onClick={() => { if (confirmPageLeave()) onLogout() }} title={t('main.log_out')}>
-              <Icon name="logout" />
-              <span className="nav-label">{t('main.log_out')}</span>
-              <span className="nav-short">{t('main.log_out')}</span>
-            </button>
-            <button className="nav-item collapse-btn" style={{ width: collapsed ? '100%' : 36, padding: 0, justifyContent: 'center' }}
-              onClick={toggle} title={collapsed ? t('main.expand_menu') : t('main.collapse_menu')}>
-              <Icon name={collapsed ? 'expand' : 'collapse'} />
-            </button>
+            <SideTooltip label={t('main.log_out')} active={collapsed}>
+              <button className="nav-item" onClick={() => { if (confirmPageLeave()) onLogout() }} aria-label={t('main.log_out')}>
+                <Icon name="logout" />
+                <span className="nav-label">{t('main.log_out')}</span>
+              </button>
+            </SideTooltip>
+            <SideTooltip label={collapsed ? t('main.expand_menu') : t('main.collapse_menu')} active={collapsed}>
+              <button className="nav-item collapse-btn"
+                onClick={toggle} title={collapsed ? undefined : t('main.collapse_menu')} aria-label={collapsed ? t('main.expand_menu') : t('main.collapse_menu')}>
+                <Icon name={collapsed ? 'expand' : 'collapse'} />
+              </button>
+            </SideTooltip>
           </div>
         </div>
       </aside>
@@ -364,12 +368,17 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 }
 
 function App() {
-  const [session, setSession] = useState<{ login: string; version: string; method?: string; miniAppFullscreen?: boolean } | null | undefined>(undefined)
+  const [session, setSession] = useState<{ login: string; version: string; method?: string; miniAppFullscreen?: boolean; showWelcome?: boolean } | null | undefined>(undefined)
   const [magicError, setMagicError] = useState('')
-  const [onboarding, setOnboarding] = useState(() => !modeChosen())
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false)
   const check = useCallback(() => {
     get('session').then(setSession, () => setSession(null))
   }, [])
+  useEffect(() => {
+    if (session && session.showWelcome === false && !modeChosen()) {
+      markModeChosen()
+    }
+  }, [session])
   useEffect(() => {
     if (session?.method === 'telegram') {
       initTelegramMiniApp(!!session.miniAppFullscreen)
@@ -404,11 +413,12 @@ function App() {
 
   if (session === undefined) return null
   if (session === null) return <Login onLogin={() => { setMagicError(''); check() }} error={magicError} />
+  const showOnboarding = !!session.showWelcome && !modeChosen() && !onboardingDismissed
   return (
     <>
       <Shell login={session.login} version={session.version} inTelegram={session.method === 'telegram'}
         onLogout={() => post('logout').finally(() => setSession(null))} />
-      {onboarding && <Onboarding onDone={() => setOnboarding(false)} />}
+      {showOnboarding && <Onboarding onDone={() => setOnboardingDismissed(true)} />}
     </>
   )
 }

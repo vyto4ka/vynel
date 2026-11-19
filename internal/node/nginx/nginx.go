@@ -656,6 +656,78 @@ func (m *Manager) RenewCerts(ctx context.Context) error {
 	return err
 }
 
+// ForceRenewCerts immediately re-issues certificates for domain (or every certificate domain of
+// the running nginx config when domain is empty) and reloads nginx gracefully via SIGHUP.
+func (m *Manager) ForceRenewCerts(ctx context.Context, domain string) ([]string, error) {
+	m.mu.Lock()
+	conf := m.current
+	running := m.cmd != nil
+	m.mu.Unlock()
+	if conf == "" || !running {
+		return nil, errors.New("nginx is not running")
+	}
+	all := nginxconf.CertDomains(conf)
+	if len(all) == 0 {
+		return nil, errors.New("this server has no certificate domains in its nginx config")
+	}
+	target := all
+	if domain = strings.ToLower(strings.TrimSpace(domain)); domain != "" {
+		found := false
+		for _, d := range all {
+			if d == domain {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("domain %q is not served by this server's nginx config", domain)
+		}
+		target = []string{domain}
+	}
+	email, issuer := nginxconf.ACME(conf)
+	done, err := m.Certs.ForceRenew(ctx, target, email, issuer)
+	if len(done) > 0 {
+		if rerr := m.Reload(); rerr != nil {
+			err = errors.Join(err, rerr)
+		}
+		if m.OnCerts != nil {
+			m.OnCerts()
+		}
+	}
+	return done, err
+}
+
+// CertStatuses returns the status of every certificate domain in the current nginx config
+// (plus any extra domains present in the certificate store).
+func (m *Manager) CertStatuses() []certs.Status {
+	if m == nil || m.Certs == nil {
+		return nil
+	}
+	m.mu.Lock()
+	conf := m.current
+	m.mu.Unlock()
+	seen := map[string]bool{}
+	var domains []string
+	for _, d := range nginxconf.CertDomains(conf) {
+		if !seen[d] {
+			seen[d] = true
+			domains = append(domains, d)
+		}
+	}
+	for _, d := range m.Certs.Domains() {
+		if !seen[d] {
+			seen[d] = true
+			domains = append(domains, d)
+		}
+	}
+	out := make([]certs.Status, 0, len(domains))
+	for _, d := range domains {
+		st, _ := m.Certs.Status(d)
+		out = append(out, st)
+	}
+	return out
+}
+
 // ImportCaddy copies certificates Caddy already obtained (its storage dir) for the domains
 // that only have placeholders, so moving to nginx does not ask Let's Encrypt again.
 func (m *Manager) ImportCaddy(storage string, domains []string) []string {

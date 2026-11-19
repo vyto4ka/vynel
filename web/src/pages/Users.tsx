@@ -1,8 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { del, get, Group, patch, post, Template, User, UserDetails } from '../api'
 import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
-import { Badge, Bar, ChartLegend, CopyField, copyText, Drawer, Empty, Field, Icon, Info, Loading, Menu, Modal, SplitButton, Switch, Tabs, TrafficChart, useAction, useConfirm, useLoad, useToast } from '../ui'
+import { Badge, Bar, ChartLegend, CopyField, copyText, Drawer, Empty, Field, Icon, Info, isEditable, Loading, Menu, Modal, SplitButton, Switch, Tabs, TrafficChart, useAction, useConfirm, useEscape, useLoad, useRangeSelection, useToast } from '../ui'
 import { t as tr, Trans } from '../i18n'
 
 const pageSize = 200
@@ -44,6 +44,8 @@ export function Users() {
   const [transfer, setTransfer] = useState(hashAction() === 'transfer')
   const [open, setOpen] = useState<number | null>(openId)
   const [page, setPage] = useState(0)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const selectAllRef = useRef<HTMLInputElement>(null)
   const act = useAction()
   const confirm = useConfirm()
   const standard = true
@@ -79,14 +81,20 @@ export function Users() {
 
   const pageIds = useMemo(() => (users.data || []).map((u) => u.id), [users.data])
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id))
+  const somePageSelected = pageIds.some((id) => selected.includes(id))
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = somePageSelected && !allPageSelected
+  }, [somePageSelected, allPageSelected])
+
+  const { toggleItem, resetAnchor } = useRangeSelection(pageIds, selected, setSelected)
+  useEffect(() => { resetAnchor() }, [page, sort, search, statusFilter, groupFilter, resetAnchor])
+
   // В лёгком режиме — короткая таблица без массовых операций.
   const visibleColumns = standard ? columns : columns.filter(([k]) => ['username', 'status', 'expire', 'online'].includes(k))
   const toggleSelectAll = () => {
+    resetAnchor()
     if (allPageSelected) setSelected(selected.filter((id) => !pageIds.includes(id)))
     else setSelected(Array.from(new Set([...selected, ...pageIds])))
-  }
-  const toggleSelectOne = (id: number) => {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
   const runBulk = async (body: Record<string, unknown>, confirmText?: string) => {
@@ -100,11 +108,40 @@ export function Users() {
     }
   }
 
+  const overlayOpen = creating || transfer || open !== null
+  useEscape(selected.length > 0 && !overlayOpen, () => setSelected([]))
+
+  useEffect(() => {
+    if (overlayOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditable(e.target)) return
+      if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && pageIds.length > 0) {
+        e.preventDefault()
+        if (allPageSelected) setSelected((prev) => prev.filter((id) => !pageIds.includes(id)))
+        else setSelected((prev) => Array.from(new Set([...prev, ...pageIds])))
+        return
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selected.length > 0 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault()
+        void runBulk({ action: 'delete' }, tr('users.bulk_delete_confirm', { n: selected.length }))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayOpen, pageIds, allPageSelected, selected])
+
   return (
     <>
       <div className="toolbar">
         <div className="grow search-box">
-          <input className="input" placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input ref={searchRef} className="input" placeholder={tr('users.search_by_name_or_note')} value={search} onChange={(e) => setSearch(e.target.value)} />
           <span className="muted search-icon"><Icon name="search" size={18} /></span>
         </div>
         {standard && (
@@ -138,7 +175,7 @@ export function Users() {
             <button className="btn sm" onClick={() => runBulk({ action: 'enable' })}>{tr('users.bulk_enable')}</button>
             <button className="btn sm" onClick={() => runBulk({ action: 'disable' })}>{tr('users.bulk_disable')}</button>
             {(groups.data?.length ?? 0) > 0 && (
-              <select className="input" style={{ width: 'auto', height: 30, padding: '0 8px' }} value="" onChange={(e) => {
+              <select className="input" style={{ width: 'auto', height: 30, padding: '0 32px 0 10px' }} value="" onChange={(e) => {
                 const gid = Number(e.target.value)
                 if (gid > 0) runBulk({ action: 'addGroup', groupId: gid })
               }}>
@@ -165,7 +202,7 @@ export function Users() {
                 <tr>
                   {standard && (
                     <th style={{ width: 32 }} onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={allPageSelected} onChange={toggleSelectAll} />
+                      <input ref={selectAllRef} type="checkbox" checked={allPageSelected} onChange={toggleSelectAll} />
                     </th>
                   )}
                   {visibleColumns.map(([k, label, cls]) => (
@@ -180,9 +217,24 @@ export function Users() {
                   const st = statusInfo[u.status]
                   const isSel = selected.includes(u.id)
                   return (
-                    <tr key={u.id} className={'click' + (open === u.id || isSel ? ' selected' : '')} onClick={() => show(u.id)}>
+                    <tr
+                      key={u.id}
+                      className={'click' + (open === u.id || isSel ? ' selected' : '')}
+                      onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
+                      onClick={(e) => {
+                        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                          e.preventDefault()
+                          toggleItem(u.id, e.shiftKey)
+                          return
+                        }
+                        show(u.id)
+                      }}
+                    >
                       {standard && (
-                        <td onClick={(e) => { e.stopPropagation(); toggleSelectOne(u.id) }}>
+                        <td
+                          onMouseDown={(e) => { if (e.shiftKey) e.preventDefault() }}
+                          onClick={(e) => { e.stopPropagation(); toggleItem(u.id, e.shiftKey) }}
+                        >
                           <input type="checkbox" checked={isSel} onChange={() => {}} />
                         </td>
                       )}
@@ -317,22 +369,36 @@ function TransferUsers({ onClose, onImported }: { onClose: () => void; onImporte
   const canImport = tab === 'file' ? !!file : (!!remnaUrl.trim() && !!remnaToken.trim())
 
   return (
-    <Modal title={tr('users.transfer_users')} onClose={onClose}>
-      <div className="card card-pad">
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <div className="label">{tr('users.import_section')}</div>
-          <div className="tabs">
-            <button type="button" className={'tab' + (tab === 'file' ? ' active' : '')} onClick={() => { setTab('file'); setReport(null) }}>{tr('users.import_tab_file')}</button>
-            <button type="button" className={'tab' + (tab === 'remnawave' ? ' active' : '')} onClick={() => { setTab('remnawave'); setReport(null) }}>{tr('users.import_tab_remnawave')}</button>
-          </div>
-        </div>
+    <Modal
+      title={tr('users.transfer_users')}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <button type="button" className="btn ghost" onClick={onClose}>{tr('common.cancel')}</button>
+          <button type="button" className="btn" disabled={!canImport} onClick={() => doImport(true)}>{tr('users.import_dry_run_btn')}</button>
+          <button type="submit" form="transfer-users-form" className="btn primary" disabled={!canImport}>
+            <Icon name="upload" />{' '}{tr('users.import_2')}
+          </button>
+        </>
+      }
+    >
+      <Tabs
+        value={tab}
+        onChange={(v) => { setTab(v as 'file' | 'remnawave'); setReport(null) }}
+        items={[
+          { id: 'file', label: tr('users.import_tab_file') },
+          { id: 'remnawave', label: tr('users.import_tab_remnawave') },
+        ]}
+      />
+      <form id="transfer-users-form" onSubmit={(e) => { e.preventDefault(); if (canImport) doImport(false) }}>
         {tab === 'file' ? (
           <Field label={tr('users.file')} help={tr('users.file_help')}>
             <input className="input" type="file" accept=".json,application/json" onChange={(e) => { setFile(e.target.files?.[0] || null); setReport(null) }} />
           </Field>
         ) : (
           <>
-            <div className="small muted" style={{ marginBottom: 10 }}>{tr('users.remnawave_api_hint')}</div>
+            <div className="small muted" style={{ marginBottom: 12 }}>{tr('users.remnawave_api_hint')}</div>
             <Field label={tr('users.remnawave_url')}>
               <input className="input mono" value={remnaUrl} onChange={(e) => { setRemnaUrl(e.target.value); setReport(null) }} placeholder="https://panel.example.com" />
             </Field>
@@ -348,28 +414,26 @@ function TransferUsers({ onClose, onImported }: { onClose: () => void; onImporte
             <option value="rename">{tr('users.mode_rename')}</option>
           </select>
         </Field>
-        <label className="check" style={{ marginBottom: 6 }}>
-          <input type="checkbox" checked={createGroups} onChange={(e) => setCreateGroups(e.target.checked)} />{' '}{tr('users.import_create_groups')}
-        </label>
-        <label className="check" style={{ marginBottom: 6 }}>
-          <input type="checkbox" checked={withTraffic} onChange={(e) => setWithTraffic(e.target.checked)} />{' '}{tr('users.import_with_traffic')}
-        </label>
-        <label className="check" style={{ marginBottom: 12 }}>
-          <input type="checkbox" checked={reissue} onChange={(e) => setReissue(e.target.checked)} />{' '}{tr('users.reissue_on_import')}
-        </label>
-        <div className="row" style={{ gap: 8 }}>
-          <button className="btn" disabled={!canImport} onClick={() => doImport(true)}>{tr('users.import_dry_run_btn')}</button>
-          <button className="btn primary" disabled={!canImport} onClick={() => doImport(false)}><Icon name="upload" />{' '}{tr('users.import_2')}</button>
+        <div className="check-list">
+          <label className="check">
+            <input type="checkbox" checked={createGroups} onChange={(e) => setCreateGroups(e.target.checked)} />{' '}{tr('users.import_create_groups')}
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={withTraffic} onChange={(e) => setWithTraffic(e.target.checked)} />{' '}{tr('users.import_with_traffic')}
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={reissue} onChange={(e) => setReissue(e.target.checked)} />{' '}{tr('users.reissue_on_import')}
+          </label>
         </div>
         {report && (
-          <div className={'alert ' + (report.dryRun ? 'miku' : 'amber')} style={{ marginTop: 12 }}>
+          <div className={'alert ' + (report.dryRun ? 'green' : 'amber')} style={{ marginTop: 14 }}>
             <Trans k={report.dryRun ? 'users.import_dry_run_report' : 'users.import_report'} v={{ total: report.total, created: report.created, updated: report.updated, skipped: report.skipped, failed: report.failed }} />
             {(report.createdGroups?.length ?? 0) > 0 && <div style={{ marginTop: 6 }} className="small"><Trans k="users.import_created_groups" v={{ v: report.createdGroups!.join(', ') }} /></div>}
             {report.problems?.length > 0 && <div style={{ marginTop: 6 }} className="small">{report.problems.map((p, i) => <div key={i}>{p}</div>)}</div>}
             {report.missingGroups?.length > 0 && <div style={{ marginTop: 6 }} className="small"><Trans k="users.import_missing_groups" v={{ v: report.missingGroups.join(', ') }} /></div>}
           </div>
         )}
-      </div>
+      </form>
     </Modal>
   )
 }

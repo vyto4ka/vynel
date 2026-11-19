@@ -53,9 +53,10 @@ type Reconciler struct {
 	desired     map[int64]*service.DesiredState
 	revision    map[int64]int64
 	sessions    map[int64]*session
-	ready       chan struct{}            // closed after the first recompute
-	updates     map[int64]*update.Status // what each node last said about its update
-	blocks      *nodev1.IPBlocks         // addresses over users' limits, for every node
+	ready       chan struct{}                // closed after the first recompute
+	updates     map[int64]*update.Status     // what each node last said about its update
+	certs       map[int64][]*nodev1.CertInfo // what each node last said about its TLS certificates
+	blocks      *nodev1.IPBlocks             // addresses over users' limits, for every node
 	blocksVer   int64
 }
 
@@ -74,6 +75,7 @@ func New(svc *service.Service, log *slog.Logger) *Reconciler {
 		sessions: map[int64]*session{},
 		ready:    make(chan struct{}),
 		updates:  map[int64]*update.Status{},
+		certs:    map[int64][]*nodev1.CertInfo{},
 	}
 }
 
@@ -406,8 +408,21 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		return nil
 	case *nodev1.NodeMessage_Update:
 		u := m.Update
+		st := &update.Status{Running: u.Running, OK: u.Ok, StartedAt: u.StartedAt, FinishedAt: u.FinishedAt, Version: u.Version, Log: u.Log}
 		s.r.mu.Lock()
-		s.r.updates[s.nodeID] = &update.Status{Running: u.Running, OK: u.Ok, StartedAt: u.StartedAt, FinishedAt: u.FinishedAt, Version: u.Version, Log: u.Log}
+		s.r.updates[s.nodeID] = st
+		s.r.mu.Unlock()
+		if err := svc.RecordUpdateStatus(ctx, s.nodeID, st); err != nil {
+			s.r.log.Warn("persist update status", "node", s.nodeID, "err", err)
+		}
+		return nil
+	case *nodev1.NodeMessage_Certs:
+		cs := make([]*nodev1.CertInfo, 0, len(m.Certs.Certs))
+		for _, c := range m.Certs.Certs {
+			cs = append(cs, proto.Clone(c).(*nodev1.CertInfo))
+		}
+		s.r.mu.Lock()
+		s.r.certs[s.nodeID] = cs
 		s.r.mu.Unlock()
 		return nil
 	case *nodev1.NodeMessage_Result:
@@ -518,6 +533,21 @@ func (r *Reconciler) UpdateStatus(nodeID int64) *update.Status {
 		return &c
 	}
 	return nil
+}
+
+// CertStatus is what the node last reported about its TLS certificates.
+func (r *Reconciler) CertStatus(nodeID int64) []*nodev1.CertInfo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cs := r.certs[nodeID]
+	if len(cs) == 0 {
+		return nil
+	}
+	out := make([]*nodev1.CertInfo, len(cs))
+	for i, c := range cs {
+		out[i] = proto.Clone(c).(*nodev1.CertInfo)
+	}
+	return out
 }
 
 // Resync makes the next push to the node a full snapshot (admin action «send the config again»).

@@ -288,7 +288,7 @@ func LocalStatus() *Status {
 }
 
 // logLines is how much of the log the panel gets.
-const logLines = 60
+const logLines = 400
 
 // LastResult reads ResultFile (nil when there was no update yet).
 func LastResult() *Result {
@@ -309,6 +309,10 @@ func saveResult(r Result) {
 	_ = os.WriteFile(ResultFile, b, 0o644)
 }
 
+func logf(w io.Writer, format string, args ...any) {
+	fmt.Fprintf(w, "[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+}
+
 // ErrRunning means an update is going on already.
 var ErrRunning = errors.New("an update is already running")
 
@@ -321,12 +325,24 @@ func Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	started := time.Now().Unix()
+	src := LoadSource()
+	_ = os.MkdirAll(filepath.Dir(LogFile), 0o755)
+	_ = os.WriteFile(LogFile, []byte(fmt.Sprintf("[%s] Запуск службы обновления (%s): канал %s, релиз %s\n",
+		time.Now().Format("15:04:05"), Unit, src.Channel(), src.Release)), 0o644)
+	saveResult(Result{Running: true, StartedAt: started})
 	// A failed run of an earlier update keeps the unit name taken until it is reset.
 	_ = exec.Command("systemctl", "reset-failed", Unit).Run()
 	out, err := exec.CommandContext(ctx, "systemd-run", "--unit="+Unit, "--collect", "--quiet",
 		"--description=vynel update", self, "update", "--foreground").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("systemd-run: %w: %s", err, strings.TrimSpace(string(out)))
+		msg := fmt.Sprintf("systemd-run: %v: %s", err, strings.TrimSpace(string(out)))
+		if f, ferr := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
+			logf(f, "ошибка запуска: %s", msg)
+			_ = f.Close()
+		}
+		saveResult(Result{Running: false, OK: false, StartedAt: started, At: time.Now().Unix(), Error: msg})
+		return errors.New(msg)
 	}
 	return nil
 }
@@ -335,15 +351,16 @@ func Start(ctx context.Context) error {
 func Run(ctx context.Context, w io.Writer) error { return run(ctx, w, LoadSource()) }
 
 func run(ctx context.Context, w io.Writer, s Source) error {
-	logf, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	_ = os.MkdirAll(filepath.Dir(LogFile), 0o755)
+	logfFile, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
-	defer logf.Close()
-	out := io.MultiWriter(w, logf)
+	defer logfFile.Close()
+	out := io.MultiWriter(w, logfFile)
 	started := time.Now().Unix()
 	saveResult(Result{Running: true, StartedAt: started})
-	fmt.Fprintf(out, "vynel update %s: branch %s, release %s\n", time.Now().Format(time.RFC3339), s.Ref, s.Release)
+	logf(out, "vynel update: канал %s, ветка %s, релиз %s", s.Channel(), s.Ref, s.Release)
 
 	// The installer runs as root, so where it comes from matters. With a release key (signed
 	// releases) it is the release's own installer, run only when the signature and its checksum
@@ -353,28 +370,32 @@ func run(ctx context.Context, w io.Writer, s Source) error {
 	// not answer.
 	key, err := releaseKey()
 	if err != nil {
+		logf(out, "ошибка ключа релиза: %v", err)
 		saveResult(Result{StartedAt: started, At: time.Now().Unix(), Error: err.Error()})
 		return err
 	}
 	var script []byte
 	if key != nil {
+		logf(out, "проверяем подпись релиза и скачиваем установщик (%s)...", s.releaseURL())
 		var note string
 		script, note, err = signedInstaller(ctx, s, key)
 		if err != nil {
-			fmt.Fprintf(out, "update stopped: %v\n", err)
+			logf(out, "обновление остановлено: %v", err)
 			saveResult(Result{StartedAt: started, At: time.Now().Unix(), Error: err.Error()})
 			return err
 		}
-		fmt.Fprintln(out, note)
+		logf(out, "%s", note)
 	} else {
-		fmt.Fprintln(out, "releases are not signed (no key: scripts/release-key.sh): the installer is not verified")
+		logf(out, "релизы без подписи (нет ключа): скачиваем install.sh из %s...", s.releaseURL())
 		script, err = get(ctx, s.releaseURL()+"/install.sh", 4<<20)
 		if err != nil || !strings.HasPrefix(string(script), "#!") {
 			if err == nil {
 				err = errors.New("not a script")
 			}
-			fmt.Fprintf(out, "cannot download the release's installer (%v): using the one built into this version\n", err)
+			logf(out, "не удалось скачать install.sh (%v): используем встроенный установщик", err)
 			script = scripts.Install
+		} else {
+			logf(out, "install.sh загружен (%.1f КБ)", float64(len(script))/1024)
 		}
 	}
 	tmp, err := os.CreateTemp("", "vynel-install-*.sh")
@@ -390,8 +411,9 @@ func run(ctx context.Context, w io.Writer, s Source) error {
 	}
 	tmp.Close()
 
+	logf(out, "запускаем установщик (--mode update --yes)...")
 	cmd := exec.CommandContext(ctx, "bash", tmp.Name(), "--mode", "update", "--yes")
-	cmd.Env = append(append(os.Environ(), "TERM=dumb", "VYNEL_NO_TUI=1"), s.env()...)
+	cmd.Env = append(append(os.Environ(), "TERM=dumb", "VYNEL_NO_TUI=1", "VYNEL_UPDATE_LOG=1"), s.env()...)
 	cmd.Stdout, cmd.Stderr = out, out
 	runErr := cmd.Run()
 
@@ -400,19 +422,20 @@ func run(ctx context.Context, w io.Writer, s Source) error {
 		res.Version = strings.TrimSpace(string(v))
 	}
 	if runErr != nil {
-		res.Error = tail(LogFile, 6)
-		fmt.Fprintf(out, "update failed: %v\n", runErr)
+		res.Error = tail(LogFile, 12)
+		logf(out, "обновление завершилось с ошибкой: %v", runErr)
 		saveResult(res)
 		// The services may still run the old version without having restarted: restart them
 		// so the agent reconnects and the panel learns the update failed.
 		for _, u := range []string{"vynel-node", "vynel"} {
 			if exec.Command("systemctl", "is-enabled", "--quiet", u).Run() == nil {
+				logf(out, "контрольный перезапуск %s...", u)
 				_ = exec.Command("systemctl", "restart", u).Run()
 			}
 		}
 		return fmt.Errorf("update failed: %w", runErr)
 	}
-	fmt.Fprintf(out, "update finished: %s\n", res.Version)
+	logf(out, "обновление завершено успешно: %s", res.Version)
 	saveResult(res)
 	return nil
 }
@@ -426,16 +449,16 @@ func tail(path string, n int) string {
 	clean := ansiRe.ReplaceAllString(string(b), "")
 	var lines []string
 	for _, l := range strings.Split(clean, "\n") {
-		if strings.TrimSpace(l) != "" {
-			lines = append(lines, strings.TrimSpace(l))
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
 		}
 	}
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
 	out := strings.Join(lines, "\n")
-	if len(out) > 12<<10 {
-		out = out[len(out)-12<<10:]
+	if len(out) > 64<<10 {
+		out = out[len(out)-64<<10:]
 	}
 	return out
 }

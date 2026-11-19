@@ -55,4 +55,10 @@ func TestUpdateStates(t *testing.T) {
 	u.markSent(5, "v1", nil)
 	u.dismiss(5)
 	check("dismissed failure from the node", 5, &update.Status{StartedAt: now.Unix() - 5, FinishedAt: now.Unix() - 1, Log: "boom"}, true, "v1", "")
+
+	// Real log is preserved even when version changed before FinishedAt caught up.
+	u.markSent(6, "v1", nil)
+	if st, log, _, _ := u.state(6, &update.Status{Running: false, StartedAt: now.Unix(), Log: "[12:00:01] ok"}, true, "v2", now); st != UpdDone || log != "[12:00:01] ok" {
+		t.Fatalf("real log lost on version bump: %q %q", st, log)
+	}
 }

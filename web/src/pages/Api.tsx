@@ -230,7 +230,7 @@ function TokenForm({ d, token, onClose, onSaved }: { d: Integrations; token: Api
   }
   return (
     <Modal title={token ? t('integrations.edit_token', { name: token.name }) : t('integrations.create_token')} onClose={onClose}
-      footer={<><button className="btn" onClick={onClose}>{t('integrations.cancel')}</button><button className="btn primary" disabled={!name.trim() || scopes.length === 0} onClick={save}>{token ? t('integrations.save') : t('integrations.create_token')}</button></>}>
+      footer={<><button className="btn ghost" onClick={onClose}>{t('integrations.cancel')}</button><button className="btn primary" disabled={!name.trim() || scopes.length === 0} onClick={save}>{token ? t('integrations.save') : t('integrations.create_token')}</button></>}>
       <Field label={t('integrations.f_name')} help={t('integrations.f_name_help')}>
         <input className="input" value={name} maxLength={64} autoFocus onChange={(e) => setName(e.target.value)} />
       </Field>

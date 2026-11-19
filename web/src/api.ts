@@ -207,6 +207,20 @@ export interface Node {
   inbounds: Inbound[]
   addresses: { id: number; ip: string; interface: string; onInterface: boolean; primary: boolean }[]
   provider: Provider | null // где арендован сервер
+  certs?: CertInfo[]
+  certsSupported?: boolean
+}
+
+export interface CertInfo {
+  domain: string
+  issuer: string
+  notAfter: number
+  daysLeft: number
+  placeholder: boolean
+  ok: boolean
+  lastError?: string
+  retryAt?: number
+  roles?: string[]
 }
 
 // Хостинг-провайдер: сайт, вход в личный кабинет, иконка с сайта.
@@ -224,7 +238,8 @@ export interface SelfHost {
   version: string
   uptime: number
   withNode: boolean
-  certs: { domain: string; issuer: string; notAfter: number; placeholder: boolean; ok: boolean }[]
+  renewSupported?: boolean
+  certs: CertInfo[]
 }
 
 // Нода в «Биллинге»: стоимость, оплата и лимит трафика у провайдера.
@@ -380,6 +395,7 @@ export interface Overview {
   nodes: Node[]
   webUrl: string
   version: string
+  showWelcome?: boolean
 }
 
 export interface AuditEntry {
