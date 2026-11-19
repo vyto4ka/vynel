@@ -16,3 +16,5 @@ func killGroup(pid int) {
 		_ = p.Kill()
 	}
 }
+
+func fileInode(os.FileInfo) uint64 { return 0 }

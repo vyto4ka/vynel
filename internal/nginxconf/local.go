@@ -22,6 +22,12 @@ type Local struct {
 	// gets DummyCert/DummyKey, a self-signed certificate for no real name, and closes (444).
 	RejectHandshake     bool
 	DummyCert, DummyKey string
+	// NoHTTP2 strips http2 from listen directives so ngx_http_v2_module stays inactive on
+	// nginx builds not yet patched for CVE-2026-123007 and CVE-2026-123633 (NGINX2Root).
+	NoHTTP2 bool
+	// ModernHTTP2 replaces deprecated `listen ... http2` with `http2 on;` per server block
+	// on patched nginx 1.25.1+.
+	ModernHTTP2 bool
 }
 
 // Finalize fills the agent's tokens in a config built by Build.
@@ -50,7 +56,7 @@ func Finalize(conf string, l Local) string {
 		conf = strings.Replace(conf, "pid "+TokRun+"/nginx.pid;", "pid "+l.State+"/nginx.pid;", 1)
 		conf = strings.Replace(conf, "error_log "+TokRun+"/error.log ", "error_log "+l.State+"/error.log ", 1)
 	}
-	return strings.NewReplacer(
+	out := strings.NewReplacer(
 		TokModules, strings.Join(mods, "\n"),
 		TokUser, user,
 		TokRun, l.Run,
@@ -60,6 +66,40 @@ func Finalize(conf string, l Local) string {
 		TokIPv6, ipv6,
 		TokReject, reject,
 	).Replace(conf)
+	if l.NoHTTP2 || l.ModernHTTP2 {
+		out = rewriteHTTP2(out, l.NoHTTP2, l.ModernHTTP2)
+	}
+	return out
+}
+
+func rewriteHTTP2(conf string, noHTTP2, modernHTTP2 bool) string {
+	lines := strings.Split(conf, "\n")
+	out := make([]string, 0, len(lines)+8)
+	addedInServer := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "server {" {
+			addedInServer = false
+		}
+		isActiveListen := strings.HasPrefix(trimmed, "listen ") && strings.HasSuffix(trimmed, ";")
+		isCommentListen := strings.HasPrefix(trimmed, "# listen ") && strings.HasSuffix(trimmed, ";")
+		if isActiveListen || isCommentListen {
+			hadHTTP2 := strings.Contains(line, " http2 ") || strings.Contains(line, " http2;")
+			if hadHTTP2 {
+				line = strings.ReplaceAll(line, " http2 ", " ")
+				line = strings.ReplaceAll(line, " http2;", ";")
+			}
+			out = append(out, line)
+			if isActiveListen && hadHTTP2 && !noHTTP2 && modernHTTP2 && !addedInServer {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				out = append(out, indent+"http2 on;")
+				addedInServer = true
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 var metaRe = regexp.MustCompile(`(?m)^# vynel-acme-(email|issuer): (.*)$`)

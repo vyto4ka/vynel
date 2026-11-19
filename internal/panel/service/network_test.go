@@ -63,3 +63,39 @@ func TestNetworkRolesAndDNS(t *testing.T) {
 		t.Fatalf("dns %+v", net.Domains)
 	}
 }
+
+func TestSetupAllInOneWebDomainAndPanelOnlyNetwork(t *testing.T) {
+	// Panel-only server (no local node) still checks DNS for separate panel and subscription domains.
+	fp := newFixture(t)
+	for k, v := range map[string]string{
+		SettingGatewayAddr: "203.0.113.55:9443",
+		SettingSubDomain:   "sub.example.com",
+		SettingWebDomain:   "panel.example.com",
+	} {
+		if err := fp.s.SetSetting(fp.ctx, ActorCLI, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := Resolver
+	defer func() { Resolver = old }()
+	Resolver = fakeResolver{"sub.example.com": {"203.0.113.55"}, "panel.example.com": {"198.51.100.9"}}
+	netView := must(fp.s.Network(fp.ctx))
+	got := map[string]DomainCheck{}
+	for _, d := range netView.Domains {
+		got[d.Name] = d
+	}
+	if len(got) != 2 || !got["sub.example.com"].OK || got["panel.example.com"].OK {
+		t.Fatalf("panel-only domains: %+v", netView.Domains)
+	}
+
+	// SetupAllInOne sets web.domain when SubDomain != Domain on one IP, and clears it when reconfigured back to one domain.
+	fa := newFixture(t)
+	must(fa.s.SetupAllInOne(fa.ctx, ActorCLI, SetupInput{NodeName: "NL", Country: "nl", Domain: "vpn.example.com", SubDomain: "sub.example.com"}))
+	if got := must(fa.s.Setting(fa.ctx, SettingWebDomain, "")); got != "vpn.example.com" {
+		t.Fatalf("web.domain = %q, want vpn.example.com", got)
+	}
+	must(fa.s.SetupAllInOne(fa.ctx, ActorCLI, SetupInput{NodeName: "NL", Country: "nl", Domain: "vpn.example.com", SubDomain: "vpn.example.com"}))
+	if got := must(fa.s.Setting(fa.ctx, SettingWebDomain, "")); got != "" {
+		t.Fatalf("stale web.domain not cleared: %q", got)
+	}
+}

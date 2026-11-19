@@ -341,7 +341,14 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 	switch m := msg.Msg.(type) {
 	case *nodev1.NodeMessage_Hello:
 		h := m.Hello
-		s.r.log.Info("node connected", "node", s.nodeID, "agent", h.AgentVersion, "xray", h.XrayVersion)
+		s.mu.Lock()
+		refresh := s.hello != nil
+		s.mu.Unlock()
+		if !refresh {
+			s.r.log.Info("node connected", "node", s.nodeID, "agent", h.AgentVersion, "xray", h.XrayVersion)
+		} else {
+			s.r.log.Info("node facts updated", "node", s.nodeID, "warnings", len(h.Warnings))
+		}
 		if err := svc.SyncAddresses(ctx, s.nodeID, toReported(h.Addresses)); err != nil {
 			return err
 		}
@@ -353,27 +360,36 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		if err := store.SetNodeFacts(ctx, svc.Store().DB, s.nodeID, facts); err != nil {
 			return err
 		}
+		capsChanged := prev.NginxVersion != h.NginxVersion || !slices.Equal(prev.Capabilities, h.Capabilities)
 		// What the node can run decides its config (nginx or Caddy). If that changed, the
 		// first snapshot must already be built for it, not the old web server.
-		if prev.NginxVersion != h.NginxVersion || !slices.Equal(prev.Capabilities, h.Capabilities) {
+		if capsChanged {
 			if err := s.r.recompute(ctx); err != nil {
 				return err
 			}
 		}
 		s.mu.Lock()
-		s.hello, s.appliedH, s.applied, s.pending = h, h.AppliedHash, nil, nil
-		if ds := s.r.desiredFor(s.nodeID); ds != nil && ds.Hash == h.AppliedHash {
-			s.applied = ds
+		if !refresh || capsChanged {
+			s.hello, s.appliedH, s.applied, s.pending = h, h.AppliedHash, nil, nil
+			if ds := s.r.desiredFor(s.nodeID); ds != nil && ds.Hash == h.AppliedHash {
+				s.applied = ds
+			}
+		} else {
+			s.hello = h
 		}
 		s.mu.Unlock()
-		if err := store.SetNodeRuntime(ctx, svc.Store().DB, s.nodeID, store.NodeRuntime{AgentVersion: h.AgentVersion, XrayVersion: h.XrayVersion, AppliedHash: h.AppliedHash}); err != nil {
-			return err
+		if !refresh {
+			if err := store.SetNodeRuntime(ctx, svc.Store().DB, s.nodeID, store.NodeRuntime{AgentVersion: h.AgentVersion, XrayVersion: h.XrayVersion, AppliedHash: h.AppliedHash}); err != nil {
+				return err
+			}
 		}
 		for _, w := range h.Warnings {
 			s.r.log.Warn("node warning", "node", s.nodeID, "warning", w)
 		}
-		s.wake()
-		s.r.Notify() // reported addresses may change the desired state too
+		if !refresh || capsChanged {
+			s.wake()
+			s.r.Notify() // reported addresses may change the desired state too
+		}
 	case *nodev1.NodeMessage_Addresses:
 		return svc.SyncAddresses(ctx, s.nodeID, toReported(m.Addresses.Addresses))
 	case *nodev1.NodeMessage_OnlineIps:

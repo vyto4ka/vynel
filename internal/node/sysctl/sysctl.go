@@ -6,8 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
+
+// BootGrace suppresses the NTP warning right after a server boots while systemd-timesyncd or
+// chronyd finishes its first network exchange; agent.factsTick re-checks once the grace elapses.
+const BootGrace = 90 * time.Second
 
 // Settings is the tuning applied on nodes.
 var Settings = []struct{ Key, Value string }{
@@ -76,10 +82,42 @@ func Check() []string {
 			warnings = append(warnings, s.Key+"="+orUnknown(v)+" (want "+s.Value+")")
 		}
 	}
-	if out, err := exec.Command("timedatectl", "show", "-p", "NTPSynchronized", "--value").Output(); err == nil && strings.TrimSpace(string(out)) == "no" {
-		warnings = append(warnings, "clock is not NTP-synchronized (Reality rejects clients when clocks drift)")
+	if w := checkClock(
+		func() ([]byte, error) {
+			return exec.Command("timedatectl", "show", "-p", "NTPSynchronized", "--value").Output()
+		},
+		systemUptime,
+	); w != "" {
+		warnings = append(warnings, w)
 	}
 	return warnings
+}
+
+func checkClock(ntpOut func() ([]byte, error), uptime func() (time.Duration, bool)) string {
+	out, err := ntpOut()
+	if err != nil || strings.TrimSpace(string(out)) != "no" {
+		return ""
+	}
+	if up, ok := uptime(); ok && up < BootGrace {
+		return ""
+	}
+	return "clock is not NTP-synchronized (Reality rejects clients when clocks drift)"
+}
+
+func systemUptime() (time.Duration, bool) {
+	b, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0, false
+	}
+	fields := strings.Fields(string(b))
+	if len(fields) == 0 {
+		return 0, false
+	}
+	secs, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil || secs < 0 {
+		return 0, false
+	}
+	return time.Duration(secs * float64(time.Second)), true
 }
 
 func orUnknown(v string) string {

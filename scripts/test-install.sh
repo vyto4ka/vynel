@@ -70,4 +70,24 @@ scripts/release-assets.sh "$tmp" 'x;y' latest >/dev/null 2>&1 && bad "a bad vers
 # shellcheck disable=SC2016 # the pattern names ${VYNEL_REF literally
 sed -n '/^BUILT_RELEASE=/,/^\[\[ -n "\${VYNEL_REF/p' "$tmp/install.sh" | grep -q 'BUILT_REF' || bad "built values not read"
 
+# ---- TUI shell output validator ----
+valid_fn="$(sed -n '/^valid_shell_out()/,/^}/p' scripts/install.sh)"
+[[ -n "$valid_fn" ]] || bad "valid_shell_out not found in install.sh"
+eval "$valid_fn"
+cat >"$tmp/good.env" <<'EOF'
+MODE='aio'
+DOMAIN='nl.example.com'
+SUB_DOMAIN='sub.example.com'
+SUB_PATH='/'
+FUTURE_NEW_FIELD='O'\''Brien $(not-run)'
+EMPTY=''
+EOF
+valid_shell_out "$tmp/good.env" || bad "valid_shell_out rejected valid TUI output"
+: >"$tmp/empty.env"
+valid_shell_out "$tmp/empty.env" && bad "valid_shell_out accepted empty output"
+for line in "MODE=aio" "MODE='aio'; id" "MODE='x'\\'; id #'" "bad='1'"; do
+  printf '%s\n' "$line" >"$tmp/bad.env"
+  valid_shell_out "$tmp/bad.env" && bad "valid_shell_out accepted '$line'"
+done
+
 exit $fail

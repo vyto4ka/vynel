@@ -80,6 +80,11 @@ type Config struct {
 	UpdateStatus func() *update.Status
 	// UpdateEvery is how often a running update is reported, default 2s.
 	UpdateEvery time.Duration
+	// FactsInterval is how often sysctl/NTP warnings and nginx version are re-checked and sent
+	// to the panel when they change, default 15s.
+	FactsInterval time.Duration
+	// CheckFacts overrides sysctl.Check in tests.
+	CheckFacts func() []string
 }
 
 // Agent applies the panel's desired state to Xray.
@@ -148,6 +153,12 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.UpdateEvery == 0 {
 		cfg.UpdateEvery = 2 * time.Second
+	}
+	if cfg.FactsInterval == 0 {
+		cfg.FactsInterval = 15 * time.Second
+	}
+	if cfg.CheckFacts == nil {
+		cfg.CheckFacts = sysctl.Check
 	}
 	if cfg.Reboot == nil {
 		cfg.Reboot = func() error { return exec.Command("systemctl", "reboot").Run() }
@@ -218,6 +229,48 @@ func (a *Agent) AppliedHash() string {
 	return a.cur.Hash
 }
 
+// refreshFacts re-reads sysctl/NTP warnings and nginx version, returning true when either changed.
+func (a *Agent) refreshFacts(ctx context.Context) bool {
+	warnings := slices.Clone(a.cfg.CheckFacts())
+	var nginxVer string
+	if a.nginx != nil {
+		nginxVer = a.nginx.Version(ctx)
+		if nginxVer == "" {
+			warnings = append(warnings, "nginx is not installed: apt install nginx libnginx-mod-stream")
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if slices.Equal(a.warnings, warnings) && a.nginxVer == nginxVer {
+		return false
+	}
+	a.warnings = warnings
+	a.nginxVer = nginxVer
+	return true
+}
+
+func (a *Agent) buildHello() *nodev1.Hello {
+	addrs := a.cfg.Addresses()
+	a.mu.Lock()
+	applied := ""
+	if a.cur != nil {
+		applied = a.cur.Hash
+	}
+	warnings := slices.Clone(a.warnings)
+	nginxVer := a.nginxVer
+	a.mu.Unlock()
+	hello := &nodev1.Hello{
+		AgentVersion: a.cfg.Version, XrayVersion: a.xrayVer, AppliedHash: applied,
+		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: addrs,
+		CaddyVersion: a.caddyVer, Warnings: warnings, NginxVersion: nginxVer,
+	}
+	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit)
+	if !a.cfg.Manual && nginxVer != "" {
+		hello.Capabilities = append(hello.Capabilities, CapNginx)
+	}
+	return hello
+}
+
 // Run starts Xray from the saved state and keeps a session with the panel until ctx ends.
 func (a *Agent) Run(ctx context.Context) error {
 	if v, err := a.cfg.Xray.Version(ctx); err == nil {
@@ -225,16 +278,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	} else {
 		a.log.Warn("cannot get xray version", "err", err)
 	}
-	a.warnings = sysctl.Tune(a.cfg.TuneSysctl)
+	if a.cfg.TuneSysctl {
+		_ = sysctl.Tune(true)
+	}
 	if a.caddy != nil {
 		a.caddyVer = a.caddy.Version(ctx)
 	}
-	if a.nginx != nil {
-		a.nginxVer = a.nginx.Version(ctx)
-		if a.nginxVer == "" {
-			a.warnings = append(a.warnings, "nginx is not installed: apt install nginx libnginx-mod-stream")
-		}
-	}
+	a.refreshFacts(ctx)
 	a.mu.Lock()
 	if a.cur != nil {
 		if err := a.applyWebLocked(ctx, a.cur.Caddy, a.cur.Nginx); err != nil {
@@ -289,15 +339,8 @@ func (a *Agent) session(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hello := &nodev1.Hello{
-		AgentVersion: a.cfg.Version, XrayVersion: a.xrayVer, AppliedHash: a.AppliedHash(),
-		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: a.cfg.Addresses(),
-		CaddyVersion: a.caddyVer, Warnings: a.warnings, NginxVersion: a.nginxVer,
-	}
-	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit)
-	if !a.cfg.Manual && a.nginxVer != "" {
-		hello.Capabilities = append(hello.Capabilities, CapNginx)
-	}
+	a.refreshFacts(ctx)
+	hello := a.buildHello()
 	if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Hello{Hello: hello}}); err != nil {
 		return err
 	}
@@ -321,6 +364,8 @@ func (a *Agent) session(ctx context.Context) error {
 	}()
 	addrTick := time.NewTicker(5 * time.Minute)
 	defer addrTick.Stop()
+	factsTick := time.NewTicker(a.cfg.FactsInterval)
+	defer factsTick.Stop()
 	resendTick := time.NewTicker(time.Minute)
 	defer resendTick.Stop()
 	var sentUpTo uint64       // highest seq sent in this session
@@ -372,6 +417,12 @@ func (a *Agent) session(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-factsTick.C:
+			if a.refreshFacts(ctx) {
+				if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Hello{Hello: a.buildHello()}}); err != nil {
+					return err
+				}
+			}
 		case <-onlineTick.C:
 			a.mu.Lock()
 			msg := a.online
