@@ -1,9 +1,8 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { del, get, Group, patch, post, Template, User, UserDetails } from '../api'
 import { UserExtras } from '../extras'
 import { ago, bytes, clientTypes, date, dateTime, fromDateInput, GiB, isOnline, left, resetLabels, statusInfo, toDateInput } from '../format'
-import { Badge, Bar, ChartLegend, CopyField, Drawer, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, TrafficChart, useAction, useConfirm, useLoad } from '../ui'
-import { useAtLeast } from '../mode'
+import { Badge, Bar, ChartLegend, CopyField, copyText, Drawer, Empty, Field, Icon, Info, Loading, Menu, Modal, SplitButton, Switch, Tabs, TrafficChart, useAction, useConfirm, useLoad, useToast } from '../ui'
 import { t as tr, Trans } from '../i18n'
 
 const pageSize = 200
@@ -47,7 +46,7 @@ export function Users() {
   const [page, setPage] = useState(0)
   const act = useAction()
   const confirm = useConfirm()
-  const standard = useAtLeast('standard')
+  const standard = true
   useEffect(() => { setPage(0); setSelected([]) }, [sort, search, statusFilter, groupFilter])
   useEffect(() => {
     try { localStorage.setItem('vynel.users.sort', JSON.stringify(sort)) } catch { /* приватное окно */ }
@@ -377,7 +376,7 @@ function TransferUsers({ onClose, onImported }: { onClose: () => void; onImporte
 
 function CreateUser({ groups, onClose, onCreated }: { groups: Group[]; onClose: () => void; onCreated: (u: User) => void }) {
   const templates = useLoad(() => get<Template[]>('templates'))
-  const standard = useAtLeast('standard')
+  const standard = true
   const [username, setUsername] = useState('')
   const [templateId, setTemplateId] = useState(0)
   const [note, setNote] = useState('')
@@ -533,11 +532,11 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
   const { data, error, reload } = useLoad(() => get<UserDetails>(`users/${id}`), [id], 20000)
   const act = useAction()
   const confirm = useConfirm()
-  const standard = useAtLeast('standard')
+  const toast = useToast()
   const [editing, setEditing] = useState(false)
   const [showQR, setShowQR] = useState(false)
   const [linkEdit, setLinkEdit] = useState<string | null>(null)
-  const linkRef = useRef<HTMLDivElement>(null)
+  const [tab, setTab] = useState<'access' | 'activity'>('access')
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     const r = await act(fn, ok)
@@ -551,15 +550,7 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
   const u = data.user
   const st = statusInfo[u.status]
 
-  const scrollToLink = () => linkRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-
-  const toggleBtn = u.enabled
-    ? <button className="btn sm" onClick={() => run(() => patch(`users/${id}`, { enabled: false }), tr('users.disabled'))}><Icon name="power" />{' '}{tr('users.disable')}</button>
-    : <button className="btn sm primary" onClick={() => run(() => patch(`users/${id}`, { enabled: true }), tr('users.enabled'))}><Icon name="power" />{' '}{tr('users.enable')}</button>
-
-  const extendBtns = [1, 3, 6, 12].map((m) => (
-    <button key={m} className="btn sm primary" onClick={() => run(() => post(`users/${id}/extend`, { months: m }), tr('users.extended_by_mo', { m }))}><Trans k="users.mo_2" v={{ m: m }} /></button>
-  ))
+  const extend = (m: number) => run(() => post(`users/${id}/extend`, { months: m }), tr('users.extended_by_mo', { m }))
 
   const doDelete = async () => {
     if (await confirm(<><Trans k="users.delete_the_user_this_cannot" v={{ username: u.username }} /></>, tr('common.delete'))) {
@@ -568,58 +559,16 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
     }
   }
 
-  // Лёгкий режим: три блока — ссылка, состояние, действия.
-  if (!standard) {
-    return (
-      <Drawer title={<>{u.username} <Badge color={st.color} dot>{st.label}</Badge></>} onClose={onClose}>
-        <div className="card card-pad">
-          <div className="label" style={{ marginBottom: 8 }}>{tr('users.subscription_link_send_it_to')}</div>
-          {data.subUrl ? (
-            <>
-              <CopyField value={data.subUrl} />
-              <div className="row" style={{ marginTop: 10 }}>
-                <button className="btn sm" onClick={() => setShowQR(!showQR)}>{showQR ? tr('users.hide_qr') : tr('users.show_qr')}</button>
-                <a className="btn sm" href={data.subUrl} target="_blank" rel="noreferrer"><Icon name="link" />{' '}{tr('users.open_the_page')}</a>
-              </div>
-              {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
-            </>
-          ) : <div className="alert amber"><Trans k="users.no_link_check_subscription" v={{ subError: data.subError }} /></div>}
-        </div>
-
-        <div className="card card-pad">
-          <div className="kv">
-            <div className="k">{tr('users.expires')}</div>
-            <div>{u.expireAt ? <>{dateTime(u.expireAt)} <span className="muted">({left(u.expireAt)})</span></> : tr('users.no_expiry')}</div>
-            <div className="k">{tr('common.traffic')}</div>
-            <div>{bytes(u.trafficUsed)} / {bytes(u.trafficLimit)}
-              {u.trafficLimit != null && <div style={{ marginTop: 6 }}><Bar value={u.trafficUsed} max={u.trafficLimit} /></div>}</div>
-            <div className="k">{tr('common.online')}</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">{tr('common.now')}</span> : ago(u.onlineAt)}</div>
-          </div>
-        </div>
-
-        <div className="card card-pad">
-          <div className="label" style={{ marginBottom: 10 }}>{tr('common.actions')}</div>
-          <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span className="text-2 small">{tr('users.extend')}</span>
-            {[1, 3, 12].map((m) => (
-              <button key={m} className="btn sm primary" onClick={() => run(() => post(`users/${id}/extend`, { months: m }), tr('users.extended_by_mo', { m }))}><Trans k="users.mo_2" v={{ m: m }} /></button>
-            ))}
-          </div>
-          <div className="row" style={{ marginTop: 10, gap: 6, flexWrap: 'wrap' }}>
-            {toggleBtn}
-            <button className="btn sm danger" onClick={doDelete}><Icon name="trash" />{' '}{tr('common.delete')}</button>
-          </div>
-        </div>
-      </Drawer>
-    )
-  }
-
   return (
     <Drawer title={<>{u.username} <Badge color={st.color} dot>{st.label}</Badge></>} onClose={onClose}
       actions={<>
-        <button className="btn sm" onClick={() => setEditing(true)}><Icon name="edit" />{' '}{tr('common.edit')}</button>
+        <button className="btn ghost icon sm" title={tr('common.edit')} onClick={() => setEditing(true)}><Icon name="edit" /></button>
         <Menu title={tr('common.more_actions')} items={[
+          u.enabled
+            ? { label: tr('users.disable'), icon: 'power', onClick: () => run(() => patch(`users/${id}`, { enabled: false }), tr('users.disabled')) }
+            : { label: tr('users.enable'), icon: 'power', onClick: () => run(() => patch(`users/${id}`, { enabled: true }), tr('users.enabled')) },
           { label: tr('users.reset_traffic'), icon: 'refresh', onClick: () => run(() => post(`users/${id}/reset`), tr('users.traffic_reset_2')) },
+          ...(data.subUrl ? [{ label: tr('users.custom_link'), icon: 'edit', onClick: () => setLinkEdit(data.subUrl!.split('/').pop() || '') }] : []),
           { label: tr('users.new_link'), icon: 'link', onClick: async () => {
               if (await confirm(tr('users.the_old_subscription_link_will'), tr('users.issue_a_new_one')))
                 run(() => post(`users/${id}/reissue`, { token: true }), tr('users.new_link_issued'))
@@ -633,22 +582,25 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
         ]} />
       </>}>
 
-      {/* Полоса быстрых действий — самые частые операции под рукой. */}
-      <div className="card card-pad">
-        <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span className="text-2 small">{tr('users.extend')}</span>
-          {extendBtns}
-          <span className="grow" />
-          {data.subUrl && <button className="btn sm" onClick={scrollToLink}><Icon name="link" />{' '}{tr('users.link')}</button>}
-          {toggleBtn}
-        </div>
-      </div>
-
-      <div className="card card-pad" ref={linkRef}>
+      {/* Компактная строка подписки со встроенными иконками [Копировать · QR · Открыть] */}
+      <div>
         <div className="label" style={{ marginBottom: 8 }}>{tr('users.subscription_link_send_it_to')}<Info>{tr('users.on_a_phone_the_link')}</Info></div>
         {data.subUrl ? (
           <>
-            <CopyField value={data.subUrl} />
+            <div className="url-bar">
+              <code title={data.subUrl}>{data.subUrl}</code>
+              <button className="btn ghost icon sm" title={tr('ui.copy')}
+                onClick={() => copyText(data.subUrl!).then(() => toast(tr('ui.copied')))}>
+                <Icon name="copy" />
+              </button>
+              <button className={'btn ghost icon sm' + (showQR ? ' on' : '')} title={showQR ? tr('users.hide_qr') : tr('users.show_qr')}
+                onClick={() => setShowQR(!showQR)}>
+                <Icon name="qr" />
+              </button>
+              <a className="btn ghost icon sm" title={tr('users.open_the_page')} href={data.subUrl} target="_blank" rel="noreferrer">
+                <Icon name="external" />
+              </a>
+            </div>
             {linkEdit !== null && (
               <div className="link-input" style={{ marginTop: 10 }}>
                 <span className="mono muted">{data.subUrl.slice(0, data.subUrl.length - (data.subUrl.split('/').pop() || '').length)}</span>
@@ -662,108 +614,145 @@ function UserDrawer({ id, groups, onClose, onChanged }: { id: number; groups: Gr
                 <button className="btn sm ghost" onClick={() => setLinkEdit(null)}>{tr('common.cancel')}</button>
               </div>
             )}
-            <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn sm" onClick={() => setShowQR(!showQR)}>{showQR ? tr('users.hide_qr') : tr('users.show_qr')}</button>
-              {linkEdit === null && <button className="btn sm" onClick={() => setLinkEdit(data.subUrl!.split('/').pop() || '')}><Icon name="edit" />{' '}{tr('users.custom_link')}</button>}
-              <a className="btn sm" href={data.subUrl} target="_blank" rel="noreferrer"><Icon name="link" />{' '}{tr('users.open_the_page')}</a>
-            </div>
             {showQR && <img className="qr" style={{ marginTop: 12 }} src={`api/qr?text=${encodeURIComponent(data.subUrl)}`} alt="QR" />}
           </>
         ) : <div className="alert amber"><Trans k="users.no_link_check_subscription" v={{ subError: data.subError }} /></div>}
       </div>
 
-      <div className="card card-pad">
-        <div className="kv">
+      {/* Две воздушные карточки состояния + единая сплит-кнопка продления */}
+      <div className="drawer-kpis">
+        <div className="drawer-kpi">
           <div className="k">{tr('users.expires')}</div>
-          <div>{u.expireAt ? <>{dateTime(u.expireAt)} <span className="muted">({left(u.expireAt)})</span></> : tr('users.no_expiry')}</div>
+          <div className="v">{u.expireAt ? left(u.expireAt) : tr('users.no_expiry')}</div>
+          {u.expireAt && <div className="muted small">{date(u.expireAt)}</div>}
+          <div style={{ marginTop: 10 }}>
+            <SplitButton
+              primary
+              label={<>{tr('users.extend')} <Trans k="users.mo_2" v={{ m: 1 }} /></>}
+              onClick={() => extend(1)}
+              items={[3, 6, 12].map((m) => ({
+                label: <>{tr('users.extend')} <Trans k="users.mo_2" v={{ m }} /></>,
+                onClick: () => extend(m),
+              }))}
+            />
+          </div>
+        </div>
+        <div className="drawer-kpi">
           <div className="k">{tr('common.traffic')}</div>
-          <div><Trans k="users.of_reset" v={{ v: bytes(u.trafficUsed), v2: bytes(u.trafficLimit), v3: resetLabels[u.resetStrategy] || u.resetStrategy, v4: u.trafficLimit != null && <div style={{ marginTop: 6 }}><Bar value={u.trafficUsed} max={u.trafficLimit} /></div> }} /></div>
-          <div className="k">{tr('users.total_over_all_time')}</div><div>{bytes(u.lifetimeUsed)}</div>
-          <div className="k">{tr('common.devices')}</div><div>{u.hwidOff
-            ? <span className="amber-text">{tr('users.hwid_is_not_checked_any')}</span>
-            : <><Trans k="users.of" v={{ length: data.devices.length, v: (u.hwidLimit ?? data.hwidDefault) || '∞' }} />{' '}{u.hwidLimit == null && <span className="muted">{tr('users.default')}</span>}</>}</div>
-          <div className="k">{tr('users.addresses_at_once_2')}</div><div><Trans k="users.of" v={{ length: data.ips.length, v: (u.ipLimit ?? data.ipDefault) || '∞' }} />{' '}{u.ipLimit == null && <span className="muted">{tr('users.default')}</span>}
-            {data.ips.length > 0 && <div className="row small" style={{ marginTop: 6, gap: 6 }}>
-              {data.ips.map((a) => (
-                <span key={a.addr} className={'chip static' + (a.blocked ? ' pink-text' : '')}
-                  title={a.blocked ? tr('users.over_the_limit_blocked_on') : a.admitted ? tr('users.connected_from', { v: dateTime(a.since) }) : tr('users.being_checked_short_connections')}>
-                  {a.blocked ? '⛔ ' : a.admitted ? '' : '… '}<span className="mono">{a.addr}</span>
-                </span>
-              ))}
-            </div>}
-          </div>
-          <div className="k">{tr('common.groups')}</div><div>{u.groupIds.map((g) => groups.find((x) => x.id === g)?.name).filter(Boolean).join(', ') || <span className="pink-text">{tr('users.none_the_subscription_will')}</span>}</div>
-          <div className="k">{tr('common.online')}</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">{tr('common.now')}</span> : ago(u.onlineAt)}</div>
-          <div className="k">{tr('users.subscription_refreshed')}</div><div>{ago(u.subLastAt)} {u.subLastUA && <span className="muted small">· {u.subLastUA}</span>}</div>
-          <div className="k">{tr('users.format')}</div><div>{clientTypes[u.clientType] || u.clientType}</div>
-          {u.note && <><div className="k">{tr('users.note')}</div><div>{u.note}</div></>}
-          <div className="k">{tr('users.created')}</div><div>{dateTime(u.createdAt)}</div>
+          <div className="v">{bytes(u.trafficUsed)} <span className="muted small" style={{ fontWeight: 400 }}>/ {bytes(u.trafficLimit)}</span></div>
+          {u.trafficLimit != null && <div style={{ marginTop: 8 }}><Bar value={u.trafficUsed} max={u.trafficLimit} /></div>}
+          <div className="muted small" style={{ marginTop: 4 }}>{resetLabels[u.resetStrategy] || u.resetStrategy}</div>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <div>
-            <h3>{tr('users.devices_hwid')}</h3>
-            <div className="card-sub">{u.hwidOff ? tr('users.the_check_is_off_for') : tr('users.of', { length: data.devices.length, v: (u.hwidLimit ?? data.hwidDefault) || '∞' })}</div>
-          </div>
-          <label className="row small text-2" style={{ gap: 8, flexWrap: 'nowrap' }}>
-            <span>{tr('users.check_hwid')}<Info>{tr('users.turn_it_off_for_apps')}</Info></span>
-            <Switch checked={!u.hwidOff} onChange={(v) => run(() => patch(`users/${id}`, { hwidOff: !v }), v ? tr('users.hwid_check_is_on') : tr('users.hwid_is_off_for_this'))} />
-          </label>
-        </div>
-        {data.devices.length === 0 ? <Empty>{tr('users.devices_appear_after_the_first')}</Empty> : (
-          <div className="table-wrap">
-            <table className="table">
-              <tbody>
-                {data.devices.map((d) => (
-                  <tr key={d.id}>
-                    <td>
-                      <div>{d.model || tr('users.device')} <span className="muted small">{d.platform} {d.osVersion}</span></div>
-                      <div className="muted small ellipsis" style={{ maxWidth: 300 }}>{d.userAgent}</div>
-                    </td>
-                    <td className="small muted nowrap">{ago(d.lastSeen)}<br />{d.lastIp}</td>
-                    <td style={{ width: 40 }}>
-                      <button className="btn ghost icon sm" title={tr('common.unlink')} onClick={async () => {
-                        if (await confirm(tr('users.unlink_the_device_the_slot'), tr('common.unlink')))
-                          run(() => del(`users/${id}/devices/${d.id}`), tr('users.device_unlinked'))
-                      }}><Icon name="trash" /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <Tabs
+        value={tab}
+        onChange={(v) => setTab(v as 'access' | 'activity')}
+        items={[
+          { id: 'access', label: tr('users.servers_in_the_subscription'), count: data.links.length },
+          { id: 'activity', label: tr('common.devices'), count: data.devices.length },
+        ]}
+      />
 
-      <div className="card">
-        <div className="card-head"><h3>{tr('users.traffic_in_30_days')}</h3><ChartLegend /></div>
-        <div className="card-pad">
-          <TrafficChart days={data.daily} />
-          {data.trafficByNode.length > 0 && (
-            <div className="row small text-2" style={{ marginTop: 8 }}>
-              {data.trafficByNode.map((t) => <span key={t.code} className="chip static">{t.code}: {bytes(t.bytes)}</span>)}
+      {tab === 'access' ? (
+        <>
+          <div className="card card-pad">
+            <div className="kv">
+              <div className="k">{tr('common.groups')}</div><div>{u.groupIds.map((g) => groups.find((x) => x.id === g)?.name).filter(Boolean).join(', ') || <span className="pink-text">{tr('users.none_the_subscription_will')}</span>}</div>
+              <div className="k">{tr('common.online')}</div><div>{isOnline(u.onlineAt) ? <span className="miku-text">{tr('common.now')}</span> : ago(u.onlineAt)}</div>
+              <div className="k">{tr('users.subscription_refreshed')}</div><div>{ago(u.subLastAt)} {u.subLastUA && <span className="muted small">· {u.subLastUA}</span>}</div>
+              <div className="k">{tr('users.format')}</div><div>{clientTypes[u.clientType] || u.clientType}</div>
+              {u.note && <><div className="k">{tr('users.note')}</div><div>{u.note}</div></>}
+              <div className="k">{tr('users.created')}</div><div>{dateTime(u.createdAt)}</div>
+              <div className="k">{tr('users.total_over_all_time')}</div><div>{bytes(u.lifetimeUsed)}</div>
             </div>
-          )}
-          <a className="small" href={`#/insights/traffic/${id}`} style={{ display: 'inline-block', marginTop: 8 }}>{tr('users.traffic_by_profile')}</a>
-        </div>
-      </div>
+          </div>
 
-      <UserExtras userId={id} grants={data.grants} groups={groups} onChanged={reload} />
+          <UserExtras userId={id} grants={data.grants} groups={groups} onChanged={reload} />
 
-      <div className="card">
-        <div className="card-head"><h3>{tr('users.servers_in_the_subscription')}</h3><span className="card-sub">{tr('users.separate_links_for_manual_import')}</span></div>
-        <div className="card-pad">
-          {data.links.length === 0 ? <div className="muted">{tr('users.no_servers_available_check')}</div> :
-            data.links.map((l, i) => (
-              <div key={i} style={{ marginBottom: 12 }}>
-                <div className="small text-2" style={{ marginBottom: 5 }}>{l.remark} <span className="muted">· {l.tag}{l.hidden ? tr('users.hidden') : ''}</span></div>
-                <CopyField value={l.link} />
+          <div className="card">
+            <div className="card-head"><h3>{tr('users.servers_in_the_subscription')}</h3><span className="card-sub">{tr('users.separate_links_for_manual_import')}</span></div>
+            <div className="card-pad">
+              {data.links.length === 0 ? <div className="muted">{tr('users.no_servers_available_check')}</div> :
+                data.links.map((l, i) => (
+                  <div key={i} style={{ marginBottom: 12 }}>
+                    <div className="small text-2" style={{ marginBottom: 5 }}>{l.remark} <span className="muted">· {l.tag}{l.hidden ? tr('users.hidden') : ''}</span></div>
+                    <CopyField value={l.link} />
+                  </div>
+                ))}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="card">
+            <div className="card-head">
+              <div>
+                <h3>{tr('users.devices_hwid')}</h3>
+                <div className="card-sub">{u.hwidOff ? tr('users.the_check_is_off_for') : tr('users.of', { length: data.devices.length, v: (u.hwidLimit ?? data.hwidDefault) || '∞' })}</div>
               </div>
-            ))}
-        </div>
-      </div>
+              <label className="row small text-2" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                <span>{tr('users.check_hwid')}<Info>{tr('users.turn_it_off_for_apps')}</Info></span>
+                <Switch checked={!u.hwidOff} onChange={(v) => run(() => patch(`users/${id}`, { hwidOff: !v }), v ? tr('users.hwid_check_is_on') : tr('users.hwid_is_off_for_this'))} />
+              </label>
+            </div>
+            {data.devices.length === 0 ? <Empty>{tr('users.devices_appear_after_the_first')}</Empty> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <tbody>
+                    {data.devices.map((d) => (
+                      <tr key={d.id}>
+                        <td>
+                          <div>{d.model || tr('users.device')} <span className="muted small">{d.platform} {d.osVersion}</span></div>
+                          <div className="muted small ellipsis" style={{ maxWidth: 280 }}>{d.userAgent}</div>
+                        </td>
+                        <td className="small muted nowrap">{ago(d.lastSeen)}<br />{d.lastIp}</td>
+                        <td style={{ width: 36 }}>
+                          <button className="btn ghost icon sm" title={tr('common.unlink')} onClick={async () => {
+                            if (await confirm(tr('users.unlink_the_device_the_slot'), tr('common.unlink')))
+                              run(() => del(`users/${id}/devices/${d.id}`), tr('users.device_unlinked'))
+                          }}><Icon name="trash" /></button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card card-pad">
+            <div className="kv">
+              <div className="k">{tr('users.addresses_at_once_2')}</div>
+              <div>
+                <Trans k="users.of" v={{ length: data.ips.length, v: (u.ipLimit ?? data.ipDefault) || '∞' }} />{' '}
+                {u.ipLimit == null && <span className="muted">{tr('users.default')}</span>}
+                {data.ips.length > 0 && <div className="row small" style={{ marginTop: 6, gap: 6 }}>
+                  {data.ips.map((a) => (
+                    <span key={a.addr} className={'chip static' + (a.blocked ? ' pink-text' : '')}
+                      title={a.blocked ? tr('users.over_the_limit_blocked_on') : a.admitted ? tr('users.connected_from', { v: dateTime(a.since) }) : tr('users.being_checked_short_connections')}>
+                      {a.blocked ? '⛔ ' : a.admitted ? '' : '… '}<span className="mono">{a.addr}</span>
+                    </span>
+                  ))}
+                </div>}
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h3>{tr('users.traffic_in_30_days')}</h3><ChartLegend /></div>
+            <div className="card-pad">
+              <TrafficChart days={data.daily} />
+              {data.trafficByNode.length > 0 && (
+                <div className="row small text-2" style={{ marginTop: 8 }}>
+                  {data.trafficByNode.map((t) => <span key={t.code} className="chip static">{t.code}: {bytes(t.bytes)}</span>)}
+                </div>
+              )}
+              <a className="small" href={`#/insights/traffic/${id}`} style={{ display: 'inline-block', marginTop: 8 }}>{tr('users.traffic_by_profile')}</a>
+            </div>
+          </div>
+        </>
+      )}
 
       {editing && <EditUser u={u} hwidDefault={data.hwidDefault} ipDefault={data.ipDefault} groups={groups} onClose={() => setEditing(false)}
         onSaved={() => { setEditing(false); reload(); onChanged() }} />}

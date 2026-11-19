@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { get, Node, post } from './api'
 import { Icon, useAction, useLoad } from './ui'
 import { t } from './i18n'
-import { isMigrant, useAtLeast } from './mode'
+import { isMigrant, useEngineer } from './mode'
 
 // SetupChecklist — ведущий чеклист на дашборде, пока панель не настроена:
 // сервер → доступ → пользователь → ссылка. Для мигранта шаги 2–4 заменяются переносом.
 // Скрывается кнопкой «Свернуть»; состояние свёртки — в localStorage.
 export function SetupChecklist() {
-  const standard = useAtLeast('standard')
+  const standard = useEngineer()
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 15000)
   const usersTotal = useLoad(() => get<{ total: number }>('users?limit=1'), [], 20000)
   const [dismissed, setDismissed] = useState(loadDismissed)

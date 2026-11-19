@@ -46,11 +46,15 @@ const paths: Record<string, ReactNode> = {
   download: <><path d="M12 4v11M7 11l5 5 5-5" /><path d="M5 20h14" /></>,
   upload: <><path d="M12 16V5M7 9l5-5 5 5" /><path d="M5 20h14" /></>,
   help: <><circle cx="12" cy="12" r="9" /><path d="M9.2 9a2.9 2.9 0 0 1 5.7.9c0 1.9-2.9 2.4-2.9 4.1" /><path d="M12 17.5h.01" /></>,
+  chevron: <path d="m6 9 6 6 6-6" />,
+  grip: <><circle cx="9" cy="6" r="1.2" /><circle cx="15" cy="6" r="1.2" /><circle cx="9" cy="12" r="1.2" /><circle cx="15" cy="12" r="1.2" /><circle cx="9" cy="18" r="1.2" /><circle cx="15" cy="18" r="1.2" /></>,
+  qr: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 20h2" /></>,
+  fullscreen: <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />,
 }
 
 export function Icon({ name, size }: { name: string; size?: number }) {
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       {paths[name]}
     </svg>
   )
@@ -271,8 +275,7 @@ export function Badge({ color, children, dot }: { color?: string; children: Reac
   return <span className={'badge ' + (color || '')}>{dot && <span className="dot" />}{children}</span>
 }
 
-// Info — кнопка «i» с пояснением во всплывающем окне: что это такое и зачем. Короткие уточнения
-// («пусто — без лимита», «за сутки») остаются на виду, в подписи поля.
+// Info — тихая подсказка по наведению/клику без навязчивого кружка.
 export function Info({ children, label = t('ui.what_is_this') }: { children: ReactNode; label?: string }) {
   const [open, setOpen] = useState<'hover' | 'click' | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
@@ -306,7 +309,7 @@ export function Info({ children, label = t('ui.what_is_this') }: { children: Rea
       <button type="button" ref={btn} className={'info-btn' + (open ? ' on' : '')} aria-label={label} aria-expanded={!!open}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(open === 'click' ? null : 'click') }}
         onMouseEnter={() => { if (!open && matchMedia('(hover: hover)').matches) setOpen('hover') }}
-        onMouseLeave={() => { if (open === 'hover') setOpen(null) }}>?</button>
+        onMouseLeave={() => { if (open === 'hover') setOpen(null) }}>i</button>
       {open && createPortal(
         <div ref={pop} className="info-pop" role="tooltip" style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden', left: 0, top: 0 }}
           onClick={(e) => e.stopPropagation()}>{children}</div>,
@@ -316,9 +319,65 @@ export function Info({ children, label = t('ui.what_is_this') }: { children: Rea
   )
 }
 
-// PageInfo — «О разделе» с пояснением во всплывающем окне, слева в панели инструментов.
+// PageInfo — спокойная строка контекста без навязчивых кнопок.
 export function PageInfo({ children }: { children: ReactNode }) {
-  return <div className="grow page-info"><span className="muted small">{t('ui.about_this_page')}</span><Info label={t('ui.about_this_page')}>{children}</Info></div>
+  return <div className="grow page-info"><Info label={t('ui.about_this_page')}>{children}</Info></div>
+}
+
+// Tabs — чистые линейные вкладки с плавным нижним подчёркиванием.
+export type TabItem = { id: string; label: ReactNode; count?: number }
+export function Tabs({ items, value, onChange, right }: { items: TabItem[]; value: string; onChange: (id: string) => void; right?: ReactNode }) {
+  return (
+    <div className="tabs-bar" role="tablist">
+      <div className="tabs-list">
+        {items.map((it) => (
+          <button key={it.id} type="button" role="tab" aria-selected={value === it.id}
+            className={'tab-btn' + (value === it.id ? ' on' : '')}
+            onClick={() => onChange(it.id)}>
+            <span>{it.label}</span>
+            {it.count !== undefined && <span className="tab-count">{it.count}</span>}
+          </button>
+        ))}
+      </div>
+      {right && <div className="tabs-right">{right}</div>}
+    </div>
+  )
+}
+
+// SplitButton — главное действие + выпадающий список дополнительных вариантов.
+export function SplitButton({ label, onClick, items, primary, disabled }: {
+  label: ReactNode
+  onClick: () => void
+  items: { label: ReactNode; onClick: () => void }[]
+  primary?: boolean
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); window.removeEventListener('keydown', key) }
+  }, [open])
+  const cls = primary ? 'btn primary sm' : 'btn sm'
+  return (
+    <div className="split-btn" ref={box}>
+      <button type="button" className={cls + ' split-main'} disabled={disabled} onClick={onClick}>{label}</button>
+      <button type="button" className={cls + ' split-arrow'} disabled={disabled} aria-haspopup="menu" aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}><Icon name="chevron" size={14} /></button>
+      {open && (
+        <div className="menu" role="menu">
+          {items.map((it, i) => (
+            <button key={i} type="button" role="menuitem" className="menu-item"
+              onClick={() => { setOpen(false); it.onClick() }}>{it.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function Field({ label, help, info, link, children }: { label: ReactNode; help?: ReactNode; info?: ReactNode; link?: Link; children: ReactNode }) {

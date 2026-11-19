@@ -53,4 +53,6 @@ export default {
   unlinked: 'Unlinked',
   user_management_passwordless: 'User management, passwordless panel sign-in, backups and node notifications — in a private chat with the bot.',
   with_a_password_backups_telegram: 'With a password, backups (Telegram, download, copies on the server) are .age files; <code>vynel restore</code> opens them (it asks for the password), and so does age -d. Telegram is a trusted place anyway, so this is up to you.',
+  miniapp_fullscreen: 'Open Mini App in fullscreen',
+  miniapp_fullscreen_help: 'On Desktop, opens the panel in a wide horizontal fullscreen window instead of a narrow vertical one; on mobile, uses full screen with safe-area insets (Telegram 8.0+).',
 }

@@ -7,14 +7,16 @@ import { ProviderIcon } from './Billing'
 import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
 import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans, Key } from '../i18n'
-import { useAdvanced, useAtLeast } from '../mode'
+import { useAdvanced } from '../mode'
 import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
+import { NodeInspector } from './NodeInspector'
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000)
   const selfHost = useLoad(() => get<SelfHost>('self-host'), [], 30000)
   const profiles = useLoad(() => get<Profile[]>('profiles'))
   const [adding, setAdding] = useState(() => location.hash.startsWith('#/nodes/new'))
+  const [inspectId, setInspectId] = useState<number | null>(null)
   const [join, setJoin] = useState<JoinInfo | null>(null)
   const [checkOf, setCheckOf] = useState<Node | null>(null)
   const [editNode, setEditNode] = useState<Node | null>(null)
@@ -28,7 +30,8 @@ export function Nodes() {
   const updates = useUpdates(15000)
   const [updLog, setUpdLog] = useState<{ id: number; name: string } | null>(null)
   const upd = useRunUpdate(updates.data, () => { updates.reload(); reload() })
-  const light = !useAtLeast('standard')
+  const engineer = useAdvanced()
+  const light = false
   // У локальной ноды версия панели: она обновляется вместе с панелью.
   const updOf = (n: Node) => n.local ? updates.data?.panel : updates.data?.nodes.find((x) => x.id === n.id)
 
@@ -37,6 +40,25 @@ export function Nodes() {
     if (warn && !(await confirm(warn, ok || t('common.yes')))) return
     await act(() => post(`nodes/${n.id}/action`, { action }), done)
     reload()
+  }
+
+  const inspectedNode = inspectId != null ? nodes.data?.find((x) => x.id === inspectId) : null
+  if (inspectedNode) {
+    return (
+      <>
+        <NodeInspector
+          node={inspectedNode}
+          onBack={() => setInspectId(null)}
+          onAttach={() => setAttachTo(inspectedNode)}
+          onEditHost={(inb) => setHostOf(inb)}
+          onEditConfig={(inb) => setConfigOf(inb)}
+          onReload={reload}
+        />
+        {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}
+        {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
+        {configOf && <InboundEditor i={configOf} onClose={() => setConfigOf(null)} onSaved={() => { setConfigOf(null); reload() }} />}
+      </>
+    )
   }
 
   return (
@@ -66,7 +88,16 @@ export function Nodes() {
                   <div className="node-head">
                     <span className="flag">{n.flag || '🌐'}</span>
                     <div>
-                      <h3>{n.name} <span className="muted small">{n.code}</span> {n.local && <Badge>{t('nodes.on_the_panel_server')}</Badge>} {n.manual && <Badge>{t('nodes.manual_node')}</Badge>}</h3>
+                      <h3>
+                        {engineer ? (
+                          <button type="button" className="btn ghost sm" style={{ padding: '0 4px', marginLeft: -4, height: 'auto', fontSize: 15.5, fontWeight: 600, color: 'var(--on-surface)' }}
+                            onClick={() => setInspectId(n.id)}>{n.name}</button>
+                        ) : n.name}
+                        {' '}<span className="muted small">{n.code}</span>{' '}
+                        {!n.enabled && <Badge color="amber">{t('nodes.node_turned_off')}</Badge>}{' '}
+                        {n.local && <Badge>{t('nodes.on_the_panel_server')}</Badge>}{' '}
+                        {n.manual && <Badge>{t('nodes.manual_node')}</Badge>}
+                      </h3>
                       <div className="card-sub">{n.domain || t('nodes.no_domain')}{' '}<Trans k="nodes.contact" v={{ v: ago(n.lastSeenAt) }} /></div>
                       {n.provider && (
                         <div className="row small" style={{ gap: 8, marginTop: 4 }}>
@@ -82,13 +113,18 @@ export function Nodes() {
                     {updOf(n) && <UpdateChip n={updOf(n)!} latest={updates.data!.latest} onLog={() => setUpdLog({ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name })} />}
                     {n.setupStep > 0 && <Badge color="amber" dot>{t('nodes.without_profiles')}</Badge>}
                     <Badge color={st.color} dot>{st.label}</Badge>
-                    <Switch checked={n.enabled} onChange={(v) => act(() => patch(`nodes/${n.id}`, { enabled: v }), v ? t('nodes.node_turned_on') : t('nodes.node_turned_off')).then(reload)} />
-                    {light ? (
-                      <button className="btn ghost icon sm" title={t('nodes.check_connection_config_dns')} onClick={() => setCheckOf(n)}><Icon name="search" /></button>
-                    ) : (
+                    {engineer && (
+                      <button className="btn sm" onClick={() => setInspectId(n.id)}>
+                        <Icon name="code" /> Xray / Nginx
+                      </button>
+                    )}
                     <Menu title={t('common.actions')} items={[
                       { label: t('nodes.check_connection_config_dns'), icon: 'search', onClick: () => setCheckOf(n) },
                       { label: t('common.edit'), icon: 'edit', onClick: () => setEditNode(n) },
+                      { label: n.enabled ? t('nodes.node_turned_off') : t('nodes.node_turned_on'), icon: 'power', onClick: async () => {
+                        if (n.enabled && !(await confirm(`${n.name}: ${t('nodes.node_turned_off')}?`, t('common.yes')))) return
+                        act(() => patch(`nodes/${n.id}`, { enabled: !n.enabled }), !n.enabled ? t('nodes.node_turned_on') : t('nodes.node_turned_off')).then(reload)
+                      } },
                       'divider',
                       { label: t('nodes.restart_xray'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'xray', t('nodes.xray_restarted')) },
                       ...(!n.manual ? [{ label: t('nodes.restart_the_web_server'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', t('nodes.web_server_restarted')) }] : []),
@@ -118,7 +154,6 @@ export function Nodes() {
                             act(() => del(`nodes/${n.id}`), t('nodes.node_deleted')).then(reload)
                         } }] : []),
                     ]} />
-                    )}
                   </div>
                 </div>
                 <div className="card-pad">
@@ -182,7 +217,7 @@ export function Nodes() {
                             <Switch checked={i.enabled} onChange={(v) => act(() => patch(`inbounds/${i.id}`, { enabled: v }), v ? t('nodes.inbound_turned_on') : t('nodes.inbound_turned_off')).then(reload)} />
                           </div>
                           <div className="row" style={{ marginTop: 8, gap: 6 }}>
-                            <button className="btn sm primary" onClick={() => setConfigOf(i)}><Icon name="code" />{' '}{t('nodes.configure')}</button>
+                            <button className="btn sm" onClick={() => setConfigOf(i)}><Icon name="code" />{' '}{t('nodes.configure')}</button>
                             <Menu title={t('common.actions')} items={[
                               { label: t('nodes.connection_point'), icon: 'edit', onClick: () => setHostOf(i) },
                               { label: t('common.duplicate'), icon: 'copy', onClick: () => {
@@ -1052,7 +1087,10 @@ function SourceTree({ value, sources, override, preview, onSet, onReset, path = 
                   onClick={() => onReset(childPath)}>↺</button>
               </span>
             ) : (
-              <span className="json-leaf mono" title={k}>{preview?.error ? '—' : pretty(v)}</span>
+              <button type="button" className="json-leaf-btn mono" title={`${k} — click to override`}
+                onClick={() => onSet(childPath, Array.isArray(v) ? JSON.stringify(v) : toScalar(v))}>
+                {preview?.error ? '—' : pretty(v)}
+              </button>
             )}
             {typeof label === 'string' && <Badge color={SOURCE_COLORS[label] || ''}>{t(SOURCE_KEYS[label] || 'nodes.from_the_template')}</Badge>}
           </div>

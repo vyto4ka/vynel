@@ -1,21 +1,24 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { ClientFragment, ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
+import { CodeEditor } from '../code'
+import { ExternalList } from '../extras'
 import { RoutingChain, RoutingForm } from '../routing'
-import { Badge, Field, Icon, Info, Loading, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Field, Icon, Info, Loading, Modal, Switch, Tabs, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
 import { useUnsavedChanges } from '../unsaved'
-import { useAtLeast } from '../mode'
+import { useEngineer } from '../mode'
 
-// Вкладки по режимам: Лёгкий — общие/страница/приложения; Стандарт — + маршруты и проверка;
-// Про — + заголовки и клиенты. Внешние подписки — отдельный раздел «Доступы → Внешние».
-const allTabs: [string, string, 'light' | 'standard' | 'pro'][] = [
-  ['basics', t('subscription.general'), 'light'],
-  ['page', t('subscription.page'), 'light'],
-  ['apps', t('common.apps'), 'light'],
-  ['routing', t('subscription.routes'), 'standard'],
-  ['test', t('subscription.check'), 'standard'],
-  ['headers', t('subscription.headers'), 'pro'],
-  ['rules', t('subscription.clients'), 'pro'],
+// Вкладки по режимам: Обычный — общие, страница, приложения, маршруты, внешние;
+// Инженерный — + симулятор выдачи, заголовки и клиентские конфиги (YAML/JSON).
+const allTabs: [string, string, 'basic' | 'engineer'][] = [
+  ['basics', t('subscription.general'), 'basic'],
+  ['page', t('subscription.page'), 'basic'],
+  ['apps', t('common.apps'), 'basic'],
+  ['routing', t('subscription.routes'), 'basic'],
+  ['externals', t('subscription.external'), 'basic'],
+  ['rules', t('subscription.clients'), 'engineer'],
+  ['headers', t('subscription.headers'), 'engineer'],
+  ['test', t('subscription.check'), 'engineer'],
 ]
 
 const platformNames: Record<string, string> = { android: 'Android', ios: 'iOS', windows: 'Windows', macos: 'macOS', linux: 'Linux' }
@@ -36,12 +39,11 @@ export function Subscription() {
   const cfg = useLoad(() => get<SubConfig>('subscription'))
   const userPage = useLoad(() => get<{ users: User[] }>('users?limit=200'))
   const users = { ...userPage, data: userPage.data?.users }
-  const [tab, setTab] = useState('basics')
-  const standard = useAtLeast('standard')
-  const pro = useAtLeast('pro')
-  const tabs = allTabs.filter(([, , min]) => min === 'light' || (min === 'standard' ? standard : pro))
+  const [tab, setTab] = useState(() => location.hash.startsWith('#/externals') ? 'externals' : 'basics')
+  const eng = useEngineer()
+  const tabs = allTabs.filter(([, , min]) => min === 'basic' || eng)
   // Скрытая режимом вкладка не должна оставаться открытой.
-  useEffect(() => { if (!tabs.some(([id]) => id === tab)) setTab('basics') }, [tab, standard, pro])
+  useEffect(() => { if (!tabs.some(([id]) => id === tab)) setTab('basics') }, [tab, eng])
   const [basics, setBasics] = useState<SubBasics | null>(null)
   const [page, setPage] = useState<SubPage | null>(null)
   const [headers, setHeaders] = useState<SubHeader[] | null>(null)
@@ -91,7 +93,6 @@ export function Subscription() {
       const r = await act(() => put<SubConfig>('subscription', JSON.parse(submitted)), t('subscription.saved_apps_pick_up_the'))
       if (r) {
         cfg.setData(r)
-        // Keep edits typed while the request was in flight.
         if (draftRef.current === submitted) {
           setBasics(r.basics); setPage(r.page); setHeaders(r.headers); setRules(r.rules); setRouting(r.routing)
         }
@@ -115,44 +116,48 @@ export function Subscription() {
 
   return (
     <>
-      <div className="toolbar">
-        <div className="seg">
-          {tabs.map(([id, label]) => <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
-        </div>
-        {standard && (
-          <a className="btn ghost sm hide-sm" href="#/externals" title={t('subscription.external')}>
-            <Icon name="external" size={16} />{' '}{t('subscription.external')}
-          </a>
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        items={tabs.map(([id, label]) => ({ id, label }))}
+        right={tab !== 'externals' && (
+          <>
+            {dirty && <span className="amber-text small">{t('subscription.there_are_unsaved_changes')}</span>}
+            {dirty && (
+              <button className="btn ghost sm" onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers); setRules(c.rules); setRouting(c.routing) }}>
+                {t('common.revert')}
+              </button>
+            )}
+            <button className="btn primary sm" disabled={!dirty || saving} onClick={save}>{t('common.save')}</button>
+          </>
         )}
-        <div className="grow" />
-        {dirty && <span className="pink-text small">{t('subscription.there_are_unsaved_changes')}</span>}
-        <button className="btn ghost" disabled={!dirty} onClick={() => { setBasics(c.basics); setPage(c.page); setHeaders(c.headers); setRules(c.rules); setRouting(c.routing) }}>{t('common.revert')}</button>
-        <button className="btn primary" disabled={!dirty || saving} onClick={save}>{t('common.save')}</button>
-      </div>
+      />
 
-      <div className={showPreview ? 'sub-split' : ''}>
-        <div className="cards">
-          {tab === 'basics' && <BasicsTab b={basics} set={setBasics} />}
-          {tab === 'page' && <PageTab p={page} set={setPage} onReset={() => reset('page')} />}
-          {tab === 'apps' && <AppsTab p={page} set={setPage} catalog={c.appCatalog} />}
-          {tab === 'headers' && <HeadersTab hs={headers} set={setHeaders} cfg={c} onReset={() => reset('headers')} />}
-          {tab === 'rules' && <ClientsTab rules={rules} set={setRules} routing={routing} setRouting={setRouting} onReset={() => reset('rules')} />}
-          {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} onTest={() => setTab('test')} />}
-          {tab === 'test' && <TestTab routing={routing} page={page} headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
-        </div>
-        {showPreview && (
-          <div className="card sub-preview">
-            <div className="card-head">
-              <h3>{t('subscription.preview')}</h3>
-              <select className="input" style={{ width: 180, height: 30 }} value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
-                <option value={0}>{t('subscription.first_user')}</option>
-                {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
-              </select>
-            </div>
-            {previewSrc && <iframe title={t('subscription.subscription_page')} src={previewSrc} />}
+      {tab === 'externals' ? <ExternalList /> : (
+        <div className={showPreview ? 'sub-split' : ''}>
+          <div className="cards">
+            {tab === 'basics' && <BasicsTab b={basics} set={setBasics} />}
+            {tab === 'page' && <PageTab p={page} set={setPage} onReset={() => reset('page')} />}
+            {tab === 'apps' && <AppsTab p={page} set={setPage} catalog={c.appCatalog} />}
+            {tab === 'headers' && <HeadersTab hs={headers} set={setHeaders} cfg={c} onReset={() => reset('headers')} />}
+            {tab === 'rules' && <ClientsTab rules={rules} set={setRules} routing={routing} setRouting={setRouting} onReset={() => reset('rules')} />}
+            {tab === 'routing' && <RoutingTab r={routing} set={setRouting} onReset={() => reset('routing')} onTest={() => setTab('test')} />}
+            {tab === 'test' && <TestTab routing={routing} page={page} headers={headers} basics={basics} users={users.data || []} rules={rules} dirty={dirty} />}
           </div>
-        )}
-      </div>
+          {showPreview && (
+            <div className="card sub-preview">
+              <div className="card-head">
+                <h3>{t('subscription.preview')}</h3>
+                <select className="input" style={{ width: 180, height: 32 }} value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
+                  <option value={0}>{t('subscription.first_user')}</option>
+                  {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+                </select>
+              </div>
+              {previewSrc && <iframe title={t('subscription.subscription_page')} src={previewSrc} />}
+            </div>
+          )}
+        </div>
+      )}
     </>
   )
 }
@@ -204,7 +209,7 @@ function FragmentCard({ f, set }: { f: ClientFragment; set: (f: ClientFragment) 
 }
 
 function BasicsTab({ b, set }: { b: SubBasics; set: (b: SubBasics) => void }) {
-  const pro = useAtLeast('pro')
+  const pro = useEngineer()
   const f = (k: keyof SubBasics) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     set({ ...b, [k]: k === 'updateHours' ? Number(e.target.value.replace(/\D/g, '')) || 0 : e.target.value })
   return (
@@ -493,22 +498,21 @@ function TestTab({ headers, basics, users, rules, dirty, routing, page }: { rout
   const [hwid, setHwid] = useState('')
   const [requestIP, setRequestIP] = useState('')
   const [explicitFormat, setExplicitFormat] = useState('')
-  const { data: result, error, loading } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; selection: { allowed: boolean; reason: string; hwid: { off: boolean; noHwid: boolean; count: number; limit: number }; servers: { name: string; node: string; protocol: string; network: string; excluded?: string }[] }; routingProfile: unknown; appLinks: { name: string; value: string }[]; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, hwid, ip: requestIP, format: explicitFormat, headers, basics, rules, routing, page }),
+  const { data: result, error, loading } = useLoad(() => post<{ user: string; format: string; client: string; ownTemplate: boolean; body?: string; decodedUris?: string; selection: { allowed: boolean; reason: string; hwid: { off: boolean; noHwid: boolean; count: number; limit: number }; servers: { name: string; node: string; protocol: string; network: string; excluded?: string }[] }; routingProfile: unknown; appLinks: { name: string; value: string }[]; headers: { name: string; value: string }[] }>('subscription/test', { userId, userAgent: ua, hwid, ip: requestIP, format: explicitFormat, headers, basics, rules, routing, page }),
     [ua, userId, hwid, requestIP, explicitFormat, JSON.stringify(headers), JSON.stringify(basics), JSON.stringify(rules), JSON.stringify(routing), JSON.stringify(page)])
   const data = loading || error ? null : result
+  const bodyLang: 'yaml' | 'json' = data?.format === 'mihomo' ? 'yaml' : 'json'
+  const renderedBody = data?.decodedUris || data?.body || ''
   return (
     <>
       <div className="card card-pad">
         <div className="muted small" style={{ marginBottom: 12 }}>
-          {dirty ? <span className="pink-text">{t('subscription.with_unsaved_changes')}</span> : t('subscription.as_saved')} <Info>{t('subscription.what_the_app_will_get')}</Info>
+          {dirty ? <span className="amber-text">{t('subscription.with_unsaved_changes')}</span> : t('subscription.as_saved')} <Info>{t('subscription.what_the_app_will_get')}</Info>
         </div>
-        <div className="grid2">
+        <div className="grid3">
           <Field label={t('subscription.app_user_agent')}>
             <input className="input mono" list="uas" value={ua} onChange={(e) => setUa(e.target.value)} />
             <datalist id="uas">{uas.map((u) => <option key={u} value={u} />)}</datalist>
-            <div className="row" style={{ gap: 6, marginTop: 8 }}>
-              {uas.slice(0, 6).map((u) => <button key={u} className={'btn sm' + (u === ua ? ' primary' : '')} onClick={() => setUa(u)}>{u.split('/')[0]}</button>)}
-            </div>
           </Field>
           <Field label={t('common.user')}>
             <select className="input" value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
@@ -516,43 +520,63 @@ function TestTab({ headers, basics, users, rules, dirty, routing, page }: { rout
               {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
             </select>
           </Field>
+          <Field label={t('subscription.explicit_format')}>
+            <select className="input" value={explicitFormat} onChange={(e) => setExplicitFormat(e.target.value)}>
+              <option value="">{t('subscription.auto_format')}</option>
+              {Object.entries(formatNames).map(([key, label]) => <option key={key} value={label ? key : key}>{label}</option>)}
+            </select>
+          </Field>
         </div>
-      </div>
-      <div className="card card-pad">
-        <div className="grid3">
+        <div className="grid2">
           <Field label="HWID" help={t('subscription.hwid_preview_help')}><input className="input mono" value={hwid} onChange={(e) => setHwid(e.target.value)} /></Field>
           <Field label={t('subscription.request_ip')} help={t('subscription.request_ip_help')}><input className="input mono" value={requestIP} onChange={(e) => setRequestIP(e.target.value)} /></Field>
-          <Field label={t('subscription.explicit_format')}><select className="input" value={explicitFormat} onChange={(e) => setExplicitFormat(e.target.value)}>
-            <option value="">{t('subscription.auto_format')}</option>
-            {Object.entries(formatNames).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-          </select></Field>
         </div>
-        <p className="small muted">{t('subscription.inspection_cached')}</p>
+        <p className="small muted" style={{ margin: 0 }}>{t('subscription.inspection_cached')}</p>
       </div>
-      <div className="card">
-        <div className="card-head">
-          <div><h3>{t('subscription.response')}</h3>{data && <div className="card-sub">{data.client ? t('subscription.client', { client: data.client }) : t('subscription.client_not_recognised')}{data.ownTemplate ? t('subscription.own_template') : ''}</div>}</div>
-          {data && <Badge color="green">{formatNames[data.format] || data.format}</Badge>}
+
+      <div className={renderedBody ? 'sim-grid' : 'cards'}>
+        <div className="cards">
+          <div className="card">
+            <div className="card-head">
+              <div><h3>{t('subscription.response')}</h3>{data && <div className="card-sub">{data.client ? t('subscription.client', { client: data.client }) : t('subscription.client_not_recognised')}{data.ownTemplate ? t('subscription.own_template') : ''}</div>}</div>
+              {data && <Badge color="green">{formatNames[data.format] || data.format}</Badge>}
+            </div>
+            {!data ? <div className="card-pad"><Loading error={error} /></div> : (
+              <pre className="code" style={{ border: 0, borderRadius: 0, maxHeight: 'none' }}>
+                {data.headers.length === 0 ? t('subscription.no_headers') : data.headers.map((h) => `${h.name}: ${h.value}`).join('\n')}
+                {'\nCache-Control: no-store'}
+              </pre>
+            )}
+          </div>
+          {data && data.format !== 'html' && <div className="card card-pad">
+            <h3 style={{ marginTop: 0 }}>{t('subscription.delivery_diagnostics')}</h3>
+            <p role="status">{data.selection.allowed ? t('subscription.delivery_allowed') : data.selection.reason}</p>
+            <p className="small">{data.selection.hwid.off ? t('subscription.hwid_check_off') : hwid ? t('subscription.hwid_provided') : t('subscription.hwid_missing')}
+              {' · '}{t('subscription.server_counts', { available: data.selection.servers.filter((s) => !s.excluded).length, total: data.selection.servers.length })}</p>
+            <div className="table-wrap"><table className="table"><tbody>
+              {data.selection.servers.map((s, i) => <tr key={i}>
+                <td>{s.name}<div className="small muted">{s.node} · {s.protocol} · {s.network}</div></td>
+                <td>{s.excluded ? ({ hidden: t('subscription.excluded_hidden'), xhttp: t('subscription.excluded_xhttp'), raw: t('subscription.excluded_raw'), format: t('subscription.excluded_format') }[s.excluded as 'hidden' | 'xhttp' | 'raw' | 'format'] || s.excluded) : t('subscription.server_included')}</td>
+              </tr>)}
+            </tbody></table></div>
+          </div>}
         </div>
-        {!data ? <div className="card-pad"><Loading error={error} /></div> : (
-          <pre className="code" style={{ border: 0, borderRadius: 0, maxHeight: 'none' }}>
-            {data.headers.length === 0 ? t('subscription.no_headers') : data.headers.map((h) => `${h.name}: ${h.value}`).join('\n')}
-            {'\nCache-Control: no-store'}
-          </pre>
+        {renderedBody && (
+          <div className="card">
+            <div className="card-head">
+              <h3>Body ({data?.format})</h3>
+              <Badge>{renderedBody.length} chars</Badge>
+            </div>
+            <div className="card-pad" style={{ paddingTop: 0 }}>
+              {data?.format === 'mihomo' || data?.format === 'singbox' || data?.format === 'karing' || data?.format === 'xray' ? (
+                <CodeEditor lang={bodyLang} value={renderedBody} readOnly height={460} />
+              ) : (
+                <pre className="code" style={{ maxHeight: 460 }}>{renderedBody}</pre>
+              )}
+            </div>
+          </div>
         )}
       </div>
-      {data && data.format !== 'html' && <div className="card card-pad">
-        <h3>{t('subscription.delivery_diagnostics')}</h3>
-        <p role="status">{data.selection.allowed ? t('subscription.delivery_allowed') : data.selection.reason}</p>
-        <p className="small">{data.selection.hwid.off ? t('subscription.hwid_check_off') : hwid ? t('subscription.hwid_provided') : t('subscription.hwid_missing')}
-          {' · '}{t('subscription.server_counts', { available: data.selection.servers.filter((s) => !s.excluded).length, total: data.selection.servers.length })}</p>
-        <div className="table-wrap"><table className="table"><tbody>
-          {data.selection.servers.map((s, i) => <tr key={i}>
-            <td>{s.name}<div className="small muted">{s.node} · {s.protocol} · {s.network}</div></td>
-            <td>{s.excluded ? ({ hidden: t('subscription.excluded_hidden'), xhttp: t('subscription.excluded_xhttp'), raw: t('subscription.excluded_raw'), format: t('subscription.excluded_format') }[s.excluded as 'hidden' | 'xhttp' | 'raw' | 'format'] || s.excluded) : t('subscription.server_included')}</td>
-          </tr>)}
-        </tbody></table></div>
-      </div>}
       {/happ/i.test(ua) && <div className="card card-pad small">{t('subscription.happ_routing_limits')}</div>}
       {/karing/i.test(ua) && <div className="card card-pad small">{t('subscription.karing_routing_setup')}</div>}
       {data && data.appLinks.length > 0 && <div className="card card-pad">
@@ -682,8 +706,12 @@ function ClientsTab({ rules, set, routing, setRouting, onReset }: {
               <div style={{ marginTop: 16 }}>
                 <Field label={t('subscription.own_template_2')} help={t('subscription.empty_the_panel_builds_the')} info={<><Trans k="subscription.paste_a_ready_config_for" v={{ v: r.format === 'mihomo' ? 'Mihomo YAML' : r.format === 'singbox' ? 'sing-box JSON' : 'Xray JSON' }} />{' '}{r.format === 'mihomo' ? t('subscription.into_proxies_and_into_all') :
                   r.format === 'singbox' ? t('subscription.into_outbounds_where_selector') : t('subscription.in_place_of_the_outbound')}.</>}>
-                  <textarea className="input mono" rows={10} spellCheck={false} value={r.template || ''} onChange={(e) => { update({ ...r, template: e.target.value }); setInfo(null) }}
-                    onBlur={read} placeholder={r.format === 'mihomo' ? 'proxy-groups:\n  - name: Proxy\n    type: select\nrules:\n  - MATCH,Proxy' : '{ "outbounds": [ … ] }'} />
+                  <CodeEditor
+                    lang={r.format === 'mihomo' ? 'yaml' : 'json'}
+                    value={r.template || ''}
+                    onChange={(v) => { update({ ...r, template: v }); setInfo(null) }}
+                    height={320}
+                  />
                 </Field>
                 {r.template?.trim() && (
                   <div className="row" style={{ gap: 8 }}>

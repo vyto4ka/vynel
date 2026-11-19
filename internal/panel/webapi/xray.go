@@ -18,6 +18,9 @@ func (s *Server) xrayRoutes() {
 	s.handle("POST /api/xray/base/check", s.xrayCheck)
 	s.handle("PUT /api/xray/base", s.xraySave)
 	s.handle("POST /api/xray/nodes/{id}/config", s.xrayNodeConfig)
+	s.handle("GET /api/nodes/{id}/xray-base", s.nodeXrayBase)
+	s.handle("PUT /api/nodes/{id}/xray-base", s.nodeXrayBaseSave)
+	s.handle("GET /api/nodes/{id}/compiled", s.nodeCompiled)
 }
 
 func (s *Server) xrayBase(r *http.Request) (any, error) {
@@ -127,4 +130,48 @@ func nodeCount(nodes []service.BaseCheckNode) int {
 		return 0
 	}
 	return len(nodes)
+}
+
+type nodeBaseEdit struct {
+	Mode string `json:"mode"`
+	JSON string `json:"json"`
+}
+
+func (s *Server) nodeXrayBase(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	return s.svc.NodeBaseConfig(r.Context(), id)
+}
+
+func (s *Server) nodeXrayBaseSave(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	var in nodeBaseEdit
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	if in.Mode == "custom" {
+		if chk, err := s.svc.CheckNodeBaseConfig(r.Context(), id, in.JSON); err == nil {
+			if rejected, _ := s.xrayTest(r.Context(), chk.Nodes); rejected != "" {
+				return nil, badRequest("Xray не принял конфиг: " + rejected)
+			}
+		}
+	}
+	if err := s.svc.SaveNodeBaseConfig(r.Context(), actor(r), id, in.Mode, in.JSON); err != nil {
+		return nil, err
+	}
+	return s.svc.NodeBaseConfig(r.Context(), id)
+}
+
+func (s *Server) nodeCompiled(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	includeSecrets := r.URL.Query().Get("secrets") == "1"
+	return s.svc.CompiledNodeConfig(r.Context(), id, includeSecrets)
 }

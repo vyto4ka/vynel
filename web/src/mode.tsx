@@ -1,27 +1,26 @@
 import { createContext, ReactNode, useCallback, useContext, useState } from 'react'
 
-// Interface mode: how much is shown. «Лёгкий» is the guided path without Xray terms
-// (no profiles, templates or inbounds); «Стандарт» is the full product without raw
-// JSON; «Про» adds raw configs, profile templates, headers and the «Xray» page.
-// It only changes what is shown — the data is the same.
-export type Mode = 'light' | 'standard' | 'pro'
+// Interface mode: two honest modes without the middle clutter.
+// «Обычный» ('basic') is a clean daily dashboard (users, groups, tariffs, nodes, subscription page & simple routes);
+// «Инженерный» ('engineer') unlocks full Config-First control (Xray base per node, Raw Inbound,
+// compiled xray.json + nginx.conf + diff, protocol blueprints, client YAML/JSON configs and live subscription simulator).
+export type Mode = 'basic' | 'engineer'
 
 const key = 'vynel.mode'
-const Ctx = createContext<{ mode: Mode; setMode: (m: Mode) => void }>({ mode: 'standard', setMode: () => {} })
+const Ctx = createContext<{ mode: Mode; setMode: (m: Mode) => void }>({ mode: 'basic', setMode: () => {} })
 
-// rank orders modes by how much they show.
-export const modeRank: Record<Mode, number> = { light: 0, standard: 1, pro: 2 }
+export const modeRank: Record<Mode, number> = { basic: 0, engineer: 1 }
 
 function load(): Mode {
   try {
     const v = localStorage.getItem(key)
-    // Старые значения: simple → standard, advanced → pro.
-    if (v === 'light' || v === 'standard' || v === 'pro') return v
-    if (v === 'advanced') return 'pro'
+    if (v === 'basic' || v === 'engineer') return v
+    // Миграция со старых значений: pro / advanced → engineer, остальное → basic.
+    if (v === 'pro' || v === 'advanced') return 'engineer'
   } catch {
     /* приватный режим */
   }
-  return 'standard'
+  return 'basic'
 }
 
 export function ModeProvider({ children }: { children: ReactNode }) {
@@ -34,14 +33,12 @@ export function ModeProvider({ children }: { children: ReactNode }) {
 }
 
 export const useMode = () => useContext(Ctx)
+export const useEngineer = () => useContext(Ctx).mode === 'engineer'
+export const useAdvanced = useEngineer
 
-// atLeast(m) — видимость «от уровня m и выше»: pro ≥ standard ≥ light.
 export function useAtLeast(m: Mode): boolean {
   return modeRank[useContext(Ctx).mode] >= modeRank[m]
 }
-
-// Обратная совместимость: «расширенный» = Про.
-export const useAdvanced = () => useContext(Ctx).mode === 'pro'
 
 // Флаг «режим уже выбирали» (экран первого входа показывается один раз).
 const chosenKey = 'vynel.mode.chosen'

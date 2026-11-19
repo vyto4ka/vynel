@@ -64,6 +64,12 @@ func (s *Service) DesiredStates(ctx context.Context) (map[int64]*DesiredState, e
 // desiredStates is DesiredStates with the base config replaced by baseJSON for every node (nil =
 // the stored ones): what nodes would get if the edited base config were saved.
 func (s *Service) desiredStates(ctx context.Context, baseJSON *string) (map[int64]*DesiredState, error) {
+	return s.desiredStatesWithOverrides(ctx, baseJSON, nil)
+}
+
+// desiredStatesWithOverrides computes desired states with an optional global base override or
+// per-node base config overrides (nodeID -> raw JSON).
+func (s *Service) desiredStatesWithOverrides(ctx context.Context, baseJSON *string, nodeOverrides map[int64]string) (map[int64]*DesiredState, error) {
 	if err := s.syncTemplates(ctx); err != nil {
 		return nil, err
 	}
@@ -132,7 +138,9 @@ func (s *Service) desiredStates(ctx context.Context, baseJSON *string) (map[int6
 		}
 		apiAddr := "127.0.0.1:" + nodePort
 		var base *store.BaseConfig
-		if baseJSON != nil {
+		if raw, ok := nodeOverrides[n.ID]; ok {
+			base = &store.BaseConfig{JSON: raw}
+		} else if baseJSON != nil {
 			base = &store.BaseConfig{JSON: *baseJSON}
 		} else if base, err = store.GetBaseConfig(ctx, q, n.BaseConfigID); errors.Is(err, store.ErrNotFound) {
 			base = &store.BaseConfig{JSON: xrayconf.DefaultBaseJSON}
@@ -143,11 +151,13 @@ func (s *Service) desiredStates(ctx context.Context, baseJSON *string) (map[int6
 		if err != nil {
 			return nil, fmt.Errorf("node %s: %w", n.Code, err)
 		}
-		logLevel, err := s.nodeSetting(ctx, SettingXrayLog, n.Code, DefaultXrayLog)
-		if err != nil {
-			return nil, err
+		if !hasNonEmptyLog(baseMap) {
+			logLevel, err := s.nodeSetting(ctx, SettingXrayLog, n.Code, DefaultXrayLog)
+			if err != nil {
+				return nil, err
+			}
+			baseMap["log"] = XrayLog(logLevel)
 		}
-		baseMap["log"] = XrayLog(logLevel)
 		var rendered []*xrayconf.RenderedInbound
 		if n.Enabled {
 			for _, ni := range inbounds {
@@ -235,6 +245,16 @@ func XrayLog(level string) map[string]any {
 		return map[string]any{"loglevel": "debug", "access": "", "dnsLog": false}
 	}
 	return map[string]any{"loglevel": DefaultXrayLog, "access": "none", "dnsLog": false}
+}
+
+// hasNonEmptyLog reports whether baseMap already carries an explicit non-empty "log" object.
+func hasNonEmptyLog(baseMap map[string]any) bool {
+	raw, ok := baseMap["log"]
+	if !ok || raw == nil {
+		return false
+	}
+	m, ok := raw.(map[string]any)
+	return ok && len(m) > 0
 }
 
 // DesiredState computes one node's desired state.

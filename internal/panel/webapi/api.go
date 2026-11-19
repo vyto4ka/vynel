@@ -237,8 +237,9 @@ func (s *Server) session(r *http.Request) (any, error) {
 	subBase, _ := s.svc.SubBase(ctx)
 	hwid, _ := s.svc.Setting(ctx, service.SettingHWIDLimit, "0")
 	hwidDefault, _ := strconv.Atoi(hwid)
+	miniAppFS, _ := s.svc.Setting(ctx, service.SettingBotMiniAppFullscreen, "false")
 	return map[string]any{"login": login, "method": s.svc.WebSessionMethod(ctx, current(r).ID), "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase,
-		"ipDefault": s.svc.IPLimitOf(ctx, &store.User{}), "hwidDefault": hwidDefault}, nil
+		"ipDefault": s.svc.IPLimitOf(ctx, &store.User{}), "hwidDefault": hwidDefault, "miniAppFullscreen": miniAppFS == "true"}, nil
 }
 
 // sessionPing: the open page says it is alive every half a minute, and whether the admin did

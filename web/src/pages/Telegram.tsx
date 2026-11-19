@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react'
 import { del, get, post, put } from '../api'
 import { dateTime } from '../format'
 import { Badge, CopyField, Field, Icon, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { setTelegramFullscreen } from '../telegram'
 import { t, Trans } from '../i18n'
 
 interface BotInfo {
@@ -13,6 +14,7 @@ interface BotInfo {
   timezone: string
   alerts: boolean
   alertDelay: string
+  miniAppFullscreen: boolean
   backupEncrypted: boolean
 }
 
@@ -153,6 +155,17 @@ export function Telegram() {
             <input className="input" style={{ maxWidth: 160 }} type="time" defaultValue={d.summaryTime === 'off' ? '' : d.summaryTime}
               onBlur={(e) => { if ((e.target.value || 'off') !== d.summaryTime) save({ summaryTime: e.target.value }) }} />
           </Field>
+          <div className="field" style={{ marginTop: 14 }}>
+            <div className="row between" style={{ flexWrap: 'nowrap' }}>
+              <div>
+                <div>{t('telegram.miniapp_fullscreen')}</div>
+                <div className="help" style={{ padding: 0, marginTop: 2 }}>{t('telegram.miniapp_fullscreen_help')}</div>
+              </div>
+              <Switch checked={!!d.miniAppFullscreen} onChange={(v) => {
+                save({ miniAppFullscreen: v }).then((ok) => { if (ok) setTelegramFullscreen(v) })
+              }} />
+            </div>
+          </div>
           <div className="muted small">{t('telegram.sign_in_messages_and_the')}{' '}<Info>
               <p>{t('telegram.the_bot_writes_about_every')}</p>
               <p>{t('telegram.the_panel_button_next_to')}</p>
