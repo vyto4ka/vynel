@@ -168,6 +168,78 @@ func TestNginxAllInOneSNIRouter(t *testing.T) {
 	}
 }
 
+// Ordinary Reality (TCP) and the standard XHTTP template on one 443: nginx takes the port and
+// the single SNI router sends each front's names to its own loopback Xray.
+func TestNginxTwoRealitySharePort(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "")
+	f.nginxNode(t, n)
+	prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "XHTTP std", TemplateID: "vless-xhttp-reality-std"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: prof.ID,
+		Values: map[string]any{"NODE_DOMAIN": "xhttp.example.com"}}))
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	if got := strings.Count(ds.Nginx, "ssl_preread on;"); got != 1 {
+		t.Fatalf("SNI routers %d:\n%s", got, ds.Nginx)
+	}
+	contains(t, ds.Nginx, "nl.example.com 127.0.0.1:10443;", "xhttp.example.com 127.0.0.1:10444;",
+		"default 127.0.0.1:8443;", "server_name nl.example.com;", "server_name xhttp.example.com;",
+		"listen 127.0.0.1:8443 ssl proxy_protocol http2;")
+	a := inboundByTag(t, ds.Config, "VLESS_NL")
+	if a["listen"] != "127.0.0.1" || a["port"] != float64(10443) {
+		t.Fatalf("VLESS_NL: %v %v", a["listen"], a["port"])
+	}
+	b := inboundByTag(t, ds.Config, "XH_NL")
+	if b["listen"] != "127.0.0.1" || b["port"] != float64(10444) {
+		t.Fatalf("XH_NL: %v %v", b["listen"], b["port"])
+	}
+	// The firewall opens nginx's :443 and :80; the loopback Xray ports stay closed.
+	ports := map[int]bool{}
+	for _, p := range append(firewall.NginxPorts(ds.Nginx), firewall.XrayPorts(ds.Config)...) {
+		if p.Proto == "tcp" {
+			ports[p.Port] = true
+		}
+	}
+	if !ports[443] || !ports[80] || len(ports) != 2 {
+		t.Fatalf("ports %v", ports)
+	}
+	// Both connection points keep the public port.
+	nis := must(store.ListNodeInbounds(f.ctx, f.s.st.DB, n.ID, 0))
+	if len(nis) != 2 {
+		t.Fatalf("inbounds %d", len(nis))
+	}
+	for _, ni := range nis {
+		if h := must(f.s.HostFor(f.ctx, ni)); h.Port != 443 {
+			t.Fatalf("%s: host port %d", ni.Tag, h.Port)
+		}
+	}
+}
+
+// A shared 443 needs every Reality front to fall back to a local site, otherwise nginx cannot
+// serve the port's unknown names.
+func TestNginxTwoRealitySharePortForeignTarget(t *testing.T) {
+	f := newFixture(t)
+	n, reality := f.aio(t, "")
+	f.nginxNode(t, n)
+	must(f.s.UpdateProfile(f.ctx, ActorCLI, reality.ID, ProfileInput{Name: reality.Name, Override: map[string]any{
+		"streamSettings": map[string]any{"realitySettings": map[string]any{"target": "yandex.ru:443"}}}}))
+	prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "XHTTP std", TemplateID: "vless-xhttp-reality-std"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: prof.ID,
+		Values: map[string]any{"NODE_DOMAIN": "xhttp.example.com"}}))
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	found := false
+	for _, p := range ds.Problems {
+		if strings.Contains(p, "target is not local") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("problems %v", ds.Problems)
+	}
+}
+
 // An old agent (no nginx capability) keeps getting the Caddy layout.
 func TestNginxOldAgentGetsCaddy(t *testing.T) {
 	f := newFixture(t)
