@@ -535,6 +535,13 @@ func (r *Reconciler) UpdateStatus(nodeID int64) *update.Status {
 	return nil
 }
 
+// ClearUpdateStatus drops the cached update status of nodeID right before starting a new update.
+func (r *Reconciler) ClearUpdateStatus(nodeID int64) {
+	r.mu.Lock()
+	delete(r.updates, nodeID)
+	r.mu.Unlock()
+}
+
 // CertStatus is what the node last reported about its TLS certificates.
 func (r *Reconciler) CertStatus(nodeID int64) []*nodev1.CertInfo {
 	r.mu.Lock()

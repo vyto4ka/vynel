@@ -172,3 +172,38 @@ func TestResultAndTail(t *testing.T) {
 		t.Fatalf("result %+v", r)
 	}
 }
+
+func TestRunPreservesInitialStartLog(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rel/install.sh" {
+			_, _ = w.Write([]byte("#!/bin/sh\necho \"step two\"\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	ResultFile, LogFile = filepath.Join(dir, "r", "last.json"), filepath.Join(dir, "update.log")
+	started := LastResult()
+	if started != nil {
+		t.Fatal("unexpected result")
+	}
+	initStarted := int64(9999999999)
+	// Use a current timestamp within the 30s Start() window:
+	if fi, err := os.Stat(dir); err == nil {
+		initStarted = fi.ModTime().Unix()
+	}
+	_ = os.WriteFile(LogFile, []byte("[12:00:00] Запуск службы обновления\n"), 0o644)
+	saveResult(Result{Running: true, StartedAt: initStarted})
+	var out strings.Builder
+	if err := run(context.Background(), &out, Source{Ref: "main", Release: ReleaseLatest, ReleaseURL: srv.URL + "/rel"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	st := LocalStatus()
+	if st == nil || !st.OK || st.StartedAt != initStarted {
+		t.Fatalf("status: %+v, want StartedAt=%d", st, initStarted)
+	}
+	if !strings.Contains(st.Log, "Запуск службы обновления") || !strings.Contains(st.Log, "step two") {
+		t.Fatalf("expected both initial Start line and installer output in log:\n%s", st.Log)
+	}
+}

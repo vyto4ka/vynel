@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { get, post, UpdateInfo, UpdateNode } from './api'
+import { ApiError, get, post, UpdateInfo, UpdateNode } from './api'
 import { Badge, copyText, Icon, Modal, Tabs, useAction, useConfirm, useLoad, useToast } from './ui'
 import { t, Trans } from './i18n'
 
 type RunResult = { started: string[]; startedIds?: number[]; panelStarted?: boolean; failed: Record<string, string> }
-export type LogTarget = { id: number; name: string }
+export type LogTarget = { id: number; name: string; initial?: UpdateNode }
 
 // Обновление идёт: опрашивать чаще.
 export const updatesActive = (info: UpdateInfo | null) => !!info && [info.panel, ...info.nodes].some((n) => n.updating)
@@ -24,13 +24,18 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void, onStar
   const toast = useToast()
   const [waiting, setWaiting] = useState(false)
   const [panelUpdated, setPanelUpdated] = useState(false)
+  const fromVersion = useRef('')
 
   useEffect(() => {
-    if (!waiting || !info) return
-    const from = info.panel.version
+    if (!waiting) return
+    if (info?.panel && ((fromVersion.current && info.panel.version !== fromVersion.current) || info.panel.state === 'done' || info.panel.state === 'failed')) {
+      setWaiting(false)
+      if (info.panel.state !== 'failed') setPanelUpdated(true)
+      return
+    }
     const timer = setInterval(() => {
       get<{ version: string }>('session').then((s) => {
-        if (s.version !== from) {
+        if (fromVersion.current && s.version && s.version !== fromVersion.current) {
           setWaiting(false)
           setPanelUpdated(true)
           reload()
@@ -38,23 +43,47 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void, onStar
       }, () => {})
     }, 2500)
     return () => clearInterval(timer)
-  }, [waiting, info, reload])
+  }, [waiting, info?.panel.version, info?.panel.state, reload])
 
   return {
     waiting,
     panelUpdated,
     run: async (target: 'all' | 'panel' | 'node', id?: number) => {
+      const prePanelVer = info?.panel.version || ''
       const r = await act(() => post<RunResult>('updates/run', { target, id }))
       if (!r) return
       if (r.started.length) toast(t('updates.command_sent_to', { v: r.started.join(', ') }))
       for (const [name, err] of Object.entries(r.failed)) toast(`${name}: ${err}`, true)
       if (r.started.length === 0 && Object.keys(r.failed).length === 0) toast(t('updates.nothing_to_update_everything'))
-      if (r.panelStarted) setWaiting(true)
+      if (r.panelStarted) {
+        fromVersion.current = prePanelVer
+        setWaiting(true)
+      }
       if (onStarted && r.startedIds && r.startedIds.length > 0) {
-        const targets: LogTarget[] = r.startedIds.map((sid, i) => ({
-          id: sid,
-          name: sid === 0 ? t('common.panel') : (r.started[i] || info?.nodes.find((n) => n.id === sid)?.name || `#${sid}`),
-        }))
+        const nowSec = Math.floor(Date.now() / 1000)
+        const targets: LogTarget[] = r.startedIds.map((sid, i) => {
+          const prev = sid === 0 ? info?.panel : info?.nodes.find((n) => n.id === sid)
+          const label = sid === 0
+            ? (r.started[i] || info?.panel.name || t('common.panel'))
+            : (r.started[i] || prev?.name || `#${sid}`)
+          return {
+            id: sid,
+            name: label,
+            initial: {
+              id: sid,
+              code: prev?.code || '',
+              name: label,
+              flag: prev?.flag || '',
+              local: sid === 0,
+              online: true,
+              version: prev?.version || '',
+              available: false,
+              updating: true,
+              state: 'sent',
+              startedAt: nowSec,
+            },
+          }
+        })
         onStarted(targets)
       }
       reload()
@@ -103,28 +132,114 @@ export function UpdateChip({ n, latest, onLog }: { n: UpdateNode; latest: string
   return null
 }
 
-// Панель временно не ответила (сеть или nginx 502/503/504 во время перезапуска службы).
-const offline = (e: string | null) => !!e && /NetworkError|Failed to fetch|Load failed|network|HTTP 50[234]\b/i.test(e)
+// Панель временно не ответила (обрыв сети или прокси 502/503/504/52x во время перезапуска службы).
+function isOfflineErr(e: unknown): boolean {
+  if (!e) return false
+  if (e instanceof ApiError) {
+    return (e.status >= 502 && e.status <= 504) || (e.status >= 520 && e.status <= 524)
+  }
+  return true
+}
 
 export function UpdateLog({ id, name, targets, onClose }: { id: number; name: string; targets?: LogTarget[]; onClose: () => void }) {
   const list: LogTarget[] = targets && targets.length > 0 ? targets : [{ id, name }]
   const [curId, setCurId] = useState(id)
   const curTarget = list.find((x) => x.id === curId) || list[0]
-  const [fast, setFast] = useState(true)
-  const { data, error } = useLoad(() => get<UpdateNode>(`updates/log?id=${curTarget.id}`), [curTarget.id, fast], fast ? 1500 : 0)
-  const lastData = useRef<Record<number, UpdateNode>>({})
-  if (data) lastData.current[curTarget.id] = data
-  const shown = data || lastData.current[curTarget.id] || null
-  const isOffline = offline(error)
+  const [byId, setById] = useState<Record<number, UpdateNode>>(() => {
+    const init: Record<number, UpdateNode> = {}
+    for (const item of list) {
+      if (item.initial) init[item.id] = item.initial
+    }
+    return init
+  })
+  const [isOffline, setIsOffline] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const byIdRef = useRef(byId)
+  byIdRef.current = byId
+  const listKey = list.map((x) => x.id).join(',')
 
-  useEffect(() => { if (shown) setFast(shown.updating) }, [shown])
-  useEffect(() => { if (isOffline) setFast(true) }, [isOffline])
+  useEffect(() => {
+    setById((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const item of list) {
+        if (item.initial && !next[item.id]) {
+          next[item.id] = item.initial
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listKey])
 
+  useEffect(() => {
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let ac: AbortController | null = null
+    const multi = list.length > 1
+    const targetId = curTarget.id
+
+    const poll = async () => {
+      if (stopped) return
+      let nextDelay = 1500
+      if (!document.hidden) {
+        ac = new AbortController()
+        try {
+          if (multi) {
+            const info = await get<UpdateInfo>('updates?logs=1', ac.signal)
+            if (stopped) return
+            const next: Record<number, UpdateNode> = { ...byIdRef.current, 0: info.panel }
+            for (const n of info.nodes) next[n.id] = n
+            byIdRef.current = next
+            setById(next)
+            setIsOffline(false)
+            setError(null)
+            const anyActive = list.some((t) => !next[t.id] || next[t.id].updating)
+            nextDelay = anyActive ? 1500 : 4000
+          } else {
+            const node = await get<UpdateNode>(`updates/log?id=${targetId}`, ac.signal)
+            if (stopped) return
+            const next = { ...byIdRef.current, [node.id]: node }
+            byIdRef.current = next
+            setById(next)
+            setIsOffline(false)
+            setError(null)
+            nextDelay = node.updating ? 1500 : 4000
+          }
+        } catch (e: any) {
+          if (stopped || ac.signal.aborted) return
+          if (isOfflineErr(e)) {
+            setIsOffline(true)
+            setError(null)
+            nextDelay = 1500
+          } else {
+            setIsOffline(false)
+            setError(e?.message || String(e))
+            nextDelay = 4000
+          }
+        }
+      }
+      if (!stopped) {
+        timer = setTimeout(poll, nextDelay)
+      }
+    }
+
+    poll()
+    return () => {
+      stopped = true
+      if (timer !== undefined) clearTimeout(timer)
+      ac?.abort()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listKey, list.length > 1 ? 0 : curTarget.id])
+
+  const shown = byId[curTarget.id] || null
   const act = useAction()
   const toast = useToast()
   const finished = shown?.state === 'done' || shown?.state === 'failed'
   const offlineNote = isOffline && <div className="alert amber" style={{ marginBottom: 14 }}>{t('updates.the_panel_is_not_responding')}</div>
-  useTick(!!shown?.updating)
+  useTick(!!shown?.updating || list.some((x) => byId[x.id]?.updating))
   const pre = useRef<HTMLPreElement>(null)
   useEffect(() => {
     if (pre.current) pre.current.scrollTop = pre.current.scrollHeight
@@ -149,10 +264,30 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
         <Tabs
           value={String(curTarget.id)}
           onChange={(v) => setCurId(Number(v))}
-          items={list.map((x) => ({ id: String(x.id), label: x.name }))}
+          items={list.map((x) => {
+            const st = byId[x.id]
+            return {
+              id: String(x.id),
+              label: (
+                <span className="row" style={{ gap: 6, display: 'inline-flex', alignItems: 'center' }}>
+                  {st?.updating ? <span className="spinner" style={{ width: 11, height: 11 }} />
+                    : st?.state === 'done' ? <span style={{ color: 'var(--teal)' }}>✓</span>
+                      : st?.state === 'failed' ? <span style={{ color: 'var(--pink)' }}>!</span> : null}
+                  <span>{x.name}</span>
+                </span>
+              ),
+            }
+          })}
         />
       )}
-      {!shown ? (offlineNote || (error ? <div className="alert pink">{error}</div> : <div className="muted">{t('common.loading')}</div>)) : (
+      {!shown ? (
+        isOffline ? (
+          <>
+            {offlineNote}
+            <pre ref={pre} className="code update-log">{t('updates.waiting_for_the_first_log')}</pre>
+          </>
+        ) : error ? <div className="alert pink">{error}</div> : <div className="muted">{t('common.loading')}</div>
+      ) : (
         <>
           {offlineNote}
           {shown.state === 'failed' ? <div className="alert pink" style={{ marginBottom: 14 }}>{t('updates.the_update_failed_if_the')}</div>
@@ -190,17 +325,17 @@ export function UpdateBanner() {
   const [logTargets, setLogTargets] = useState<LogTarget[] | null>(null)
   const { waiting, panelUpdated, run } = useRunUpdate(data, reload, (targets) => setLogTargets(targets))
   const [closed, setClosed] = useState(dismissedKey)
-  if (!data) return null
-  const all = [data.panel, ...data.nodes]
-  const busy = all.filter((n) => n.updating)
-  const recent = all.filter((n) => n.state === 'done' || n.state === 'failed')
   const log = logTargets && logTargets.length > 0 && (
     <UpdateLog id={logTargets[0].id} name={logTargets[0].name} targets={logTargets} onClose={() => { setLogTargets(null); reload() }} />
   )
+  if (!data) return log || null
+  const all = [data.panel, ...data.nodes]
+  const busy = all.filter((n) => n.updating)
+  const recent = all.filter((n) => n.state === 'done' || n.state === 'failed')
   // Что именно показано: итог этих обновлений или эта новая версия.
   const key = recent.length > 0 ? 'done:' + recent.map((n) => `${n.id}.${n.state}.${n.finishedAt || 0}`).join(',') : 'new:' + data.latest
   const close = <button className="btn ghost icon sm" title={t('updates.hide')} onClick={() => { dismiss(key); setClosed(key) }}><Icon name="close" /></button>
-  if (closed === key && !waiting && !panelUpdated && busy.length === 0) return null
+  if (closed === key && !waiting && !panelUpdated && busy.length === 0) return log || null
 
   if (waiting || panelUpdated || busy.length > 0 || recent.length > 0) {
     const failed = recent.filter((n) => n.state === 'failed')
@@ -212,7 +347,7 @@ export function UpdateBanner() {
             <b>{busy.length > 0 || waiting ? t('updates.update_in_progress') : failed.length > 0 ? t('updates.the_update_finished_with_errors') : t('updates.update_finished')}</b>
             <div className="update-list">
               {all.filter((n) => n.state).map((n) => (
-                <span key={n.id} className="update-item">{n.flag ? flagOf(n.flag) + ' ' : ''}{n.name}<UpdateChip n={n} latest="" onLog={() => setLogTargets([{ id: n.id, name: n.name }])} /></span>
+                <span key={n.id} className="update-item">{n.flag ? flagOf(n.flag) + ' ' : ''}{n.name}<UpdateChip n={n} latest="" onLog={() => setLogTargets([{ id: n.id, name: n.name, initial: n }])} /></span>
               ))}
             </div>
             {(waiting || data.panel.updating) && <div className="small text-2">{t('updates.the_panel_will_restart_and')}</div>}
@@ -225,7 +360,7 @@ export function UpdateBanner() {
       </>
     )
   }
-  if (data.count === 0) return null
+  if (data.count === 0) return log || null
 
   const nodes = data.nodes.filter((n) => n.available)
   const what = [data.panel.available && t('common.panel'), nodes.length > 0 && t('common.nodes_count', { n: nodes.length })].filter(Boolean).join(t('updates.and'))

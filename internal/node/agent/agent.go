@@ -388,6 +388,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		if time.Since(started) > time.Minute {
 			backoff = min(time.Second, a.cfg.MaxBackoff)
 		}
+		if st := a.cfg.UpdateStatus(); st != nil && (st.Running || time.Since(time.Unix(st.FinishedAt, 0)) < 2*time.Minute) {
+			// Reconnect quickly during and right after an update so live and final logs reach a restarted panel immediately.
+			backoff = min(backoff, min(2*time.Second, a.cfg.MaxBackoff))
+		}
 		if status.Code(err) == codes.PermissionDenied {
 			// Revoked or deleted on the panel: retrying fast is pointless.
 			backoff = a.cfg.MaxBackoff
@@ -442,24 +446,8 @@ func (a *Agent) session(ctx context.Context) error {
 	defer resendTick.Stop()
 	var sentUpTo uint64       // highest seq sent in this session
 	parts := &snapshotParts{} // a snapshot sent in parts, while they come in
-	sendStats := func() error {
-		batches, err := a.st.Pending(sentUpTo, 50)
-		if err != nil {
-			return err
-		}
-		for _, b := range batches {
-			if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Stats{Stats: b}}); err != nil {
-				return err
-			}
-			sentUpTo = b.Seq
-		}
-		return nil
-	}
-	if err := sendStats(); err != nil {
-		return err
-	}
-	// The last update's outcome on every connect (a node restarted by its own update reports how
-	// it ended), then every second while one runs.
+	// Send the update status right after Hello (before flushing queued stats batches) so a
+	// version change in Hello never races ahead of the update's log on the panel.
 	var lastUpd *nodev1.UpdateStatus
 	var watchUntil time.Time // right after an update command its "running" record may not be there yet
 	watching := false
@@ -477,6 +465,22 @@ func (a *Agent) session(ctx context.Context) error {
 		return conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Update{Update: msg}})
 	}
 	if err := sendUpdate(); err != nil {
+		return err
+	}
+	sendStats := func() error {
+		batches, err := a.st.Pending(sentUpTo, 50)
+		if err != nil {
+			return err
+		}
+		for _, b := range batches {
+			if err := conn.Send(&nodev1.NodeMessage{Msg: &nodev1.NodeMessage_Stats{Stats: b}}); err != nil {
+				return err
+			}
+			sentUpTo = b.Seq
+		}
+		return nil
+	}
+	if err := sendStats(); err != nil {
 		return err
 	}
 	var lastCerts *nodev1.CertStatusReport
@@ -500,6 +504,7 @@ func (a *Agent) session(ctx context.Context) error {
 	defer onlineTick.Stop()
 	var lastOnline *nodev1.OnlineIPs
 	var lastOnlineAt time.Time
+	updTicks := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -525,7 +530,8 @@ func (a *Agent) session(ctx context.Context) error {
 			}
 			lastOnline, lastOnlineAt = msg, time.Now()
 		case <-updTick.C:
-			if watching {
+			updTicks++
+			if watching || updTicks%5 == 0 {
 				if err := sendUpdate(); err != nil {
 					return err
 				}

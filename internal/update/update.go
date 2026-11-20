@@ -306,6 +306,10 @@ func LastResult() *Result {
 func saveResult(r Result) {
 	b, _ := json.Marshal(r)
 	_ = os.MkdirAll(filepath.Dir(ResultFile), 0o755)
+	tmp := ResultFile + ".tmp"
+	if os.WriteFile(tmp, b, 0o644) == nil && os.Rename(tmp, ResultFile) == nil {
+		return
+	}
 	_ = os.WriteFile(ResultFile, b, 0o644)
 }
 
@@ -352,13 +356,18 @@ func Run(ctx context.Context, w io.Writer) error { return run(ctx, w, LoadSource
 
 func run(ctx context.Context, w io.Writer, s Source) error {
 	_ = os.MkdirAll(filepath.Dir(LogFile), 0o755)
-	logfFile, err := os.OpenFile(LogFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	started := time.Now().Unix()
+	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	if prev := LastResult(); prev != nil && prev.Running && prev.StartedAt > 0 && time.Since(time.Unix(prev.StartedAt, 0)) < 30*time.Second {
+		started = prev.StartedAt
+		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	}
+	logfFile, err := os.OpenFile(LogFile, flags, 0o644)
 	if err != nil {
 		return err
 	}
 	defer logfFile.Close()
 	out := io.MultiWriter(w, logfFile)
-	started := time.Now().Unix()
 	saveResult(Result{Running: true, StartedAt: started})
 	logf(out, "vynel update: канал %s, ветка %s, релиз %s", s.Channel(), s.Ref, s.Release)
 

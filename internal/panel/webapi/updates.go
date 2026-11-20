@@ -35,6 +35,7 @@ const (
 // updates keeps what the panel knows about new versions and the updates it started.
 type updates struct {
 	mu        sync.Mutex
+	checking  bool
 	latest    string
 	checkErr  string
 	checkedAt time.Time
@@ -54,14 +55,25 @@ type updJob struct {
 
 func (u *updates) check(ctx context.Context, force bool) {
 	u.mu.Lock()
-	fresh := !force && time.Since(u.checkedAt) < updateCheckEvery
+	fresh := !force && (u.checking || time.Since(u.checkedAt) < updateCheckEvery)
+	if !fresh {
+		u.checking = true
+	}
 	u.mu.Unlock()
 	if fresh {
 		return
 	}
-	v, err := update.Latest(ctx, update.LoadSource())
+	reqCtx := ctx
+	if !force {
+		reqCtx = context.Background()
+	}
+	v, err := update.Latest(reqCtx, update.LoadSource())
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.checking = false
+	if err != nil && errors.Is(err, context.Canceled) {
+		return
+	}
 	u.checkedAt = time.Now()
 	if err != nil {
 		u.checkErr = err.Error()
@@ -135,6 +147,10 @@ func mergeUpdateStatus(live *update.Status, run *store.UpdateRun) *update.Status
 	if run == nil {
 		c := *live
 		return &c
+	}
+	// Ignore a finished live status left over from an earlier update before the current trigger.
+	if live != nil && run.SentAt > 0 && !live.Running && live.StartedAt < run.SentAt-30 {
+		live = nil
 	}
 	fromDB := &update.Status{
 		Running:    run.State == UpdRunning || run.State == UpdRestarting,
@@ -277,10 +293,18 @@ func (n *UpdateNode) setState(state, log string, started, finished int64) {
 }
 
 func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, error) {
-	s.upd.check(ctx, false)
+	if withLog {
+		go s.upd.check(context.Background(), false)
+	} else {
+		s.upd.check(ctx, false)
+	}
 	sts, err := s.svc.NodeStatuses(ctx, s.cfg.Connected)
 	if err != nil {
 		return nil, err
+	}
+	panelLive := update.LocalStatus()
+	if panelLive != nil {
+		_ = s.svc.RecordUpdateStatus(ctx, 0, panelLive)
 	}
 	now := time.Now()
 	runs, _ := s.svc.UpdateRuns(ctx)
@@ -293,10 +317,6 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 	}
 	s.upd.mu.Unlock()
 
-	panelLive := update.LocalStatus()
-	if panelLive != nil {
-		_ = s.svc.RecordUpdateStatus(ctx, 0, panelLive)
-	}
 	panelSt := mergeUpdateStatus(panelLive, runs[0])
 	info.Panel = UpdateNode{Name: "Панель", Local: true, Online: true, Version: s.cfg.Version, Available: newer(s.cfg.Version, info.Latest)}
 	info.Panel.setState(s.upd.state(0, panelSt, true, s.cfg.Version, now))
@@ -340,7 +360,8 @@ func (s *Server) checkUpdates(r *http.Request) (any, error) {
 
 // localUpdateInfo is updateInfo with the panel's own entry named in the language of the request.
 func (s *Server) localUpdateInfo(r *http.Request) (any, error) {
-	info, err := s.updateInfo(r.Context(), false)
+	withLog := r.URL.Query().Get("logs") == "1"
+	info, err := s.updateInfo(r.Context(), withLog)
 	if err != nil {
 		return nil, err
 	}
@@ -399,35 +420,38 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 	if in.Target != "panel" && s.cfg.NodeAction == nil {
 		return nil, badRequest("обновление нод недоступно")
 	}
+	panelName := i18n.T(i18n.FromRequest(r), "Панель")
 	var mu sync.Mutex
-	started, startedIDs, failed := []string{}, []int64{}, map[string]string{}
-	panelStarted := false
+	startedSet := map[int64]bool{}
+	failed := map[string]string{}
 	versionOf := map[int64]string{0: info.Panel.Version}
 	for _, n := range info.Nodes {
 		versionOf[n.ID] = n.Version
 	}
-	done := func(name string, id int64, err error) {
-		s.upd.markSent(id, versionOf[id], err)
-		errMsg := ""
+	// Persist the trigger before dispatching the command so an immediate NodeMessage_Update
+	// from the node is never overwritten back to an empty "sent" record.
+	begin := func(id int64) {
+		s.upd.markSent(id, versionOf[id], nil)
+		_ = s.svc.RecordUpdateSent(ctx, id, versionOf[id], "")
+	}
+	finish := func(name string, id int64, err error) {
 		if err != nil {
-			errMsg = updateError(err)
-		}
-		_ = s.svc.RecordUpdateSent(ctx, id, versionOf[id], errMsg)
-		mu.Lock()
-		defer mu.Unlock()
-		if err != nil {
+			errMsg := updateError(err)
+			s.upd.markSent(id, versionOf[id], err)
+			_ = s.svc.RecordUpdateSent(ctx, id, versionOf[id], errMsg)
+			mu.Lock()
 			failed[name] = errMsg
+			mu.Unlock()
 			return
 		}
-		started = append(started, name)
-		startedIDs = append(startedIDs, id)
-		if id == 0 {
-			panelStarted = true
-		}
+		mu.Lock()
+		startedSet[id] = true
+		mu.Unlock()
 	}
 	nodeUpdate := func(n UpdateNode) {
+		begin(n.ID)
 		_, err := s.cfg.NodeAction(ctx, n.ID, "update")
-		done(n.Name, n.ID, err)
+		finish(n.Name, n.ID, err)
 		res := "ok"
 		if err != nil {
 			res = err.Error()
@@ -435,8 +459,9 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		_ = s.svc.LogNodeAction(ctx, actor(r), n.ID, "update", res)
 	}
 	panelUpdate := func() {
+		begin(0)
 		err := update.Start(ctx)
-		done("Панель", 0, err)
+		finish(panelName, 0, err)
 		res := "ok"
 		if err != nil {
 			res = err.Error()
@@ -467,6 +492,18 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		}
 	default:
 		return nil, badRequest("что обновлять: all, panel или node")
+	}
+	started, startedIDs := []string{}, []int64{}
+	for _, n := range info.Nodes {
+		if startedSet[n.ID] {
+			started = append(started, n.Name)
+			startedIDs = append(startedIDs, n.ID)
+		}
+	}
+	panelStarted := startedSet[0]
+	if panelStarted {
+		started = append(started, panelName)
+		startedIDs = append(startedIDs, 0)
 	}
 	return map[string]any{
 		"started":      started,

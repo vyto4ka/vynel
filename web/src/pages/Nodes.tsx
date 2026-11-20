@@ -80,7 +80,7 @@ export function Nodes() {
           onUpdate={async () => {
             if (await confirm(t('nodes.update_the_panel_and_the'), t('nodes.update'), false)) upd.run('panel')
           }}
-          onLog={() => setUpdLog([{ id: 0, name: t('common.panel') }])}
+          onLog={() => setUpdLog([{ id: 0, name: updates.data?.panel.name || t('common.panel'), initial: updates.data?.panel }])}
           onReload={() => { selfHost.reload(); reload() }}
         />
       )}
@@ -122,7 +122,7 @@ export function Nodes() {
                     </div>
                   </div>
                   <div className="row" style={{ gap: 6 }}>
-                    {updOf(n) && <UpdateChip n={updOf(n)!} latest={updates.data!.latest} onLog={() => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name }])} />}
+                    {updOf(n) && <UpdateChip n={updOf(n)!} latest={updates.data!.latest} onLog={() => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? (updates.data?.panel.name || t('common.panel')) : n.name, initial: updOf(n) }])} />}
                     {certsSummary && (
                       <button type="button" className="chip-btn" onClick={() => setEditNode({ node: n, tab: 'certs' })} title={t('nodes.certs_title')}>
                         <Badge color={certsSummary.color} dot>{certsSummary.label}</Badge>
@@ -153,7 +153,7 @@ export function Nodes() {
                           if (await confirm(n.local ? t('nodes.update_the_panel_and_the') : <><Trans k="nodes.update_the_node_it_will" v={{ name: n.name }} /></>, t('nodes.update'), false))
                             upd.run(n.local ? 'panel' : 'node', n.id)
                         } },
-                      { label: t('nodes.update_log'), icon: 'audit', onClick: () => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? t('common.panel') : n.name }]) },
+                      { label: t('nodes.update_log'), icon: 'audit', onClick: () => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? (updates.data?.panel.name || t('common.panel')) : n.name, initial: updOf(n) }]) },
                       { label: n.local ? t('nodes.restart_the_service_and_the') : t('nodes.restart_the_vynel_service'), icon: 'power', disabled: !online,
                         onClick: () => nodeAction(n, 'service', t('nodes.the_service_is_restarting'),
                           n.local ? t('nodes.restart_the_vynel_service_the') : t('nodes.restart_the_vynel_service_on'), t('nodes.restart')) },
