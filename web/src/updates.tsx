@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, get, post, UpdateInfo, UpdateNode } from './api'
+import { fmtVersion } from './format'
 import { Badge, copyText, Icon, Modal, Tabs, useAction, useConfirm, useLoad, useToast } from './ui'
 import { t, Trans } from './i18n'
 
@@ -303,7 +304,7 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
                 </div>
               )}
           <pre ref={pre} className="code update-log">{shown.log || (shown.updating ? t('updates.waiting_for_the_first_log') : t('updates.no_log_this_server_has'))}</pre>
-          <div className="muted small" style={{ marginTop: 8 }}><Trans k="updates.version_full_log_on_the" v={{ v: shown.version || '—' }} /></div>
+          <div className="muted small" style={{ marginTop: 8 }}><Trans k="updates.version_full_log_on_the" v={{ v: fmtVersion(shown.version) }} /></div>
         </>
       )}
     </Modal>
@@ -339,11 +340,12 @@ export function UpdateBanner() {
 
   if (waiting || panelUpdated || busy.length > 0 || recent.length > 0) {
     const failed = recent.filter((n) => n.state === 'failed')
+    const inProgress = busy.length > 0 || waiting || data.panel.updating
     return (
       <>
-        <div className={'banner' + (busy.length === 0 && failed.length > 0 ? ' error' : '')}>
+        <div className={'banner' + (!inProgress ? ' compact' : '') + (busy.length === 0 && failed.length > 0 ? ' error' : '')}>
           {busy.length > 0 || waiting ? <span className="spinner" /> : <Icon name="refresh" />}
-          <div className="grow">
+          <div className={!inProgress ? 'banner-inline' : 'grow'}>
             <b>{busy.length > 0 || waiting ? t('updates.update_in_progress') : failed.length > 0 ? t('updates.the_update_finished_with_errors') : t('updates.update_finished')}</b>
             <div className="update-list">
               {all.filter((n) => n.state).map((n) => (

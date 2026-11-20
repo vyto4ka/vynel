@@ -123,15 +123,31 @@ export function useAction() {
 
 // ---------- загрузка данных ----------
 
-export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unknown[] = [], refreshMs = 0) {
-  const [loading, setLoading] = useState(true)
-  const [data, setData] = useState<T | null>(null)
+const loadCache = new Map<string, unknown>()
+export function clearLoadCache() { loadCache.clear() }
+
+export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unknown[] = [], refreshMs = 0, cacheKey?: string) {
+  const cached = cacheKey && loadCache.has(cacheKey) ? (loadCache.get(cacheKey) as T) : null
+  const [loading, setLoading] = useState(cached === null)
+  const [data, setDataState] = useState<T | null>(cached)
   const [error, setError] = useState<string | null>(null)
   const requestId = useRef(0)
   const controller = useRef<AbortController | null>(null)
   const inFlight = useRef(false)
   const fnRef = useRef(fn)
   fnRef.current = fn
+  const cacheKeyRef = useRef(cacheKey)
+  cacheKeyRef.current = cacheKey
+  const setData = useCallback((next: T | null | ((prev: T | null) => T | null)) => {
+    setDataState((prev) => {
+      const val = typeof next === 'function' ? (next as (p: T | null) => T | null)(prev) : next
+      if (cacheKeyRef.current) {
+        if (val === null) loadCache.delete(cacheKeyRef.current)
+        else loadCache.set(cacheKeyRef.current, val)
+      }
+      return val
+    })
+  }, [])
   // A newer explicit load aborts the one in flight; a periodic refresh skips while one is already running.
   const runLoad = useCallback(async (background: boolean) => {
     if (background && inFlight.current) return
@@ -147,7 +163,8 @@ export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unkno
     try {
       const result = await fnRef.current(ac.signal)
       if (id !== requestId.current) return
-      setData(result)
+      if (cacheKeyRef.current) loadCache.set(cacheKeyRef.current, result)
+      setDataState(result)
       setError(null)
     } catch (e: any) {
       if (id !== requestId.current || ac.signal.aborted) return
@@ -162,7 +179,8 @@ export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unkno
   const reload = useCallback(() => runLoad(false), [runLoad])
   useEffect(() => {
     inFlight.current = false
-    runLoad(false)
+    const hasWarm = !!(cacheKeyRef.current && loadCache.has(cacheKeyRef.current))
+    runLoad(hasWarm)
     if (!refreshMs) return () => { requestId.current++; inFlight.current = false; controller.current?.abort() }
     const t = setInterval(() => {
       if (!document.hidden) runLoad(true)
@@ -370,18 +388,20 @@ export function Menu({ title, items, icon = 'more' }: { title: string; items: Me
 }
 
 // SideTooltip — мгновенный портальный тултип справа от иконки в свёрнутом сайдбаре.
-export function SideTooltip({ label, active, children }: { label: string; active: boolean; children: ReactNode }) {
+export function SideTooltip({ label, active, slim, children }: { label: string; active: boolean; slim?: boolean; children: ReactNode }) {
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const show = () => {
     if (!active || !wrap.current) return
     const r = wrap.current.getBoundingClientRect()
-    setPos({ left: r.right + 10, top: r.top + r.height / 2 })
+    const side = wrap.current.closest('.sidebar')
+    const edge = side ? Math.min(side.getBoundingClientRect().right, 64) : r.right
+    setPos({ left: edge + 10, top: r.top + r.height / 2 })
   }
   const hide = () => setPos(null)
-  useEffect(() => { if (!active) setPos(null) }, [active])
+  useEffect(() => { setPos(null) }, [active, label])
   return (
-    <div ref={wrap} className="side-tip-wrap" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}>
+    <div ref={wrap} className={'side-tip-wrap' + (slim ? ' slim' : '')} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide} onPointerDown={hide} onClick={hide}>
       {children}
       {active && pos && createPortal(
         <div className="side-tooltip" role="tooltip" style={{ left: pos.left, top: pos.top }}>{label}</div>,

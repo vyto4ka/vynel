@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { del, get, post, put } from '../api'
-import { ago } from '../format'
+import { ago, fmtVersion } from '../format'
 import { Badge, CopyField, Field, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
 
@@ -18,7 +18,7 @@ function browser(ua: string): string {
 }
 
 function Sessions() {
-  const { data, error, reload } = useLoad(() => get<{ sessions: WebSession[]; passwordLogin: boolean; loginMode: string; sessionPaths: boolean; hasBot: boolean }>('sessions'), [], 30000)
+  const { data, error, reload } = useLoad(() => get<{ sessions: WebSession[]; passwordLogin: boolean; loginMode: string; sessionPaths: boolean; hasBot: boolean }>('sessions'), [], 30000, 'sessions')
   const act = useAction()
   const confirm = useConfirm()
   if (!data) return <div className="card card-pad"><Loading error={error} /></div>
@@ -88,7 +88,7 @@ function Sessions() {
 }
 
 export function Account() {
-  const session = useLoad(() => get<{ login: string; webUrl: string; version: string }>('session'))
+  const session = useLoad(() => get<{ login: string; webUrl: string; version: string }>('session'), [], 0, 'session')
   const [current, setCurrent] = useState('')
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
@@ -107,33 +107,37 @@ export function Account() {
   }
 
   return (
-    <div className="cards" style={{ maxWidth: 760 }}>
-      <div className="card card-pad">
-        <div className="kv">
-          <div className="k">{t('common.login')}</div><div>{session.data.login}</div>
-          <div className="k">{t('account.panel_address')}</div><div>{session.data.webUrl ? <CopyField value={session.data.webUrl} /> : <span className="muted">{t('account.no_domain_set')}</span>}</div>
-          <div className="k">{t('account.version')}</div><div className="mono">{session.data.version}</div>
+    <div className="settings-grid">
+      <div className="settings-col">
+        <div className="card card-pad">
+          <div className="kv">
+            <div className="k">{t('common.login')}</div><div>{session.data.login}</div>
+            <div className="k">{t('account.panel_address')}</div><div>{session.data.webUrl ? <CopyField value={session.data.webUrl} /> : <span className="muted">{t('account.no_domain_set')}</span>}</div>
+            <div className="k">{t('account.version')}</div><div className="mono">{fmtVersion(session.data.version)}</div>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-head"><h3>{t('account.change_login_or_password')}</h3></div>
+          <form className="card-pad" onSubmit={(e: FormEvent) => { e.preventDefault(); submit(false) }}>
+            <Field label={t('account.current_password')}><input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
+            <Field label={t('account.new_login')} help={t('account.empty_keep_the_current_one')}><input className="input" autoComplete="username" value={login} onChange={(e) => setLogin(e.target.value)} placeholder={session.data.login} /></Field>
+            <Field label={t('account.new_password')} help={t('account.at_least_8_characters_or')}><input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+            <div className="row">
+              <button className="btn primary" disabled={!current || password.length < 8}>{t('common.save')}</button>
+              <button type="button" className="btn pink" disabled={!current} onClick={() => submit(true)}>{t('account.generate_password')}</button>
+            </div>
+            {result && (
+              <div className="alert green" style={{ marginTop: 14 }}><Trans k="account.done_login_password" v={{ login: result.login }} /><div style={{ marginTop: 8 }}><CopyField value={result.password} /></div>
+                <div className="small" style={{ marginTop: 8 }}>{t('account.save_it_it_is_shown')}</div>
+              </div>
+            )}
+            <p className="muted small" style={{ marginBottom: 0 }}><Trans k="account.forgot_the_password_on_the" /></p>
+          </form>
         </div>
       </div>
-      <div className="card">
-        <div className="card-head"><h3>{t('account.change_login_or_password')}</h3></div>
-        <form className="card-pad" onSubmit={(e: FormEvent) => { e.preventDefault(); submit(false) }}>
-          <Field label={t('account.current_password')}><input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
-          <Field label={t('account.new_login')} help={t('account.empty_keep_the_current_one')}><input className="input" autoComplete="username" value={login} onChange={(e) => setLogin(e.target.value)} placeholder={session.data.login} /></Field>
-          <Field label={t('account.new_password')} help={t('account.at_least_8_characters_or')}><input className="input" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
-          <div className="row">
-            <button className="btn primary" disabled={!current || password.length < 8}>{t('common.save')}</button>
-            <button type="button" className="btn pink" disabled={!current} onClick={() => submit(true)}>{t('account.generate_password')}</button>
-          </div>
-          {result && (
-            <div className="alert green" style={{ marginTop: 14 }}><Trans k="account.done_login_password" v={{ login: result.login }} /><div style={{ marginTop: 8 }}><CopyField value={result.password} /></div>
-              <div className="small" style={{ marginTop: 8 }}>{t('account.save_it_it_is_shown')}</div>
-            </div>
-          )}
-          <p className="muted small" style={{ marginBottom: 0 }}><Trans k="account.forgot_the_password_on_the" /></p>
-        </form>
+      <div className="settings-col">
+        <Sessions />
       </div>
-      <Sessions />
     </div>
   )
 }

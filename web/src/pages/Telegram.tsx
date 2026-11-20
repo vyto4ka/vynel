@@ -22,7 +22,7 @@ const zones = ['Europe/Moscow', 'Europe/Kaliningrad', 'Europe/Samara', 'Asia/Yek
   'Asia/Krasnoyarsk', 'Asia/Irkutsk', 'Asia/Vladivostok', 'Europe/Minsk', 'Europe/Kyiv', 'Asia/Almaty', 'Asia/Tbilisi', 'Europe/Berlin', 'UTC']
 
 export function Telegram() {
-  const info = useLoad(() => get<BotInfo>('bot'), [], 10000)
+  const info = useLoad(() => get<BotInfo>('bot'), [], 10000, 'bot')
   const [token, setToken] = useState('')
   const [backupPw, setBackupPw] = useState('')
   const [code, setCode] = useState<{ code: string; minutes: number; link?: string; username?: string } | null>(null)
@@ -39,7 +39,8 @@ export function Telegram() {
   const st = d.status
 
   return (
-    <div className="cards" style={{ maxWidth: 860 }}>
+    <div className="settings-grid">
+      <div className="settings-col">
       <div className="card">
         <div className="card-head">
           <div>
@@ -112,7 +113,9 @@ export function Telegram() {
           )}
         </div>
       </div>
+      </div>
 
+      <div className="settings-col">
       <div className="card">
         <div className="card-head"><div><h3>{t('telegram.backups')}{' '}<Info><Trans k="telegram.an_archive_the_panel_database" /></Info></h3><div className="card-sub"><Trans k="telegram.the_last_7_nightly_ones" /></div></div></div>
         <div className="card-pad">
@@ -190,6 +193,7 @@ export function Telegram() {
               onBlur={(e) => { if (e.target.value !== d.alertDelay) save({ alertDelay: Number(e.target.value) || 0 }) }} />
           </Field>
         </div>
+      </div>
       </div>
     </div>
   )

@@ -13,6 +13,7 @@ func TestTranslate(t *testing.T) {
 		{`строка 2, User-Agent "x(" — неверное регулярное выражение: bad`, `line 2, User-Agent "x(" is not a valid regular expression: bad`},             // %q kept as written
 		{"«Всегда напрямую», строка 3", "“Always direct”, line 3"},                                                                                       // arguments are translated too
 		{"не удалось подключиться: timeout", "could not connect: timeout"},                                                                               // prefix
+		{"Панель · Финляндия", "Panel · Финляндия"},                                                                                                      // prefix
 		{"nl.example.com не находится в DNS: добавьте A-запись на IP сервера", "nl.example.com is not found in DNS: add an A record to the server’s IP"}, // suffix
 		{"слишком много неудачных попыток входа с этого адреса — повторите через 5 мин", "too many failed sign-in attempts from this address — try again in 5 min"},
 		{"что-то, чего нет в каталоге", "что-то, чего нет в каталоге"}, // unknown stays
@@ -40,15 +41,21 @@ func TestSprintf(t *testing.T) {
 }
 
 func TestFromRequest(t *testing.T) {
-	for _, c := range []struct{ lang, accept, want string }{
-		{"en", "", "en"},
-		{"de", "", "ru"},
-		{"", "en-US,en;q=0.9,ru;q=0.8", "en"},
-		{"", "de-DE,de;q=0.9,en;q=0.5", "en"},
-		{"", "fr-FR", "ru"},
-		{"", "", "ru"},
+	for _, c := range []struct{ lang, query, accept, want string }{
+		{"en", "", "", "en"},
+		{"de", "", "", "ru"},
+		{"", "en", "ru-RU", "en"},
+		{"", "ru", "en-US", "ru"},
+		{"", "", "en-US,en;q=0.9,ru;q=0.8", "en"},
+		{"", "", "de-DE,de;q=0.9,en;q=0.5", "en"},
+		{"", "", "fr-FR", "ru"},
+		{"", "", "", "ru"},
 	} {
-		r := httptest.NewRequest("GET", "/", nil)
+		target := "/"
+		if c.query != "" {
+			target = "/?lang=" + c.query
+		}
+		r := httptest.NewRequest("GET", target, nil)
 		if c.lang != "" {
 			r.Header.Set("X-Lang", c.lang)
 		}
@@ -56,7 +63,7 @@ func TestFromRequest(t *testing.T) {
 			r.Header.Set("Accept-Language", c.accept)
 		}
 		if got := FromRequest(r); got != c.want {
-			t.Errorf("X-Lang %q Accept-Language %q: %q, want %q", c.lang, c.accept, got, c.want)
+			t.Errorf("X-Lang %q ?lang=%q Accept-Language %q: %q, want %q", c.lang, c.query, c.accept, got, c.want)
 		}
 	}
 }

@@ -34,9 +34,9 @@ export function Profiles() {
 
 // ================================================================ профили
 
-function ProfileList() {
-  const profiles = useLoad(() => get<Profile[]>('profiles'))
-  const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
+export function ProfileList() {
+  const profiles = useLoad(() => get<Profile[]>('profiles'), [], 0, 'profiles')
+  const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'), [], 0, 'profile-templates')
   const [creating, setCreating] = useState(false)
   const [edit, setEdit] = useState<number | null>(null)
   const [applyTo, setApplyTo] = useState<Profile | null>(null)
@@ -58,12 +58,12 @@ function ProfileList() {
             const overridden = Object.keys(p.override).length > 0
             return (
               <div key={p.id} className="card">
-                <div className="card-head">
+                <div className="card-head nowrap">
                   <div>
                     <h3>{p.name}</h3>
                     <div className="card-sub">{p.templateTitle || p.templateId} {t?.custom && <Badge color="pink">{tr('profiles.own_template')}</Badge>}</div>
                   </div>
-                  <div className="row" style={{ gap: 4 }}>
+                  <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
                     <button className="btn sm" onClick={() => setEdit(p.id)}><Icon name="edit" />{' '}{tr('common.edit')}</button>
                     <Menu title={tr('common.more_actions')} items={[
                       { label: tr('profiles.duplicate'), icon: 'copy', onClick: () => {
@@ -87,11 +87,13 @@ function ProfileList() {
                     <div className="k">{tr('common.tag')}</div><div className="mono">{p.tagPattern}</div>
                     <div className="k">{tr('profiles.in_apps')}</div><div className="mono">{p.remarkPattern}</div>
                   </div>
-                  <div className="row small" style={{ marginTop: 12, gap: 6 }}>
-                    <span className="muted">{tr('profiles.on_nodes')}</span>
-                    {p.inbounds.length === 0 ? <span className="muted">{tr('profiles.nowhere_add_it_on_the')}</span> : p.inbounds.map((tag) => <span key={tag} className="chip static mono">{tag}</span>)}
+                  <div className="profile-foot">
+                    <div className="row small" style={{ gap: 6 }}>
+                      <span className="muted">{tr('profiles.on_nodes')}</span>
+                      {p.inbounds.length === 0 ? <span className="muted">{tr('profiles.nowhere_add_it_on_the')}</span> : p.inbounds.map((tag) => <span key={tag} className="chip static mono">{tag}</span>)}
+                    </div>
+                    {overridden && <div className="small pink-text" style={{ marginTop: 8 }}>{tr('profiles.there_is_a_manual_json')}</div>}
                   </div>
-                  {overridden && <div className="small pink-text" style={{ marginTop: 8 }}>{tr('profiles.there_is_a_manual_json')}</div>}
                 </div>
               </div>
             )
@@ -581,8 +583,8 @@ export function VariableTable({ vars, values, onChange, empty, link }: { vars: V
 
 // ================================================================ шаблоны
 
-function TemplateList() {
-  const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'))
+export function TemplateList() {
+  const tpls = useLoad(() => get<ProfileTemplate[]>('profile-templates'), [], 0, 'profile-templates')
   const [edit, setEdit] = useState<{ id: string; source: string; isNew: boolean; readOnly: boolean; help?: boolean } | null>(null)
   const [choosing, setChoosing] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -630,7 +632,7 @@ function TemplateList() {
       <div className="cards cols">
         {tpls.data.map((t) => (
           <div key={t.id} className="card">
-            <div className="card-head">
+            <div className="card-head nowrap">
               <div>
                 <h3>{t.title}</h3>
                 <div className="card-sub mono">{t.id} · v{t.version || '?'}</div>
@@ -644,7 +646,7 @@ function TemplateList() {
               <div className="small" style={{ marginTop: 8 }}>
                 <span className="muted">{tr('profiles.profiles')}{' '}</span>{t.profiles.length ? t.profiles.join(', ') : <span className="muted">{tr('common.not_used')}</span>}
               </div>
-              <div className="row" style={{ marginTop: 12, gap: 6 }}>
+              <div className="row profile-foot" style={{ gap: 6 }}>
                 {t.custom ? (
                   <>
                     <button className="btn sm primary" onClick={() => setEdit({ id: t.id, source: t.source, isNew: false, readOnly: false })}><Icon name="edit" />{' '}{tr('common.edit')}</button>

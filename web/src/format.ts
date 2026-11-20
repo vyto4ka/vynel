@@ -12,6 +12,26 @@ export function bytes(b: number | null | undefined): string {
   return (i === 0 ? v.toFixed(0) : v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)) + ' ' + u[i]
 }
 
+// Компактная подпись делений оси Y: без лишнего ".0" для целых значений (30 ГБ вместо 30.0 ГБ).
+export function fmtAxisBytes(b: number): string {
+  if (b <= 0) return '0'
+  const u = [t('format.b'), t('format.kb'), t('format.mb'), t('format.gb'), t('format.tb')]
+  let i = 0
+  let v = b
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024
+    i++
+  }
+  const num = i === 0 ? v.toFixed(0) : v >= 100 ? v.toFixed(0) : Number(v.toFixed(v >= 10 ? 1 : 2)).toString()
+  return `${num} ${u[i]}`
+}
+
+// Нормализация версии сборки: не дублирует префикс "v" (v0.3.1 → v0.3.1, 0.3.1 → v0.3.1, dev → dev).
+export function fmtVersion(v?: string | null): string {
+  if (!v) return '—'
+  return v === 'dev' || v.startsWith('v') ? v : 'v' + v
+}
+
 export function bps(b: number): string {
   return bytes(b) + t('format.per_second')
 }

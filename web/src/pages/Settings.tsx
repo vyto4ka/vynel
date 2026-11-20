@@ -5,22 +5,32 @@ import { t, Trans } from '../i18n'
 import { applyTheme, loadTheme, themes } from '../theme'
 
 export function Settings() {
-  const { data, error, reload } = useLoad(() => get<Setting[]>('settings'))
-  if (!data) return <Loading error={error} />
+  const settings = useLoad(() => get<Setting[]>('settings'), [], 0, 'settings')
+  const network = useLoad(() => get<Network>('network'), [], 0, 'network')
+  if (!settings.data) return <Loading error={settings.error} />
+  const data = settings.data
   const sections = [...new Set(data.map((s) => s.section))]
+  const leftSections = sections.filter((_, i) => i % 2 === 0)
+  const rightSections = sections.filter((_, i) => i % 2 === 1)
+  const renderSection = (sec: string) => (
+    <div key={sec} className="card">
+      <div className="card-head"><h3>{sec}</h3></div>
+      <div className="card-pad">
+        {data.filter((s) => s.section === sec).map((s) => <SettingRow key={s.key + (s.value ?? '')} s={s} onSaved={settings.reload} />)}
+      </div>
+    </div>
+  )
   return (
-    <div className="cards" style={{ maxWidth: 900 }}>
-      <ThemeCard />
-      <Stealth settings={data} />
-      <NetworkCard />
-      {sections.map((sec) => (
-        <div key={sec} className="card">
-          <div className="card-head"><h3>{sec}</h3></div>
-          <div className="card-pad">
-            {data.filter((s) => s.section === sec).map((s) => <SettingRow key={s.key + (s.value ?? '')} s={s} onSaved={reload} />)}
-          </div>
-        </div>
-      ))}
+    <div className="settings-grid">
+      <div className="settings-col">
+        <ThemeCard />
+        <Stealth settings={data} />
+        {leftSections.map(renderSection)}
+      </div>
+      <div className="settings-col">
+        <NetworkCard data={network.data} error={network.error} reload={network.reload} />
+        {rightSections.map(renderSection)}
+      </div>
     </div>
   )
 }
@@ -97,15 +107,14 @@ function RoleChips({ roles }: { roles: NetRole[] }) {
   return <span className="badges">{roles.map((r, i) => <Badge key={i} color={roleColors[r.kind]}>{roleNames[r.kind]}{r.tag ? ` ${r.tag}` : ''}</Badge>)}</span>
 }
 
-function NetworkCard() {
-  const { data, error, reload } = useLoad(() => get<Network>('network'))
+function NetworkCard({ data, error, reload }: { data: Network | null; error: string | null; reload: () => void }) {
   return (
     <div className="card">
       <div className="card-head">
         <div><h3>{t('settings.addresses_and_roles')}</h3><div className="card-sub">{t('settings.which_ip_serves_what_and')}</div></div>
         <button className="btn ghost sm" onClick={reload}>{t('settings.check_dns_again')}</button>
       </div>
-      {!data ? <div className="card-pad"><Loading error={error} /></div> : (
+      {!data ? <div className="card-pad net-skeleton"><Loading error={error} /></div> : (
         <div className="card-pad">
           {data.domains.length > 0 && (
             <div className="dns-list">
@@ -184,8 +193,11 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: () => void }) {
     )
   }
   const defaultLabel = ip ? (s.key === 'web.address' ? t('settings.same_as_subscriptions') : t('common.all_addresses')) : t('common.default_2', { v: s.default ? ` (${s.default})` : '' })
+  const label = s.title === s.key
+    ? <span className="mono">{s.key}</span>
+    : <><span>{s.title}</span><span className="muted mono" style={{ fontWeight: 400 }}>{s.key}</span></>
   return (
-    <Field label={<>{s.title} <span className="muted mono" style={{ fontWeight: 400 }}>{s.key}</span></>} help={s.hint} info={s.help}>
+    <Field label={label} help={s.hint} info={s.help}>
       <div className="row" style={{ flexWrap: 'nowrap' }}>
         {s.type === 'select' ? (
           <select className="input" value={val} onChange={(e) => setValue(e.target.value)}>

@@ -2,17 +2,21 @@ import { ReactElement, StrictMode, useCallback, useEffect, useState } from 'reac
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
-import { ConfirmProvider, Icon, Logo, Modal, SideTooltip, Tabs, ToastProvider, useAction, useLoad } from './ui'
+import { clearLoadCache, ConfirmProvider, Icon, Logo, Modal, SideTooltip, Tabs, ToastProvider, useAction, useLoad } from './ui'
+import { fmtVersion } from './format'
 import { initTelegramMiniApp, openExternal } from './telegram'
 import { Login } from './pages/Login'
-import { Dashboard } from './pages/Dashboard'
+import { Overview } from './pages/Overview'
+import { Stats } from './pages/Stats'
+import { ServerLoad } from './pages/ServerLoad'
 import { Insights } from './pages/Insights'
 import { Billing } from './pages/Billing'
 import { Users } from './pages/Users'
 import { Groups } from './pages/Groups'
 import { Templates } from './pages/Templates'
 import { Nodes } from './pages/Nodes'
-import { Profiles } from './pages/Profiles'
+import { ProfileList, TemplateList } from './pages/Profiles'
+import { CascadeList } from './extras'
 import { Xray } from './pages/Xray'
 import { Settings } from './pages/Settings'
 import { Subscription } from './pages/Subscription'
@@ -40,6 +44,7 @@ const navPages: PageDef[] = [
 
 // Совместимость со всеми старыми ссылками (#/groups, #/billing, #/xray и т.д.).
 const legacyMap: Record<string, RouteTarget> = {
+  stats: { page: 'overview', sub: 'connections' },
   insights: { page: 'overview', sub: 'analytics' },
   groups: { page: 'users', sub: 'groups' },
   templates: { page: 'users', sub: 'tariffs' },
@@ -65,22 +70,32 @@ function parseRoute(): RouteTarget {
 
 function OverviewHub({ initialTab }: { initialTab?: string }) {
   const eng = useEngineer()
-  const [tab, setTab] = useState(initialTab === 'analytics' && eng ? 'analytics' : 'summary')
+  const valid = new Set(['summary', 'connections', 'servers', ...(eng ? ['analytics'] : [])])
+  const [tab, setTab] = useState(initialTab && valid.has(initialTab) ? initialTab : 'summary')
   useEffect(() => {
-    if (initialTab === 'analytics' && eng) setTab('analytics')
-  }, [initialTab, eng])
-  if (!eng) return <Dashboard />
+    if (initialTab && valid.has(initialTab)) setTab(initialTab)
+    else if (!eng && tab === 'analytics') setTab('summary')
+  }, [initialTab, eng, tab])
+  const pick = (next: string) => {
+    history.replaceState(null, '', next === 'summary' ? '#/overview' : `#/overview/${next}`)
+    setTab(next)
+  }
   return (
     <>
       <Tabs
         value={tab}
-        onChange={setTab}
+        onChange={pick}
         items={[
-          { id: 'summary', label: t('main.overview') },
-          { id: 'analytics', label: t('main.analytics') },
+          { id: 'summary', label: t('dashboard.summary') },
+          { id: 'connections', label: t('dashboard.connections') },
+          { id: 'servers', label: t('common.servers') },
+          ...(eng ? [{ id: 'analytics', label: t('main.analytics') }] : []),
         ]}
       />
-      {tab === 'summary' ? <Dashboard /> : <Insights />}
+      {tab === 'summary' && <Overview />}
+      {tab === 'connections' && <Stats />}
+      {tab === 'servers' && <ServerLoad />}
+      {tab === 'analytics' && eng && <Insights />}
     </>
   )
 }
@@ -129,9 +144,10 @@ function NodesHub({ initialTab }: { initialTab?: string }) {
 }
 
 function ProtocolsHub({ initialTab }: { initialTab?: string }) {
-  const [tab, setTab] = useState(initialTab === 'xray' ? 'xray' : 'profiles')
+  const valid = new Set(['profiles', 'templates', 'cascades', 'xray'])
+  const [tab, setTab] = useState(initialTab && valid.has(initialTab) ? initialTab : 'profiles')
   useEffect(() => {
-    if (initialTab === 'xray' || initialTab === 'profiles') setTab(initialTab)
+    if (initialTab && valid.has(initialTab)) setTab(initialTab)
   }, [initialTab])
   return (
     <>
@@ -140,10 +156,15 @@ function ProtocolsHub({ initialTab }: { initialTab?: string }) {
         onChange={setTab}
         items={[
           { id: 'profiles', label: t('common.profiles') },
+          { id: 'templates', label: t('profiles.profile_templates') },
+          { id: 'cascades', label: t('profiles.cascades') },
           { id: 'xray', label: 'Xray' },
         ]}
       />
-      {tab === 'profiles' ? <Profiles /> : <Xray />}
+      {tab === 'profiles' && <ProfileList />}
+      {tab === 'templates' && <TemplateList />}
+      {tab === 'cascades' && <CascadeList />}
+      {tab === 'xray' && <Xray />}
     </>
   )
 }
@@ -225,6 +246,7 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
   useEffect(() => {
     const h = (event: HashChangeEvent) => {
       const next = parseRoute()
+      if (next.page === route.page && next.sub === route.sub) return
       if (next.page !== route.page && !confirmPageLeave()) {
         history.replaceState(null, '', event.oldURL)
         return
@@ -234,7 +256,7 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
     }
     window.addEventListener('hashchange', h)
     return () => window.removeEventListener('hashchange', h)
-  }, [route.page])
+  }, [route.page, route.sub])
 
   const { mode, setMode } = useMode()
   const p = navPages.find((x) => x.id === route.page) ?? navPages[0]
@@ -252,6 +274,10 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
     })
   }
 
+  const curLang = languages.find((l) => l.code === lang()) ?? languages[0]
+  const nextLang = languages.find((l) => l.code !== curLang.code) ?? languages[0]
+  const ver = fmtVersion(version)
+
   return (
     <div className={'app' + (collapsed ? ' collapsed' : '') + (mobileOpen ? ' mobile-open' : '')}>
       <aside className="sidebar">
@@ -262,7 +288,17 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
         <nav className="nav">
           {navPages.filter(visible).map((x) => (
             <SideTooltip key={x.id} label={x.title} active={collapsed}>
-              <a href={'#/' + x.id} className={'nav-item' + (x.id === route.page ? ' active' : '')} aria-label={x.title}>
+              <a
+                href={'#/' + x.id}
+                className={'nav-item' + (x.id === route.page ? ' active' : '')}
+                aria-label={x.title}
+                onClick={(e) => {
+                  if (x.id === route.page && !route.sub) {
+                    e.preventDefault()
+                    setMobileOpen(false)
+                  }
+                }}
+              >
                 <Icon name={x.icon} />
                 <span className="nav-label">{x.title}</span>
                 {x.id === 'nodes' && (updates.data?.count || 0) > 0 && (
@@ -283,7 +319,7 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
               </button>
             </div>
             <div className="side-meta">
-              <span className="side-foot-text" title={`${login} · ${version}`}>{login} · {version}</span>
+              <span className="side-foot-text" title={login}>{login}</span>
               <div className="side-lang" title={t('main.language')}>
                 {languages.map((l) => (
                   <button key={l.code} type="button" className={lang() === l.code ? 'on' : ''} title={l.name}
@@ -291,15 +327,35 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
                 ))}
               </div>
             </div>
+            <div className="side-version mono" title={ver}>{ver}</div>
+          </div>
+          <div className="side-rail-controls">
+            <SideTooltip label={mode === 'engineer' ? t('main.mode_engineer') : t('main.mode_basic')} active={collapsed}>
+              <button type="button" className="nav-item" aria-label={mode === 'engineer' ? t('main.mode_engineer') : t('main.mode_basic')}
+                onClick={() => setMode(mode === 'engineer' ? 'basic' : 'engineer')}>
+                <Icon name={mode === 'engineer' ? 'code' : 'dashboard'} />
+              </button>
+            </SideTooltip>
+            <SideTooltip label={`${t('main.language')}: ${curLang.name}`} active={collapsed}>
+              <button type="button" className="nav-item side-rail-btn" aria-label={t('main.language')}
+                onClick={() => setLang(nextLang.code).then(() => location.reload())}>
+                {curLang.short}
+              </button>
+            </SideTooltip>
+            <SideTooltip label={`${login} · ${ver}`} active={collapsed}>
+              <a href="#/system/account" className="nav-item" aria-label={`${login} · ${ver}`}>
+                <Icon name="account" />
+              </a>
+            </SideTooltip>
           </div>
           <div className="side-actions">
             <SideTooltip label={t('main.log_out')} active={collapsed}>
-              <button className="nav-item" onClick={() => { if (confirmPageLeave()) onLogout() }} aria-label={t('main.log_out')}>
+              <button className="nav-item" onClick={() => { if (confirmPageLeave()) { clearLoadCache(); onLogout() } }} aria-label={t('main.log_out')}>
                 <Icon name="logout" />
                 <span className="nav-label">{t('main.log_out')}</span>
               </button>
             </SideTooltip>
-            <SideTooltip label={collapsed ? t('main.expand_menu') : t('main.collapse_menu')} active={collapsed}>
+            <SideTooltip slim label={collapsed ? t('main.expand_menu') : t('main.collapse_menu')} active={collapsed}>
               <button className="nav-item collapse-btn"
                 onClick={toggle} title={collapsed ? undefined : t('main.collapse_menu')} aria-label={collapsed ? t('main.expand_menu') : t('main.collapse_menu')}>
                 <Icon name={collapsed ? 'expand' : 'collapse'} />

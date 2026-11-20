@@ -115,6 +115,8 @@ export default {
   pause_ms: 'Pause, ms',
   piece_length_bytes: 'Piece length, bytes',
   preview: 'Preview',
+  open_saved_page: 'Open saved page',
+  preview_hint: 'App links open in a new tab. Device removal is disabled in preview.',
   qr_code: 'QR code',
   recommended: 'recommended',
   refresh_hours: 'Refresh, hours',
