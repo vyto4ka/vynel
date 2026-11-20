@@ -180,3 +180,35 @@ func TestCertificateRightAfterConfig(t *testing.T) {
 		return nil
 	})
 }
+
+func TestWebTakesXrayPort(t *testing.T) {
+	xrayPublic443 := []byte(`{"inbounds":[{"listen":"0.0.0.0","port":443,"protocol":"vless"}]}`)
+	xrayLoopback := []byte(`{"inbounds":[{"listen":"127.0.0.1","port":10443,"protocol":"vless"},{"listen":"127.0.0.1","port":10444,"protocol":"vless"}]}`)
+	nginxNoStream, err := nginxconf.Build(nginxconf.Spec{
+		Issuer: "internal", HTTPPort: 80,
+		Sites: []nginxconf.Site{{Domain: "node.example.com", LocalPort: 8443, ProxyProtocol: true,
+			Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "cloud"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nginxWithStream, err := nginxconf.Build(nginxconf.Spec{
+		Issuer: "internal", HTTPPort: 80,
+		Streams: []nginxconf.Stream{{Port: 443, Default: "127.0.0.1:8443",
+			Backends: []nginxconf.Backend{{Names: []string{"node.example.com"}, Addr: "127.0.0.1:10443"}}}},
+		Sites: []nginxconf.Site{{Domain: "node.example.com", LocalPort: 8443, ProxyProtocol: true,
+			Routes: []nginxconf.Route{{Kind: nginxconf.KindDecoy, Decoy: "cloud"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !webTakesXrayPort(xrayPublic443, xrayLoopback, nil, nginxWithStream) {
+		t.Fatal("expected handover when nginx stream takes :443 from Xray")
+	}
+	if webTakesXrayPort(xrayLoopback, xrayPublic443, nil, nginxNoStream) {
+		t.Fatal("reverse direction (nginx gives :443 back to Xray) must not trigger Xray-first handover")
+	}
+	if webTakesXrayPort(xrayPublic443, xrayPublic443, nil, nginxWithStream) {
+		t.Fatal("unchanged Xray config cannot release ports")
+	}
+}

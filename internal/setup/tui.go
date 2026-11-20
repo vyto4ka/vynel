@@ -98,8 +98,14 @@ func cleanDomain(s string) string {
 }
 
 func validDomain(s string) error {
-	if !domainRe.MatchString(cleanDomain(s)) {
+	d := cleanDomain(s)
+	if len(d) > 253 || !domainRe.MatchString(d) {
 		return errors.New("это не похоже на домен, пример: nl.example.com")
+	}
+	for _, l := range strings.Split(d, ".") {
+		if len(l) == 0 || len(l) > 63 {
+			return errors.New("это не похоже на домен, пример: nl.example.com")
+		}
 	}
 	return nil
 }

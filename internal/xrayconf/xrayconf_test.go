@@ -95,11 +95,14 @@ func TestTemplatesLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ts) != 5 {
-		t.Fatalf("want 5 templates, got %d", len(ts))
+	if len(ts) != 4 {
+		t.Fatalf("want 4 templates, got %d", len(ts))
 	}
 	if IsBuiltin("vless-xhttp-vkcdn") {
 		t.Fatal("the VK CDN template is no longer built in")
+	}
+	if IsBuiltin("vless-xhttp-reality") {
+		t.Fatal("the old obfuscated XHTTP+REALITY template is no longer built in")
 	}
 }
 
@@ -165,7 +168,7 @@ func TestGoldenXHTTPMatchesGuide(t *testing.T) {
 
 func xhttpRealitySpec() InboundSpec {
 	return InboundSpec{
-		TemplateID:    "vless-xhttp-reality",
+		Template:      retired("vless-xhttp-reality"),
 		ProfileValues: map[string]any{"XHTTP_PATH": "/assets/sync", "XHTTP_OBFS": "cookie"},
 		NodeValues: map[string]any{
 			"REALITY_PRIVATE_KEY": fixturePriv,

@@ -6,8 +6,8 @@
 # через SNI-роутер nginx: каждый фронт получает свои имена (свой домен/SNI).
 id: vless-xhttp-reality-std
 version: 1
-title: VLESS XHTTP + REALITY (стандартный)
-summary: Стандартный XHTTP (auto, набивка 100-1342) поверх REALITY на 443. Простой и совместимый. Без Vision.
+title: VLESS XHTTP + REALITY
+summary: XHTTP поверх REALITY на 443, маскировка под собственный сайт. Простой и совместимый. Без Vision.
 tag_pattern: XH_${NODE_CODE}
 remark_pattern: ${NODE_FLAG} ${NODE_NAME} · XHTTP
 protocol: vless
