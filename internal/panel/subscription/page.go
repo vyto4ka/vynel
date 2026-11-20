@@ -13,6 +13,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
