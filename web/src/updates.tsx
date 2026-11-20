@@ -91,7 +91,7 @@ export function UpdateChip({ n, latest, onLog }: { n: UpdateNode; latest: string
   if (n.state) {
     const color = n.state === 'done' ? 'green' : n.state === 'failed' ? 'red' : 'amber'
     return (
-      <button className="chip-btn" onClick={onLog} title={t('updates.show_update_log')}>
+      <button type="button" className="badge-btn" onClick={onLog} title={t('updates.show_update_log')}>
         <Badge color={color}>
           {n.updating ? <span className="spinner" /> : <span className="dot" />}
           {stateText[n.state]}{n.updating && n.startedAt ? ' · ' + elapsed(n.startedAt) : ''}
