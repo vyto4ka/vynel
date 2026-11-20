@@ -129,17 +129,21 @@ export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unkno
   const [error, setError] = useState<string | null>(null)
   const requestId = useRef(0)
   const controller = useRef<AbortController | null>(null)
+  const inFlight = useRef(false)
   const fnRef = useRef(fn)
   fnRef.current = fn
-  // A newer load aborts the one in flight: a slow answer to an old filter must not overwrite
-  // the data the admin is looking at now.
-  const reload = useCallback(async () => {
+  // A newer explicit load aborts the one in flight; a periodic refresh skips while one is already running.
+  const runLoad = useCallback(async (background: boolean) => {
+    if (background && inFlight.current) return
     const id = ++requestId.current
     controller.current?.abort()
     const ac = new AbortController()
     controller.current = ac
-    setLoading(true)
-    setError(null)
+    inFlight.current = true
+    if (!background) {
+      setLoading(true)
+      setError(null)
+    }
     try {
       const result = await fnRef.current(ac.signal)
       if (id !== requestId.current) return
@@ -149,16 +153,21 @@ export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unkno
       if (id !== requestId.current || ac.signal.aborted) return
       setError(e?.message || String(e))
     } finally {
-      if (id === requestId.current) setLoading(false)
+      if (id === requestId.current) {
+        inFlight.current = false
+        setLoading(false)
+      }
     }
   }, [])
+  const reload = useCallback(() => runLoad(false), [runLoad])
   useEffect(() => {
-    reload()
-    if (!refreshMs) return () => { requestId.current++; controller.current?.abort() }
+    inFlight.current = false
+    runLoad(false)
+    if (!refreshMs) return () => { requestId.current++; inFlight.current = false; controller.current?.abort() }
     const t = setInterval(() => {
-      if (!document.hidden) reload()
+      if (!document.hidden) runLoad(true)
     }, refreshMs)
-    return () => { requestId.current++; controller.current?.abort(); clearInterval(t) }
+    return () => { requestId.current++; inFlight.current = false; controller.current?.abort(); clearInterval(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps)
   return { data, error, loading, reload, setData }

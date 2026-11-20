@@ -609,11 +609,11 @@ func (m *Manager) stopLocked() {
 	}
 	cmd, done := m.cmd, m.done
 	m.stopping = true
-	_ = cmd.Process.Signal(syscall.SIGQUIT) // graceful: finish requests
+	_ = cmd.Process.Signal(syscall.SIGTERM) // fast shutdown: upstream services are already stopping
 	m.mu.Unlock()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
 		killGroup(cmd.Process.Pid)
 		<-done
 	}

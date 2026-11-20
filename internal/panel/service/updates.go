@@ -26,6 +26,14 @@ func (s *Service) RecordUpdateSent(ctx context.Context, nodeID int64, fromVersio
 	}
 	if prev != nil {
 		r.DismissedAt = prev.DismissedAt
+		if errMsg == "" && prev.StartedAt >= now-10 && (prev.State == "running" || prev.State == "done") {
+			r.State = prev.State
+			r.OK = prev.OK
+			r.StartedAt = prev.StartedAt
+			r.FinishedAt = prev.FinishedAt
+			r.ToVersion = prev.ToVersion
+			r.Log = prev.Log
+		}
 	}
 	if errMsg != "" {
 		r.State = "failed"

@@ -177,6 +177,7 @@ func nodeAction(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int
 			// Nodes update to the release the panel follows, so the panel and its nodes run one version.
 			src := update.LoadSource()
 			c.Release, c.Ref = src.Release, src.Ref
+			rec.ClearUpdateStatus(nodeID)
 		}
 		ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		defer cancel()
