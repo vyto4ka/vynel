@@ -95,3 +95,48 @@ func TestShellStripsLineBreaksAndSubPathRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestValidSystemHostname(t *testing.T) {
+	good := map[string]string{
+		"nl.example.com":     "nl.example.com",
+		"NL.Example.COM.\n":  "nl.example.com",
+		"  node-1.my.org.  ": "node-1.my.org",
+	}
+	for raw, want := range good {
+		got, ok := validSystemHostname(raw)
+		if !ok || got != want {
+			t.Fatalf("validSystemHostname(%q) = (%q, %v), want (%q, true)", raw, got, ok, want)
+		}
+	}
+	longLabel := strings.Repeat("a", 64) + ".example.com"
+	longHost := strings.Repeat("a.", 128) + "com"
+	bad := []string{
+		"",
+		"ubuntu",
+		"localhost",
+		"vps.localdomain",
+		"server.local",
+		"host.internal",
+		"box.lan",
+		"host.home.arpa",
+		"foo.localhost",
+		"bad_host.example.com",
+		"https://nl.example.com/path",
+		"nl.example.com/extra",
+		"-bad.example.com",
+		"bad-.example.com",
+		"a..b.example.com",
+		"1.2.3.4",
+		"node.example.com..",
+		longLabel,
+		longHost,
+	}
+	for _, raw := range bad {
+		if got, ok := validSystemHostname(raw); ok {
+			t.Fatalf("validSystemHostname(%q) unexpectedly accepted as %q", raw, got)
+		}
+	}
+	if validDomain(longLabel) == nil || validDomain(longHost) == nil {
+		t.Fatal("validDomain must reject overlong labels and hostnames")
+	}
+}

@@ -20,7 +20,7 @@ func TestInboundSourcesAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := svc.CreateProfile(ctx, service.ActorCLI, service.ProfileInput{Name: "XHTTP", TemplateID: "vless-xhttp-reality",
+	p, err := svc.CreateProfile(ctx, service.ActorCLI, service.ProfileInput{Name: "XHTTP", TemplateID: "vless-xhttp-reality-std",
 		Override: map[string]any{"sniffing": map[string]any{"routeOnly": false}}})
 	if err != nil {
 		t.Fatal(err)

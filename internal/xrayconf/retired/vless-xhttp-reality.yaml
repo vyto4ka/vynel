@@ -1,4 +1,5 @@
 # Template C — VLESS + XHTTP + REALITY self-steal (docs/PROFILES.md §8).
+# No longer built in: kept only for panels whose profiles still use it (see RetiredTemplate).
 # Xray owns public TCP 443; everything that is not a REALITY client is passed to the node's own
 # nginx site on 127.0.0.1:8443, like template A. The traffic is HTTP requests (XHTTP) instead of
 # one long raw TLS stream: session id in a cookie, sequence and padding in the query string.

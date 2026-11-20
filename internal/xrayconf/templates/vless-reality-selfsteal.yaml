@@ -3,7 +3,7 @@
 id: vless-reality-selfsteal
 version: 3
 title: VLESS Reality (self-steal)
-summary: Основной профиль. Нода маскируется под собственный сайт на своём домене.
+summary: Основной профиль для совместимости со старыми клиентами. Нода маскируется под собственный сайт на своём домене.
 tag_pattern: VLESS_${NODE_CODE}
 remark_pattern: ${NODE_FLAG} ${NODE_NAME}
 protocol: vless

@@ -583,7 +583,7 @@ Docker на ноде **не нужен**: Xray (бинарь) и nginx (паке
 
 ## 8. Шаблон C — VLESS + XHTTP + REALITY (self-steal)
 
-Файл: `internal/xrayconf/templates/vless-xhttp-reality.yaml`. Источник — ТЗ «XHTTP + REALITY» (Remnawave + Nginx); сайт за REALITY — тот же nginx, что в шаблоне A.
+Файл: `internal/xrayconf/retired/vless-xhttp-reality.yaml` (перенесён в `retired/` для обратной совместимости; для новых профилей используется `vless-xhttp-reality-std`). Источник — ТЗ «XHTTP + REALITY» (Remnawave + Nginx); сайт за REALITY — тот же nginx, что в шаблоне A.
 
 ### 8.1 Технические характеристики
 

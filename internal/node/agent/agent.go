@@ -708,13 +708,7 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 		// anything that slips through (a mixed-version panel) is ignored rather than applied.
 		next.Caddy, next.Nginx = nil, ""
 	}
-	// The web server first: the Reality target must exist before clients arrive. A failure does
-	// not stop the VPN config from applying, but the state is saved as "not fully applied" so the
-	// panel keeps retrying and shows the error.
-	webErr := a.applyWebLocked(ctx, next.Caddy, next.Nginx)
-	if webErr == nil {
-		a.syncFirewall(ctx) // e.g. port 80 for certificates, even if Xray then fails
-	}
+	var webErr error
 	commit := func() error {
 		defer a.syncFirewall(ctx)
 		if webErr != nil {
@@ -727,6 +721,25 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 		}
 		return a.commitLocked(next)
 	}
+	// Handover: when the web server is taking over a TCP port that Xray currently holds (for
+	// example adding a second Reality profile on an all-in-one node moves :443 from Xray to
+	// nginx's SNI router), restart Xray first so it releases the port before nginx tries to bind
+	// it. Otherwise nginx's reload fails with EADDRINUSE while Xray moves to loopback, leaving
+	// :443 with no listener at all.
+	if a.cur != nil && a.proc.Running() && webTakesXrayPort(a.cur.Config, next.Config, next.Caddy, next.Nginx) {
+		if err := a.restartLocked(ctx, next); err != nil {
+			return err
+		}
+		webErr = a.applyWebLocked(ctx, next.Caddy, next.Nginx)
+		return commit()
+	}
+	// Normally the web server goes first: the Reality target must exist before clients arrive.
+	// A failure does not stop the VPN config from applying, but the state is saved as "not fully
+	// applied" so the panel keeps retrying and shows the error.
+	webErr = a.applyWebLocked(ctx, next.Caddy, next.Nginx)
+	if webErr == nil {
+		a.syncFirewall(ctx) // e.g. port 80 for certificates, even if Xray then fails
+	}
 	if a.cur != nil && bytes.Equal(a.cur.Config, next.Config) && a.proc.Running() && a.api != nil {
 		err := a.syncUsersLocked(ctx, a.cur, next)
 		if err == nil {
@@ -737,7 +750,45 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	if err := a.restartLocked(ctx, next); err != nil {
 		return errors.Join(err, webErr)
 	}
+	if webErr != nil {
+		// Xray just restarted and may have released a port the web server needed.
+		webErr = a.applyWebLocked(ctx, next.Caddy, next.Nginx)
+	}
 	return commit()
+}
+
+// webTakesXrayPort reports whether the next web config binds a public TCP port that the current
+// Xray config holds and the next Xray config gives up.
+func webTakesXrayPort(curXray, nextXray, nextCaddy []byte, nextNginx string) bool {
+	if bytes.Equal(curXray, nextXray) {
+		return false
+	}
+	nextXrayTCP := map[int]bool{}
+	for _, p := range firewall.XrayPorts(nextXray) {
+		if p.Proto == "tcp" {
+			nextXrayTCP[p.Port] = true
+		}
+	}
+	freed := map[int]bool{}
+	for _, p := range firewall.XrayPorts(curXray) {
+		if p.Proto == "tcp" && !nextXrayTCP[p.Port] {
+			freed[p.Port] = true
+		}
+	}
+	if len(freed) == 0 {
+		return false
+	}
+	for _, p := range firewall.NginxPorts(nextNginx) {
+		if p.Proto == "tcp" && freed[p.Port] {
+			return true
+		}
+	}
+	for _, p := range firewall.CaddyPorts(nextCaddy) {
+		if p.Proto == "tcp" && freed[p.Port] {
+			return true
+		}
+	}
+	return false
 }
 
 // FirewallPorts is what this node serves: public Xray inbounds, nginx (or Caddy) sites and the extras.

@@ -210,8 +210,13 @@ func (m *Manager) Apply(ctx context.Context, conf string) error {
 			m.Log.Error("cannot put the previous nginx config back", "err", err)
 		}
 	}
-	if m.cmd != nil && upgraded {
-		m.Log.Info("nginx binary changed on disk, restarting to load updated binary")
+	streamChanged := strings.Contains(conf, "\nstream {") != strings.Contains(m.current, "\nstream {")
+	if m.cmd != nil && (upgraded || streamChanged) {
+		if upgraded {
+			m.Log.Info("nginx binary changed on disk, restarting to load updated binary")
+		} else {
+			m.Log.Info("nginx stream router changed, restarting to apply listeners cleanly")
+		}
 		m.stopLocked()
 		if m.closed {
 			return errors.New("nginx manager closed")

@@ -25,6 +25,13 @@ func TestProfileSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	src, ok := xrayconf.RetiredTemplate("vless-xhttp-reality")
+	if !ok {
+		t.Fatal("missing retired vless-xhttp-reality template")
+	}
+	if _, err := s.SaveTemplate(ctx, ActorCLI, "", src); err != nil {
+		t.Fatal(err)
+	}
 	p, err := s.CreateProfile(ctx, ActorCLI, ProfileInput{Name: "XHTTP", TemplateID: "vless-xhttp-reality", Override: map[string]any{"sniffing": map[string]any{"enabled": false}}})
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +40,10 @@ func TestProfileSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tpl, _ := xrayconf.GetTemplate("vless-xhttp-reality")
+	tpl, err := xrayconf.ParseTemplate([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// The editor gets the full source: legacy override folded in, extra inlined, variables kept.
 	in, host := ProfileSources(tpl, p)

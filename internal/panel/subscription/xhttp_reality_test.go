@@ -21,6 +21,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/xray"
 	"github.com/vyto4ka/vynel/internal/xray/xraytest"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // xhttpRealityEnv is one node with template C (XHTTP + REALITY) and one user.
@@ -44,6 +45,13 @@ func newXHTTPRealityEnv(t *testing.T, values map[string]any, port int) *xhttpRea
 	}
 	node, _, err := svc.CreateNode(ctx, actor, service.NodeInput{Name: "Нидерланды", Country: "nl", Domain: "example.test"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	src, ok := xrayconf.RetiredTemplate("vless-xhttp-reality")
+	if !ok {
+		t.Fatal("missing retired vless-xhttp-reality template")
+	}
+	if _, err := svc.SaveTemplate(ctx, actor, "", src); err != nil {
 		t.Fatal(err)
 	}
 	prof, err := svc.CreateProfile(ctx, actor, service.ProfileInput{Name: "XHTTP", TemplateID: "vless-xhttp-reality", Values: values})

@@ -229,12 +229,24 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 		if len(group) < 2 {
 			continue
 		}
+		sniOwner := map[string]string{}
 		for _, f := range group {
 			if f.localPort == 0 {
 				problems = append(problems, fmt.Sprintf("%s shares port %d with Reality inbound %s but its target is not local, the SNI router needs a local target", f.tag, f.port, group[0].tag))
 				continue
 			}
 			f.routed = true
+			for _, name := range f.names {
+				n := strings.ToLower(strings.TrimSpace(name))
+				if n == "" {
+					continue
+				}
+				if prev, dup := sniOwner[n]; dup && prev != f.tag {
+					problems = append(problems, fmt.Sprintf("%s shares port %d and SNI %s with %s: use different domains or ports so the SNI router can tell them apart", f.tag, f.port, n, prev))
+				} else {
+					sniOwner[n] = f.tag
+				}
+			}
 		}
 	}
 

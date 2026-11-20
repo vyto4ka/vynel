@@ -69,6 +69,43 @@ func (a *Answers) restore(s *Answers, fixed Options) {
 	}
 }
 
+// reservedTLDs are pseudo-TLDs that a server's local hostname often uses (RFC 2606, RFC 6761,
+// RFC 6762, ICANN reserved) and that can never receive a public TLS certificate.
+var reservedTLDs = map[string]bool{
+	"local": true, "localdomain": true, "localhost": true, "internal": true,
+	"lan": true, "home": true, "arpa": true, "corp": true, "intranet": true,
+	"invalid": true, "test": true, "example": true,
+}
+
+// validSystemHostname checks whether a raw hostname returned by the OS (hostname -f,
+// os.Hostname, or PTR) is a syntactically valid public DNS hostname (RFC 1035 / RFC 1123)
+// suitable as a candidate domain. Unlike cleanDomain (which accepts pasted URLs from user
+// input), garbage such as paths, schemes, underscores, overlong labels or local pseudo-TLDs
+// is rejected outright.
+func validSystemHostname(raw string) (string, bool) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	s = strings.TrimSuffix(s, ".")
+	if s == "" || len(s) > 253 {
+		return "", false
+	}
+	if net.ParseIP(s) != nil || !domainRe.MatchString(s) {
+		return "", false
+	}
+	labels := strings.Split(s, ".")
+	if len(labels) < 2 {
+		return "", false
+	}
+	for _, l := range labels {
+		if len(l) == 0 || len(l) > 63 {
+			return "", false
+		}
+	}
+	if reservedTLDs[labels[len(labels)-1]] {
+		return "", false
+	}
+	return s, true
+}
+
 // DetectDomain looks for a domain this server already answers to: the host name or the reverse
 // DNS name of its public IP, if public DNS points it at ip. "" when there is none.
 func DetectDomain(ctx context.Context, ip string) string {
@@ -89,8 +126,8 @@ func DetectDomain(ctx context.Context, ip string) string {
 	}
 	seen := map[string]bool{}
 	for _, c := range cands {
-		d := strings.TrimSuffix(cleanDomain(c), ".")
-		if seen[d] || !domainRe.MatchString(d) {
+		d, ok := validSystemHostname(c)
+		if !ok || seen[d] {
 			continue
 		}
 		seen[d] = true

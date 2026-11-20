@@ -505,3 +505,27 @@ func TestRootPrefixConflictsWithSessionPaths(t *testing.T) {
 		})
 	}
 }
+
+// Two Reality profiles attached to the same all-in-one node with the same domain report an SNI
+// conflict instead of silently dropping the second inbound, while keeping the panel site intact.
+func TestNginxTwoRealitySameSNIProblem(t *testing.T) {
+	f := newFixture(t)
+	n, _ := f.aio(t, "nl.example.com")
+	f.nginxNode(t, n)
+	if err := f.s.EnsureWebDefaults(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "XHTTP", TemplateID: "vless-xhttp-reality-std"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: prof.ID}))
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	found := false
+	for _, p := range ds.Problems {
+		if strings.Contains(p, "shares port 443 and SNI nl.example.com") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected duplicate SNI problem, got %v", ds.Problems)
+	}
+	contains(t, ds.Nginx, "ssl_preread on;", "nl.example.com 127.0.0.1:10443;", "default 127.0.0.1:8443;", "location ^~ /s/ {")
+}
