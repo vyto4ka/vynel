@@ -2,6 +2,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useId, us
 import { createPortal } from 'react-dom'
 import { Day } from './api'
 import { fmtBytes, TimeChart } from './charts'
+import { clearAllCache, fetchCached, getCacheEntry, isCacheFresh, setCacheEntry, subscribeCache } from './cache'
 import { bytes } from './format'
 import { Link, useLinkHandlers } from './jsonlink'
 import { t } from './i18n'
@@ -123,13 +124,26 @@ export function useAction() {
 
 // ---------- загрузка данных ----------
 
-const loadCache = new Map<string, unknown>()
-export function clearLoadCache() { loadCache.clear() }
+export type LoadOptions = {
+  cacheKey?: string
+  staleTimeMs?: number
+  keepPreviousData?: boolean
+  enabled?: boolean
+}
 
-export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unknown[] = [], refreshMs = 0, cacheKey?: string) {
-  const cached = cacheKey && loadCache.has(cacheKey) ? (loadCache.get(cacheKey) as T) : null
-  const [loading, setLoading] = useState(cached === null)
-  const [data, setDataState] = useState<T | null>(cached)
+export function clearLoadCache() { clearAllCache() }
+
+export function useLoad<T>(
+  fn: (signal?: AbortSignal) => Promise<T>,
+  deps: unknown[] = [],
+  refreshMs = 0,
+  cacheOrOpts?: string | LoadOptions,
+) {
+  const opts: LoadOptions = typeof cacheOrOpts === 'string' ? { cacheKey: cacheOrOpts } : (cacheOrOpts || {})
+  const { cacheKey, staleTimeMs = 10000, keepPreviousData = true, enabled = true } = opts
+  const warmEntry = getCacheEntry<T>(cacheKey)
+  const [loading, setLoading] = useState(() => enabled && !warmEntry)
+  const [data, setDataState] = useState<T | null>(() => warmEntry ? warmEntry.data : null)
   const [error, setError] = useState<string | null>(null)
   const requestId = useRef(0)
   const controller = useRef<AbortController | null>(null)
@@ -137,20 +151,52 @@ export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unkno
   const fnRef = useRef(fn)
   fnRef.current = fn
   const cacheKeyRef = useRef(cacheKey)
-  cacheKeyRef.current = cacheKey
+  const prevCacheKey = useRef(cacheKey)
+
+  // Синхронное переключение данных при смене cacheKey (например stats:7d -> stats:30d) без моргания в <Loading />.
+  if (prevCacheKey.current !== cacheKey) {
+    prevCacheKey.current = cacheKey
+    cacheKeyRef.current = cacheKey
+    const nextEntry = getCacheEntry<T>(cacheKey)
+    if (nextEntry) {
+      if (data !== nextEntry.data) setDataState(nextEntry.data)
+      if (loading) setLoading(false)
+      if (error) setError(null)
+    } else if (!keepPreviousData && data !== null) {
+      setDataState(null)
+      if (enabled && !loading) setLoading(true)
+    }
+  } else {
+    cacheKeyRef.current = cacheKey
+  }
+
+  // Синхронизация всех смонтированных компонентов с одинаковым cacheKey (например Shell и Nodes по 'updates').
+  useEffect(() => {
+    if (!cacheKey) return
+    return subscribeCache(cacheKey, () => {
+      const cur = getCacheEntry<T>(cacheKey)
+      setDataState(cur ? cur.data : null)
+      if (cur) {
+        setLoading(false)
+        setError(null)
+      }
+    })
+  }, [cacheKey])
+
   const setData = useCallback((next: T | null | ((prev: T | null) => T | null)) => {
     setDataState((prev) => {
       const val = typeof next === 'function' ? (next as (p: T | null) => T | null)(prev) : next
       if (cacheKeyRef.current) {
-        if (val === null) loadCache.delete(cacheKeyRef.current)
-        else loadCache.set(cacheKeyRef.current, val)
+        setCacheEntry(cacheKeyRef.current, val)
       }
       return val
     })
   }, [])
-  // A newer explicit load aborts the one in flight; a periodic refresh skips while one is already running.
-  const runLoad = useCallback(async (background: boolean) => {
+
+  // Новый явный запрос прерывает предыдущий; фоновый опрос пропускается, если запрос уже летит.
+  const runLoad = useCallback(async (background: boolean, force = false) => {
     if (background && inFlight.current) return
+    const key = cacheKeyRef.current
     const id = ++requestId.current
     controller.current?.abort()
     const ac = new AbortController()
@@ -161,9 +207,10 @@ export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unkno
       setError(null)
     }
     try {
-      const result = await fnRef.current(ac.signal)
+      const result = key
+        ? await fetchCached<T>(key, () => fnRef.current(), force)
+        : await fnRef.current(ac.signal)
       if (id !== requestId.current) return
-      if (cacheKeyRef.current) loadCache.set(cacheKeyRef.current, result)
       setDataState(result)
       setError(null)
     } catch (e: any) {
@@ -176,19 +223,36 @@ export function useLoad<T>(fn: (signal?: AbortSignal) => Promise<T>, deps: unkno
       }
     }
   }, [])
-  const reload = useCallback(() => runLoad(false), [runLoad])
+
+  const reload = useCallback(() => runLoad(false, true), [runLoad])
+
   useEffect(() => {
+    if (!enabled) {
+      inFlight.current = false
+      setLoading(false)
+      return
+    }
     inFlight.current = false
-    const hasWarm = !!(cacheKeyRef.current && loadCache.has(cacheKeyRef.current))
-    runLoad(hasWarm)
+    const key = cacheKeyRef.current
+    const entry = getCacheEntry<T>(key)
+    if (entry) {
+      setDataState(entry.data)
+      setLoading(false)
+    }
+    if (!isCacheFresh(key, staleTimeMs)) {
+      const hasWarm = !!entry || (keepPreviousData && data !== null)
+      runLoad(hasWarm, false)
+    }
     if (!refreshMs) return () => { requestId.current++; inFlight.current = false; controller.current?.abort() }
-    const t = setInterval(() => {
-      if (!document.hidden) runLoad(true)
+    const timer = setInterval(() => {
+      if (!document.hidden) runLoad(true, true)
     }, refreshMs)
-    return () => { requestId.current++; inFlight.current = false; controller.current?.abort(); clearInterval(t) }
+    return () => { requestId.current++; inFlight.current = false; controller.current?.abort(); clearInterval(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
-  return { data, error, loading, reload, setData }
+  }, [enabled, ...deps])
+
+  const effectiveData = cacheKey && warmEntry && data === null ? warmEntry.data : data
+  return { data: effectiveData, error, loading, reload, setData }
 }
 
 export function Loading({ error }: { error?: string | null }) {
@@ -466,13 +530,15 @@ export function PageInfo({ children }: { children: ReactNode }) {
 
 // Tabs — чистые линейные вкладки с плавным нижним подчёркиванием.
 export type TabItem = { id: string; label: ReactNode; count?: number }
-export function Tabs({ items, value, onChange, right }: { items: TabItem[]; value: string; onChange: (id: string) => void; right?: ReactNode }) {
+export function Tabs({ items, value, onChange, onHover, right }: { items: TabItem[]; value: string; onChange: (id: string) => void; onHover?: (id: string) => void; right?: ReactNode }) {
   return (
     <div className="tabs-bar" role="tablist">
       <div className="tabs-list">
         {items.map((it) => (
           <button key={it.id} type="button" role="tab" aria-selected={value === it.id}
             className={'tab-btn' + (value === it.id ? ' on' : '')}
+            onMouseEnter={onHover ? () => onHover(it.id) : undefined}
+            onFocus={onHover ? () => onHover(it.id) : undefined}
             onClick={() => onChange(it.id)}>
             <span>{it.label}</span>
             {it.count !== undefined && <span className="tab-count">{it.count}</span>}

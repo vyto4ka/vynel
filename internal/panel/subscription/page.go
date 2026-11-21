@@ -2,7 +2,9 @@ package subscription
 
 import (
 	"context"
+	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -17,6 +19,55 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
+
+// PageScript is the client script served as a same-origin JS asset so strict proxy CSP
+// (default-src 'self' without 'unsafe-inline') allows copy buttons, OS tabs and device actions.
+//
+//go:embed page.js
+var PageScript []byte
+
+var osDisplayNames = map[string]string{
+	"ios":     "iOS",
+	"android": "Android",
+	"windows": "Windows",
+	"macos":   "macOS",
+	"linux":   "Linux",
+}
+
+// DetectClientOS inspects Sec-CH-UA-Platform and User-Agent to pick "ios", "android",
+// "windows", "macos" or "linux" ("" when unknown).
+func DetectClientOS(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	ch := strings.ToLower(strings.Trim(r.Header.Get("Sec-CH-UA-Platform"), `"`+" \t"))
+	switch {
+	case strings.Contains(ch, "win"):
+		return "windows"
+	case strings.Contains(ch, "android"):
+		return "android"
+	case strings.Contains(ch, "ios"):
+		return "ios"
+	case strings.Contains(ch, "mac"):
+		return "macos"
+	case strings.Contains(ch, "linux"), strings.Contains(ch, "chrome os"), strings.Contains(ch, "cros"):
+		return "linux"
+	}
+	ua := strings.ToLower(r.UserAgent())
+	switch {
+	case strings.Contains(ua, "android"):
+		return "android"
+	case strings.Contains(ua, "iphone"), strings.Contains(ua, "ipad"), strings.Contains(ua, "ipod"):
+		return "ios"
+	case strings.Contains(ua, "windows"), strings.Contains(ua, "win64"), strings.Contains(ua, "win32"), strings.Contains(ua, "wow64"):
+		return "windows"
+	case strings.Contains(ua, "macintosh"), strings.Contains(ua, "mac os x"):
+		return "macos"
+	case strings.Contains(ua, "linux"), strings.Contains(ua, "x11"), strings.Contains(ua, "cros"):
+		return "linux"
+	}
+	return ""
+}
 
 // The page shows the subscription URL (QR and deep links), never raw server links: those would
 // bypass the HWID limit (docs/ARCHITECTURE.md §8.4). Its look comes from service.SubPage.
@@ -56,6 +107,7 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 
 .hero{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .hero-left{display:flex;align-items:center;gap:14px;min-width:0}
+.hero-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .avatar{width:46px;height:46px;border-radius:10px;flex:none;display:grid;place-items:center;
  background:linear-gradient(135deg,var(--primary) 0%,var(--pink) 100%);color:#fff;font-size:20px;font-weight:700}
 .chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:7px;font-size:12.5px;font-weight:500;background:var(--primary-soft);color:var(--primary);white-space:nowrap}
@@ -75,6 +127,9 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 .kpi .s{color:var(--muted);font-size:12px;margin-top:4px}
 .bar{height:5px;border-radius:3px;background:var(--card3);overflow:hidden;margin-top:8px}
 .bar i{display:block;height:100%;border-radius:3px;background:var(--primary)}
+
+.page-cols{display:flex;flex-direction:column}
+.col-main,.col-side{display:contents}
 
 /* Traffic chart */
 .chart-info{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -146,6 +201,25 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 
 .foot{text-align:center;color:var(--muted);font-size:12.5px;margin-top:18px;white-space:pre-line}
 
+/* Mobile preserve natural stack order: Traffic chart -> Connect -> Apps -> Devices -> Support */
+.sec-chart{order:1}
+.sec-connect{order:2}
+.sec-apps{order:3}
+.sec-devices{order:4}
+.sec-support{order:5}
+
+@media (min-width:900px){
+  main{max-width:1080px;padding:28px 24px 48px}
+  .card{padding:20px;margin-bottom:0}
+  .hero{margin-bottom:16px}
+  .desc{margin-bottom:16px}
+  .ann{margin-bottom:16px}
+  .kpis{gap:16px;margin-bottom:18px}
+  .page-cols{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(350px,.82fr);gap:18px;align-items:start}
+  .col-main,.col-side{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .sec-chart,.sec-connect,.sec-apps,.sec-devices,.sec-support{order:initial}
+}
+
 @media (max-width:560px){
   main{padding:14px 12px calc(28px + env(safe-area-inset-bottom))}
   .card{padding:15px}
@@ -171,7 +245,9 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
       <div class="muted" style="overflow:hidden;text-overflow:ellipsis">{{.Username}}</div>
     </div>
   </div>
-  <span class="chip{{if not .Active}} bad{{end}}">{{.Status}}</span>
+  <div class="hero-right">
+    <span class="chip{{if not .Active}} bad{{end}}">{{.Status}}</span>
+  </div>
 </div>
 
 {{if .Description}}<div class="card desc">{{.Description}}</div>{{end}}
@@ -192,8 +268,69 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 </div>
 {{end}}
 
+<div class="page-cols">
+<div class="col-main">
+{{if .Apps}}
+<div class="card sec-apps">
+  <div class="card-head">
+    <h2 id="apps-h">{{.T.Apps}}</h2>
+    <span class="chip pink" id="os-badge"{{if not .DetectedOSName}} style="display:none"{{end}}>{{if .DetectedOSName}}{{.T.YourOS}}{{.DetectedOSName}}{{end}}</span>
+  </div>
+  <div class="os-tabs" id="os-tabs" role="tablist">
+    <button type="button" class="os-tab{{if eq .ActiveOS "ios"}} on{{end}}{{if eq .DetectedOS "ios"}} detected{{end}}" data-os="ios"><span class="os-dot"></span>iOS</button>
+    <button type="button" class="os-tab{{if eq .ActiveOS "android"}} on{{end}}{{if eq .DetectedOS "android"}} detected{{end}}" data-os="android"><span class="os-dot"></span>Android</button>
+    <button type="button" class="os-tab{{if eq .ActiveOS "windows"}} on{{end}}{{if eq .DetectedOS "windows"}} detected{{end}}" data-os="windows"><span class="os-dot"></span>Windows</button>
+    <button type="button" class="os-tab{{if eq .ActiveOS "macos"}} on{{end}}{{if eq .DetectedOS "macos"}} detected{{end}}" data-os="macos"><span class="os-dot"></span>macOS</button>
+    <button type="button" class="os-tab{{if eq .ActiveOS "linux"}} on{{end}}{{if eq .DetectedOS "linux"}} detected{{end}}" data-os="linux"><span class="os-dot"></span>Linux</button>
+  </div>
+  <div class="apps" id="apps-grid">
+    {{range .Apps}}
+    <div class="app{{if .Recommended}} rec{{end}}" data-id="{{.ID}}" data-p="{{.Platforms}}"{{if .Hidden}} style="display:none"{{end}}>
+      <div class="app-top"><b>{{.Name}}</b><span class="rec-tag"{{if not .Recommended}} style="display:none"{{end}}>{{$.T.Recommended}}</span></div>
+      {{if .Note}}<span class="note">{{.Note}}</span>{{end}}
+      <div class="app-actions">
+        {{if .Link}}<a class="btn sm app-add" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}{{if .HideAdd}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>{{$.T.Add}}</a>{{end}}
+        <button type="button" class="btn sm app-copy"{{if and .Link (not .HideAdd)}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>{{$.T.CopyLink}}</span></button>
+        {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{$.T.DownloadBtn}}</a>{{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+  <div class="guide">
+    <div class="guide-title" id="guide-title">{{if .ActiveOSName}}{{.T.HowToConnectOn}}{{.ActiveOSName}}{{else}}{{.T.HowToConnect}}{{end}}</div>
+    {{if .Instructions}}<div class="steps">{{.Instructions}}</div>{{else}}
+    <ol id="guide-steps">
+      <li>{{.T.Step1}}</li>
+      <li>{{.T.Step2}}</li>
+      <li>{{.T.Step3}}</li>
+    </ol>{{end}}
+  </div>
+</div>
+{{else if .Instructions}}
+<div class="card sec-apps"><div class="card-head"><h2>{{.T.HowToConnect}}</h2></div><div class="steps">{{.Instructions}}</div></div>
+{{end}}
+
+<div class="card sec-connect">
+  <div class="card-head">
+    <h2>{{.T.Connection}}</h2>
+    <span class="muted">{{.T.LinkAndQR}}</span>
+  </div>
+  <div class="{{if .QR}}connect-grid{{end}}">
+    {{if .QR}}<div class="qr-wrap"><img src="data:image/png;base64,{{.QR}}" alt="{{.T.QRAlt}}"></div>{{end}}
+    <div style="min-width:0">
+      <div class="muted" style="margin-bottom:8px">{{.T.ScanOrCopy}}</div>
+      <div class="copy">
+        <input id="u" readonly value="{{.URL}}" aria-label="{{.T.SubLinkLabel}}">
+        <button id="c" type="button" class="btn sm"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>{{.T.Copy}}</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="col-side">
 {{if .ShowTraffic}}{{if .Daily}}
-<div class="card">
+<div class="card sec-chart">
   <div class="card-head">
     <h2>{{.T.TrafficByDay}}</h2>
     <div class="chart-info" id="chart-info">{{if .ChartHasData}}{{.T.Max}}: <b>{{.ChartMax}}</b>{{else}}{{.T.NoDataYet}}{{end}}</div>
@@ -217,65 +354,8 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 </div>
 {{end}}{{end}}
 
-<div class="card">
-  <div class="card-head">
-    <h2>{{.T.Connection}}</h2>
-    <span class="muted">{{.T.LinkAndQR}}</span>
-  </div>
-  <div class="{{if .QR}}connect-grid{{end}}">
-    {{if .QR}}<div class="qr-wrap"><img src="data:image/png;base64,{{.QR}}" alt="{{.T.QRAlt}}"></div>{{end}}
-    <div style="min-width:0">
-      <div class="muted" style="margin-bottom:8px">{{.T.ScanOrCopy}}</div>
-      <div class="copy">
-        <input id="u" readonly value="{{.URL}}" onclick="this.select()" aria-label="{{.T.SubLinkLabel}}">
-        <button id="c" type="button" class="btn sm"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>{{.T.Copy}}</span></button>
-      </div>
-    </div>
-  </div>
-</div>
-
-{{if .Apps}}
-<div class="card">
-  <div class="card-head">
-    <h2 id="apps-h">{{.T.Apps}}</h2>
-    <span class="chip pink" id="os-badge" style="display:none"></span>
-  </div>
-  <div class="os-tabs" id="os-tabs" role="tablist">
-    <button type="button" class="os-tab" data-os="ios"><span class="os-dot"></span>iOS</button>
-    <button type="button" class="os-tab" data-os="android"><span class="os-dot"></span>Android</button>
-    <button type="button" class="os-tab" data-os="windows"><span class="os-dot"></span>Windows</button>
-    <button type="button" class="os-tab" data-os="macos"><span class="os-dot"></span>macOS</button>
-    <button type="button" class="os-tab" data-os="linux"><span class="os-dot"></span>Linux</button>
-  </div>
-  <div class="apps" id="apps-grid">
-    {{range .Apps}}
-    <div class="app{{if .Recommended}} rec{{end}}" data-id="{{.ID}}" data-p="{{.Platforms}}">
-      <div class="app-top"><b>{{.Name}}</b><span class="rec-tag"{{if not .Recommended}} style="display:none"{{end}}>{{$.T.Recommended}}</span></div>
-      {{if .Note}}<span class="note">{{.Note}}</span>{{end}}
-      <div class="app-actions">
-        {{if .Link}}<a class="btn sm app-add" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>{{$.T.Add}}</a>{{end}}
-        <button type="button" class="btn sm app-copy"{{if .Link}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>{{$.T.CopyLink}}</span></button>
-        {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{$.T.DownloadBtn}}</a>{{end}}
-      </div>
-    </div>
-    {{end}}
-  </div>
-  <div class="guide">
-    <div class="guide-title" id="guide-title">{{.T.HowToConnect}}</div>
-    {{if .Instructions}}<div class="steps">{{.Instructions}}</div>{{else}}
-    <ol id="guide-steps">
-      <li>{{.T.Step1}}</li>
-      <li>{{.T.Step2}}</li>
-      <li>{{.T.Step3}}</li>
-    </ol>{{end}}
-  </div>
-</div>
-{{else if .Instructions}}
-<div class="card"><div class="card-head"><h2>{{.T.HowToConnect}}</h2></div><div class="steps">{{.Instructions}}</div></div>
-{{end}}
-
 {{if .ShowDevices}}
-<div class="card" id="devices-card" data-base="{{.DeviceActionBase}}">
+<div class="card sec-devices" id="devices-card" data-base="{{.DeviceActionBase}}">
   <div class="card-head">
     <h2>{{.T.DevicesTitle}}</h2>
     <span class="muted" id="dev-counter">{{if .HWIDOff}}{{.T.CheckDisabled}}{{else if .DeviceLimit}}{{len .Devices}} {{.T.Of}} {{.DeviceLimit}}{{else}}{{len .Devices}} {{.T.Connected}}{{end}}</span>
@@ -300,99 +380,15 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 </div>
 {{end}}
 
-{{if .SupportURL}}<a class="btn sec wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>{{.T.Support}}</a>{{end}}
+{{if .SupportURL}}<div class="sec-support"><a class="btn sec wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>{{.T.Support}}</a></div>{{end}}
+</div>
+</div>
+
 {{if .Footer}}<div class="foot">{{.Footer}}</div>{{end}}
 </main>
-<script>
-(function(){
-  var L={
-    copy:{{.T.Copy}},copied:{{.T.Copied}},copyLink:{{.T.CopyLink}},
-    yourOS:{{.T.YourOS}},howOn:{{.T.HowToConnectOn}},
-    del:{{.T.Delete}},sure:{{.T.Sure}},err:{{.T.Error}},noDev:{{.T.NoLinkedDevices}}
-  };
-  var c=document.getElementById('c');
-  if(c){var s=c.querySelector('span');c.onclick=function(){var i=document.getElementById('u');
-    (navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).catch(function(){i.select();document.execCommand('copy')});
-    s.textContent=L.copied;setTimeout(function(){s.textContent=L.copy},1600)}}
-
-  var bars=document.getElementById('chart-bars'), info=document.getElementById('chart-info');
-  if(bars&&info){
-    var cols=[].slice.call(bars.querySelectorAll('.day-col'));
-    function showDay(el){
-      cols.forEach(function(x){x.classList.remove('on')});
-      el.classList.add('on');
-      info.innerHTML='<b>'+el.dataset.date+'</b> · ↓ '+el.dataset.down+' · ↑ '+el.dataset.up;
-    }
-    cols.forEach(function(el){
-      el.addEventListener('click',function(){showDay(el)});
-      el.addEventListener('mouseenter',function(){showDay(el)});
-    });
-  }
-
-  var ua=navigator.userAgent||'';
-  var detected=/android/i.test(ua)?'android':/iphone|ipad|ipod/i.test(ua)?'ios':/mac os|macintosh/i.test(ua)?'macos':/windows/i.test(ua)?'windows':/linux/i.test(ua)?'linux':'ios';
-  var osNames={ios:'iOS',android:'Android',windows:'Windows',macos:'macOS',linux:'Linux'};
-  var tabsWrap=document.getElementById('os-tabs'), grid=document.getElementById('apps-grid'), badge=document.getElementById('os-badge'), gTitle=document.getElementById('guide-title');
-  if(tabsWrap&&grid){
-    var tabs=[].slice.call(tabsWrap.querySelectorAll('.os-tab'));
-    var cards=[].slice.call(grid.querySelectorAll('.app'));
-    tabs.forEach(function(t){if(t.dataset.os===detected)t.classList.add('detected')});
-    if(badge){badge.textContent=L.yourOS+osNames[detected];badge.style.display='inline-flex'}
-    function selectOS(os){
-      tabs.forEach(function(t){t.classList.toggle('on',t.dataset.os===os)});
-      var shown=0;
-      cards.forEach(function(el){
-        var ps=(el.dataset.p||'').trim();
-        var ok=!ps||ps.indexOf(os)>=0;
-        el.style.display=ok?'':'none';
-        var isRec=ok&&shown===0;
-        el.classList.toggle('rec',isRec);
-        var tag=el.querySelector('.rec-tag');if(tag)tag.style.display=isRec?'':'none';
-        var add=el.querySelector('.app-add'), cp=el.querySelector('.app-copy');
-        if(add&&cp){
-          var noScheme=el.dataset.id==='keqdroid'&&os==='linux';
-          add.style.display=noScheme?'none':'';
-          cp.style.display=noScheme?'':'none';
-        }
-        if(ok)shown++;
-      });
-      if(!shown){cards.forEach(function(el,idx){el.style.display='';el.classList.toggle('rec',idx===0);var tag=el.querySelector('.rec-tag');if(tag)tag.style.display=idx===0?'':'none'})}
-      if(gTitle){gTitle.textContent=L.howOn+osNames[os]}
-    }
-    grid.addEventListener('click',function(e){
-      var b=e.target.closest('.app-copy');if(!b)return;
-      var i=document.getElementById('u'), sp=b.querySelector('span');
-      if(i)(navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).catch(function(){i.select();document.execCommand('copy')});
-      if(sp){sp.textContent=L.copied;setTimeout(function(){sp.textContent=L.copyLink},1600)}
-    });
-    tabs.forEach(function(t){t.onclick=function(){selectOS(t.dataset.os)}});
-    selectOS(detected);
-  }
-
-  var dCard=document.getElementById('devices-card');
-  if(dCard&&dCard.dataset.base){
-    var base=dCard.dataset.base, list=document.getElementById('dev-list'), counter=document.getElementById('dev-counter');
-    dCard.addEventListener('click',function(e){
-      var btn=e.target.closest('.dev-del');
-      if(!btn||btn.disabled)return;
-      if(!btn.classList.contains('arm')){
-        btn.classList.add('arm');btn.textContent=L.sure;
-        setTimeout(function(){if(btn.isConnected&&btn.classList.contains('arm')){btn.classList.remove('arm');btn.textContent=L.del}},3500);
-        return;
-      }
-      var id=btn.dataset.id;
-      btn.disabled=true;btn.textContent='…';
-      fetch(base+encodeURIComponent(id)+'/delete',{method:'POST',headers:{'X-Vynel':'1'}}).then(function(r){
-        if(!r.ok)throw new Error('err');
-        var row=btn.closest('.dev-row');if(row)row.remove();
-        var left=list.querySelectorAll('.dev-row').length;
-        if(!left){list.innerHTML='<div class="empty-dev">'+L.noDev+'</div>'}
-        if(counter){counter.textContent=counter.textContent.replace(/^\d+/,String(left))}
-      }).catch(function(){btn.disabled=false;btn.classList.remove('arm');btn.textContent=L.err});
-    });
-  }
-})();
-</script></body></html>`))
+<script id="sub-cfg" type="application/json">{{.ConfigJSON}}</script>
+{{if .ScriptURL}}<script src="{{.ScriptURL}}" defer></script>{{end}}
+</body></html>`))
 
 // PageText holds localized UI labels of the public subscription page.
 type PageText struct {
@@ -449,6 +445,8 @@ type pageApp struct {
 	Link                      template.URL
 	Download                  template.URL
 	Recommended               bool
+	Hidden                    bool
+	HideAdd                   bool
 }
 
 type pageDevice struct {
@@ -490,6 +488,13 @@ type PageData struct {
 	Apps                                  []pageApp
 	Instructions, Footer                  string
 	SupportURL                            template.URL
+
+	DetectedOS     string
+	DetectedOSName string
+	ActiveOS       string
+	ActiveOSName   string
+	ScriptURL      string
+	ConfigJSON     template.JS
 
 	Daily            []pageDay
 	ChartMax         string
@@ -556,6 +561,51 @@ func BuildPage(u *store.User, subURL string, b service.SubBasics, p service.SubP
 		first = false
 	}
 	return d, nil
+}
+
+func appSupportsOS(platforms, os string) bool {
+	ps := strings.TrimSpace(platforms)
+	if ps == "" {
+		return true
+	}
+	for _, p := range strings.Fields(ps) {
+		if p == os {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyDetectedOS pre-selects the visitor's OS tab, badge and matching apps in server-rendered HTML.
+func ApplyDetectedOS(d *PageData, detected string) {
+	if _, ok := osDisplayNames[detected]; ok {
+		d.DetectedOS = detected
+		d.DetectedOSName = osDisplayNames[detected]
+		d.ActiveOS = detected
+		d.ActiveOSName = osDisplayNames[detected]
+	} else {
+		d.DetectedOS = ""
+		d.DetectedOSName = ""
+		d.ActiveOS = "ios"
+		d.ActiveOSName = osDisplayNames["ios"]
+	}
+	shown := 0
+	for i := range d.Apps {
+		ok := appSupportsOS(d.Apps[i].Platforms, d.ActiveOS)
+		d.Apps[i].Hidden = !ok
+		d.Apps[i].Recommended = ok && shown == 0
+		d.Apps[i].HideAdd = d.Apps[i].ID == "keqdroid" && d.ActiveOS == "linux"
+		if ok {
+			shown++
+		}
+	}
+	if shown == 0 {
+		for i := range d.Apps {
+			d.Apps[i].Hidden = false
+			d.Apps[i].Recommended = i == 0
+			d.Apps[i].HideAdd = false
+		}
+	}
 }
 
 // PopulatePageExtras attaches HWID devices and daily traffic chart data to PageData.
@@ -728,6 +778,11 @@ func ApplyPageLang(d *PageData, lang string) {
 	}
 }
 
+type pageClientConfig struct {
+	DetectedOS string            `json:"detectedOS,omitempty"`
+	Labels     map[string]string `json:"labels"`
+}
+
 // RenderPage writes the page.
 func RenderPage(w io.Writer, d PageData) error {
 	if d.Lang == "" {
@@ -736,6 +791,26 @@ func RenderPage(w io.Writer, d PageData) error {
 	if d.T.Traffic == "" {
 		d.T = pageTextRU
 	}
+	if d.ActiveOS == "" {
+		ApplyDetectedOS(&d, d.DetectedOS)
+	}
+	cfgBytes, _ := json.Marshal(pageClientConfig{
+		DetectedOS: d.DetectedOS,
+		Labels: map[string]string{
+			"copy":     d.T.Copy,
+			"copied":   d.T.Copied,
+			"copyLink": d.T.CopyLink,
+			"yourOS":   d.T.YourOS,
+			"howOn":    d.T.HowToConnectOn,
+			"del":      d.T.Delete,
+			"sure":     d.T.Sure,
+			"err":      d.T.Error,
+			"noDev":    d.T.NoLinkedDevices,
+		},
+	})
+	// Escape "</" so JSON inside <script type="application/json"> can never close the tag.
+	safeJSON := strings.ReplaceAll(string(cfgBytes), "</", `<\/`)
+	d.ConfigJSON = template.JS(safeJSON) // #nosec G203 -- JSON marshaled and "</" escaped for <script type="application/json">
 	return pageTmpl.Execute(w, d)
 }
 
@@ -792,8 +867,13 @@ func (h *Handler) page(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	prefix := h.svc.SubPrefix(ctx)
 	PopulatePageExtras(&d, devs, limit, hwidOff, daily, prefix+u.SubToken+"/devices/", now)
 	ApplyPageLang(&d, i18n.FromRequest(r))
+	ApplyDetectedOS(&d, DetectClientOS(r))
+	d.ScriptURL = prefix + u.SubToken + "/page.js"
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	hdr := w.Header()
+	hdr.Set("Content-Type", "text/html; charset=utf-8")
+	hdr.Set("Accept-CH", "Sec-CH-UA-Platform")
+	hdr.Set("Vary", "User-Agent, Sec-CH-UA-Platform, Accept")
 	_ = RenderPage(w, d)
 }
 

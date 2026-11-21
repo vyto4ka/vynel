@@ -23,7 +23,7 @@ export function ProviderIcon({ p, size = 18 }: { p: Provider | null | undefined;
 }
 
 export function Billing() {
-  const { data, error, reload } = useLoad(() => get<BillingT>('billing'), [], 60000)
+  const { data, error, reload } = useLoad(() => get<BillingT>('billing'), [], 60000, { cacheKey: 'billing', staleTimeMs: 20000 })
   const [editProvider, setEditProvider] = useState<Provider | 'new' | null>(null)
   const [editNode, setEditNode] = useState<BillingNode | null>(null)
   const act = useAction()

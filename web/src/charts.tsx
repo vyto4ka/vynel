@@ -14,8 +14,12 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
-    setW(el.clientWidth)
-    const ro = new ResizeObserver(() => setW(el.clientWidth))
+    const measure = () => {
+      const next = el.clientWidth
+      if (next > 0) setW(next)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
   }, [])

@@ -206,6 +206,9 @@ func (u *updates) state(id int64, st *update.Status, online bool, version string
 			if !st.OK {
 				return UpdFailed, log, started, finished
 			}
+			if strings.TrimSpace(log) == "" {
+				log = "Версия " + j.version + " → " + j.newVersion
+			}
 			return UpdDone, log, started, finished
 		}
 		if strings.TrimSpace(log) != "" {
@@ -248,6 +251,15 @@ func (u *updates) state(id int64, st *update.Status, online bool, version string
 	}
 	if st != nil && st.FinishedAt > u.hidden[id] && now.Unix()-st.FinishedAt < show {
 		if st.OK {
+			if strings.TrimSpace(log) == "" {
+				ver := st.Version
+				if ver == "" {
+					ver = version
+				}
+				if ver != "" {
+					log = "Версия " + ver
+				}
+			}
 			return UpdDone, log, started, finished
 		}
 		return UpdFailed, log, started, finished
@@ -293,11 +305,7 @@ func (n *UpdateNode) setState(state, log string, started, finished int64) {
 }
 
 func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, error) {
-	if withLog {
-		go s.upd.check(context.Background(), false)
-	} else {
-		s.upd.check(ctx, false)
-	}
+	go s.upd.check(context.Background(), false)
 	sts, err := s.svc.NodeStatuses(ctx, s.cfg.Connected)
 	if err != nil {
 		return nil, err

@@ -50,15 +50,15 @@ export function ServerLoad() {
     setRangeState(r)
     try { localStorage.setItem('vynel.load.range', r) } catch { /* ignore */ }
   }
-  const { data, error } = useLoad(() => get<LoadT>(`stats/load?range=${range}`), [range], 5 * 60 * 1000)
+  const { data, error, loading } = useLoad(() => get<LoadT>(`stats/load?range=${range}`), [range], 5 * 60 * 1000, { cacheKey: `stats/load:${range}`, staleTimeMs: 60000 })
   return (
     <>
       <div className="stats-head">
         <div className="muted small">{data ? <>{t('serverload.averages_per')}{' '}{bucketWord[data.bucket] || t('serverload.min', { v: data.bucket / 60 })} <Info>{t('serverload.a_node_sends_measurements_every')}</Info></> : ' '}</div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
-      {!data || data.range !== range ? <Loading error={error} /> : data.nodes.length === 0 ? <div className="card"><Empty>{t('common.no_nodes_yet')}</Empty></div> : (
-        <div className="cards">
+      {!data ? <Loading error={error} /> : data.nodes.length === 0 ? <div className="card"><Empty>{t('common.no_nodes_yet')}</Empty></div> : (
+        <div className="cards" style={loading || data.range !== range ? { opacity: 0.72, transition: 'opacity .15s' } : undefined}>
           {data.nodes.length > 1 && <AllNodesCard d={data} />}
           {data.nodes.map((n) => <NodeLoadCard key={n.id} n={n} d={data} />)}
         </div>

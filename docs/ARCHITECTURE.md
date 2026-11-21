@@ -1,9 +1,8 @@
 # Архитектура: панель + нода (Xray + nginx)
 
-> **Проектный документ.** Описывает систему целиком, включая то, чего ещё нет.
-> **Реализовано:** ноды и связь с панелью, профили и инбаунды, пользователи, группы, шаблоны, статистика, подписки, HWID, nginx (до этого был Caddy, см. [MIGRATION_NGINX.md](MIGRATION_NGINX.md)), all-in-one установка, веб-панель (первая версия) и `vynel admin`.
-> **Сделано позже:** веб-панель, редакторы профилей и шаблонов, Telegram-бот (§10), бэкапы (§11).
-> **Ещё нет:** публичный API (§12), полноценный установщик (§16).
+> **Проектный документ.** Описывает систему целиком, включая отдельные будущие этапы.
+> **Реализовано:** ноды и связь с панелью, профили и инбаунды, пользователи, группы, шаблоны, статистика и аналитика, подписки во всех форматах, HWID, nginx (до этого был Caddy, см. [MIGRATION_NGINX.md](MIGRATION_NGINX.md)), интерактивный установщик `install.sh` + TUI (§16), веб-панель и `vynel admin`, Telegram-бот и Mini App (§10), бэкапы с шифрованием `age` (§11), публичное API и вебхуки (§12), обновление панели и нод из интерфейса с персистентными логами.
+> **Ещё впереди:** установка нод по SSH прямо из панели (§6.1, INSTALL.md §4), внешние проверки CDN, DNS-01 wildcard и режим «панель только через VPN».
 > Как пользоваться тем, что есть: [USER_GUIDE.md](USER_GUIDE.md). Статус по этапам: [ROADMAP.md](ROADMAP.md).
 
 Название: **vynel**. Аналог Remnawave: та же модель (ноды, профили Xray, группы, хосты, шаблоны подписок, HWID), но проще в установке и понятнее в настройке.
@@ -220,8 +219,14 @@ node_traffic_hourly node_id, hour_ts, up, down                 -- 30 дней, �
 node_metrics        node_id, ts, cpu, mem, load1, rx_bps, tx_bps, online   -- 7 дней, прореживание
 stats_batches       node_id, seq                               -- идемпотентность
 
-── служебное ──────────────────────────────────────────────────────
-events_outbox       id, type, payload_json, created_at, delivered_at   -- для бота и будущих вебхуков
+── служебное и API ────────────────────────────────────────────────
+events_outbox       id, type, payload_json, created_at, delivered_at
+update_runs         target_id(0=панель | node_id), status_json         -- ход и живой лог обновлений
+api_tokens          id, name, token_hash, scopes, cidrs, rpm, expires_at, last_used_at, last_ip
+api_events          id, type, entity_id, data_json, created_at
+webhooks            id, url, secret, events, allow_private, enabled, fail_count
+webhook_deliveries  id, webhook_id, event_id, status, attempts, next_at, last_error
+api_idempotency     token_id, key, req_hash, status, body, created_at
 backups             id, created_at, size, sha256, sent_to_telegram, error
 ```
 
@@ -424,7 +429,7 @@ limit = user.hwid_limit ?? settings.hwid_default_limit   (0 = без лимит�
 
 ### 8.4 HTML-страница подписки
 
-QR-код, кнопки «Добавить в приложение» (deep links), остаток трафика и срок, инструкции по платформам, список устройств (без возможности удалить, только просмотр).
+Адаптивная страница для телефонов и ПК (двухколоночная сетка от 900 px): QR-код и копирование ссылки, серверное и клиентское автоопределение ОС (`Sec-CH-UA-Platform`, `User-Agent`, `navigator.userAgentData`) с вкладками платформ, кнопки «Добавить в приложение» (deep links) и пошаговые инструкции, остаток трафика и срок, 14-дневный график потребления по дням, список привязанных HWID-устройств с возможностью удалить устройство (`DELETE {prefix}{token}/devices/{id}`). Клиентская логика вынесена во внешний скрипт `page.js` (и `/api/subscription/preview.js` для предпросмотра), что работает со строгой политикой `Content-Security-Policy: default-src 'self'` обратного прокси без `'unsafe-inline'`.
 
 ---
 

@@ -1,14 +1,14 @@
 # Шаблоны профилей
 
-> **Статус:** шаблоны A, C и D (Hysteria2) встроены; B (VK CDN) больше не встроен (§4). Переменные, наследование, lint, конфиг nginx и проверки конфигов реализованы. Свои шаблоны пишутся в веб-панели («Профили» → «Шаблоны профилей» → «Новый шаблон» или копия встроенного) → правка YAML → проверка пробной сборкой; хранятся в базе панели (таблица `profile_templates`). Не реализованы: внешние шаги VK на странице-инструкции (§4.6), автопроверки edge CDN (§4.7), режим отладки (§2, §4.9).
+> **Статус:** шаблоны **A** (`vless-reality-selfsteal`), **D** (`hysteria2`), **E** (`vless-xhttp-reality-std`) и **F** (`vless-xhttp-tls`) встроены; **B** (`vless-xhttp-vkcdn`) и **C** (`vless-xhttp-reality`) перенесены в `internal/xrayconf/retired/` с автоматическим сохранением существующих профилей. Переменные, наследование, lint, конфиг nginx и проверки конфигов реализованы. Свои шаблоны пишутся в веб-панели («Протоколы и Xray → Шаблоны профилей» → «Новый шаблон» или копия встроенного) → правка YAML → проверка пробной сборкой; хранятся в базе панели (таблица `profile_templates`). Не реализованы: внешние шаги VK на странице-инструкции (§4.6), автопроверки edge CDN (§4.7), режим отладки (§2, §4.9).
 
-Описание встроенных шаблонов профилей Xray: технические характеристики, что используется и как это автоматизировано.
-Основа — две реальные рабочие схемы:
+Описание шаблонов профилей Xray: технические характеристики, что используется и как это автоматизировано.
 
-- **A. VLESS + Reality, self-steal.** Как ставилось через Remnawave + RemnaSetup (Remnanode → «полная установка»: Caddy self-steal + BBR, без WARP).
-- **B. VLESS + XHTTP через VK Cloud CDN.** По гайду «Узел xHTTP за VK Cloud CDN» (packet-up, данные в куках, набивка в query).
-- **C. VLESS + XHTTP + REALITY, self-steal.** По ТЗ «XHTTP + REALITY» (stream-up, резервный packet-up): XHTTP напрямую на ноду, без CDN, под маской своего сайта (§8).
-- **D. Hysteria2.** QUIC на UDP 443 рядом с A/C на том же домене и том же сертификате, который нода уже получила для сайта-заглушки (§9).
+- **A. VLESS + Reality, self-steal** (`vless-reality-selfsteal`). Основной профиль: нода маскируется под собственный сайт с сертификатом Let's Encrypt (§3).
+- **B. VLESS + XHTTP через VK Cloud CDN** (справочная схема / свой шаблон, §4).
+- **C. VLESS + XHTTP + REALITY с cookie-обфускацией** (в `retired/`, §8) и **E. VLESS + XHTTP + REALITY, стандартный** (`vless-xhttp-reality-std`, §10).
+- **D. Hysteria2** (`hysteria2`). QUIC на UDP 443 рядом с Reality на том же домене и сертификате ноды (§9).
+- **F. VLESS + XHTTP + TLS** (`vless-xhttp-tls`). XHTTP поверх обычного TLS на сертификате ноды — работает в Karing 1.2.26+, Mihomo 1.19+ и Xray-клиентах на Xray 26.9.8+ (§11).
 
 Цель — чтобы в нашей панели оба профиля ставились **выбором шаблона и заполнением 1–3 полей**. Всё, что в Remnawave делается руками (ключи, shortIds, SNI, extra в хосте, nginx/certbot, BBR, видимость хоста), делает панель.
 
@@ -797,7 +797,30 @@ TCP :80  → nginx: ACME HTTP-01 → агент получает сертифи�
 
 ---
 
-## 11. Будущие шаблоны (не в MVP)
+## 11. Шаблон F — VLESS + XHTTP + TLS (сертификат ноды)
+
+Файл: `internal/xrayconf/templates/vless-xhttp-tls.yaml`. XHTTP поверх обычного TLS на Let's Encrypt-сертификате ноды.
+
+### 11.1 Зачем нужен
+
+Начиная с Xray 26.9.8 сервер REALITY проверяет постквантовую группу `X25519MLKEM768` в ClientHello, которую клиенты на ядре `sing-box-extended` (например, **Karing 1.2.26+**) пока не отправляют. Шаблон F использует собственный валидный сертификат ноды (`vynel:cert:${NODE_DOMAIN}` / `vynel:key:${NODE_DOMAIN}`, как Hysteria2 в §9.3) вместо REALITY, поэтому работает одновременно на свежем Xray 26.9.8+, в Karing 1.2.26+, в Mihomo 1.19+ и во всех клиентах на ядре Xray.
+
+### 11.2 Технические характеристики и переменные
+
+| Параметр | Значение |
+|----------|----------|
+| Протокол / транспорт | VLESS (`decryption: none`), `network: xhttp`, `security: tls`, ALPN `h2, http/1.1` |
+| Сертификат | `vynel:cert:${NODE_DOMAIN}` и `vynel:key:${NODE_DOMAIN}` (роль nginx `certificate`, выпуск и продление по HTTP-01 на `:80`) |
+| `NODE_DOMAIN` | домен инбаунда (scope `node`); при совмещении на одном `IP:443` с Reality должен отличаться от домена Reality — nginx разведёт соединения по SNI |
+| `XHTTP_PATH` | генерируется из `/assets/sync`, `/api/stream`, `/static/chunks`, `/media/feed` (в подписку уходит со слешем `${XHTTP_PATH}/`) |
+| `XHTTP_MODE` | `auto` (по умолчанию), `stream-up` или `packet-up` |
+| `xhttp_extra` | `{"mode":"${XHTTP_MODE}","xPaddingBytes":"100-1342"}` |
+| `FINGERPRINT` | `chrome` (по умолчанию) |
+| Клиенты | Xray JSON и `vless://`, Mihomo 1.19+ (`xhttp-opts`), Karing 1.2.26+ (`sing-box-extended` транспорт `xhttp`) |
+
+---
+
+## 12. Будущие шаблоны (не в MVP)
 
 | Шаблон | Зачем |
 |--------|-------|

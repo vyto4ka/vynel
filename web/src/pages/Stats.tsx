@@ -53,7 +53,7 @@ export function Stats() {
     setRangeState(r)
     try { localStorage.setItem('vynel.stats.range', r) } catch { /* ignore */ }
   }
-  const { data, error } = useLoad(() => get<StatsT>(`stats?range=${range}`), [range], 30000)
+  const { data, error, loading } = useLoad(() => get<StatsT>(`stats?range=${range}`), [range], 30000, { cacheKey: `stats:${range}`, staleTimeMs: 25000 })
 
   return (
     <>
@@ -61,7 +61,11 @@ export function Stats() {
         <div className="muted small">{data ? <><Trans k="stats.time" v={{ timeZone: data.timeZone }} />{' '}<Info>{t('stats.online_is_kept_for_7')}</Info></> : ' '}</div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
-      {!data || data.range !== range ? <Loading error={error} /> : <StatsBody d={data} range={range} />}
+      {!data ? <Loading error={error} /> : (
+        <div style={loading || data.range !== range ? { opacity: 0.72, transition: 'opacity .15s' } : undefined}>
+          <StatsBody d={data} range={data.range as Range} />
+        </div>
+      )}
     </>
   )
 }

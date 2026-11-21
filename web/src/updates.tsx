@@ -13,7 +13,7 @@ export const updatesActive = (info: UpdateInfo | null) => !!info && [info.panel,
 // Сведения об обновлениях: раз в 20 с, а пока что-то обновляется — раз в 2 с.
 export function useUpdates(slowMs = 20000) {
   const [fast, setFast] = useState(false)
-  const res = useLoad(() => get<UpdateInfo>('updates'), [fast], fast ? 2000 : slowMs)
+  const res = useLoad(() => get<UpdateInfo>('updates'), [fast], fast ? 2000 : slowMs, { cacheKey: 'updates', staleTimeMs: fast ? 1500 : 15000 })
   useEffect(() => { setFast(updatesActive(res.data)) }, [res.data])
   return res
 }
@@ -133,14 +133,26 @@ export function UpdateChip({ n, latest, onLog }: { n: UpdateNode; latest: string
   return null
 }
 
-// Панель временно не ответила (обрыв сети или прокси 502/503/504/52x во время перезапуска службы).
+// Панель временно не ответила (обрыв сети, таймаут или прокси 502/503/504/52x и 404-заглушка nginx во время перезапуска службы).
 function isOfflineErr(e: unknown): boolean {
   if (!e) return false
   if (e instanceof ApiError) {
-    return (e.status >= 502 && e.status <= 504) || (e.status >= 520 && e.status <= 524)
+    if ((e.status >= 502 && e.status <= 504) || (e.status >= 520 && e.status <= 524)) return true
+    if (e.nonJson && (e.status === 404 || e.status === 200 || e.status >= 500)) return true
+    return false
   }
   return true
 }
+
+function mergeNodeLog(prev: UpdateNode | undefined, incoming: UpdateNode): UpdateNode {
+  if (!prev?.log || incoming.log) return incoming
+  if (!prev.startedAt || !incoming.startedAt || Math.abs(incoming.startedAt - prev.startedAt) <= 30) {
+    return { ...incoming, log: prev.log }
+  }
+  return incoming
+}
+
+const isTerminal = (n?: UpdateNode) => !!n && !n.updating && (n.state === 'done' || n.state === 'failed' || n.state === '')
 
 export function UpdateLog({ id, name, targets, onClose }: { id: number; name: string; targets?: LogTarget[]; onClose: () => void }) {
   const list: LogTarget[] = targets && targets.length > 0 ? targets : [{ id, name }]
@@ -153,10 +165,19 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
     }
     return init
   })
+  const [loadedIds, setLoadedIds] = useState<Record<number, boolean>>(() => {
+    const init: Record<number, boolean> = {}
+    for (const item of list) {
+      if (item.initial?.log) init[item.id] = true
+    }
+    return init
+  })
   const [isOffline, setIsOffline] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const byIdRef = useRef(byId)
   byIdRef.current = byId
+  const loadedRef = useRef(loadedIds)
+  loadedRef.current = loadedIds
   const listKey = list.map((x) => x.id).join(',')
 
   useEffect(() => {
@@ -183,34 +204,52 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
 
     const poll = async () => {
       if (stopped) return
-      let nextDelay = 1500
+      let nextDelay: number | null = 1500
       if (!document.hidden) {
         ac = new AbortController()
+        let timedOut = false
+        const reqTimeout = setTimeout(() => {
+          timedOut = true
+          ac?.abort()
+        }, 8000)
         try {
           if (multi) {
             const info = await get<UpdateInfo>('updates?logs=1', ac.signal)
-            if (stopped) return
-            const next: Record<number, UpdateNode> = { ...byIdRef.current, 0: info.panel }
-            for (const n of info.nodes) next[n.id] = n
+            clearTimeout(reqTimeout)
+            if (stopped || !info || typeof info !== 'object') return
+            const next: Record<number, UpdateNode> = { ...byIdRef.current }
+            if (info.panel) next[0] = mergeNodeLog(next[0], info.panel)
+            for (const n of info.nodes || []) next[n.id] = mergeNodeLog(next[n.id], n)
+            const nextLoaded: Record<number, boolean> = { ...loadedRef.current, 0: true }
+            for (const n of info.nodes || []) nextLoaded[n.id] = true
             byIdRef.current = next
+            loadedRef.current = nextLoaded
             setById(next)
+            setLoadedIds(nextLoaded)
             setIsOffline(false)
             setError(null)
+            const allSettled = list.every((t) => nextLoaded[t.id] && isTerminal(next[t.id]))
             const anyActive = list.some((t) => !next[t.id] || next[t.id].updating)
-            nextDelay = anyActive ? 1500 : 4000
+            nextDelay = allSettled ? null : anyActive ? 1500 : 3000
           } else {
             const node = await get<UpdateNode>(`updates/log?id=${targetId}`, ac.signal)
-            if (stopped) return
-            const next = { ...byIdRef.current, [node.id]: node }
+            clearTimeout(reqTimeout)
+            if (stopped || !node || typeof node.id !== 'number') return
+            const next = { ...byIdRef.current, [node.id]: mergeNodeLog(byIdRef.current[node.id], node) }
+            const nextLoaded: Record<number, boolean> = { ...loadedRef.current, [node.id]: true }
             byIdRef.current = next
+            loadedRef.current = nextLoaded
             setById(next)
+            setLoadedIds(nextLoaded)
             setIsOffline(false)
             setError(null)
-            nextDelay = node.updating ? 1500 : 4000
+            nextDelay = isTerminal(next[node.id]) ? null : node.updating ? 1500 : 3000
           }
         } catch (e: any) {
-          if (stopped || ac.signal.aborted) return
-          if (isOfflineErr(e)) {
+          clearTimeout(reqTimeout)
+          if (stopped) return
+          if (ac.signal.aborted && !timedOut) return
+          if (timedOut || isOfflineErr(e)) {
             setIsOffline(true)
             setError(null)
             nextDelay = 1500
@@ -221,7 +260,7 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
           }
         }
       }
-      if (!stopped) {
+      if (!stopped && nextDelay !== null) {
         timer = setTimeout(poll, nextDelay)
       }
     }
@@ -236,10 +275,13 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
   }, [listKey, list.length > 1 ? 0 : curTarget.id])
 
   const shown = byId[curTarget.id] || null
+  const logLoaded = !!loadedIds[curTarget.id] || !!shown?.log
   const act = useAction()
   const toast = useToast()
   const finished = shown?.state === 'done' || shown?.state === 'failed'
-  const offlineNote = isOffline && <div className="alert amber" style={{ marginBottom: 14 }}>{t('updates.the_panel_is_not_responding')}</div>
+  const showOffline = isOffline && !(finished && logLoaded)
+  const offlineNote = showOffline && <div className="alert amber" style={{ marginBottom: 14 }}>{t('updates.the_panel_is_not_responding')}</div>
+  const errorNote = !showOffline && error && <div className="alert pink" style={{ marginBottom: 14 }}>{error}</div>
   useTick(!!shown?.updating || list.some((x) => byId[x.id]?.updating))
   const pre = useRef<HTMLPreElement>(null)
   useEffect(() => {
@@ -282,7 +324,7 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
         />
       )}
       {!shown ? (
-        isOffline ? (
+        showOffline ? (
           <>
             {offlineNote}
             <pre ref={pre} className="code update-log">{t('updates.waiting_for_the_first_log')}</pre>
@@ -291,6 +333,7 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
       ) : (
         <>
           {offlineNote}
+          {errorNote}
           {shown.state === 'failed' ? <div className="alert pink" style={{ marginBottom: 14 }}>{t('updates.the_update_failed_if_the')}</div>
             : shown.state === '' ? <div className="muted small" style={{ marginBottom: 14 }}>{t('updates.no_update_is_running_now')}</div>
               : (
@@ -303,7 +346,7 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
                   {shown.updating && shown.startedAt ? <div className="muted">{elapsed(shown.startedAt)}</div> : null}
                 </div>
               )}
-          <pre ref={pre} className="code update-log">{shown.log || (shown.updating ? t('updates.waiting_for_the_first_log') : t('updates.no_log_this_server_has'))}</pre>
+          <pre ref={pre} className="code update-log">{shown.log || (!logLoaded ? (shown.updating || showOffline ? t('updates.waiting_for_the_first_log') : t('common.loading')) : shown.updating ? t('updates.waiting_for_the_first_log') : t('updates.no_log_this_server_has'))}</pre>
           <div className="muted small" style={{ marginTop: 8 }}><Trans k="updates.version_full_log_on_the" v={{ v: fmtVersion(shown.version) }} /></div>
         </>
       )}

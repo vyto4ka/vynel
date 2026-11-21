@@ -6,7 +6,7 @@ import { t } from '../i18n'
 const actors: Record<string, string> = { admin: t('audit.web'), cli: t('audit.terminal'), system: t('audit.system'), bot: t('audit.bot'), api: 'API' }
 
 export function Audit() {
-  const { data, error } = useLoad(() => get<AuditEntry[]>('audit?limit=300'), [], 30000)
+  const { data, error } = useLoad(() => get<AuditEntry[]>('audit?limit=300'), [], 30000, { cacheKey: 'audit:300', staleTimeMs: 15000 })
   if (!data) return <Loading error={error} />
   return (
     <div className="card">

@@ -99,7 +99,7 @@ export function RoutingForm({ r, set }: { r: ClientRouting; set: (r: ClientRouti
 // RoutingChain — постоянная схема «кто кого перекрывает» над формой маршрутов:
 // базовые маршруты подписки → профили со своими маршрутами → ограничения приложений.
 export function RoutingChain({ r, onTest }: { r: ClientRouting; onTest?: () => void }) {
-  const profiles = useLoad(() => get<Profile[]>('profiles'))
+  const profiles = useLoad(() => get<Profile[]>('profiles'), [], 0, { cacheKey: 'profiles', staleTimeMs: 30000 })
   const custom = (profiles.data || []).filter((p) => p.clientCustom)
   return (
     <div className="card card-pad">

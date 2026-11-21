@@ -166,6 +166,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleDeviceDelete(ctx, w, r, u, explicit)
 		return
 	}
+	if explicit == "page.js" {
+		if on, _ := h.svc.Setting(ctx, service.SettingSubPageEnabled, "true"); on == "false" {
+			h.notFound(ctx, w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(PageScript)
+		return
+	}
 	if name, ok := strings.CutPrefix(explicit, "karing-rules/"); ok {
 		// Rule-set requests are metadata, not subscription/device registrations. No
 		// credentials are served here, but the token and user status must still be valid.

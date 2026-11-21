@@ -8,44 +8,38 @@
 <link rel="icon" type="image/svg+xml" href="images/logo.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,650&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
-  /* The panel's palette: Catppuccin-style layered dark neutrals in Miku teal, pastel teal and pink. */
+  /* The panel's v0.3.x palette: neutral charcoal-graphite layers with Miku teal and pastel pink accents. */
   :root {
     color-scheme: dark;
-    --crust: #0d1316; --mantle: #121b1f; --base: #172226;
-    --c-low: #1b272b; --c: #1f2c31; --c-high: #243137; --c-highest: #2b383d;
-    --text: #d1e1e8; --subtext: #b3c7cf; --muted: #84969d; --outline: #324045; --overlay: #65747b;
-    --miku: #75e0d7; --on-miku: #003633; --miku-deep: #00544f; --miku-soft: rgba(117, 224, 215, .12);
-    --pink: #ff94ba; --pink-deep: #672b42; --pink-soft: rgba(255, 148, 186, .12);
+    --crust: #141619; --mantle: #191c20; --base: #1e2125;
+    --c-low: #22262b; --c: #262a30; --c-high: #2d3239; --c-highest: #353b43;
+    --text: #e3e6eb; --subtext: #b7bec8; --muted: #8a929e; --outline: #343a42; --overlay: #67707d;
+    --miku: #62dcd2; --on-miku: #063330; --miku-deep: #0f4f4a; --miku-soft: rgba(98, 220, 210, .12);
+    --pink: #ff8fb8; --pink-deep: #5c273b; --pink-soft: rgba(255, 143, 184, .12);
     --amber: #f5c572; --amber-soft: rgba(245, 197, 114, .12);
     --red: #fb8276; --red-soft: rgba(251, 130, 118, .12);
     --ok: #8fd99a;
-    --sans: "Roboto Flex", Roboto, Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
-    --mono: "JetBrains Mono", "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --ease: cubic-bezier(.2, 0, 0, 1);
   }
   * { box-sizing: border-box; }
   html { scroll-padding-top: 76px; }
   body {
     margin: 0; background: var(--base); color: var(--text);
-    font: 15.5px/1.6 var(--sans); letter-spacing: .1px; -webkit-font-smoothing: antialiased;
-  }
-  body::before {
-    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-    background:
-      radial-gradient(900px 500px at 85% -10%, rgba(117, 224, 215, .10), transparent 60%),
-      radial-gradient(700px 420px at -10% 10%, rgba(255, 148, 186, .07), transparent 60%);
+    font: 15.5px/1.6 var(--sans); letter-spacing: .05px; -webkit-font-smoothing: antialiased;
   }
   a { color: var(--miku); text-decoration: none; }
   a:hover { text-decoration: underline; }
   ::selection { background: var(--pink-deep); color: #ffd7e4; }
-  :focus-visible { outline: 3px solid var(--miku); outline-offset: 2px; border-radius: 6px; }
-  .page { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 32px 16px 96px; }
+  :focus-visible { outline: 2px solid var(--miku); outline-offset: 2px; border-radius: 6px; }
+  .page { position: relative; z-index: 1; max-width: 920px; margin: 0 auto; padding: 32px 16px 96px; }
 
   /* Header */
   header.top { display: flex; gap: 18px; align-items: center; margin-bottom: 22px; }
-  header.top svg { flex: none; width: 56px; height: 56px; filter: drop-shadow(0 6px 18px rgba(57, 197, 187, .25)); }
+  header.top svg { flex: none; width: 56px; height: 56px; }
   .eyebrow { margin: 0 0 2px; font: 600 12px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--pink); }
   h1 { margin: 0; font-size: clamp(24px, 4.6vw, 34px); line-height: 1.15; font-weight: 650; letter-spacing: -.3px; }
   .lead { color: var(--subtext); margin: 6px 0 0; max-width: 680px; }
@@ -53,14 +47,14 @@
   /* Tabs */
   .tabs-bar {
     position: sticky; top: 0; z-index: 5; margin: 0 -16px 22px; padding: 10px 16px;
-    background: color-mix(in srgb, var(--base) 88%, transparent); backdrop-filter: blur(10px);
+    background: color-mix(in srgb, var(--base) 90%, transparent); backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--outline);
   }
-  .tabs { display: flex; gap: 6px; padding: 4px; background: var(--c-low); border: 1px solid var(--outline); border-radius: 999px; width: max-content; max-width: 100%; }
+  .tabs { display: flex; gap: 4px; padding: 4px; background: var(--c-low); border: 1px solid var(--outline); border-radius: 10px; width: max-content; max-width: 100%; }
   .tabs button {
     appearance: none; border: 0; cursor: pointer; font: 500 14.5px/1 var(--sans); color: var(--subtext);
-    padding: 10px 18px; border-radius: 999px; background: transparent; display: flex; gap: 8px; align-items: center;
-    transition: background .2s var(--ease), color .2s var(--ease);
+    padding: 9px 16px; border-radius: 7px; background: transparent; display: flex; gap: 8px; align-items: center;
+    transition: background .16s var(--ease), color .16s var(--ease);
   }
   .tabs button:hover { background: var(--c-high); color: var(--text); }
   .tabs button[aria-selected="true"] { background: var(--miku); color: var(--on-miku); }
@@ -69,7 +63,7 @@
   .tabs .short { display: none; }
 
   /* Cards */
-  .card { background: var(--c); border: 1px solid var(--outline); border-radius: 16px; padding: 18px 20px; }
+  .card { background: var(--c); border: 1px solid var(--outline); border-radius: 12px; padding: 18px 20px; }
   section { margin: 34px 0 0; }
   h2 { font-size: 21px; line-height: 1.3; margin: 0 0 12px; font-weight: 650; display: flex; gap: 10px; align-items: baseline; }
   h2 .sn { font: 600 13px/1 var(--mono); color: var(--pink); }
@@ -78,31 +72,31 @@
   ul, ol { margin: 8px 0; padding-left: 22px; }
   li { margin: 3px 0; }
   li::marker { color: var(--miku); }
-  b, strong { font-weight: 600; color: #e6f2f6; }
+  b, strong { font-weight: 600; color: #f0f3f7; }
   code { font: 13px/1.5 var(--mono); background: var(--c-high); border: 1px solid var(--outline); border-radius: 6px; padding: 1px 5px; color: #d6eef0; word-break: break-word; }
   kbd { font: 600 12px/1 var(--mono); background: var(--c-highest); border: 1px solid var(--overlay); border-bottom-width: 2px; border-radius: 6px; padding: 3px 6px; }
 
   /* Contents */
   .toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
-  .toc a { display: inline-block; font-size: 13px; padding: 5px 11px; border-radius: 999px; background: var(--c-low); border: 1px solid var(--outline); color: var(--subtext); }
+  .toc a { display: inline-block; font-size: 13px; padding: 5px 11px; border-radius: 8px; background: var(--c-low); border: 1px solid var(--outline); color: var(--subtext); }
   .toc a:hover { color: var(--text); border-color: var(--overlay); text-decoration: none; }
 
   /* Steps */
   .step { display: grid; grid-template-columns: 34px 1fr; gap: 12px; margin: 14px 0; }
   .step .num {
-    width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
-    background: var(--miku-soft); color: var(--miku); border: 1px solid rgba(117, 224, 215, .35); font: 600 13px/1 var(--mono);
+    width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+    background: var(--miku-soft); color: var(--miku); border: 1px solid rgba(98, 220, 210, .35); font: 600 13px/1 var(--mono);
   }
   .step-body { min-width: 0; }
   .step-body > p:first-child { margin-top: 3px; }
 
   /* Code */
-  .code { margin: 10px 0; border: 1px solid var(--outline); border-radius: 12px; overflow: hidden; background: var(--crust); }
+  .code { margin: 10px 0; border: 1px solid var(--outline); border-radius: 10px; overflow: hidden; background: var(--crust); }
   .code-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; background: var(--c-low); border-bottom: 1px solid var(--outline); }
   .code-name { font: 12px/1 var(--mono); color: var(--muted); }
   .copy {
     appearance: none; cursor: pointer; font: 500 12.5px/1 var(--sans); color: var(--miku);
-    background: var(--miku-soft); border: 1px solid rgba(117, 224, 215, .3); border-radius: 999px; padding: 6px 12px;
+    background: var(--miku-soft); border: 1px solid rgba(98, 220, 210, .3); border-radius: 7px; padding: 6px 12px;
   }
   .copy:hover { background: rgba(117, 224, 215, .2); }
   .copy.done { color: var(--on-miku); background: var(--miku); }
@@ -268,7 +262,7 @@
       <tr><td>Подключать другие серверы?</td><td class="wrap">«Да» откроет порт 9443 для будущих нод (только их адресам). Если сервер будет один — «Нет», включить можно позже</td></tr>
       <tr><td>Путь ссылок подписки</td><td class="wrap">Начало ссылки: <code>https://домен/s/…</code>. Оставьте <code>/s/</code></td></tr>
       <tr><td>Секретный путь панели</td><td class="wrap">Адрес панели. По умолчанию случайный: на любом другом пути открывается сайт-заглушка, поэтому путь — такой же секрет, как пароль</td></tr>
-      <tr><td>Вход в панель</td><td class="wrap"><b>Логин и пароль</b> (проще всего), <b>только по одноразовой ссылке</b> из бота или с сервера, или <b>только через Telegram</b>. Меняется потом в разделе «Аккаунт»</td></tr>
+      <tr><td>Вход в панель</td><td class="wrap"><b>Логин и пароль</b> (проще всего), <b>только по одноразовой ссылке</b> из бота или с сервера, или <b>только через Telegram</b>. Меняется потом в «Система → Аккаунт»</td></tr>
       <tr><td>Логин</td><td class="wrap">Имя для входа, по умолчанию <code>admin</code>. Пароль генерируется сам и показывается в конце</td></tr>
       <tr><td>Токен Telegram-бота</td><td class="wrap">По желанию: от <a href="https://t.me/BotFather">@BotFather</a>. Бот присылает бэкапы, уведомления и пускает в панель без пароля. Можно добавить позже в панели</td></tr>
       <tr><td>Восстановить из бэкапа</td><td class="wrap">Обычно пусто. Путь к файлу бэкапа, если переезжаете со старого сервера</td></tr>
@@ -332,20 +326,20 @@
   <h2><span class="sn">01</span> Инбаунд из шаблона</h2>
   <p>Установщик уже создал профиль <b>«Reality»</b> (VLESS Reality) и поставил его на сервер — можно сразу переходить к шагу 02. Инбаунд — это вход для клиентов на конкретной ноде; профиль — его общие настройки, которые берутся из шаблона.</p>
   <p>Добавить второй протокол, например Hysteria2 (быстрее на плохих каналах):</p>
-  <div class="step"><span class="num">1</span><div class="step-body"><p>«Профили» → <b>«+ Профиль»</b> → название (например <code>Hysteria2</code>) → шаблон <b>«Hysteria2 (сертификат ноды)»</b> → «Создать». Поля с параметрами не трогайте: всё заполнится само.</p></div></div>
+  <div class="step"><span class="num">1</span><div class="step-body"><p>Внизу бокового меню переключите режим на <b>«Инженерный»</b>, затем откройте «Протоколы и Xray → Профили» → <b>«+ Профиль»</b> → название (например <code>Hysteria2</code>) → шаблон <b>«Hysteria2 (сертификат ноды)»</b> → «Создать». Поля с параметрами не трогайте: всё заполнится само.</p></div></div>
   <div class="step"><span class="num">2</span><div class="step-body"><p>«Ноды» → у своего сервера <b>«+ Профиль»</b> → выберите новый профиль → «Добавить». Порт, ключи и тег создадутся автоматически.</p></div></div>
-  <div class="note tip"><b>Кто его получит:</b> группа «Основная» (в неё попадают все новые пользователи) видит все профили, поэтому новый сервер появится у пользователей сам, с ближайшим обновлением подписки.</div>
+  <div class="note tip"><b>Кто его получит:</b> группа «Основная» (в неё попадают все новые пользователи) по умолчанию имеет доступ ко всем серверам и профилям, поэтому новый сервер появится у пользователей сам, с ближайшим обновлением подписки.</div>
 </section>
 
 <section id="f-user">
   <h2><span class="sn">02</span> Пользователь</h2>
-  <p>«Пользователи» → <b>«+ Пользователь»</b> → имя (например <code>vasya</code>) → «Создать». Достаточно имени: срок (3 месяца), группа и лимиты берутся из шаблона пользователя по умолчанию — они показаны серым.</p>
+  <p>«Пользователи» → <b>«+ Пользователь»</b> → имя (например <code>vasya</code>) → «Создать». Достаточно имени: срок (3 месяца), группа и лимиты берутся из шаблона пользователя (тарифа) по умолчанию — они показаны серым.</p>
   <p>Откроется карточка пользователя со ссылкой подписки, QR-кодом и кнопкой «Копировать». Продлить потом — кнопки «+1 / 3 / 6 / 12 мес» в той же карточке.</p>
 </section>
 
 <section id="f-sub">
   <h2><span class="sn">03</span> Подписка</h2>
-  <p>Отправьте ссылку пользователю. На телефоне она открывает страницу с QR-кодом и кнопками приложений; рекомендуемое — <a href="https://github.com/Lemonochka/keqdroid/releases/latest">KeqDroid</a> (Android, Windows, Linux): кнопка «Добавить в KeqDroid» стоит первой. В любом другом приложении — «Добавить подписку» и вставить ссылку.</p>
+  <p>Отправьте ссылку пользователю. В браузере на телефоне или ПК она открывает адаптивную страницу: автоматически определяет ОС (<code>Windows</code>, <code>Android</code>, <code>iOS</code>, <code>macOS</code>, <code>Linux</code>), показывает подходящие приложения (рекомендуемое — <a href="https://github.com/Lemonochka/keqdroid/releases/latest">KeqDroid</a>, кнопка «Добавить в KeqDroid» стоит первой), инструкцию, QR-код, график трафика и привязанные устройства. В любом другом приложении — «Добавить подписку» и вставить ссылку.</p>
   <p>Что стоит поправить один раз — «Подписка» → «Основное»:</p>
   <ul>
     <li><b>Название подписки</b> — так она называется в приложениях.</li>
@@ -388,11 +382,11 @@
     <thead><tr><th>Понятие</th><th class="wrap">Что это</th></tr></thead>
     <tbody>
       <tr><td>Нода</td><td class="wrap">Сервер, к которому подключаются клиенты (Xray + nginx). В all-in-one живёт на сервере панели, код — <code>NL</code></td></tr>
-      <tr><td>Шаблон профиля</td><td class="wrap">Готовая схема: VLESS + Reality или Hysteria2</td></tr>
+      <tr><td>Шаблон профиля</td><td class="wrap">Готовая схема: VLESS + Reality, XHTTP + REALITY, XHTTP + TLS или Hysteria2</td></tr>
       <tr><td>Профиль</td><td class="wrap">Ваши общие настройки на основе шаблона. Изменение применяется на всех нодах</td></tr>
       <tr><td>Инбаунд ноды</td><td class="wrap">Профиль на конкретной ноде со своими ключами: <code>VLESS_NL</code></td></tr>
-      <tr><td>Группа</td><td class="wrap">К чему есть доступ: профиль целиком, нода или один инбаунд</td></tr>
-      <tr><td>Шаблон пользователя</td><td class="wrap">Что получает новый пользователь: срок, лимиты, группы</td></tr>
+      <tr><td>Группа</td><td class="wrap">К чему есть доступ: всё сразу, профиль целиком, нода или один инбаунд</td></tr>
+      <tr><td>Шаблон пользователя</td><td class="wrap">Тариф для нового пользователя: срок, лимиты, группы</td></tr>
       <tr><td>Точка подключения</td><td class="wrap">Как сервер выглядит в приложении: «🇳🇱 Нидерланды»</td></tr>
     </tbody>
   </table></div>
@@ -402,19 +396,20 @@
 
 <section id="u-panel">
   <h2><span class="sn">01</span> Веб-панель</h2>
+  <p>Меню слева состоит из шести разделов; внизу переключаются режимы <b>«Обычный / Инженерный»</b> и язык <b>RU / EN</b>, а в «Система → Настройки» выбирается одна из пяти тем (Miku и палитры Catppuccin).</p>
   <div class="grid2">
-    <div class="mini"><h4>Дашборд и статистика</h4><p>Онлайн, трафик, графики за 24 ч – 90 дней, нагрузка нод, топ пользователей, баннер новой версии.</p></div>
-    <div class="mini"><h4>Пользователи</h4><p>Поиск и фильтры, карточка: подписка с QR, продление +1/3/6/12 мес, устройства, лимиты.</p></div>
-    <div class="mini"><h4>Группы и шаблоны</h4><p>Кто какие серверы видит и что получает новый пользователь.</p></div>
-    <div class="mini"><h4>Подписка</h4><p>Название, объявление, страница, кнопки приложений, заголовки, правила форматов, проверка ответа.</p></div>
-    <div class="mini"><h4>Ноды и профили</h4><p>Серверы, их инбаунды и ключи; профили и шаблоны профилей с проверкой на лету.</p></div>
-    <div class="mini"><h4>Настройки и Telegram</h4><p>Домены и IP, путь и домен панели, заглушка, сертификаты, бот, сводки, бэкапы.</p></div>
+    <div class="mini"><h4>Обзор</h4><p>«Сводка», «Подключения» и «Серверы» (графики за 24 ч – 90 дней: трафик, онлайн, CPU, steal, RAM, канал), в инж. режиме — «Аналитика».</p></div>
+    <div class="mini"><h4>Пользователи</h4><p>Список пользователей, «Группы» и «Тарифы» (шаблоны пользователей); карточка с QR, продлением +1/3/6/12 мес и переносом.</p></div>
+    <div class="mini"><h4>Ноды</h4><p>Серверы, сертификаты, нагрузка, инбаунды, обновления с живым логом, свой <code>Xray Base</code> и вкладка «Оплата хостинга».</p></div>
+    <div class="mini"><h4>Протоколы и Xray (инж.)</h4><p>«Профили», «Шаблоны профилей» с проверкой на лету, «Каскады» и общий базовый конфиг «Xray».</p></div>
+    <div class="mini"><h4>Подписка</h4><p>Название, объявление, страница с живым превью, приложения, маршруты, внешние подписки, клиенты, заголовки и проверка.</p></div>
+    <div class="mini"><h4>Система</h4><p>«Настройки» (тема, домены, IP, скрытие), «Telegram» (бот, бэкапы, Mini App), «API», «Журнал» и «Аккаунт».</p></div>
   </div>
   <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
 <pre><code>vynel admin web                       <span class="c"># адрес панели и логин</span>
 vynel admin web password              <span class="c"># новый пароль (сессии разлогинятся)</span>
 vynel admin setting web.path /новый-путь/   <span class="c"># сменить секретный путь</span></code></pre></div>
-  <p>Безопасность входа: сессия закрывается после 5 минут бездействия и привязана к IP; о каждом входе бот присылает сообщение с кнопкой «Завершить эту сессию». Открытые сессии — «Аккаунт» или <code>/sessions</code> в боте.</p>
+  <p>Безопасность входа: сессия закрывается после 5 минут бездействия и привязана к IP; о каждом входе бот присылает сообщение с кнопкой «Завершить эту сессию». Открытые сессии — «Система → Аккаунт» или <code>/sessions</code> в боте.</p>
 </section>
 
 <section id="u-users">
@@ -436,14 +431,14 @@ vynel admin user rm vasya</code></pre></div>
 
 <section id="u-groups">
   <h2><span class="sn">03</span> Группы и шаблоны пользователей</h2>
-  <p><b>Группа</b> решает, какие серверы видит пользователь. Установка создала «Основную» с доступом ко всему профилю «Reality»: новая нода с этим профилем сразу появится у всех в группе. Групп у пользователя может быть несколько — доступы складываются.</p>
+  <p><b>Группа</b> («Пользователи → Группы») решает, какие серверы видит пользователь. Установка создаёт «Основную» с доступом ко всему (<code>all</code>): любая новая нода, профиль или каскад сразу появляются у всех в группе. Групп у пользователя может быть несколько — доступы складываются.</p>
   <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
 <pre><code>vynel admin group add Тест
 vynel admin group grant Тест profile Reality          <span class="c"># весь профиль, включая будущие ноды</span>
 vynel admin group grant Тест node NL                <span class="c"># все инбаунды ноды</span>
 vynel admin group grant Тест inbound VLESS_NL       <span class="c"># один инбаунд</span>
 vynel admin user groups vasya --group Основная --group Тест</code></pre></div>
-  <p><b>Шаблон пользователя</b> — что получает новый пользователь, если указать только имя. Изменение шаблона не трогает уже созданных.</p>
+  <p><b>Шаблон пользователя</b> («Пользователи → Тарифы») — что получает новый пользователь, если указать только имя. Изменение шаблона не трогает уже созданных.</p>
   <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
 <pre><code>vynel admin template add Пробный --days 3 --limit-gb 5 --reset no --group Основная
 vynel admin template add Год --months 12 --group Основная --default</code></pre></div>
@@ -458,51 +453,52 @@ vynel admin template add Год --months 12 --group Основная --default</
       <tr><td>KeqDroid, Happ, v2RayTun</td><td class="wrap">Xray JSON: у каждого сервера свой конфиг с маршрутами</td></tr>
       <tr><td>Остальные приложения на Xray</td><td class="wrap">Список ссылок <code>vless://</code>, <code>hysteria2://</code></td></tr>
       <tr><td>Mihomo (Clash Meta)</td><td class="wrap">Профиль YAML</td></tr>
+      <tr><td>Karing</td><td class="wrap">Профиль импорта sing-box с удалёнными наборами правил (в Karing 1.2.26+ поддерживается и XHTTP)</td></tr>
       <tr><td>sing-box</td><td class="wrap">Профиль JSON</td></tr>
-      <tr><td>Браузер</td><td class="wrap">Страница: срок, трафик, QR-код, кнопки «Добавить в …»</td></tr>
+      <tr><td>Браузер (телефон или ПК)</td><td class="wrap">Адаптивная страница: срок, трафик и график за 14 дней, QR-код, автоопределение ОС с вкладками платформ, кнопки «Добавить в …», удаление старых устройств</td></tr>
     </tbody>
   </table></div>
-  <p>Явно: <code>…/s/&lt;токен&gt;/clash</code>, <code>/singbox</code>, <code>/json</code>, <code>/base64</code>. Неверный токен открывает 404 сайта-заглушки, а IP, который перебирает токены, банится на час.</p>
-  <p>Раздел <b>«Подписка»</b> в панели: название и объявление в приложениях, страница (тема, цвет, тексты с переменными <code>{username}</code>, <code>{days_left}</code>…), кнопки приложений (первая — KeqDroid), HTTP-заголовки, вкладка «Клиенты» — какой формат какому приложению (у каждого можно вставить свой конфиг, например шаблон из Remnawave), «Маршруты» — что идёт напрямую, что через сервер, что блокируется (домены, IP, <code>geosite:</code>, процессы <code>process:</code>), и «Проверка» — что получит конкретное приложение. Всё видно в предпросмотре до сохранения.</p>
-  <div class="note tip"><b>Устройства и адреса.</b> По умолчанию число устройств (HWID) не ограничено, а подключаться одновременно можно с 3 IP-адресов: <code>vynel admin setting ip.default_limit 5</code>. Лимит устройств — <code>vynel admin setting hwid.default_limit 3</code>; клиенты без HWID — выключить проверку пользователю в карточке или <code>vynel admin setting hwid.allow_missing true</code>.</div>
+  <p>Явно: <code>…/s/&lt;токен&gt;/clash</code>, <code>/karing</code>, <code>/singbox</code>, <code>/json</code>, <code>/base64</code>. Неверный токен открывает 404 сайта-заглушки, а IP, который перебирает токены, банится на час.</p>
+  <p>Раздел <b>«Подписка»</b> в панели: название и объявление в приложениях, страница (тема, цвет, язык, тексты с переменными <code>{username}</code>, <code>{days_left}</code>…), кнопки приложений (первая — KeqDroid), «Маршруты» — что идёт напрямую, что через сервер, что блокируется (домены, IP, <code>geosite:</code>, процессы <code>process:</code>), «Внешние», а в инженерном режиме — «Клиенты» (какой формат какому приложению и свои шаблоны конфигов), «Заголовки» и «Проверка». Правки сразу видны в интерактивном предпросмотре до сохранения.</p>
+  <div class="note tip"><b>Устройства и адреса.</b> По умолчанию число устройств (HWID) не ограничено, а подключаться одновременно можно с 3 IP-адресов: <code>vynel admin setting ip.default_limit 5</code>. Лимит устройств — <code>vynel admin setting hwid.default_limit 3</code>; освободить слот пользователь может сам на странице подписки. Клиенты без HWID — выключить проверку пользователю в карточке или <code>vynel admin setting hwid.allow_missing true</code>.</div>
 </section>
 
 <section id="u-extras">
   <h2><span class="sn">05</span> Каскады и внешние подписки</h2>
-  <p><b>Каскад</b> («Профили» → «Каскады»): приложение подключается к одной ноде, а в интернет выходит через другую. Для пользователя это отдельный сервер в подписке, например «🇳🇱 Нидерланды → 🇩🇪 Германия». Новых портов не нужно. Группа «Основная» получает каждый каскад сразу; другим — в «Группах» или в карточке пользователя со своим сроком.</p>
-  <p><b>Внешняя подписка</b> — чужие серверы в вашей подписке: ссылка на подписку друга или другой панели, или сами ссылки <code>vless://</code>, <code>hysteria2://</code>. Выдаётся группе, шаблону пользователя или одному пользователю; обновляется, когда приложение обновляет подписку.</p>
+  <p><b>Каскад</b> («Протоколы и Xray → Каскады»): приложение подключается к одной ноде, а в интернет выходит через другую. Для пользователя это отдельный сервер в подписке, например «🇳🇱 Нидерланды → 🇩🇪 Германия». Новых портов не нужно. Группа «Основная» получает каждый каскад сразу; другим — в «Пользователи → Группы» или в карточке пользователя со своим сроком.</p>
+  <p><b>Внешняя подписка</b> («Подписка → Внешние») — чужие серверы в вашей подписке: ссылка на подписку друга или другой панели, или сами ссылки <code>vless://</code>, <code>hysteria2://</code>. Выдаётся группе, шаблону пользователя или одному пользователю; обновляется, когда приложение обновляет подписку.</p>
 </section>
 
 <section id="u-insights">
-  <h2><span class="sn">06</span> Аналитика</h2>
-  <p>Раздел «Аналитика» — то, чего нет на дашборде:</p>
+  <h2><span class="sn">06</span> Аналитика и оплата серверов</h2>
+  <p>Вкладка <b>«Обзор → Аналитика»</b> (инженерный режим) — подробности сверх сводных графиков:</p>
   <ul>
     <li><b>По профилям</b> — сколько трафика ушло через каждый профиль и каскад, всего и у каждого пользователя, графиком по дням.</li>
     <li><b>Устройства</b> — все HWID всех пользователей: модель, приложение, последний IP, поиск.</li>
     <li><b>IP-адреса</b> — с каких адресов подключались за 90 дней и на какой ноде.</li>
   </ul>
-  <p>Нагрузка серверов (процессор, steal, память, канал) — на дашборде, вкладка «Серверы».</p>
-  <h3>Биллинг</h3>
-  <p>Раздел «Биллинг»: провайдеры (ссылка на сайт и на вход в кабинет — название и иконка подтянутся сами), у каждой ноды — провайдер,
+  <p>Нагрузка серверов (процессор, steal, память, канал) — в «Обзор → Серверы».</p>
+  <h3>Оплата хостинга</h3>
+  <p>Вкладка <b>«Ноды → Оплата хостинга»</b>: провайдеры (ссылка на сайт и на вход в кабинет — название и иконка подтянутся сами), у каждой ноды — провайдер,
   цена и дата оплаты. За 5 дней до оплаты бот напомнит. Лимит трафика провайдера в гигабайтах и число месяца сброса (по умолчанию 1-е):
   за пару гигабайт до лимита нода выключится и включится сама в новый период.</p>
 </section>
 
 <section id="u-profiles">
   <h2><span class="sn">07</span> Профили и инбаунды</h2>
-  <p>Установка создала профиль «Reality» и инбаунд <code>VLESS_NL</code> — этого достаточно для начала. Настройка идёт на трёх уровнях:</p>
+  <p>Установка создала профиль «Reality» и инбаунд <code>VLESS_NL</code> — этого достаточно для начала. В инженерном режиме настройка идёт на трёх уровнях:</p>
   <div class="table-scroll"><table>
     <thead><tr><th>Уровень</th><th class="wrap">Что это</th><th>Где</th></tr></thead>
     <tbody>
-      <tr><td>Шаблон профиля</td><td class="wrap">JSON инбаунда Xray с <code>${ПЕРЕМЕННЫМИ}</code>, точка подключения, раздел nginx, проверки</td><td>Профили → Шаблоны</td></tr>
-      <tr><td>Профиль</td><td class="wrap">Шаблон + ваши значения. Общий для всех нод</td><td>Профили → Изменить</td></tr>
+      <tr><td>Шаблон профиля</td><td class="wrap">JSON инбаунда Xray с <code>${ПЕРЕМЕННЫМИ}</code>, точка подключения, раздел nginx, проверки</td><td>Протоколы и Xray → Шаблоны профилей</td></tr>
+      <tr><td>Профиль</td><td class="wrap">Шаблон + ваши значения. Общий для всех нод</td><td>Протоколы и Xray → Профили</td></tr>
       <tr><td>Инбаунд ноды</td><td class="wrap">Профиль на ноде: ключи, домен, порт, IP входа и выхода</td><td>Ноды → «Настроить»</td></tr>
     </tbody>
   </table></div>
   <p>Справа в редакторе — «Что получат ноды»: итоговый конфиг каждой ноды с несохранёнными правками. Если правка ломает хоть одну ноду, сохранить нельзя.</p>
-  <h3>Два протокола</h3>
+  <h3>Встроенные протоколы</h3>
   <div class="grid2">
-    <div class="mini"><h4>VLESS + Reality</h4><p>TCP 443, маскировка под свой сайт-заглушку. Профиль «Reality» есть сразу после установки.</p></div>
+    <div class="mini"><h4>VLESS + Reality / XHTTP</h4><p>TCP 443, маскировка под свой сайт-заглушку (<code>vless-reality-selfsteal</code>, <code>vless-xhttp-reality-std</code>) или XHTTP на сертификате ноды (<code>vless-xhttp-tls</code>, совместим с Karing 1.2.26+).</p></div>
     <div class="mini"><h4>Hysteria2</h4><p>UDP 443 рядом с Reality, на сертификате ноды. Хорош на мобильных сетях. Нужен открытый UDP 443.</p></div>
   </div>
   <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
@@ -516,7 +512,7 @@ vynel admin inbound host VLESS_NL --set remark="🇳🇱 Амстердам"</co
 
 <section id="u-templates">
   <h2><span class="sn">08</span> Свои шаблоны профилей</h2>
-  <p>Обычно не нужны: VLESS + Reality и Hysteria2 уже встроены. Если захочется своё — «Профили» → «Шаблоны профилей» → <b>«Новый шаблон»</b> (заготовка с пояснениями к каждому разделу) или «Скопировать и изменить» у встроенного. На вкладке «Справка» — все поля, переменные и проверки.</p>
+  <p>Обычно не нужны: VLESS + Reality, XHTTP + REALITY, XHTTP + TLS и Hysteria2 уже встроены. Если захочется своё — «Протоколы и Xray → Шаблоны профилей» → <b>«Новый шаблон»</b> (заготовка с пояснениями к каждому разделу) или «Скопировать и изменить» у встроенного. На вкладке «Справка» — все поля, переменные и проверки.</p>
   <p>Каждая правка проверяется пробной сборкой на тестовой ноде: ошибка YAML, неизвестная <code>${ПЕРЕМЕННАЯ}</code> или ошибка nginx видны сразу. Используемый шаблон нельзя удалить, а правка, которая ломает хоть одну ноду, не сохранится. Формат — <a href="https://github.com/vyto4ka/vynel/blob/main/docs/PROFILES.md">PROFILES.md</a>.</p>
 </section>
 
@@ -535,7 +531,7 @@ vynel admin inbound host VLESS_NL --set remark="🇳🇱 Амстердам"</co
 
 <section id="u-update">
   <h2><span class="sn">10</span> Обновление</h2>
-  <p><b>Из панели.</b> Раз в полчаса панель сверяет версии. Если есть новая — баннер на дашборде и значок у «Нод». «Обновить всё» обновляет все ноды разом, панель — последней; около минуты подключения не работают. Ход обновления и лог видны прямо на карточке ноды. Одна нода — меню «⋮» → «Обновить».</p>
+  <p><b>Из панели.</b> Раз в полчаса панель сверяет версии. Если есть новая — баннер в «Обзоре» и значок у «Нод». «Обновить всё» обновляет все ноды разом, панель — последней; около минуты подключения не работают. Ход обновления и живой лог со вкладками по серверам открываются прямо из плашки обновления или меню ноды «⋮» → «Лог обновления» и сохраняются в базе после перезапуска панели. Одна нода — меню «⋮» → «Обновить».</p>
   <p><b>На сервере:</b></p>
   <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
 <pre><code>vynel update --check          <span class="c"># только сравнить версии</span>
@@ -555,7 +551,7 @@ vynel update --foreground     <span class="c"># здесь и сейчас</span
   <p>Встроен в панель и отвечает только админам; чужим не отвечает вовсе. Входящие порты не нужны.</p>
   <div class="step"><span class="num">1</span><div class="step-body"><p><a href="https://t.me/BotFather">@BotFather</a> → <code>/newbot</code> → имя и username → скопировать токен <code>123456789:AA…</code>.</p></div></div>
   <div class="step"><span class="num">2</span><div class="step-body">
-    <p>Токен — в панели «Telegram» → «Сохранить», или:</p>
+    <p>Токен — в панели «Система → Telegram» → «Сохранить», или:</p>
     <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
 <pre><code>vynel admin bot token 123456789:AA…
 vynel admin bot code           <span class="c"># код привязки: боту /start КОД (15 минут)</span></code></pre></div>
@@ -569,7 +565,7 @@ vynel admin bot code           <span class="c"># код привязки: бот
       <tr><td><code>/new имя</code></td><td class="wrap">Новый пользователь и сразу ссылка для отправки</td></tr>
       <tr><td><code>/nodes</code></td><td class="wrap">Ноды: связь, онлайн, CPU, RAM, трафик</td></tr>
       <tr><td><code>/login</code></td><td class="wrap">Ссылка входа в панель без пароля (60 секунд, один раз)</td></tr>
-      <tr><td>Кнопка «Панель»</td><td class="wrap">Панель прямо в Telegram (Mini App)</td></tr>
+      <tr><td>Кнопка «Панель»</td><td class="wrap">Панель прямо в Telegram (Mini App, по желанию — на весь экран)</td></tr>
       <tr><td><code>/sessions</code></td><td class="wrap">Где выполнен вход; завершить</td></tr>
       <tr><td><code>/summary</code></td><td class="wrap">Сводка за сутки (сама приходит в 10:00)</td></tr>
       <tr><td><code>/firewall</code></td><td class="wrap">Заблокированные сканеры, «Разблокировать всех», выключить</td></tr>
@@ -582,7 +578,7 @@ vynel admin bot code           <span class="c"># код привязки: бот
 
 <section id="u-backup">
   <h2><span class="sn">12</span> Бэкапы и переезд</h2>
-  <p>Бэкап — <code>.tar.gz</code> со снимком базы (пользователи, ноды, профили, ключи, настройки, логин) и внутренним CA. С ним новая панель поднимается со всеми пользователями, а ноды подключаются без новых токенов. В нём приватные ключи — храните как пароль.</p>
+  <p>Бэкап — <code>.tar.gz</code> (или зашифрованный паролем <code>.tar.gz.age</code>) со снимком базы (пользователи, ноды, профили, ключи, настройки, логин) и внутренним CA. С ним новая панель поднимается со всеми пользователями, а ноды подключаются без новых токенов. В нём приватные ключи — храните как пароль.</p>
   <div class="code"><div class="code-bar"><span class="code-name">на сервере</span><button class="copy" type="button">Копировать</button></div>
 <pre><code>vynel admin backup -o /root/vynel-backup.tar.gz      <span class="c"># сейчас</span>
 ls /var/lib/vynel/backups/                           <span class="c"># последние 7 ночных и перед обновлениями</span></code></pre></div>
@@ -616,7 +612,9 @@ web [password | mode]     адрес панели и логин; новый па
 login-link                одноразовая ссылка входа (1 минута)
 bot [token | code | unbind]   Telegram-бот
 backup [-o файл]          бэкап
+api-token create | list | revoke   токены публичного API
 user      add | list | show | extend | disable | enable | reset | groups | reissue | links | devices | link | rm
+          transfer export | import | import-remnawave | import-3xui
 group     add | list | grant | revoke
 template  add | list
 node      add | list | addr | token | rm
