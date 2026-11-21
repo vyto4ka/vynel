@@ -4,7 +4,7 @@
 import { lang, t } from './i18n'
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public nonJson = false) {
     super(message)
   }
 }
@@ -24,14 +24,22 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
   })
   const text = await res.text()
   let data: any = null
-  try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    data = text
+  let parsedJson = !text
+  if (text) {
+    try {
+      data = JSON.parse(text)
+      parsedJson = true
+    } catch {
+      data = text
+    }
   }
   if (!res.ok) {
-    if (res.status === 401 && path !== 'login') onUnauthorized((data && data.error) || '')
-    throw new ApiError(res.status, (data && data.error) || plainError(res))
+    const jsonErr = parsedJson && data && typeof data === 'object' ? data.error : ''
+    if (res.status === 401 && path !== 'login') onUnauthorized(jsonErr || '')
+    throw new ApiError(res.status, jsonErr || plainError(res), !parsedJson)
+  }
+  if (!parsedJson) {
+    throw new ApiError(res.status, plainError(res), true)
   }
   return data as T
 }

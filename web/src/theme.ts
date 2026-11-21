@@ -4,7 +4,7 @@
 export type Theme = 'miku' | 'mocha' | 'macchiato' | 'frappe' | 'latte'
 
 export const themes: { id: Theme; name: string; base: string }[] = [
-  { id: 'miku', name: 'Miku', base: '#172226' },
+  { id: 'miku', name: 'Miku', base: '#1e2125' },
   { id: 'mocha', name: 'Mocha', base: '#1e1e2e' },
   { id: 'macchiato', name: 'Macchiato', base: '#24273a' },
   { id: 'frappe', name: 'Frappé', base: '#303446' },

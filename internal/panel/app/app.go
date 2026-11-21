@@ -122,6 +122,9 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
 		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
 		UpdateStatus: rec.UpdateStatus, CertStatus: rec.CertStatus, RenewCerts: nodeRenewCerts(rec), XrayTest: xrayTester(cfg.Xray)})
+	if st := update.LocalStatus(); st != nil {
+		_ = svc.RecordUpdateStatus(ctx, 0, st)
+	}
 	return p, func() { st.Close() }, nil
 }
 

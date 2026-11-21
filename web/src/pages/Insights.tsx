@@ -12,7 +12,11 @@ type Tab = 'traffic' | 'devices' | 'ips'
 const tabs: [Tab, string][] = [['traffic', t('insights.by_profile')], ['devices', t('common.devices')], ['ips', t('insights.ip_addresses')]]
 
 function fromHash(): { tab: Tab; user: number } {
-  const [, sub, user] = location.hash.replace(/^#\/?/, '').split('/')
+  const parts = location.hash.replace(/^#\/?/, '').split('/')
+  // Поддержка как #/overview/analytics/<tab>/<user>, так и устаревшего #/insights/<tab>/<user>.
+  const offset = parts[0] === 'overview' && parts[1] === 'analytics' ? 2 : 1
+  const sub = parts[offset]
+  const user = parts[offset + 1]
   return { tab: tabs.some(([t]) => t === sub) ? (sub as Tab) : 'traffic', user: Number(user) || 0 }
 }
 
@@ -24,7 +28,7 @@ export function Insights() {
     return () => window.removeEventListener('hashchange', h)
   }, [])
   const open = (tab: Tab, user = 0) => {
-    history.replaceState(null, '', `#/insights/${tab}${user ? '/' + user : ''}`)
+    history.replaceState(null, '', `#/overview/analytics/${tab}${user ? '/' + user : ''}`)
     setState({ tab, user })
   }
   return (
@@ -74,8 +78,7 @@ function ProfileTraffic({ user, setUser }: { user: number; setUser: (id: number)
   }
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<string>('total')
-  const { data, error } = useLoad((signal) => get<TrafficT>(`insights/traffic?range=${range}${user ? '&user=' + user : ''}`, signal), [range, user], 5 * 60 * 1000)
-  const ok = data && data.range === range
+  const { data, error, loading } = useLoad((signal) => get<TrafficT>(`insights/traffic?range=${range}${user ? '&user=' + user : ''}`, signal), [range, user], 5 * 60 * 1000, { cacheKey: `insights/traffic:${range}:${user}`, staleTimeMs: 60000 })
   const groups = useMemo(() => {
     if (!data) return []
     const top = data.profiles.slice(0, data.profiles.length > shown + 1 ? shown : shown + 1)
@@ -109,10 +112,10 @@ function ProfileTraffic({ user, setUser }: { user: number; setUser: (id: number)
         </div>
         <Segmented value={range} options={ranges} onChange={setRange} />
       </div>
-      {!ok ? <Loading error={error} /> : data.profiles.length === 0 ? (
+      {!data ? <Loading error={error} /> : data.profiles.length === 0 ? (
         <div className="card"><Empty icon="📊"><Trans k="insights.no_traffic" v={{ v: rangeWord[range] }} />{user ? t('insights.for_this_user') : ''}</Empty></div>
       ) : (
-        <>
+        <div style={loading || data.range !== range ? { opacity: 0.72, transition: 'opacity .15s' } : undefined}>
           <div className="card">
             <div className="card-head">
               <div><h3>{t('insights.traffic_by_profile')}</h3><div className="card-sub">{t('insights.by_day')}{' '}{user ? name || t('insights.user') : t('common.all_users')}</div></div>
@@ -190,7 +193,7 @@ function ProfileTraffic({ user, setUser }: { user: number; setUser: (id: number)
               </div>
             )}
           </div>
-        </>
+        </div>
       )}
     </>
   )
@@ -201,7 +204,7 @@ function ProfileTraffic({ user, setUser }: { user: number; setUser: (id: number)
 interface NewcomersT { days: number[]; devices: number[]; ips: number[]; platforms: { label: string; n: number }[] }
 
 function Newcomers() {
-  const { data, error } = useLoad(() => get<NewcomersT>('insights/newcomers'), [], 5 * 60 * 1000)
+  const { data, error } = useLoad(() => get<NewcomersT>('insights/newcomers'), [], 5 * 60 * 1000, { cacheKey: 'insights/newcomers', staleTimeMs: 60000 })
   if (!data) return <Loading error={error} />
   const count = (v: number) => String(Math.round(v))
   return (
@@ -234,7 +237,8 @@ function usePaged<T>(path: string) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   useEffect(() => setPage(0), [search])
-  const list = useLoad((signal) => get<{ items: T[]; total: number }>(`${path}?q=${encodeURIComponent(search)}&limit=${pageSize}&offset=${page * pageSize}`, signal), [search, page], 60000)
+  const qKey = `${path}:${search}:${page}`
+  const list = useLoad((signal) => get<{ items: T[]; total: number }>(`${path}?q=${encodeURIComponent(search)}&limit=${pageSize}&offset=${page * pageSize}`, signal), [search, page], 60000, { cacheKey: qKey, staleTimeMs: 30000 })
   return { search, setSearch, page, setPage, list }
 }
 

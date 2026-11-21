@@ -28,7 +28,7 @@ function loadTab(): Tab {
 }
 
 export function Api() {
-  const info = useLoad(() => get<Integrations>('integrations'), [], 15000)
+  const info = useLoad(() => get<Integrations>('integrations'), [], 15000, { cacheKey: 'integrations', staleTimeMs: 10000 })
   const [tab, setTabState] = useState<Tab>(loadTab)
   // The tester's token lives here, so it stays while the tabs are switched.
   const [token, setToken] = useState('')

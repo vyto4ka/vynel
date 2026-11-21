@@ -5,8 +5,8 @@ import { t, Trans } from '../i18n'
 import { applyTheme, loadTheme, themes } from '../theme'
 
 export function Settings() {
-  const settings = useLoad(() => get<Setting[]>('settings'), [], 0, 'settings')
-  const network = useLoad(() => get<Network>('network'), [], 0, 'network')
+  const settings = useLoad(() => get<Setting[]>('settings'), [], 0, { cacheKey: 'settings', staleTimeMs: 30000 })
+  const network = useLoad(() => get<Network>('network'), [], 0, { cacheKey: 'network', staleTimeMs: 5 * 60 * 1000 })
   if (!settings.data) return <Loading error={settings.error} />
   const data = settings.data
   const sections = [...new Set(data.map((s) => s.section))]

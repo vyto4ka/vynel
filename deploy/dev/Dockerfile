@@ -1,4 +1,4 @@
-# Dev image: the vynel binary plus Xray. Build context is the repository root.
+# Dev image: the vynel binary plus Xray and nginx. Build context is the repository root.
 FROM golang:1.26 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -7,7 +7,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/vynel ./cmd/vynel
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip nginx libnginx-mod-stream && rm -rf /var/lib/apt/lists/*
 COPY scripts/fetch-xray.sh /tmp/fetch-xray.sh
 RUN /tmp/fetch-xray.sh /usr/local/share/xray && ln -s /usr/local/share/xray/xray /usr/local/bin/xray
 COPY --from=build /out/vynel /usr/local/bin/vynel

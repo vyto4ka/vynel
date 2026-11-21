@@ -158,3 +158,58 @@ func TestPreviewPageLangAndNoDuplicateHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestPageExternalScriptOSDetectionAndDesktopLayout(t *testing.T) {
+	e := newEnv(t)
+	prefix := e.svc.SubPrefix(e.ctx)
+
+	// Open the page from a Windows browser (User-Agent + Client Hint).
+	req := httptest.NewRequest(http.MethodGet, prefix+e.user.SubToken, nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Sec-CH-UA-Platform", `"Windows"`)
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("page status %d", w.Code)
+	}
+	htmlStr := w.Body.String()
+
+	// Must have no inline executable scripts or inline onclick attributes (blocked by proxy CSP).
+	if strings.Contains(htmlStr, "onclick=") {
+		t.Fatalf("inline onclick attribute present in page HTML")
+	}
+	scriptURL := prefix + e.user.SubToken + "/page.js"
+	for _, want := range []string{
+		`src="` + scriptURL + `"`,
+		`id="sub-cfg" type="application/json"`,
+		`Ваша ОС: Windows`,
+		`class="os-tab on detected" data-os="windows"`,
+		`Как подключиться на Windows`,
+		`@media (min-width:900px)`,
+		`max-width:1080px`,
+	} {
+		if !strings.Contains(htmlStr, want) {
+			t.Fatalf("Windows subscription page missing %q", want)
+		}
+	}
+
+	// Fetch the external JS asset via the subscription handler.
+	jsReq := httptest.NewRequest(http.MethodGet, scriptURL, nil)
+	jsW := httptest.NewRecorder()
+	e.h.ServeHTTP(jsW, jsReq)
+	if jsW.Code != http.StatusOK || !strings.Contains(jsW.Header().Get("Content-Type"), "javascript") {
+		t.Fatalf("page.js status=%d ct=%q", jsW.Code, jsW.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(jsW.Body.String(), "copyValue") || !strings.Contains(jsW.Body.String(), "selectOS") {
+		t.Fatalf("unexpected page.js body")
+	}
+
+	// Unknown token must still return 404 for page.js (stealth).
+	badJSReq := httptest.NewRequest(http.MethodGet, prefix+"nonexistent-token-xyz/page.js", nil)
+	badJSW := httptest.NewRecorder()
+	e.h.ServeHTTP(badJSW, badJSReq)
+	if badJSW.Code != http.StatusNotFound {
+		t.Fatalf("unknown token page.js got %d, want 404", badJSW.Code)
+	}
+}

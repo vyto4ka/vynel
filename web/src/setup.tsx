@@ -6,19 +6,19 @@ import { isMigrant, useEngineer } from './mode'
 
 // SetupChecklist — ведущий чеклист на дашборде, пока серверной статистике меньше 1 суток.
 // Скрывается кнопкой «Свернуть»; состояние свёртки — в localStorage.
-export function SetupChecklist({ showWelcome }: { showWelcome?: boolean }) {
+export function SetupChecklist({ showWelcome, usersTotal }: { showWelcome?: boolean; usersTotal?: number }) {
   const standard = useEngineer()
   const [dismissed, setDismissed] = useState(loadDismissed)
-  const nodes = useLoad(() => (showWelcome ? get<Node[]>('nodes') : Promise.resolve(null)), [showWelcome], showWelcome ? 15000 : 0)
-  const usersTotal = useLoad(() => (showWelcome ? get<{ total: number }>('users?limit=1') : Promise.resolve(null)), [showWelcome], showWelcome ? 20000 : 0)
+  const active = !!showWelcome && !dismissed
+  const nodes = useLoad(() => get<Node[]>('nodes'), [], active ? 15000 : 0, { cacheKey: 'nodes', staleTimeMs: 10000, enabled: active })
   const act = useAction()
 
-  if (!showWelcome || dismissed) return null
-  if (!nodes.data || !usersTotal.data) return null
+  if (!active) return null
+  if (!nodes.data) return null
   const list = nodes.data
   const hasNode = list.length > 0
   const hasAccess = list.some((n) => n.inbounds.length > 0)
-  const hasUser = (usersTotal.data.total ?? 0) > 0
+  const hasUser = (usersTotal ?? 0) > 0
   const migrant = isMigrant()
 
   const steps: Step[] = migrant

@@ -44,7 +44,7 @@ const example = {
 }
 
 export function Events({ d }: { d: Integrations }) {
-  const feed = useLoad(() => get<EventDoc[]>('integrations/events'), [], 10000)
+  const feed = useLoad(() => get<EventDoc[]>('integrations/events'), [], 10000, { cacheKey: 'integrations/events', staleTimeMs: 8000 })
   const [open, setOpen] = useState<string | null>(null)
   return (
     <div className="cards" style={{ maxWidth: 980 }}>

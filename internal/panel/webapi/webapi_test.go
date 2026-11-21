@@ -213,8 +213,12 @@ func TestSubscriptionAPI(t *testing.T) {
 		t.Fatalf("rules error: %d %s", w.Code, w.Body.String())
 	}
 	w = c.do("GET", "/api/subscription/preview", "", false)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || strings.Contains(w.Body.String(), "Предпросмотр") || !strings.Contains(w.Body.String(), `href="happ://add/https://example.com/s/demo-token" target="_blank"`) || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Мику") || strings.Contains(w.Body.String(), "Предпросмотр") || !strings.Contains(w.Body.String(), `href="happ://add/https://example.com/s/demo-token" target="_blank"`) || !strings.Contains(w.Body.String(), `src="preview.js"`) || !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'self'") || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
 		t.Fatalf("preview: %d %q %.100s", w.Code, w.Header().Get("X-Frame-Options"), w.Body.String())
+	}
+	w = c.do("GET", "/api/subscription/preview.js", "", false)
+	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Type"), "javascript") || !strings.Contains(w.Body.String(), "copyValue") {
+		t.Fatalf("preview.js: %d %q", w.Code, w.Header().Get("Content-Type"))
 	}
 	w = c.do("GET", "/api/subscription/preview?lang=en", "", false)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `<html lang="en"`) || !strings.Contains(w.Body.String(), "Connect") {

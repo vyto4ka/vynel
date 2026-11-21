@@ -2,6 +2,7 @@ import { ReactElement, StrictMode, useCallback, useEffect, useState } from 'reac
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { get, post, setUnauthorizedHandler, UpdateInfo } from './api'
+import { getUIState, prefetch, setCacheEntry, setUIState } from './cache'
 import { clearLoadCache, ConfirmProvider, Icon, Logo, Modal, SideTooltip, Tabs, ToastProvider, useAction, useLoad } from './ui'
 import { fmtVersion } from './format'
 import { initTelegramMiniApp, openExternal } from './telegram'
@@ -29,6 +30,45 @@ import { Mode, ModeProvider, isMigrant, markModeChosen, modeChosen, modeRank, se
 import { confirmPageLeave } from './unsaved'
 
 type RouteTarget = { page: string; sub?: string }
+
+function defaultUsersPath(): string {
+  let sort: { key: string; desc: boolean } = { key: '', desc: false }
+  try {
+    const raw = localStorage.getItem('vynel.users.sort')
+    if (raw) sort = JSON.parse(raw)
+  } catch { /* ignore */ }
+  return `users?search=&status=&sort=${sort.key || ''}&dir=${sort.desc ? 'desc' : 'asc'}&limit=200&offset=0`
+}
+
+function prefetchSection(id: string) {
+  switch (id) {
+    case 'overview':
+      prefetch('overview', () => get('overview'), 10000)
+      break
+    case 'users': {
+      const p = defaultUsersPath()
+      prefetch(p, () => get(p), 10000)
+      prefetch('groups', () => get('groups'), 20000)
+      break
+    }
+    case 'nodes':
+      prefetch('nodes', () => get('nodes'), 10000)
+      prefetch('self-host', () => get('self-host'), 20000)
+      prefetch('profiles', () => get('profiles'), 30000)
+      break
+    case 'protocols':
+      prefetch('profiles', () => get('profiles'), 30000)
+      prefetch('profile-templates', () => get('profile-templates'), 30000)
+      break
+    case 'subscription':
+      prefetch('subscription', () => get('subscription'), 30000)
+      prefetch('users:200', () => get('users?limit=200'), 15000)
+      break
+    case 'system':
+      prefetch('settings', () => get('settings'), 30000)
+      break
+  }
+}
 
 // 6 цельных разделов вместо 16 разрозненных пунктов.
 type PageDef = { id: string; title: string; short?: string; icon: string; min?: Mode; el: (sub?: string) => ReactElement }
@@ -71,12 +111,14 @@ function parseRoute(): RouteTarget {
 function OverviewHub({ initialTab }: { initialTab?: string }) {
   const eng = useEngineer()
   const valid = new Set(['summary', 'connections', 'servers', ...(eng ? ['analytics'] : [])])
-  const [tab, setTab] = useState(initialTab && valid.has(initialTab) ? initialTab : 'summary')
+  const saved = getUIState('hub.overview', 'summary')
+  const [tab, setTab] = useState(initialTab && valid.has(initialTab) ? initialTab : valid.has(saved) ? saved : 'summary')
   useEffect(() => {
-    if (initialTab && valid.has(initialTab)) setTab(initialTab)
-    else if (!eng && tab === 'analytics') setTab('summary')
+    if (initialTab && valid.has(initialTab)) { setUIState('hub.overview', initialTab); setTab(initialTab) }
+    else if (!eng && tab === 'analytics') { setUIState('hub.overview', 'summary'); setTab('summary') }
   }, [initialTab, eng, tab])
   const pick = (next: string) => {
+    setUIState('hub.overview', next)
     history.replaceState(null, '', next === 'summary' ? '#/overview' : `#/overview/${next}`)
     setTab(next)
   }
@@ -85,6 +127,21 @@ function OverviewHub({ initialTab }: { initialTab?: string }) {
       <Tabs
         value={tab}
         onChange={pick}
+        onHover={(id) => {
+          if (id === 'summary') prefetch('overview', () => get('overview'), 10000)
+          if (id === 'connections') {
+            const r = load('vynel.stats.range', '7d')
+            prefetch(`stats:${r}`, () => get(`stats?range=${r}`), 25000)
+          }
+          if (id === 'servers') {
+            const r = load('vynel.load.range', '24h')
+            prefetch(`stats/load:${r}`, () => get(`stats/load?range=${r}`), 60000)
+          }
+          if (id === 'analytics') {
+            const r = load('vynel.insights.range', '30d')
+            prefetch(`insights/traffic:${r}:0`, () => get(`insights/traffic?range=${r}`), 60000)
+          }
+        }}
         items={[
           { id: 'summary', label: t('dashboard.summary') },
           { id: 'connections', label: t('dashboard.connections') },
@@ -101,7 +158,9 @@ function OverviewHub({ initialTab }: { initialTab?: string }) {
 }
 
 function UsersHub({ initialTab }: { initialTab?: string }) {
-  const [tab, setTab] = useState(initialTab === 'groups' || initialTab === 'tariffs' ? initialTab : 'list')
+  const saved = getUIState('hub.users', 'list')
+  const [tab, setTabState] = useState(initialTab === 'groups' || initialTab === 'tariffs' ? initialTab : saved)
+  const setTab = (next: string) => { setUIState('hub.users', next); setTabState(next) }
   useEffect(() => {
     if (initialTab === 'groups' || initialTab === 'tariffs') setTab(initialTab)
   }, [initialTab])
@@ -110,6 +169,19 @@ function UsersHub({ initialTab }: { initialTab?: string }) {
       <Tabs
         value={tab}
         onChange={setTab}
+        onHover={(id) => {
+          if (id === 'list') prefetchSection('users')
+          if (id === 'groups') {
+            prefetch('groups', () => get('groups'), 20000)
+            prefetch('nodes', () => get('nodes'), 10000)
+            prefetch('profiles', () => get('profiles'), 30000)
+            prefetch('grants', () => get('grants'), 20000)
+          }
+          if (id === 'tariffs') {
+            prefetch('templates', () => get('templates'), 30000)
+            prefetch('groups', () => get('groups'), 20000)
+          }
+        }}
         items={[
           { id: 'list', label: t('common.users') },
           { id: 'groups', label: t('common.groups') },
@@ -124,7 +196,9 @@ function UsersHub({ initialTab }: { initialTab?: string }) {
 }
 
 function NodesHub({ initialTab }: { initialTab?: string }) {
-  const [tab, setTab] = useState(initialTab === 'billing' ? 'billing' : 'servers')
+  const saved = getUIState('hub.nodes', 'servers')
+  const [tab, setTabState] = useState(initialTab === 'billing' ? 'billing' : saved)
+  const setTab = (next: string) => { setUIState('hub.nodes', next); setTabState(next) }
   useEffect(() => {
     if (initialTab === 'billing') setTab('billing')
   }, [initialTab])
@@ -133,6 +207,10 @@ function NodesHub({ initialTab }: { initialTab?: string }) {
       <Tabs
         value={tab}
         onChange={setTab}
+        onHover={(id) => {
+          if (id === 'servers') prefetchSection('nodes')
+          if (id === 'billing') prefetch('billing', () => get('billing'), 20000)
+        }}
         items={[
           { id: 'servers', label: t('common.nodes') },
           { id: 'billing', label: t('main.billing') },
@@ -145,7 +223,9 @@ function NodesHub({ initialTab }: { initialTab?: string }) {
 
 function ProtocolsHub({ initialTab }: { initialTab?: string }) {
   const valid = new Set(['profiles', 'templates', 'cascades', 'xray'])
-  const [tab, setTab] = useState(initialTab && valid.has(initialTab) ? initialTab : 'profiles')
+  const saved = getUIState('hub.protocols', 'profiles')
+  const [tab, setTabState] = useState(initialTab && valid.has(initialTab) ? initialTab : valid.has(saved) ? saved : 'profiles')
+  const setTab = (next: string) => { setUIState('hub.protocols', next); setTabState(next) }
   useEffect(() => {
     if (initialTab && valid.has(initialTab)) setTab(initialTab)
   }, [initialTab])
@@ -154,6 +234,14 @@ function ProtocolsHub({ initialTab }: { initialTab?: string }) {
       <Tabs
         value={tab}
         onChange={setTab}
+        onHover={(id) => {
+          if (id === 'profiles' || id === 'templates') prefetchSection('protocols')
+          if (id === 'cascades') {
+            prefetch('cascades', () => get('cascades'), 30000)
+            prefetch('nodes', () => get('nodes'), 10000)
+          }
+          if (id === 'xray') prefetch('xray/base', () => get('xray/base'), 30000)
+        }}
         items={[
           { id: 'profiles', label: t('common.profiles') },
           { id: 'templates', label: t('profiles.profile_templates') },
@@ -172,9 +260,12 @@ function ProtocolsHub({ initialTab }: { initialTab?: string }) {
 function SystemHub({ initialTab }: { initialTab?: string }) {
   const eng = useEngineer()
   const valid = new Set(['settings', 'telegram', 'account', ...(eng ? ['api', 'audit'] : [])])
-  const [tab, setTab] = useState(initialTab && valid.has(initialTab) ? initialTab : 'settings')
+  const saved = getUIState('hub.system', 'settings')
+  const [tab, setTabState] = useState(initialTab && valid.has(initialTab) ? initialTab : valid.has(saved) ? saved : 'settings')
+  const setTab = (next: string) => { setUIState('hub.system', next); setTabState(next) }
   useEffect(() => {
     if (initialTab && valid.has(initialTab)) setTab(initialTab)
+    else if (!valid.has(tab)) setTab('settings')
   }, [initialTab, eng])
   const items = [
     { id: 'settings', label: t('common.settings') },
@@ -187,7 +278,21 @@ function SystemHub({ initialTab }: { initialTab?: string }) {
   ]
   return (
     <>
-      <Tabs value={tab} onChange={setTab} items={items} />
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        onHover={(id) => {
+          if (id === 'settings') prefetch('settings', () => get('settings'), 30000)
+          if (id === 'telegram') prefetch('bot', () => get('bot'), 10000)
+          if (id === 'api') prefetch('integrations', () => get('integrations'), 15000)
+          if (id === 'audit') prefetch('audit:300', () => get('audit?limit=300'), 15000)
+          if (id === 'account') {
+            prefetch('session', () => get('session'), 30000)
+            prefetch('sessions', () => get('sessions'), 15000)
+          }
+        }}
+        items={items}
+      />
       {tab === 'settings' && <Settings />}
       {tab === 'telegram' && <Telegram />}
       {tab === 'api' && eng && <Api />}
@@ -209,7 +314,19 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
   const [collapsed, setCollapsed] = useState(() => load('vynel.sidebar', 'open') === 'collapsed')
   const [mobileOpen, setMobileOpen] = useState(false)
   const [scrolled, setScrolled] = useState(false)
-  const updates = useLoad(() => get<UpdateInfo>('updates'), [], 300000)
+  const updates = useLoad(() => get<UpdateInfo>('updates'), [], 300000, { cacheKey: 'updates', staleTimeMs: 15000 })
+
+  // Фоновый прогрев частых вкладок в свободное время браузера сразу после входа.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      prefetch('nodes', () => get('nodes'), 15000)
+      prefetch('profiles', () => get('profiles'), 30000)
+      prefetch('subscription', () => get('subscription'), 30000)
+      const p = defaultUsersPath()
+      prefetch(p, () => get(p), 15000)
+    }, 600)
+    return () => clearTimeout(t)
+  }, [])
 
   useEffect(() => {
     let acted = false
@@ -292,6 +409,8 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
                 href={'#/' + x.id}
                 className={'nav-item' + (x.id === route.page ? ' active' : '')}
                 aria-label={x.title}
+                onMouseEnter={() => prefetchSection(x.id)}
+                onFocus={() => prefetchSection(x.id)}
                 onClick={(e) => {
                   if (x.id === route.page && !route.sub) {
                     e.preventDefault()
@@ -372,7 +491,7 @@ function Shell({ login, version, onLogout, inTelegram }: { login: string; versio
           <div className="spacer" />
           {inTelegram && <BrowserButton />}
         </header>
-        <main className="content" key={route.page}>{p.el(route.sub)}</main>
+        <main className="content">{p.el(route.sub)}</main>
       </div>
     </div>
   )
@@ -428,7 +547,7 @@ function App() {
   const [magicError, setMagicError] = useState('')
   const [onboardingDismissed, setOnboardingDismissed] = useState(false)
   const check = useCallback(() => {
-    get('session').then(setSession, () => setSession(null))
+    get('session').then((s) => { setCacheEntry('session', s); setSession(s) }, () => setSession(null))
   }, [])
   useEffect(() => {
     if (session && session.showWelcome === false && !modeChosen()) {

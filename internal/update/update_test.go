@@ -207,3 +207,27 @@ func TestRunPreservesInitialStartLog(t *testing.T) {
 		t.Fatalf("expected both initial Start line and installer output in log:\n%s", st.Log)
 	}
 }
+
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }
+
+func TestRunKeepsWritingLogWhenStdoutFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rel/install.sh" {
+			_, _ = w.Write([]byte("#!/bin/sh\necho \"line after broken stdout\"\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	ResultFile, LogFile = filepath.Join(dir, "r", "last.json"), filepath.Join(dir, "update.log")
+	if err := run(context.Background(), brokenWriter{}, Source{Ref: "main", Release: ReleaseLatest, ReleaseURL: srv.URL + "/rel"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	st := LocalStatus()
+	if st == nil || !st.OK || !strings.Contains(st.Log, "line after broken stdout") {
+		t.Fatalf("expected log to be written despite broken stdout, got %+v", st)
+	}
+}

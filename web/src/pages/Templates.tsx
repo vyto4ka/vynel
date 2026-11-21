@@ -7,8 +7,8 @@ import { templateSummary } from './Users'
 import { t as tr, Trans } from '../i18n'
 
 export function Templates() {
-  const templates = useLoad(() => get<Template[]>('templates'))
-  const groups = useLoad(() => get<Group[]>('groups'))
+  const templates = useLoad(() => get<Template[]>('templates'), [], 0, { cacheKey: 'templates', staleTimeMs: 30000 })
+  const groups = useLoad(() => get<Group[]>('groups'), [], 0, { cacheKey: 'groups', staleTimeMs: 20000 })
   const [edit, setEdit] = useState<Template | 'new' | null>(null)
   const act = useAction()
   const confirm = useConfirm()

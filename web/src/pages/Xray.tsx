@@ -58,15 +58,15 @@ function sameText(a: string, b: string): boolean {
 }
 
 export function Xray() {
-  const base = useLoad(() => get<BaseInfo>('xray/base'))
+  const base = useLoad(() => get<BaseInfo>('xray/base'), [], 0, { cacheKey: 'xray/base', staleTimeMs: 30000 })
   if (!base.data) return <Loading error={base.error} />
-  // key: после сохранения редактор начинается заново с того, что лежит на сервере.
-  return <XrayEditor key={base.data.json} info={base.data} reload={base.reload} />
+  return <XrayEditor info={base.data} reload={base.reload} />
 }
 
 function XrayEditor({ info, reload }: { info: BaseInfo; reload: () => Promise<void> }) {
   const [tab, setTab] = useState<Tab>('base')
   const [text, setText] = useState(info.json)
+  const lastServerJson = useRef(info.json)
   const [syntax, setSyntax] = useState<string | null>(null)
   const [check, setCheck] = useState<Check | null>(null)
   const [busy, setBusy] = useState(false)
@@ -75,6 +75,16 @@ function XrayEditor({ info, reload }: { info: BaseInfo; reload: () => Promise<vo
   const confirm = useConfirm()
 
   const dirty = !sameText(text, info.json)
+  useEffect(() => {
+    if (info.json !== lastServerJson.current) {
+      if (sameText(text, lastServerJson.current)) {
+        setText(info.json)
+        setSyntax(null)
+        setCheck(null)
+      }
+      lastServerJson.current = info.json
+    }
+  }, [info.json, text])
   const obj = useMemo(() => parseObj(text), [text])
 
   // Закрытие вкладки с несохранённой правкой.

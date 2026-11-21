@@ -7,8 +7,8 @@ import { t, Trans } from './i18n'
 // ================================================================ каскады
 
 export function CascadeList() {
-  const cascades = useLoad(() => get<Cascade[]>('cascades'))
-  const nodes = useLoad(() => get<Node[]>('nodes'))
+  const cascades = useLoad(() => get<Cascade[]>('cascades'), [], 0, { cacheKey: 'cascades', staleTimeMs: 30000 })
+  const nodes = useLoad(() => get<Node[]>('nodes'), [], 0, { cacheKey: 'nodes', staleTimeMs: 10000 })
   const [edit, setEdit] = useState<Cascade | 'new' | null>(null)
   const act = useAction()
   const confirm = useConfirm()
@@ -109,7 +109,7 @@ function CascadeForm({ c, nodes, onClose, onSaved }: { c: Cascade | null; nodes:
 // ================================================================ внешние подписки
 
 export function ExternalList() {
-  const subs = useLoad(() => get<ExternalSub[]>('externals'))
+  const subs = useLoad(() => get<ExternalSub[]>('externals'), [], 0, { cacheKey: 'externals', staleTimeMs: 30000 })
   const [edit, setEdit] = useState<ExternalSub | 'new' | null>(null)
   const act = useAction()
   const confirm = useConfirm()
@@ -246,9 +246,15 @@ export function TemplateExtras({ value, onChange }: { value: TemplateGrant[]; on
 
 // ================================================================ кому выдано
 
-function useExtras() {
-  const cascades = useLoad(() => get<Cascade[]>('cascades'))
-  const externals = useLoad(() => get<ExternalSub[]>('externals'))
+export type ExtrasInfo = {
+  name: (kind: string, id: number) => string
+  options: { kind: 'cascade' | 'external'; refId: number; label: string }[]
+  reload: () => Promise<void>
+}
+
+export function useExtras(): ExtrasInfo {
+  const cascades = useLoad(() => get<Cascade[]>('cascades'), [], 0, { cacheKey: 'cascades', staleTimeMs: 30000 })
+  const externals = useLoad(() => get<ExternalSub[]>('externals'), [], 0, { cacheKey: 'externals', staleTimeMs: 30000 })
   const name = (kind: string, id: number) =>
     kind === 'cascade' ? cascades.data?.find((c) => c.id === id)?.title || t('extras.cascade_2', { id }) : externals.data?.find((x) => x.id === id)?.name || t('extras.subscription', { id })
   const options = [
@@ -261,8 +267,8 @@ function useExtras() {
 const kindText = { cascade: t('common.cascade'), external: t('extras.subscription_3') }
 
 // GroupExtras — каскады и внешние подписки группы (без срока: срок ставится пользователю).
-export function GroupExtras({ group, grants, onChanged }: { group: Group; grants: GrantRow[]; onChanged: () => void }) {
-  const { name, options } = useExtras()
+export function GroupExtras({ group, grants, extras, onChanged }: { group: Group; grants: GrantRow[]; extras: ExtrasInfo; onChanged: () => void }) {
+  const { name, options } = extras
   const act = useAction()
   const mine = grants.filter((g) => g.groupId === group.id)
   if (options.length === 0 && mine.length === 0) return null

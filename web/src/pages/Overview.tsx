@@ -6,12 +6,12 @@ import { UpdateBanner } from '../updates'
 import { t, Trans } from '../i18n'
 
 export function Overview() {
-  const { data, error } = useLoad(() => get<OverviewT>('overview'), [], 15000, 'overview')
+  const { data, error } = useLoad(() => get<OverviewT>('overview'), [], 15000, { cacheKey: 'overview', staleTimeMs: 8000 })
   if (!data) return <Loading error={error} />
   const u = data.users
   return (
     <>
-      <SetupChecklist showWelcome={data.showWelcome} />
+      <SetupChecklist showWelcome={data.showWelcome} usersTotal={u.total} />
       <UpdateBanner />
       <div className="stats">
         <div className="card stat">

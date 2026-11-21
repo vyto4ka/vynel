@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { ClientFragment, ClientRouting, get, post, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
+import { ClientFragment, ClientRouting, ExternalSub, get, post, Profile, put, SubApp, SubBasics, SubConfig, SubHeader, SubPage, SubRule, TemplateInfo, User } from '../api'
+import { getUIState, prefetch, setUIState } from '../cache'
 import { CodeEditor } from '../code'
 import { ExternalList } from '../extras'
 import { RoutingChain, RoutingForm } from '../routing'
@@ -36,10 +37,11 @@ function encodeDraft(v: unknown): string {
 }
 
 export function Subscription() {
-  const cfg = useLoad(() => get<SubConfig>('subscription'), [], 0, 'subscription')
-  const userPage = useLoad(() => get<{ users: User[] }>('users?limit=200'), [], 0, 'users:200')
+  const cfg = useLoad(() => get<SubConfig>('subscription'), [], 0, { cacheKey: 'subscription', staleTimeMs: 30000 })
+  const userPage = useLoad(() => get<{ users: User[] }>('users?limit=200'), [], 0, { cacheKey: 'users:200', staleTimeMs: 15000 })
   const users = { ...userPage, data: userPage.data?.users }
-  const [tab, setTab] = useState(() => location.hash.startsWith('#/externals') ? 'externals' : 'basics')
+  const [tab, setTabState] = useState(() => location.hash.startsWith('#/externals') ? 'externals' : getUIState('sub.tab', 'basics'))
+  const setTab = (next: string) => { setUIState('sub.tab', next); setTabState(next) }
   const eng = useEngineer()
   const tabs = allTabs.filter(([, , min]) => min === 'basic' || eng)
   // Скрытая режимом вкладка не должна оставаться открытой.
@@ -128,6 +130,10 @@ export function Subscription() {
       <Tabs
         value={tab}
         onChange={setTab}
+        onHover={(id) => {
+          if (id === 'routing') prefetch('profiles', () => get<Profile[]>('profiles'), 30000)
+          if (id === 'externals') prefetch('externals', () => get<ExternalSub[]>('externals'), 30000)
+        }}
         items={tabs.map(([id, label]) => ({ id, label }))}
         right={tab !== 'externals' && (
           <>
@@ -172,7 +178,7 @@ export function Subscription() {
               </div>
               <div className="sub-preview-body">
                 {!previewReady && <div className="sub-preview-loading"><span className="spinner" /></div>}
-                {previewSrc && <iframe title={t('subscription.subscription_page')} src={previewSrc} onLoad={() => setPreviewReady(true)} />}
+                {previewSrc && <iframe title={t('subscription.subscription_page')} src={previewSrc} allow="clipboard-write" onLoad={() => setPreviewReady(true)} />}
               </div>
             </div>
           )}

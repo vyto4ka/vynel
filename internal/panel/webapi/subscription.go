@@ -23,6 +23,7 @@ func (s *Server) subscriptionRoutes() {
 	s.handle("POST /api/subscription/test", s.subTest)
 	s.handle("POST /api/subscription/template", s.subTemplate)
 	s.api.HandleFunc("GET /api/subscription/preview", s.subPreview)
+	s.api.HandleFunc("GET /api/subscription/preview.js", s.subPreviewScript)
 }
 
 func (s *Server) subConfig(r *http.Request) (any, error) {
@@ -371,17 +372,35 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 		subscription.PopulatePageExtras(&d, devs, limit, hwidOff, daily, "", now)
 	}
 	subscription.ApplyPageLang(&d, i18n.FromRequest(r))
+	subscription.ApplyDetectedOS(&d, subscription.DetectClientOS(r))
+	d.ScriptURL = "preview.js"
 	var buf bytes.Buffer
 	if err := subscription.RenderPage(&buf, d); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// The page is shown in a frame of the panel; its inline script and styles are its own.
+	// The page is shown in a frame of the panel; script-src 'self' intersects cleanly with nginx's CSP.
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("X-Frame-Options", "SAMEORIGIN")
-	h.Set("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'self'")
+	h.Set("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'self'; frame-ancestors 'self'")
 	_, _ = w.Write(buf.Bytes())
+}
+
+func (s *Server) subPreviewScript(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie(cookieName)
+	if err != nil {
+		http.Error(w, "not logged in", http.StatusUnauthorized)
+		return
+	}
+	if _, ok := s.verify(r, c.Value); !ok {
+		http.Error(w, "session expired", http.StatusUnauthorized)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/javascript; charset=utf-8")
+	h.Set("Cache-Control", "no-store")
+	_, _ = w.Write(subscription.PageScript)
 }
 
 // checkDraft validates every tab of a subscription draft, naming the tab of an error.

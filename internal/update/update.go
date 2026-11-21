@@ -305,16 +305,35 @@ func LastResult() *Result {
 
 func saveResult(r Result) {
 	b, _ := json.Marshal(r)
-	_ = os.MkdirAll(filepath.Dir(ResultFile), 0o755)
+	if err := os.MkdirAll(filepath.Dir(ResultFile), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "update: mkdir %s: %v\n", filepath.Dir(ResultFile), err)
+	}
 	tmp := ResultFile + ".tmp"
 	if os.WriteFile(tmp, b, 0o644) == nil && os.Rename(tmp, ResultFile) == nil {
 		return
 	}
-	_ = os.WriteFile(ResultFile, b, 0o644)
+	if err := os.WriteFile(ResultFile, b, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "update: write %s: %v\n", ResultFile, err)
+	}
 }
 
 func logf(w io.Writer, format string, args ...any) {
 	fmt.Fprintf(w, "[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+}
+
+// fanoutWriter writes to primary (the log file) first and also forwards to secondary (stdout)
+// without letting a broken stdout pipe stop the log file from being written.
+type fanoutWriter struct {
+	primary   io.Writer
+	secondary io.Writer
+}
+
+func (fw fanoutWriter) Write(p []byte) (int, error) {
+	n, err := fw.primary.Write(p)
+	if fw.secondary != nil {
+		_, _ = fw.secondary.Write(p)
+	}
+	return n, err
 }
 
 // ErrRunning means an update is going on already.
@@ -331,9 +350,13 @@ func Start(ctx context.Context) error {
 	}
 	started := time.Now().Unix()
 	src := LoadSource()
-	_ = os.MkdirAll(filepath.Dir(LogFile), 0o755)
-	_ = os.WriteFile(LogFile, []byte(fmt.Sprintf("[%s] Запуск службы обновления (%s): канал %s, релиз %s\n",
-		time.Now().Format("15:04:05"), Unit, src.Channel(), src.Release)), 0o644)
+	if mkErr := os.MkdirAll(filepath.Dir(LogFile), 0o755); mkErr != nil {
+		fmt.Fprintf(os.Stderr, "update: mkdir %s: %v\n", filepath.Dir(LogFile), mkErr)
+	}
+	if wrErr := os.WriteFile(LogFile, []byte(fmt.Sprintf("[%s] Запуск службы обновления (%s): канал %s, релиз %s\n",
+		time.Now().Format("15:04:05"), Unit, src.Channel(), src.Release)), 0o644); wrErr != nil {
+		fmt.Fprintf(os.Stderr, "update: write %s: %v\n", LogFile, wrErr)
+	}
 	saveResult(Result{Running: true, StartedAt: started})
 	// A failed run of an earlier update keeps the unit name taken until it is reset.
 	_ = exec.Command("systemctl", "reset-failed", Unit).Run()
@@ -367,7 +390,7 @@ func run(ctx context.Context, w io.Writer, s Source) error {
 		return err
 	}
 	defer logfFile.Close()
-	out := io.MultiWriter(w, logfFile)
+	out := fanoutWriter{primary: logfFile, secondary: w}
 	saveResult(Result{Running: true, StartedAt: started})
 	logf(out, "vynel update: канал %s, ветка %s, релиз %s", s.Channel(), s.Ref, s.Release)
 

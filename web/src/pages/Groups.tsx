@@ -1,16 +1,17 @@
 import { FormEvent, useState } from 'react'
 import { del, get, GrantRow, Group, Node, patch, post, Profile } from '../api'
-import { GroupExtras } from '../extras'
+import { GroupExtras, useExtras } from '../extras'
 import { Empty, Field, Icon, Loading, Modal, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans } from '../i18n'
 
 const kindLabel: Record<string, string> = { profile: t('groups.profile'), node: t('common.node_2'), node_inbound: t('groups.inbound'), all: t('groups.all') }
 
 export function Groups() {
-  const groups = useLoad(() => get<Group[]>('groups'))
-  const nodes = useLoad(() => get<Node[]>('nodes'))
-  const profiles = useLoad(() => get<Profile[]>('profiles'))
-  const grants = useLoad(() => get<GrantRow[]>('grants'))
+  const groups = useLoad(() => get<Group[]>('groups'), [], 0, { cacheKey: 'groups', staleTimeMs: 20000 })
+  const nodes = useLoad(() => get<Node[]>('nodes'), [], 0, { cacheKey: 'nodes', staleTimeMs: 10000 })
+  const profiles = useLoad(() => get<Profile[]>('profiles'), [], 0, { cacheKey: 'profiles', staleTimeMs: 30000 })
+  const grants = useLoad(() => get<GrantRow[]>('grants'), [], 0, { cacheKey: 'grants', staleTimeMs: 20000 })
+  const extras = useExtras()
   const [edit, setEdit] = useState<Group | 'new' | null>(null)
   const act = useAction()
   const confirm = useConfirm()
@@ -66,7 +67,7 @@ export function Groups() {
                   <option value="">{t('groups.grant_access')}</option>
                   {options.map((o, i) => g.rules.some((r) => r.kind === o.kind && r.refId === o.refId) ? null : <option key={i} value={i}>{o.label}</option>)}
                 </select>
-                <GroupExtras group={g} grants={grants.data || []} onChanged={grants.reload} />
+                <GroupExtras group={g} grants={grants.data || []} extras={extras} onChanged={grants.reload} />
               </div>
             </div>
           ))}

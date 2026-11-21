@@ -68,6 +68,15 @@ func TestUpdateStates(t *testing.T) {
 	if st, log, _, _ := u.state(6, &update.Status{Running: false, StartedAt: now.Unix(), Log: "[12:00:01] ok"}, true, "v2", now); st != UpdDone || log != "[12:00:01] ok" {
 		t.Fatalf("real log lost on version bump: %q %q", st, log)
 	}
+
+	// Empty log on finished status still produces a version summary instead of "".
+	u.markSent(7, "v1", nil)
+	if st, log, _, _ := u.state(7, &update.Status{OK: true, StartedAt: now.Unix(), FinishedAt: now.Unix()}, true, "v2", now); st != UpdDone || log != "Версия v1 → v2" {
+		t.Fatalf("empty done log fallback: %q %q", st, log)
+	}
+	if st, log, _, _ := u.state(8, &update.Status{OK: true, StartedAt: now.Unix(), FinishedAt: now.Unix(), Version: "v2"}, true, "v2", now); st != UpdDone || log != "Версия v2" {
+		t.Fatalf("standalone done log fallback: %q %q", st, log)
+	}
 }
 
 func TestMergeUpdateStatusDropsStaleLive(t *testing.T) {

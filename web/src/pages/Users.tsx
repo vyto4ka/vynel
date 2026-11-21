@@ -54,12 +54,11 @@ export function Users() {
     try { localStorage.setItem('vynel.users.sort', JSON.stringify(sort)) } catch { /* приватное окно */ }
   }, [sort])
   // Страницами: с десятками тысяч пользователей весь список разом тормозил и панель, и браузер.
-  const list = useLoad(() => get<{ users: User[]; total: number }>(
-    `users?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}${groupFilter ? `&group=${groupFilter}` : ''}&sort=${sort.key}&dir=${sort.desc ? 'desc' : 'asc'}` +
-    `&limit=${pageSize}&offset=${page * pageSize}`), [sort, search, statusFilter, groupFilter, page], 20000)
+  const usersPath = `users?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}${groupFilter ? `&group=${groupFilter}` : ''}&sort=${sort.key}&dir=${sort.desc ? 'desc' : 'asc'}&limit=${pageSize}&offset=${page * pageSize}`
+  const list = useLoad(() => get<{ users: User[]; total: number }>(usersPath), [sort, search, statusFilter, groupFilter, page], 20000, { cacheKey: usersPath, staleTimeMs: 8000 })
   const users = { ...list, data: list.data?.users }
   const total = list.data?.total ?? 0
-  const groups = useLoad(() => get<Group[]>('groups'))
+  const groups = useLoad(() => get<Group[]>('groups'), [], 0, { cacheKey: 'groups', staleTimeMs: 20000 })
   const groupName = useMemo(() => new Map((groups.data || []).map((g) => [g.id, g.name])), [groups.data])
 
   useEffect(() => {
