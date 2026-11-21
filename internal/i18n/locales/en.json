@@ -203,6 +203,7 @@
  "Отдано байт (всегда 0: учитывается общий трафик)": "Bytes uploaded (always 0: the total traffic is counted)",
  "Отдельный домен панели": "Separate panel domain",
  "Панель": "Panel",
+ "Панель · ": "Panel · ",
  "Панель открывается только по этому пути, всё остальное — сайт-заглушка. После смены страница перезагрузится по новому адресу.": "The panel opens only at this path; everything else is a decoy site. After a change the page reloads at the new address.",
  "Пароль на локальный SOCKS (чтобы другие приложения не узнали адрес сервера)": "A password for the local SOCKS (so that other apps do not learn the server address)",
  "Переезд домена подписки без смены пути и токена": "Migrate the subscription domain without changing the path or token",

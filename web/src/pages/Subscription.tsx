@@ -4,7 +4,7 @@ import { CodeEditor } from '../code'
 import { ExternalList } from '../extras'
 import { RoutingChain, RoutingForm } from '../routing'
 import { Badge, Field, Icon, Info, Loading, Modal, Switch, Tabs, useAction, useConfirm, useLoad } from '../ui'
-import { t, Trans } from '../i18n'
+import { lang, t, Trans } from '../i18n'
 import { useUnsavedChanges } from '../unsaved'
 import { useEngineer } from '../mode'
 
@@ -36,19 +36,19 @@ function encodeDraft(v: unknown): string {
 }
 
 export function Subscription() {
-  const cfg = useLoad(() => get<SubConfig>('subscription'))
-  const userPage = useLoad(() => get<{ users: User[] }>('users?limit=200'))
+  const cfg = useLoad(() => get<SubConfig>('subscription'), [], 0, 'subscription')
+  const userPage = useLoad(() => get<{ users: User[] }>('users?limit=200'), [], 0, 'users:200')
   const users = { ...userPage, data: userPage.data?.users }
   const [tab, setTab] = useState(() => location.hash.startsWith('#/externals') ? 'externals' : 'basics')
   const eng = useEngineer()
   const tabs = allTabs.filter(([, , min]) => min === 'basic' || eng)
   // Скрытая режимом вкладка не должна оставаться открытой.
   useEffect(() => { if (!tabs.some(([id]) => id === tab)) setTab('basics') }, [tab, eng])
-  const [basics, setBasics] = useState<SubBasics | null>(null)
-  const [page, setPage] = useState<SubPage | null>(null)
-  const [headers, setHeaders] = useState<SubHeader[] | null>(null)
-  const [rules, setRules] = useState<SubRule[] | null>(null)
-  const [routing, setRouting] = useState<ClientRouting | null>(null)
+  const [basics, setBasics] = useState<SubBasics | null>(() => cfg.data?.basics ?? null)
+  const [page, setPage] = useState<SubPage | null>(() => cfg.data?.page ?? null)
+  const [headers, setHeaders] = useState<SubHeader[] | null>(() => cfg.data?.headers ?? null)
+  const [rules, setRules] = useState<SubRule[] | null>(() => cfg.data?.rules ?? null)
+  const [routing, setRouting] = useState<ClientRouting | null>(() => cfg.data?.routing ?? null)
   const [userId, setUserId] = useState(0)
   const act = useAction()
   const confirm = useConfirm()
@@ -75,12 +75,21 @@ export function Subscription() {
   const draftRef = useRef('')
   draftRef.current = JSON.stringify({ basics, page, headers, rules, routing })
 
-  // Предпросмотр обновляется с небольшой задержкой после правок.
+  // Первый рендер предпросмотра — сразу без задержки (чтобы карточка не схлопывалась),
+  // дальнейшие правки черновика — с паузой 400 мс.
   const [previewSrc, setPreviewSrc] = useState('')
+  const [previewReady, setPreviewReady] = useState(false)
+  const previewInited = useRef(false)
   useEffect(() => {
     if (!basics || !page) return
-    const t = setTimeout(() => setPreviewSrc(`api/subscription/preview?user=${userId}&draft=${encodeDraft({ basics, page })}`), 400)
-    return () => clearTimeout(t)
+    const nextUrl = `api/subscription/preview?user=${userId}&lang=${lang()}&draft=${encodeDraft({ basics, page })}`
+    if (!previewInited.current) {
+      previewInited.current = true
+      setPreviewSrc(nextUrl)
+      return
+    }
+    const timer = setTimeout(() => setPreviewSrc(nextUrl), 400)
+    return () => clearTimeout(timer)
   }, [basics, page, userId])
 
   if (!cfg.data || !basics || !page || !headers || !rules || !routing) return <Loading error={cfg.error} />
@@ -146,14 +155,25 @@ export function Subscription() {
           </div>
           {showPreview && (
             <div className="card sub-preview">
-              <div className="card-head">
-                <h3>{t('subscription.preview')}</h3>
-                <select className="input" style={{ width: 180, height: 32 }} value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
-                  <option value={0}>{t('subscription.first_user')}</option>
-                  {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
-                </select>
+              <div className="card-head nowrap">
+                <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                  <h3>{t('subscription.preview')}</h3>
+                  <Info>{t('subscription.preview_hint')}</Info>
+                </div>
+                <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                  <select className="input" style={{ width: 170, height: 32 }} value={userId} onChange={(e) => setUserId(Number(e.target.value))}>
+                    <option value={0}>{t('subscription.first_user')}</option>
+                    {(users.data || []).map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+                  </select>
+                  <a className="btn ghost icon sm" href={`api/subscription/preview?user=${userId}&open=1`} target="_blank" rel="noopener noreferrer" title={t('subscription.open_saved_page')}>
+                    <Icon name="external" />
+                  </a>
+                </div>
               </div>
-              {previewSrc && <iframe title={t('subscription.subscription_page')} src={previewSrc} />}
+              <div className="sub-preview-body">
+                {!previewReady && <div className="sub-preview-loading"><span className="spinner" /></div>}
+                {previewSrc && <iframe title={t('subscription.subscription_page')} src={previewSrc} onLoad={() => setPreviewReady(true)} />}
+              </div>
             </div>
           )}
         </div>
@@ -213,33 +233,37 @@ function BasicsTab({ b, set }: { b: SubBasics; set: (b: SubBasics) => void }) {
   const f = (k: keyof SubBasics) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     set({ ...b, [k]: k === 'updateHours' ? Number(e.target.value.replace(/\D/g, '')) || 0 : e.target.value })
   return (
-    <div className="card card-pad">
-      <Field label={t('subscription.subscription_name')} info={t('subscription.this_is_how_the_subscription')}>
-        <input className="input" value={b.title} onChange={f('title')} placeholder="VPN" />
-      </Field>
-      <div className="grid2">
-        <Field label={t('subscription.refresh_hours')} info={t('subscription.the_profile_update_interval')}>
-          <input className="input" inputMode="numeric" value={b.updateHours || ''} onChange={f('updateHours')} placeholder="12" />
+    <>
+      <div className="card card-pad">
+        <Field label={t('subscription.subscription_name')} info={t('subscription.this_is_how_the_subscription')}>
+          <input className="input" value={b.title} onChange={f('title')} placeholder="VPN" />
         </Field>
-        <Field label={t('subscription.support')} info={t('subscription.the_support_url_header_the')}>
-          <input className="input" value={b.supportUrl} onChange={f('supportUrl')} placeholder="https://t.me/your_support" />
+        <div className="grid2">
+          <Field label={t('subscription.refresh_hours')} info={t('subscription.the_profile_update_interval')}>
+            <input className="input" inputMode="numeric" value={b.updateHours || ''} onChange={f('updateHours')} placeholder="12" />
+          </Field>
+          <Field label={t('subscription.support')} info={t('subscription.the_support_url_header_the')}>
+            <input className="input" value={b.supportUrl} onChange={f('supportUrl')} placeholder="https://t.me/your_support" />
+          </Field>
+        </div>
+        {pro && (
+          <Field label={t('subscription.karing_dns_label')} info={t('subscription.karing_dns_help')}>
+            <textarea className="input mono" rows={3} value={(b.karingDns || []).join('\n')} onChange={(e) => set({ ...b, karingDns: e.target.value.split('\n') })} placeholder={'udp://8.8.8.8\nhttps://dns.google/dns-query'} />
+          </Field>
+        )}
+      </div>
+      <div className="card card-pad">
+        <Field label={t('subscription.announcement')} help={t('subscription.empty_not_shown')} info={t('subscription.the_announce_header_a_line')}>
+          <textarea className="input" rows={2} value={b.announce} onChange={f('announce')} placeholder={t('subscription.e_g_maintenance_on_saturday')} />
+        </Field>
+        <Field label={t('subscription.announcement_link')} info={t('subscription.the_announce_url_header_where')}>
+          <input className="input" value={b.announceUrl} onChange={f('announceUrl')} placeholder="https://t.me/your_channel" />
+        </Field>
+        <Field label={t('subscription.open_in_browser_page')} help={t('subscription.empty_this_subscription_s_page')} info={t('subscription.the_profile_web_page_url')}>
+          <input className="input" value={b.pageUrl} onChange={f('pageUrl')} placeholder={t('subscription.subscription_page_2')} />
         </Field>
       </div>
-      {pro && (
-        <Field label={t('subscription.karing_dns_label')} info={t('subscription.karing_dns_help')}>
-          <textarea className="input mono" rows={3} value={(b.karingDns || []).join('\n')} onChange={(e) => set({ ...b, karingDns: e.target.value.split('\n') })} placeholder={'udp://8.8.8.8\nhttps://dns.google/dns-query'} />
-        </Field>
-      )}
-      <Field label={t('subscription.announcement')} help={t('subscription.empty_not_shown')} info={t('subscription.the_announce_header_a_line')}>
-        <textarea className="input" rows={2} value={b.announce} onChange={f('announce')} placeholder={t('subscription.e_g_maintenance_on_saturday')} />
-      </Field>
-      <Field label={t('subscription.announcement_link')} info={t('subscription.the_announce_url_header_where')}>
-        <input className="input" value={b.announceUrl} onChange={f('announceUrl')} placeholder="https://t.me/your_channel" />
-      </Field>
-      <Field label={t('subscription.open_in_browser_page')} help={t('subscription.empty_this_subscription_s_page')} info={t('subscription.the_profile_web_page_url')}>
-        <input className="input" value={b.pageUrl} onChange={f('pageUrl')} placeholder={t('subscription.subscription_page_2')} />
-      </Field>
-    </div>
+    </>
   )
 }
 

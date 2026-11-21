@@ -2,12 +2,11 @@
 // layer on every plot. Colors are role tokens from styles.css (--s1…--s6, validated for the dark
 // surface: adjacent pairs pass the CVD and normal-vision checks); text always uses text tokens.
 import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { bytes } from './format'
-import { t, Trans } from './i18n'
+import { bytes, fmtAxisBytes } from './format'
+import { locale, t, Trans } from './i18n'
 
 export const SERIES = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)']
 
-/** Width of an element, following resizes. */
 /** Width of an element, following resizes. */
 function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   const ref = useRef<T>(null)
@@ -23,7 +22,6 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T>, number] {
   return [ref as React.RefObject<T>, w]
 }
 
-/** Clean axis maximum and ticks: 0, step, 2·step… covering max. */
 /** Clean axis maximum and ticks: 0, step, 2·step… covering max. */
 function niceTicks(max: number, count = 4, unit: 'bytes' | 'plain' = 'plain'): number[] {
   if (max <= 0) return [0, 1]
@@ -47,12 +45,13 @@ function niceTicks(max: number, count = 4, unit: 'bytes' | 'plain' = 'plain'): n
 
 export function timeLabel(t: number, bucket: number, long = false, days = false): string {
   const d = new Date(t * 1000)
-  if (days && !long) return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+  const loc = locale()
+  if (days && !long) return d.toLocaleDateString(loc, { day: '2-digit', month: '2-digit' })
   if (bucket < 86400) {
-    const hm = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-    return long ? `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}, ${hm}` : hm
+    const hm = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' })
+    return long ? `${d.toLocaleDateString(loc, { day: 'numeric', month: 'short' })}, ${hm}` : hm
   }
-  return d.toLocaleDateString('ru-RU', long ? { day: 'numeric', month: 'long', weekday: 'short' } : { day: '2-digit', month: '2-digit' })
+  return d.toLocaleDateString(loc, long ? { day: 'numeric', month: 'long', weekday: 'short' } : { day: '2-digit', month: '2-digit' })
 }
 
 export interface Series {
@@ -70,23 +69,24 @@ interface TimeChartProps {
   stacked?: boolean
   height?: number
   format?: (v: number) => string
+  axisFormat?: (v: number) => string
   unit?: 'bytes' | 'plain'
   max?: number // fixed axis maximum, e.g. 100 for percent
   empty?: ReactNode
 }
 
 /** A time series chart with a crosshair tooltip. Stacked areas/bars sum series bottom-up. */
-/** A time series chart with a crosshair tooltip. Stacked areas/bars sum series bottom-up. */
-export function TimeChart({ times, bucket, series, kind, stacked, height = 220, format = String, unit = 'plain', max: fixedMax, empty }: TimeChartProps) {
+export function TimeChart({ times, bucket, series, kind, stacked, height = 220, format = String, axisFormat, unit = 'plain', max: fixedMax, empty }: TimeChartProps) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const [hover, setHover] = useState<number | null>(null)
   const n = times.length
   const any = series.some((s) => s.values.some((v) => v != null && v > 0))
-  const pad = { l: 58, r: 12, t: 12, b: 26 }
+  const pad = { l: 64, r: 12, t: 16, b: 26 }
   const W = Math.max(width, 200)
   const H = height
   const iw = W - pad.l - pad.r
   const ih = H - pad.t - pad.b
+  const fmtTick = axisFormat ?? (unit === 'bytes' && format === fmtBytes ? fmtAxisBytes : format)
 
   // Stack tops per index.
   const tops: number[][] = series.map(() => new Array(n).fill(0))
@@ -145,7 +145,7 @@ export function TimeChart({ times, bucket, series, kind, stacked, height = 220, 
           {ticks.map((t) => (
             <g key={t}>
               <line className="grid" x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} />
-              <text className="lbl" x={pad.l - 8} y={y(t) + 3.5} textAnchor="end">{format(t)}</text>
+              <text className="lbl" x={pad.l - 10} y={y(t) + 4} textAnchor="end">{fmtTick(t)}</text>
             </g>
           ))}
           {labelAt.map((i) => (

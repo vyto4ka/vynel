@@ -74,11 +74,12 @@ var hiddenSettings = map[string]bool{
 	service.SettingSubTitle: true, service.SettingSubUpdateHours: true, service.SettingSubSupportURL: true,
 	service.SettingSubAnnounce: true, service.SettingSubAnnounceURL: true, service.SettingSubPageURL: true,
 	service.SettingSubHeaders: true, service.SettingSubPage: true, service.SettingSubRules: true,
+	service.SettingSubRouting: true, service.SettingSubKaringDNS: true,
 	// edited on the «Telegram» page
 	service.SettingBotAdmins: true, service.SettingBotBackupTime: true, service.SettingBotTimezone: true,
 	service.SettingBotAlerts: true, service.SettingBotAlertDelay: true, service.SettingBotAlertState: true, "bot.backup_last": true,
 	service.SettingBotSummaryTime: true, service.SettingBotSummaryLast: true, service.SettingBotQuickKeys: true,
 	service.SettingBotMiniAppFullscreen: true,
 	// edited on the «Аккаунт» page
-	service.SettingWebPasswordLogin: true,
+	service.SettingWebPasswordLogin: true, service.SettingWebLoginMode: true, service.SettingWebSessionPaths: true,
 }

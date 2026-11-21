@@ -11,7 +11,6 @@ export default {
   log_out: 'Log out',
   menu: 'Menu',
   open_the_panel_in_a: 'Open the panel in a browser: one-time link, no messages in the bot',
-  overview: 'Summary',
   protocols: 'Protocols & Xray',
   protocols_short: 'Protocols',
   session: 'Session',

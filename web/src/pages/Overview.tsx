@@ -6,7 +6,7 @@ import { UpdateBanner } from '../updates'
 import { t, Trans } from '../i18n'
 
 export function Overview() {
-  const { data, error } = useLoad(() => get<OverviewT>('overview'), [], 15000)
+  const { data, error } = useLoad(() => get<OverviewT>('overview'), [], 15000, 'overview')
   if (!data) return <Loading error={error} />
   const u = data.users
   return (
@@ -44,7 +44,7 @@ export function Overview() {
         <div className="card-pad"><TrafficChart days={data.daily} /></div>
       </div>
 
-      <div className="cards cols section-gap">
+      <div className="overview-split section-gap">
         <div className="card">
           <div className="card-head"><h3>{t('common.nodes')}</h3><a href="#/nodes" className="small">{t('overview.all')}</a></div>
           {data.nodes.length === 0 ? <Empty>{t('common.no_nodes_yet')}</Empty> : (

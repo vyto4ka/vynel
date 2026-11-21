@@ -4,7 +4,7 @@ import { LogTarget, UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../u
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ProviderIcon } from './Billing'
-import { ago, bps, bytes, nodeStateInfo, uptime } from '../format'
+import { ago, bps, bytes, fmtVersion, nodeStateInfo, uptime } from '../format'
 import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, Tabs, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans, Key } from '../i18n'
 import { useAdvanced } from '../mode'
@@ -12,9 +12,9 @@ import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
 import { NodeInspector } from './NodeInspector'
 
 export function Nodes() {
-  const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000)
-  const selfHost = useLoad(() => get<SelfHost>('self-host'), [], 30000)
-  const profiles = useLoad(() => get<Profile[]>('profiles'))
+  const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000, 'nodes')
+  const selfHost = useLoad(() => get<SelfHost>('self-host'), [], 30000, 'self-host')
+  const profiles = useLoad(() => get<Profile[]>('profiles'), [], 0, 'profiles')
   const [adding, setAdding] = useState(() => location.hash.startsWith('#/nodes/new'))
   const [inspectId, setInspectId] = useState<number | null>(null)
   const [join, setJoin] = useState<JoinInfo | null>(null)
@@ -383,7 +383,7 @@ function SelfHostCard({ sh, panelUpd, latest, onUpdate, onLog, onReload }: {
   }
 
   return (
-    <div className="card">
+    <div className="card selfhost-card">
       <div className="card-head">
         <div className="node-head">
           <span className="flag">🎛</span>
@@ -406,24 +406,34 @@ function SelfHostCard({ sh, panelUpd, latest, onUpdate, onLog, onReload }: {
         </div>
       </div>
       <div className="card-pad">
-        <div className="kv small" style={{ gridTemplateColumns: '110px 1fr' }}>
-          <div className="k">{t('nodes.panel_version')}</div><div>v{sh.version}</div>
-          <div className="k">{t('nodes.uptime')}</div><div>{uptime(sh.uptime)}</div>
-        </div>
-        {sh.certs.length > 0 && (
-          <div style={{ marginTop: 12 }}>
-            <div className="row between" style={{ marginBottom: 8 }}>
-              <span className="label">{t('nodes.certs_title')}</span>
-              {sh.renewSupported && sh.certs.length > 1 && (
-                <button type="button" className="btn sm ghost" disabled={busyDomain !== null} onClick={() => renew('')}>
-                  {busyDomain === '*' ? <span className="spinner" /> : <Icon name="refresh" />} {t('nodes.cert_reissue_all')}
-                </button>
-              )}
+        {sh.certs.length > 0 ? (
+          <div className="selfhost-grid">
+            <div>
+              <div className="kv small" style={{ gridTemplateColumns: '110px 1fr' }}>
+                <div className="k">{t('nodes.panel_version')}</div><div className="mono">{fmtVersion(sh.version)}</div>
+                <div className="k">{t('nodes.uptime')}</div><div>{uptime(sh.uptime)}</div>
+              </div>
+              <div className="muted small" style={{ marginTop: 12 }}>{t('nodes.panel_hosts_the_web')}</div>
             </div>
-            <CertsList certs={sh.certs} canRenew={!!sh.renewSupported} busyDomain={busyDomain} onRenew={renew} />
+            <div>
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <span className="label">{t('nodes.certs_title')}</span>
+                {sh.renewSupported && sh.certs.length > 1 && (
+                  <button type="button" className="btn sm ghost" disabled={busyDomain !== null} onClick={() => renew('')}>
+                    {busyDomain === '*' ? <span className="spinner" /> : <Icon name="refresh" />} {t('nodes.cert_reissue_all')}
+                  </button>
+                )}
+              </div>
+              <CertsList certs={sh.certs} canRenew={!!sh.renewSupported} busyDomain={busyDomain} onRenew={renew} />
+            </div>
+          </div>
+        ) : (
+          <div className="selfhost-inline">
+            <div className="selfhost-kv"><span className="k">{t('nodes.panel_version')}</span><span className="mono">{fmtVersion(sh.version)}</span></div>
+            <div className="selfhost-kv"><span className="k">{t('nodes.uptime')}</span><span>{uptime(sh.uptime)}</span></div>
+            <div className="muted small grow">{t('nodes.panel_hosts_the_web')}</div>
           </div>
         )}
-        <div className="muted small" style={{ marginTop: 10 }}>{t('nodes.panel_hosts_the_web')}</div>
       </div>
     </div>
   )

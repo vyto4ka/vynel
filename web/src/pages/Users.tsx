@@ -156,6 +156,11 @@ export function Users() {
                 {groups.data!.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             )}
+          </>
+        )}
+        <div className="grow" />
+        {standard && (
+          <>
             <button className="btn ghost" title={tr('users.export_info')} onClick={() => doExport(search, statusFilter, groupFilter, act)}><Icon name="download" /> <span className="hide-sm">{tr('users.export')}</span></button>
             <button className="btn" onClick={() => setTransfer(true)}><Icon name="move" /> <span className="hide-sm">{tr('users.transfer')}</span></button>
           </>

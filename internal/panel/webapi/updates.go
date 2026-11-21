@@ -326,6 +326,11 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 	for _, ns := range sts {
 		n := ns.Node
 		if n.Local {
+			info.Panel.Code = n.Code
+			info.Panel.Flag = n.Country
+			if n.Name != "" {
+				info.Panel.Name = "Панель · " + n.Name
+			}
 			continue
 		}
 		online := s.cfg.Connected != nil && s.cfg.Connected(n.ID)

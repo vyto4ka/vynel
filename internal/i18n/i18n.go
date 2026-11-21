@@ -204,13 +204,16 @@ func Error(lang string, err error) string {
 }
 
 // FromRequest picks the language of a request: the X-Lang header the panel's page sends, then
-// Accept-Language; an unknown language is Russian.
+// the ?lang= query parameter (used by iframe previews), then Accept-Language; an unknown language
+// is Russian.
 func FromRequest(r *http.Request) string {
-	if l := r.Header.Get("X-Lang"); l != "" {
-		if Supported(l) {
-			return l
+	for _, l := range []string{r.Header.Get("X-Lang"), r.URL.Query().Get("lang")} {
+		if l != "" {
+			if Supported(l) {
+				return l
+			}
+			return Default
 		}
-		return Default
 	}
 	for _, part := range strings.Split(r.Header.Get("Accept-Language"), ",") {
 		tag := strings.ToLower(strings.TrimSpace(strings.SplitN(part, ";", 2)[0]))

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/panel/subscription"
@@ -345,6 +346,10 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("user"), 10, 64)
 	u := s.subUser(r, id)
+	if r.URL.Query().Get("open") == "1" {
+		http.Redirect(w, r, s.subURLFor(r, u), http.StatusFound)
+		return
+	}
 	now := time.Now()
 	d, err := subscription.BuildPage(u, s.subURLFor(r, u), b, page, now)
 	if err != nil {
@@ -365,6 +370,7 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 		}
 		subscription.PopulatePageExtras(&d, devs, limit, hwidOff, daily, "", now)
 	}
+	subscription.ApplyPageLang(&d, i18n.FromRequest(r))
 	var buf bytes.Buffer
 	if err := subscription.RenderPage(&buf, d); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

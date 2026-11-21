@@ -135,3 +135,26 @@ func TestPageExtrasAndDeviceDelete(t *testing.T) {
 	}
 	_ = store.Device{}
 }
+
+func TestPreviewPageLangAndNoDuplicateHeader(t *testing.T) {
+	e := newEnv(t)
+	d, err := BuildPage(e.user, "https://sub.example.com/s/demo", service.SubBasics{Title: "VPN"}, service.DefaultSubPage(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Preview = true
+	ApplyPageLang(&d, "en")
+	var buf bytes.Buffer
+	if err := RenderPage(&buf, d); err != nil {
+		t.Fatal(err)
+	}
+	htmlStr := buf.String()
+	if strings.Contains(htmlStr, "Предпросмотр") || strings.Contains(htmlStr, "Открыть сохранённую страницу") {
+		t.Fatalf("duplicate Russian preview header must not be rendered inside iframe")
+	}
+	for _, want := range []string{`<html lang="en" translate="no"`, "Traffic", "Valid until", "Connect"} {
+		if !strings.Contains(htmlStr, want) {
+			t.Fatalf("English preview page missing %q", want)
+		}
+	}
+}

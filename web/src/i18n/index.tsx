@@ -41,7 +41,7 @@ export async function setLang(code: Lang): Promise<void> {
 }
 
 export const lang = (): Lang => current
-const locale = () => languages.find((l) => l.code === current)!.locale
+export const locale = () => languages.find((l) => l.code === current)!.locale
 
 function lookup(c: Catalog | undefined, key: string): Leaf | undefined {
   let v: any = c

@@ -11,7 +11,6 @@ export default {
   log_out: 'Выйти',
   menu: 'Меню',
   open_the_panel_in_a: 'Открыть панель в браузере: одноразовая ссылка, без сообщений в боте',
-  overview: 'Сводка',
   protocols: 'Протоколы и Xray',
   protocols_short: 'Протоколы',
   session: 'Сессия',

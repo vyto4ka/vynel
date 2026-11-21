@@ -13,6 +13,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
@@ -20,8 +21,8 @@ import (
 // The page shows the subscription URL (QR and deep links), never raw server links: those would
 // bypass the HWID limit (docs/ARCHITECTURE.md §8.4). Its look comes from service.SubPage.
 var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="robots" content="noindex"><title>{{.Heading}}</title>
+<html lang="{{.Lang}}" translate="no" class="notranslate"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex"><meta name="google" content="notranslate"><title>{{.Heading}}</title>
 <style>
 :root{--accent:{{.Accent}}}
 body{--bg:#191c20;--card:#23272c;--card2:#2b3036;--card3:#373b3e;--ink:#e6ecf0;--muted:#9ba8b4;--line:#393f46;--outline:#5a646e;
@@ -161,7 +162,6 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head><body class="{{.Theme}}"><main>
-{{if .Preview}}<aside class="card" aria-label="Предпросмотр подписки"><div class="card-head" style="margin-bottom:8px"><h2>Предпросмотр</h2><a class="btn sec sm" href="{{.URL}}" target="_blank" rel="noopener noreferrer">Открыть сохранённую страницу</a></div><div class="muted">Ссылки приложений открываются в новой вкладке. Удаление устройств в предпросмотре отключено.</div></aside>{{end}}
 
 <div class="card hero">
   <div class="hero-left">
@@ -180,12 +180,12 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 {{if .ShowTraffic}}
 <div class="kpis">
   <div class="kpi">
-    <div class="k">Трафик</div>
+    <div class="k">{{.T.Traffic}}</div>
     <div class="v">{{.Used}} <span class="muted" style="font-weight:400">/ {{.Limit}}</span></div>
     {{if .Percent}}<div class="bar"><i style="width:{{.Percent}}%"></i></div>{{end}}
   </div>
   <div class="kpi">
-    <div class="k">Действует до</div>
+    <div class="k">{{.T.ValidUntil}}</div>
     <div class="v">{{.Expire}}</div>
     {{if .DaysLeft}}<div class="s">{{.DaysLeft}}</div>{{end}}
   </div>
@@ -195,8 +195,8 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 {{if .ShowTraffic}}{{if .Daily}}
 <div class="card">
   <div class="card-head">
-    <h2>Трафик по дням</h2>
-    <div class="chart-info" id="chart-info">{{if .ChartHasData}}Макс: <b>{{.ChartMax}}</b>{{else}}Пока нет данных{{end}}</div>
+    <h2>{{.T.TrafficByDay}}</h2>
+    <div class="chart-info" id="chart-info">{{if .ChartHasData}}{{.T.Max}}: <b>{{.ChartMax}}</b>{{else}}{{.T.NoDataYet}}{{end}}</div>
   </div>
   <div class="chart-bars" id="chart-bars">
     {{range $i, $d := .Daily}}
@@ -210,25 +210,25 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
     {{end}}
   </div>
   <div class="legend">
-    <span><i style="background:var(--primary)"></i>Скачивание</span>
-    <span><i style="background:var(--pink)"></i>Отдача</span>
-    <span class="muted" style="margin-left:auto">14 дней</span>
+    <span><i style="background:var(--primary)"></i>{{.T.Download}}</span>
+    <span><i style="background:var(--pink)"></i>{{.T.Upload}}</span>
+    <span class="muted" style="margin-left:auto">{{.T.Days14}}</span>
   </div>
 </div>
 {{end}}{{end}}
 
 <div class="card">
   <div class="card-head">
-    <h2>Подключение</h2>
-    <span class="muted">Ссылка и QR-код</span>
+    <h2>{{.T.Connection}}</h2>
+    <span class="muted">{{.T.LinkAndQR}}</span>
   </div>
   <div class="{{if .QR}}connect-grid{{end}}">
-    {{if .QR}}<div class="qr-wrap"><img src="data:image/png;base64,{{.QR}}" alt="QR-код подписки"></div>{{end}}
+    {{if .QR}}<div class="qr-wrap"><img src="data:image/png;base64,{{.QR}}" alt="{{.T.QRAlt}}"></div>{{end}}
     <div style="min-width:0">
-      <div class="muted" style="margin-bottom:8px">Отсканируйте QR-код в приложении или скопируйте ссылку подписки:</div>
+      <div class="muted" style="margin-bottom:8px">{{.T.ScanOrCopy}}</div>
       <div class="copy">
-        <input id="u" readonly value="{{.URL}}" onclick="this.select()" aria-label="Ссылка подписки">
-        <button id="c" type="button" class="btn sm"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Копировать</span></button>
+        <input id="u" readonly value="{{.URL}}" onclick="this.select()" aria-label="{{.T.SubLinkLabel}}">
+        <button id="c" type="button" class="btn sm"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>{{.T.Copy}}</span></button>
       </div>
     </div>
   </div>
@@ -237,7 +237,7 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 {{if .Apps}}
 <div class="card">
   <div class="card-head">
-    <h2 id="apps-h">Приложения</h2>
+    <h2 id="apps-h">{{.T.Apps}}</h2>
     <span class="chip pink" id="os-badge" style="display:none"></span>
   </div>
   <div class="os-tabs" id="os-tabs" role="tablist">
@@ -250,39 +250,39 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
   <div class="apps" id="apps-grid">
     {{range .Apps}}
     <div class="app{{if .Recommended}} rec{{end}}" data-id="{{.ID}}" data-p="{{.Platforms}}">
-      <div class="app-top"><b>{{.Name}}</b><span class="rec-tag"{{if not .Recommended}} style="display:none"{{end}}>Рекомендуем</span></div>
+      <div class="app-top"><b>{{.Name}}</b><span class="rec-tag"{{if not .Recommended}} style="display:none"{{end}}>{{$.T.Recommended}}</span></div>
       {{if .Note}}<span class="note">{{.Note}}</span>{{end}}
       <div class="app-actions">
-        {{if .Link}}<a class="btn sm app-add" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить</a>{{end}}
-        <button type="button" class="btn sm app-copy"{{if .Link}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Скопировать ссылку</span></button>
-        {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>Скачать</a>{{end}}
+        {{if .Link}}<a class="btn sm app-add" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>{{$.T.Add}}</a>{{end}}
+        <button type="button" class="btn sm app-copy"{{if .Link}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>{{$.T.CopyLink}}</span></button>
+        {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{$.T.DownloadBtn}}</a>{{end}}
       </div>
     </div>
     {{end}}
   </div>
   <div class="guide">
-    <div class="guide-title" id="guide-title">Как подключиться</div>
+    <div class="guide-title" id="guide-title">{{.T.HowToConnect}}</div>
     {{if .Instructions}}<div class="steps">{{.Instructions}}</div>{{else}}
     <ol id="guide-steps">
-      <li>Установите рекомендованное приложение кнопкой «Скачать».</li>
-      <li>Вернитесь на эту страницу и нажмите «Добавить» — подписка загрузится автоматически.</li>
-      <li>Выберите сервер в приложении и включите подключение.</li>
+      <li>{{.T.Step1}}</li>
+      <li>{{.T.Step2}}</li>
+      <li>{{.T.Step3}}</li>
     </ol>{{end}}
   </div>
 </div>
 {{else if .Instructions}}
-<div class="card"><div class="card-head"><h2>Как подключиться</h2></div><div class="steps">{{.Instructions}}</div></div>
+<div class="card"><div class="card-head"><h2>{{.T.HowToConnect}}</h2></div><div class="steps">{{.Instructions}}</div></div>
 {{end}}
 
 {{if .ShowDevices}}
 <div class="card" id="devices-card" data-base="{{.DeviceActionBase}}">
   <div class="card-head">
-    <h2>Устройства (HWID)</h2>
-    <span class="muted" id="dev-counter">{{if .HWIDOff}}Проверка отключена{{else if .DeviceLimit}}{{len .Devices}} из {{.DeviceLimit}}{{else}}{{len .Devices}} подключено{{end}}</span>
+    <h2>{{.T.DevicesTitle}}</h2>
+    <span class="muted" id="dev-counter">{{if .HWIDOff}}{{.T.CheckDisabled}}{{else if .DeviceLimit}}{{len .Devices}} {{.T.Of}} {{.DeviceLimit}}{{else}}{{len .Devices}} {{.T.Connected}}{{end}}</span>
   </div>
   <div class="dev-list" id="dev-list">
     {{if not .Devices}}
-    <div class="empty-dev">Устройства появятся здесь после первого подключения приложения.</div>
+    <div class="empty-dev">{{.T.DevicesEmpty}}</div>
     {{else}}
     {{range .Devices}}
     <div class="dev-row" data-id="{{.ID}}">
@@ -291,7 +291,7 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
         <div class="dev-meta">{{.Meta}}{{if .LastSeen}} · {{.LastSeen}}{{end}}</div>
       </div>
       {{if $.DeviceActionBase}}
-      <button type="button" class="btn danger dev-del" data-id="{{.ID}}">Удалить</button>
+      <button type="button" class="btn danger dev-del" data-id="{{.ID}}">{{$.T.Delete}}</button>
       {{end}}
     </div>
     {{end}}
@@ -300,18 +300,21 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 </div>
 {{end}}
 
-{{if .SupportURL}}<a class="btn sec wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>Поддержка</a>{{end}}
+{{if .SupportURL}}<a class="btn sec wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>{{.T.Support}}</a>{{end}}
 {{if .Footer}}<div class="foot">{{.Footer}}</div>{{end}}
 </main>
 <script>
 (function(){
-  // Копирование ссылки
+  var L={
+    copy:{{.T.Copy}},copied:{{.T.Copied}},copyLink:{{.T.CopyLink}},
+    yourOS:{{.T.YourOS}},howOn:{{.T.HowToConnectOn}},
+    del:{{.T.Delete}},sure:{{.T.Sure}},err:{{.T.Error}},noDev:{{.T.NoLinkedDevices}}
+  };
   var c=document.getElementById('c');
   if(c){var s=c.querySelector('span');c.onclick=function(){var i=document.getElementById('u');
     (navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).catch(function(){i.select();document.execCommand('copy')});
-    s.textContent='Скопировано';setTimeout(function(){s.textContent='Копировать'},1600)}}
+    s.textContent=L.copied;setTimeout(function(){s.textContent=L.copy},1600)}}
 
-  // Интерактивный выбор дня на графике трафика
   var bars=document.getElementById('chart-bars'), info=document.getElementById('chart-info');
   if(bars&&info){
     var cols=[].slice.call(bars.querySelectorAll('.day-col'));
@@ -326,7 +329,6 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
     });
   }
 
-  // Автодетект ОС и переключение вкладок приложений
   var ua=navigator.userAgent||'';
   var detected=/android/i.test(ua)?'android':/iphone|ipad|ipod/i.test(ua)?'ios':/mac os|macintosh/i.test(ua)?'macos':/windows/i.test(ua)?'windows':/linux/i.test(ua)?'linux':'ios';
   var osNames={ios:'iOS',android:'Android',windows:'Windows',macos:'macOS',linux:'Linux'};
@@ -335,7 +337,7 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
     var tabs=[].slice.call(tabsWrap.querySelectorAll('.os-tab'));
     var cards=[].slice.call(grid.querySelectorAll('.app'));
     tabs.forEach(function(t){if(t.dataset.os===detected)t.classList.add('detected')});
-    if(badge){badge.textContent='Ваша ОС: '+osNames[detected];badge.style.display='inline-flex'}
+    if(badge){badge.textContent=L.yourOS+osNames[detected];badge.style.display='inline-flex'}
     function selectOS(os){
       tabs.forEach(function(t){t.classList.toggle('on',t.dataset.os===os)});
       var shown=0;
@@ -355,19 +357,18 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
         if(ok)shown++;
       });
       if(!shown){cards.forEach(function(el,idx){el.style.display='';el.classList.toggle('rec',idx===0);var tag=el.querySelector('.rec-tag');if(tag)tag.style.display=idx===0?'':'none'})}
-      if(gTitle){gTitle.textContent='Как подключиться на '+osNames[os]}
+      if(gTitle){gTitle.textContent=L.howOn+osNames[os]}
     }
     grid.addEventListener('click',function(e){
       var b=e.target.closest('.app-copy');if(!b)return;
       var i=document.getElementById('u'), sp=b.querySelector('span');
       if(i)(navigator.clipboard?navigator.clipboard.writeText(i.value):Promise.reject()).catch(function(){i.select();document.execCommand('copy')});
-      if(sp){sp.textContent='Скопировано';setTimeout(function(){sp.textContent='Скопировать ссылку'},1600)}
+      if(sp){sp.textContent=L.copied;setTimeout(function(){sp.textContent=L.copyLink},1600)}
     });
     tabs.forEach(function(t){t.onclick=function(){selectOS(t.dataset.os)}});
     selectOS(detected);
   }
 
-  // Удаление HWID-устройств (2-шаговое подтверждение прямо на кнопке)
   var dCard=document.getElementById('devices-card');
   if(dCard&&dCard.dataset.base){
     var base=dCard.dataset.base, list=document.getElementById('dev-list'), counter=document.getElementById('dev-counter');
@@ -375,8 +376,8 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
       var btn=e.target.closest('.dev-del');
       if(!btn||btn.disabled)return;
       if(!btn.classList.contains('arm')){
-        btn.classList.add('arm');btn.textContent='Точно?';
-        setTimeout(function(){if(btn.isConnected&&btn.classList.contains('arm')){btn.classList.remove('arm');btn.textContent='Удалить'}},3500);
+        btn.classList.add('arm');btn.textContent=L.sure;
+        setTimeout(function(){if(btn.isConnected&&btn.classList.contains('arm')){btn.classList.remove('arm');btn.textContent=L.del}},3500);
         return;
       }
       var id=btn.dataset.id;
@@ -385,13 +386,63 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
         if(!r.ok)throw new Error('err');
         var row=btn.closest('.dev-row');if(row)row.remove();
         var left=list.querySelectorAll('.dev-row').length;
-        if(!left){list.innerHTML='<div class="empty-dev">Привязанных устройств нет.</div>'}
+        if(!left){list.innerHTML='<div class="empty-dev">'+L.noDev+'</div>'}
         if(counter){counter.textContent=counter.textContent.replace(/^\d+/,String(left))}
-      }).catch(function(){btn.disabled=false;btn.classList.remove('arm');btn.textContent='Ошибка'});
+      }).catch(function(){btn.disabled=false;btn.classList.remove('arm');btn.textContent=L.err});
     });
   }
 })();
 </script></body></html>`))
+
+// PageText holds localized UI labels of the public subscription page.
+type PageText struct {
+	Traffic, ValidUntil, TrafficByDay, Max, NoDataYet      string
+	Download, Upload, Days14                               string
+	Connection, LinkAndQR, QRAlt, ScanOrCopy, SubLinkLabel string
+	Copy, Copied, CopyLink                                 string
+	Apps, Recommended, Add, DownloadBtn                    string
+	HowToConnect, HowToConnectOn, YourOS                   string
+	Step1, Step2, Step3                                    string
+	DevicesTitle, CheckDisabled, Of, Connected             string
+	DevicesEmpty, NoLinkedDevices, Delete, Sure, Error     string
+	Support                                                string
+}
+
+var pageTextRU = PageText{
+	Traffic: "Трафик", ValidUntil: "Действует до", TrafficByDay: "Трафик по дням",
+	Max: "Макс", NoDataYet: "Пока нет данных",
+	Download: "Скачивание", Upload: "Отдача", Days14: "14 дней",
+	Connection: "Подключение", LinkAndQR: "Ссылка и QR-код", QRAlt: "QR-код подписки",
+	ScanOrCopy: "Отсканируйте QR-код в приложении или скопируйте ссылку подписки:", SubLinkLabel: "Ссылка подписки",
+	Copy: "Копировать", Copied: "Скопировано", CopyLink: "Скопировать ссылку",
+	Apps: "Приложения", Recommended: "Рекомендуем", Add: "Добавить", DownloadBtn: "Скачать",
+	HowToConnect: "Как подключиться", HowToConnectOn: "Как подключиться на ", YourOS: "Ваша ОС: ",
+	Step1:        "Установите рекомендованное приложение кнопкой «Скачать».",
+	Step2:        "Вернитесь на эту страницу и нажмите «Добавить» — подписка загрузится автоматически.",
+	Step3:        "Выберите сервер в приложении и включите подключение.",
+	DevicesTitle: "Устройства (HWID)", CheckDisabled: "Проверка отключена", Of: "из", Connected: "подключено",
+	DevicesEmpty:    "Устройства появятся здесь после первого подключения приложения.",
+	NoLinkedDevices: "Привязанных устройств нет.", Delete: "Удалить", Sure: "Точно?", Error: "Ошибка",
+	Support: "Поддержка",
+}
+
+var pageTextEN = PageText{
+	Traffic: "Traffic", ValidUntil: "Valid until", TrafficByDay: "Traffic by day",
+	Max: "Max", NoDataYet: "No data yet",
+	Download: "Download", Upload: "Upload", Days14: "14 days",
+	Connection: "Connect", LinkAndQR: "Link and QR code", QRAlt: "Subscription QR code",
+	ScanOrCopy: "Scan the QR code in your app or copy the subscription link:", SubLinkLabel: "Subscription link",
+	Copy: "Copy", Copied: "Copied", CopyLink: "Copy link",
+	Apps: "Apps", Recommended: "Recommended", Add: "Add", DownloadBtn: "Download",
+	HowToConnect: "How to connect", HowToConnectOn: "How to connect on ", YourOS: "Your OS: ",
+	Step1:        "Install the recommended app using the “Download” button.",
+	Step2:        "Return to this page and tap “Add” — the subscription will import automatically.",
+	Step3:        "Pick a server in the app and turn the connection on.",
+	DevicesTitle: "Devices (HWID)", CheckDisabled: "Check disabled", Of: "of", Connected: "connected",
+	DevicesEmpty:    "Devices will appear here after the first app connection.",
+	NoLinkedDevices: "No linked devices.", Delete: "Remove", Sure: "Sure?", Error: "Error",
+	Support: "Support",
+}
 
 type pageApp struct {
 	ID, Name, Note, Platforms string
@@ -419,6 +470,8 @@ type pageDay struct {
 
 // PageData is everything the subscription page shows.
 type PageData struct {
+	Lang string
+	T    PageText
 	// Preview opens links outside the panel's iframe; failed external protocol
 	// launches must not replace the preview with a browser error page.
 	Preview                               bool
@@ -613,8 +666,78 @@ func accentRe(s string) bool {
 	return true
 }
 
+// ApplyPageLang switches page labels and generated status/unit text to lang ("en" or "ru").
+func ApplyPageLang(d *PageData, lang string) {
+	if lang != "en" {
+		d.Lang = "ru"
+		d.T = pageTextRU
+		return
+	}
+	d.Lang = "en"
+	d.T = pageTextEN
+	switch d.Status {
+	case "активна":
+		d.Status = "active"
+	case "отключена":
+		d.Status = "disabled"
+	case "исчерпан трафик":
+		d.Status = "traffic limit"
+	case "истекла":
+		d.Status = "expired"
+	}
+	if d.Limit == "безлимит" {
+		d.Limit = "unlimited"
+	}
+	if d.Expire == "бессрочно" {
+		d.Expire = "unlimited"
+	}
+	if strings.HasPrefix(d.DaysLeft, "осталось ") && strings.HasSuffix(d.DaysLeft, " дн.") {
+		n := strings.TrimSuffix(strings.TrimPrefix(d.DaysLeft, "осталось "), " дн.")
+		d.DaysLeft = n + " d left"
+	}
+	enUnits := func(s string) string {
+		s = strings.ReplaceAll(s, " ТБ", " TB")
+		s = strings.ReplaceAll(s, " ГБ", " GB")
+		s = strings.ReplaceAll(s, " МБ", " MB")
+		s = strings.ReplaceAll(s, " КБ", " KB")
+		return s
+	}
+	d.Used = enUnits(d.Used)
+	d.Limit = enUnits(d.Limit)
+	d.ChartMax = enUnits(d.ChartMax)
+	for i := range d.Daily {
+		d.Daily[i].HumanDown = enUnits(d.Daily[i].HumanDown)
+		d.Daily[i].HumanUp = enUnits(d.Daily[i].HumanUp)
+		d.Daily[i].HumanTotal = enUnits(d.Daily[i].HumanTotal)
+	}
+	for i := range d.Devices {
+		if d.Devices[i].Title == "Устройство" {
+			d.Devices[i].Title = "Device"
+		}
+		ls := d.Devices[i].LastSeen
+		switch {
+		case ls == "только что":
+			d.Devices[i].LastSeen = "just now"
+		case strings.HasSuffix(ls, " мин назад"):
+			d.Devices[i].LastSeen = strings.TrimSuffix(ls, " мин назад") + " min ago"
+		case strings.HasSuffix(ls, " ч назад"):
+			d.Devices[i].LastSeen = strings.TrimSuffix(ls, " ч назад") + " h ago"
+		case strings.HasSuffix(ls, " дн назад"):
+			d.Devices[i].LastSeen = strings.TrimSuffix(ls, " дн назад") + " d ago"
+		}
+	}
+}
+
 // RenderPage writes the page.
-func RenderPage(w io.Writer, d PageData) error { return pageTmpl.Execute(w, d) }
+func RenderPage(w io.Writer, d PageData) error {
+	if d.Lang == "" {
+		d.Lang = "ru"
+	}
+	if d.T.Traffic == "" {
+		d.T = pageTextRU
+	}
+	return pageTmpl.Execute(w, d)
+}
 
 func (h *Handler) handleDeviceDelete(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User, explicit string) {
 	rest, ok := strings.CutPrefix(explicit, "devices/")
@@ -668,6 +791,7 @@ func (h *Handler) page(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	}
 	prefix := h.svc.SubPrefix(ctx)
 	PopulatePageExtras(&d, devs, limit, hwidOff, daily, prefix+u.SubToken+"/devices/", now)
+	ApplyPageLang(&d, i18n.FromRequest(r))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = RenderPage(w, d)
