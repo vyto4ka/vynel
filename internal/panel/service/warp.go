@@ -165,7 +165,7 @@ func (s *Service) nodeWarpToView(n *store.Node, w *store.NodeWarp) *NodeWarpView
 		AddrV4:         w.AddrV4,
 		AddrV6:         w.AddrV6,
 		Reserved:       res,
-		Endpoint:       w.Endpoint,
+		Endpoint:       warp.NormalizeEndpoint(w.Endpoint),
 		MTU:            w.MTU,
 		Keepalive:      w.Keepalive,
 		DomainStrategy: w.DomainStrategy,
@@ -282,7 +282,7 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 		if _, _, err := net.SplitHostPort(ep); err != nil {
 			return nil, invalid("некорректный endpoint WARP %q: нужен формат host:port", ep)
 		}
-		w.Endpoint = ep
+		w.Endpoint = warp.NormalizeEndpoint(ep)
 	}
 	if in.MTU > 0 {
 		if in.MTU < 576 || in.MTU > 9000 {
@@ -311,7 +311,7 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 		}
 		applyCredsToStore(w, creds)
 		if ep := strings.TrimSpace(in.Endpoint); ep != "" {
-			w.Endpoint = ep
+			w.Endpoint = warp.NormalizeEndpoint(ep)
 		}
 	} else if lk := strings.TrimSpace(in.LicenseKey); lk != "" && lk != w.LicenseKey && w.CredMode == "auto" && w.DeviceID != "" {
 		creds, err := s.provisionWarpCreds(ctx, n, lk, w)
@@ -417,6 +417,13 @@ func (s *Service) CheckNodeWarp(ctx context.Context, nodeID int64) (*warp.CheckR
 		return nil, invalid("агент ноды %s не поддерживает живую проверку WARP; обновите агент ноды", n.Code)
 	}
 
+	// Best-effort activation for devices registered before warp_enabled=true PATCH was added.
+	if !w.LastCheckOK && w.CredMode == "auto" && w.DeviceID != "" && w.AccessToken != "" {
+		enCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_ = warp.EnableWarp(enCtx, &http.Client{Timeout: 5 * time.Second}, "", w.DeviceID, w.AccessToken)
+		cancel()
+	}
+
 	creds := warpCredsFromStore(w)
 	res, err := s.WarpCheck(ctx, n.ID, warp.CheckRequest{
 		SecretKey:      creds.SecretKey,
@@ -499,7 +506,7 @@ func warpCredsFromStore(w *store.NodeWarp) *warp.Credentials {
 		AddrV4:        w.AddrV4,
 		AddrV6:        w.AddrV6,
 		Reserved:      slices.Clone(w.Reserved),
-		Endpoint:      w.Endpoint,
+		Endpoint:      warp.NormalizeEndpoint(w.Endpoint),
 		MTU:           w.MTU,
 		Keepalive:     w.Keepalive,
 	}

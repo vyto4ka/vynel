@@ -35,6 +35,7 @@ func TestKeyPairAndReserved(t *testing.T) {
 
 func TestProvisionAndLicense(t *testing.T) {
 	cid := base64.StdEncoding.EncodeToString([]byte{10, 20, 30})
+	warpEnabled := false
 	licenseBound := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -50,7 +51,7 @@ func TestProvisionAndLicense(t *testing.T) {
 					"peers": []any{
 						map[string]any{
 							"public_key": DefaultPeerPublicKey,
-							"endpoint":   map[string]any{"host": "engage.cloudflareclient.com:2408"},
+							"endpoint":   map[string]any{"host": "engage.cloudflareclient.com:0"},
 						},
 					},
 					"interface": map[string]any{
@@ -61,6 +62,21 @@ func TestProvisionAndLicense(t *testing.T) {
 					},
 				},
 			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/reg/dev-1":
+			if r.Header.Get("Authorization") != "Bearer tok-1" {
+				http.Error(w, "missing auth", http.StatusUnauthorized)
+				return
+			}
+			var body struct {
+				WarpEnabled bool `json:"warp_enabled"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !body.WarpEnabled {
+				http.Error(w, "expected warp_enabled=true", http.StatusBadRequest)
+				return
+			}
+			warpEnabled = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"warp_enabled":true}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/reg/dev-1/account":
 			licenseBound = true
 			w.WriteHeader(http.StatusOK)
@@ -91,8 +107,31 @@ func TestProvisionAndLicense(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
+	if !warpEnabled {
+		t.Fatalf("expected PATCH /reg/dev-1 with warp_enabled=true to be called")
+	}
+	if creds.Endpoint != "engage.cloudflareclient.com:2408" {
+		t.Fatalf("expected normalized endpoint :2408, got %q", creds.Endpoint)
+	}
 	if creds.AccountType != "limited" || creds.AddrV4 != "172.16.0.2/32" || len(creds.Reserved) != 3 || creds.Reserved[0] != 10 {
 		t.Fatalf("unexpected creds: %+v", creds)
+	}
+}
+
+func TestNormalizeEndpoint(t *testing.T) {
+	cases := map[string]string{
+		"":                               DefaultEndpoint,
+		"engage.cloudflareclient.com:0":  "engage.cloudflareclient.com:2408",
+		"engage.cloudflareclient.com":    "engage.cloudflareclient.com:2408",
+		"162.159.192.1:0":                "162.159.192.1:2408",
+		"162.159.192.1:4500":             "162.159.192.1:4500",
+		"[2606:4700:d0::a29f:c001]:0":    "[2606:4700:d0::a29f:c001]:2408",
+		"[2606:4700:d0::a29f:c001]:2408": "[2606:4700:d0::a29f:c001]:2408",
+	}
+	for in, want := range cases {
+		if got := NormalizeEndpoint(in); got != want {
+			t.Errorf("NormalizeEndpoint(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
