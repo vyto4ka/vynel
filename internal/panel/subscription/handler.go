@@ -190,6 +190,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body)
 		return
 	}
+	if strings.HasPrefix(explicit, "geo/") {
+		// Reserved for future client geo asset delivery (keeps decoy 404 anti-probing behavior).
+		h.notFound(ctx, w)
+		return
+	}
 	rules, err := h.svc.SubRules(ctx)
 	if err != nil {
 		h.log.Warn("subscription rules", "err", err)

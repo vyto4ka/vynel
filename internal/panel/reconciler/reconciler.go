@@ -651,7 +651,8 @@ func (s *session) next() []*nodev1.PanelMessage {
 	}
 	s.pending, s.pendingAt = ds, now
 	parts := s.hello != nil && slices.Contains(s.hello.Capabilities, CapChunks)
-	if s.applied != nil && bytes.Equal(s.applied.Config, ds.Config) && bytes.Equal(s.applied.Caddy, ds.Caddy) && s.applied.Nginx == ds.Nginx {
+	if s.applied != nil && bytes.Equal(s.applied.Config, ds.Config) && bytes.Equal(s.applied.Caddy, ds.Caddy) &&
+		s.applied.Nginx == ds.Nginx && slices.Equal(s.applied.GeoAssets, ds.GeoAssets) {
 		d := Delta(s.applied, ds, rev)
 		// A bulk change makes a delta as big as a snapshot; that one can go in parts.
 		if !parts || proto.Size(d) <= PartBytes {
@@ -671,6 +672,9 @@ func (s *session) next() []*nodev1.PanelMessage {
 // Snapshot converts a desired state to the wire format.
 func Snapshot(ds *service.DesiredState, rev int64) *nodev1.Snapshot {
 	snap := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config, CaddyConfig: ds.Caddy, NginxConfig: ds.Nginx}
+	for _, a := range ds.GeoAssets {
+		snap.GeoAssets = append(snap.GeoAssets, &nodev1.GeoAsset{Name: a.Name, Sha256: a.SHA256, Size: a.Size})
+	}
 	for _, in := range ds.Inbounds {
 		iu := &nodev1.InboundUsers{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
 		for _, c := range ds.Users[in.Tag] {
@@ -696,7 +700,7 @@ func SnapshotParts(ds *service.DesiredState, rev int64, limit int) []*nodev1.Sna
 	if proto.Size(whole) <= limit {
 		return []*nodev1.Snapshot{whole}
 	}
-	cur := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config, CaddyConfig: ds.Caddy, NginxConfig: ds.Nginx}
+	cur := &nodev1.Snapshot{Revision: rev, Hash: ds.Hash, XrayConfig: ds.Config, CaddyConfig: ds.Caddy, NginxConfig: ds.Nginx, GeoAssets: whole.GeoAssets}
 	size := proto.Size(cur)
 	out := []*nodev1.Snapshot{cur}
 	next := func() {

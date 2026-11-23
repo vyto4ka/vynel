@@ -10,6 +10,7 @@ import { t, Trans, Key } from '../i18n'
 import { useAdvanced } from '../mode'
 import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
 import { NodeInspector } from './NodeInspector'
+import { NodeWarpModal } from '../components/NodeWarpModal'
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000, 'nodes')
@@ -20,6 +21,7 @@ export function Nodes() {
   const [join, setJoin] = useState<JoinInfo | null>(null)
   const [checkOf, setCheckOf] = useState<Node | null>(null)
   const [editNode, setEditNode] = useState<{ node: Node; tab?: 'general' | 'certs' } | null>(null)
+  const [warpOf, setWarpOf] = useState<Node | null>(null)
   const [attachTo, setAttachTo] = useState<Node | null>(null)
   const [wizardOf, setWizardOf] = useState<Node | null>(null)
   const [hostOf, setHostOf] = useState<Inbound | null>(null)
@@ -128,6 +130,18 @@ export function Nodes() {
                         <Badge color={certsSummary.color} dot>{certsSummary.label}</Badge>
                       </button>
                     )}
+                    {n.warp?.enabled && (
+                      <button
+                        type="button"
+                        className="chip-btn"
+                        onClick={() => setWarpOf(n)}
+                        title={n.warp.colo ? `WARP · ${n.warp.colo}` : 'WARP'}
+                      >
+                        <Badge color="green" dot>
+                          {n.warp.ruleMode === 'all' ? t('warp.badge_all') : t('warp.badge_rules', { count: n.warp.rulesCount })}
+                        </Badge>
+                      </button>
+                    )}
                     {n.setupStep > 0 && <Badge color="amber" dot>{t('nodes.without_profiles')}</Badge>}
                     <Badge color={st.color} dot>{st.label}</Badge>
                     {engineer && (
@@ -138,6 +152,7 @@ export function Nodes() {
                     <Menu title={t('common.actions')} items={[
                       { label: t('nodes.check_connection_config_dns'), icon: 'search', onClick: () => setCheckOf(n) },
                       { label: t('common.edit'), icon: 'edit', onClick: () => setEditNode({ node: n, tab: 'general' }) },
+                      { label: t('warp.title'), icon: 'cloud', onClick: () => setWarpOf(n) },
                       ...(!n.manual ? [{ label: t('nodes.certs_title'), icon: 'shield', onClick: () => setEditNode({ node: n, tab: 'certs' }) }] : []),
                       { label: n.enabled ? t('nodes.node_turned_off') : t('nodes.node_turned_on'), icon: 'power', onClick: async () => {
                         if (n.enabled && !(await confirm(`${n.name}: ${t('nodes.node_turned_off')}?`, t('common.yes')))) return
@@ -270,6 +285,7 @@ export function Nodes() {
       {wizardOf && <NodeWizardModal node={wizardOf} profiles={profiles.data || []} onClose={() => { setWizardOf(null); reload() }} onProfilesChanged={profiles.reload} />}
       {updLog && updLog.length > 0 && <UpdateLog id={updLog[0].id} name={updLog[0].name} targets={updLog} onClose={() => { setUpdLog(null); updates.reload() }} />}
       {checkOf && <NodeSetup node={checkOf} onClose={() => { setCheckOf(null); reload() }} />}
+      {warpOf && <NodeWarpModal node={warpOf} onClose={() => setWarpOf(null)} onSaved={reload} />}
       {editNode && (
         <EditNode
           n={nodes.data?.find((x) => x.id === editNode.node.id) || editNode.node}

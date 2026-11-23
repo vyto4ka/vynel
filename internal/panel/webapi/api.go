@@ -95,6 +95,8 @@ func (s *Server) routes() {
 	s.handle("POST /api/setup/auto-access", s.setupAutoAccess)
 	s.editorRoutes()
 	s.xrayRoutes()
+	s.warpRoutes()
+	s.geoRoutes()
 
 	s.subscriptionRoutes()
 	s.extraRoutes()
@@ -172,8 +174,9 @@ type Node struct {
 	// 3 = node variables, 4 = requirements. -1 = unknown (the step could not be computed).
 	SetupStep      int                `json:"setupStep"`
 	Provider       *Provider          `json:"provider"` // where the node is rented, nil = not set
-	Certs          []service.SelfCert `json:"certs,omitempty"`
-	CertsSupported bool               `json:"certsSupported,omitempty"`
+	Certs          []service.SelfCert       `json:"certs,omitempty"`
+	CertsSupported bool                     `json:"certsSupported,omitempty"`
+	Warp           *service.NodeWarpSummary `json:"warp,omitempty"`
 }
 
 // Metrics are the latest host numbers of a node.
@@ -937,8 +940,12 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 		}
 	}
 	var providers map[int64]*store.Provider
+	var warps map[int64]*service.NodeWarpSummary
 	if details {
 		if providers, err = s.svc.NodeProviders(ctx); err != nil {
+			return nil, err
+		}
+		if warps, err = s.svc.NodeWarpSummaries(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -948,7 +955,7 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain,
 			Local: n.Local, Manual: n.Manual, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
 			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, NginxVersion: n.NginxVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
-			Inbounds: []Inbound{}, Addresses: []Address{}, SetupStep: -1}
+			Inbounds: []Inbound{}, Addresses: []Address{}, SetupStep: -1, Warp: warps[n.ID]}
 		if details {
 			if step, err := s.svc.NodeSetupStep(ctx, n.ID); err == nil {
 				d.SetupStep = step

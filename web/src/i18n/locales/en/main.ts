@@ -16,6 +16,7 @@ export default {
   session: 'Session',
   system: 'System',
   tariffs: 'Tariffs',
+  resources: 'Resources',
   update_available: 'Update available',
   language: 'Language',
 

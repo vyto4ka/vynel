@@ -60,7 +60,9 @@ export default {
   origin_outbound_block: '{note} — blocks addresses over the IP limit',
   origin_outbound_egress: '{note} — exit through a separate IP',
   origin_outbound_cascade: '{note} — cascade exit',
+  origin_outbound_warp: '{note} — Cloudflare WARP tunnel',
   origin_rule_egress: 'rule: inbounds → {note}',
   origin_rule_cascade: 'cascade rule → {note}',
+  origin_rule_warp: 'WARP rule → {note}',
   origin_routing: 'routing — an empty section: without it the nodes’ API refuses rules',
 }

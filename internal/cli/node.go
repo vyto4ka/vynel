@@ -52,7 +52,7 @@ func nodeCmd() *cobra.Command {
 				}
 				slog.Info("joined the panel", "node", code)
 			}
-			dial, closeFn, err := agent.GRPCDialer(dataDir)
+			dial, fetchGeo, closeFn, err := agent.GRPCClient(dataDir)
 			if err != nil {
 				return err
 			}
@@ -61,7 +61,7 @@ func nodeCmd() *cobra.Command {
 			if fw {
 				fwm = &firewall.Manager{Log: slog.Default().With("component", "firewall")}
 			}
-			a, err := agent.New(agent.Config{DataDir: dataDir, Xray: bin, Version: buildinfo.Version, Dial: dial, Log: slog.Default(),
+			a, err := agent.New(agent.Config{DataDir: dataDir, Xray: bin, Version: buildinfo.Version, Dial: dial, FetchGeo: fetchGeo, Log: slog.Default(),
 				CaddyBin: caddyBin, NginxBin: nginxBin, WWWDir: wwwDir, TuneSysctl: tune, Firewall: fwm, Manual: manual})
 			if err != nil {
 				return err

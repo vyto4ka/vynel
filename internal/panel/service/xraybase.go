@@ -435,6 +435,8 @@ func configOrigins(cfg, base map[string]any) []ConfigOrigin {
 			switch {
 			case tag == xrayconf.IPBlockTag:
 				kind = "outbound_block"
+			case tag == xrayconf.WarpTag:
+				kind = "outbound_warp"
 			case strings.HasPrefix(tag, xrayconf.DirectTag+"@"):
 				kind = "outbound_egress"
 			}
@@ -462,7 +464,10 @@ func configOrigins(cfg, base map[string]any) []ConfigOrigin {
 			m, _ := r.(map[string]any)
 			tag, _ := m["outboundTag"].(string)
 			kind := "rule_cascade"
-			if strings.HasPrefix(tag, xrayconf.DirectTag+"@") {
+			switch {
+			case tag == xrayconf.WarpTag:
+				kind = "rule_warp"
+			case strings.HasPrefix(tag, xrayconf.DirectTag+"@"):
 				kind = "rule_egress"
 			}
 			out = append(out, ConfigOrigin{Path: fmt.Sprintf("routing.rules.%d", i), Kind: kind, Note: tag})
@@ -471,12 +476,12 @@ func configOrigins(cfg, base map[string]any) []ConfigOrigin {
 	return out
 }
 
-// maskConfig hides the Reality private keys and the password of Hysteria in place.
+// maskConfig hides the Reality private keys, WireGuard secret/preshared keys and Hysteria passwords in place.
 func maskConfig(v any) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {
-			if k == "privateKey" || k == "password" {
+			if k == "privateKey" || k == "password" || k == "secretKey" || k == "preSharedKey" {
 				if _, ok := x.(string); ok {
 					t[k] = "•••"
 					continue
@@ -491,12 +496,12 @@ func maskConfig(v any) {
 	}
 }
 
-// maskCompiledConfig hides private keys, passwords, and client UUIDs/auth tokens in place.
+// maskCompiledConfig hides private keys, WireGuard keys, passwords, and client UUIDs/auth tokens in place.
 func maskCompiledConfig(v any) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {
-			if k == "privateKey" || k == "password" {
+			if k == "privateKey" || k == "password" || k == "secretKey" || k == "preSharedKey" {
 				if _, ok := x.(string); ok {
 					t[k] = "•••"
 					continue

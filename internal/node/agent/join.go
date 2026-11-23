@@ -152,21 +152,27 @@ func loadPanelInfo(dir string) (*panelInfo, error) {
 
 // GRPCDialer returns a Dialer using the stored credentials.
 func GRPCDialer(dir string) (Dialer, func(), error) {
+	dial, _, closeFn, err := GRPCClient(dir)
+	return dial, closeFn, err
+}
+
+// GRPCClient returns a Dialer and a GeoFetcher sharing one mTLS gRPC connection to the panel.
+func GRPCClient(dir string) (Dialer, GeoFetcher, func(), error) {
 	info, err := loadPanelInfo(dir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("node is not joined (%w); run `vynel node join --token ...`", err)
+		return nil, nil, nil, fmt.Errorf("node is not joined (%w); run `vynel node join --token ...`", err)
 	}
 	cert, err := tls.LoadX509KeyPair(filepath.Join(dir, fileCert), filepath.Join(dir, fileKey))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	caPEM, err := os.ReadFile(filepath.Join(dir, fileCA))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	pool := x509.NewCertPool()
 	if b, _ := pem.Decode(caPEM); b == nil || !pool.AppendCertsFromPEM(caPEM) {
-		return nil, nil, errors.New("bad ca.crt")
+		return nil, nil, nil, errors.New("bad ca.crt")
 	}
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS13, ServerName: info.SNI, RootCAs: pool, Certificates: []tls.Certificate{cert}}
 	conn, err := grpc.NewClient(info.Addr,
@@ -177,11 +183,11 @@ func GRPCDialer(dir string) (Dialer, func(), error) {
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(nodev1.MaxMessage), grpc.MaxCallSendMsgSize(nodev1.MaxMessage)),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	client := nodev1.NewNodeGatewayClient(conn)
 	dial := func(ctx context.Context) (Conn, error) {
 		return client.Connect(ctx)
 	}
-	return dial, func() { conn.Close() }, nil
+	return dial, GRPCGeoFetcher(client), func() { conn.Close() }, nil
 }

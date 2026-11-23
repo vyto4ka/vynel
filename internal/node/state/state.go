@@ -29,14 +29,22 @@ type Inbound struct {
 	Users    []User `json:"users"`
 }
 
+// GeoAsset tracks one panel-managed .dat file applied on the node.
+type GeoAsset struct {
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256"`
+	Size   int64  `json:"size"`
+}
+
 // State is the applied desired state.
 type State struct {
-	Revision int64     `json:"revision"`
-	Hash     string    `json:"hash"`
-	Config   []byte    `json:"config"` // Xray config without clients
-	Inbounds []Inbound `json:"inbounds"`
-	Caddy    []byte    `json:"caddy,omitempty"`
-	Nginx    string    `json:"nginx,omitempty"`
+	Revision  int64      `json:"revision"`
+	Hash      string     `json:"hash"`
+	Config    []byte     `json:"config"` // Xray config without clients
+	Inbounds  []Inbound  `json:"inbounds"`
+	Caddy     []byte     `json:"caddy,omitempty"`
+	Nginx     string     `json:"nginx,omitempty"`
+	GeoAssets []GeoAsset `json:"geoAssets,omitempty"`
 }
 
 // Inbound returns the inbound with tag, or nil.

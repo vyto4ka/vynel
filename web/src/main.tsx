@@ -25,6 +25,7 @@ import { Audit } from './pages/Audit'
 import { Telegram } from './pages/Telegram'
 import { Api } from './pages/Api'
 import { Account } from './pages/Account'
+import { GeoFiles } from './pages/GeoFiles'
 import { languages, lang, setLang, t } from './i18n'
 import { Mode, ModeProvider, isMigrant, markModeChosen, modeChosen, modeRank, setMigrant, useEngineer, useMode } from './mode'
 import { confirmPageLeave } from './unsaved'
@@ -259,7 +260,7 @@ function ProtocolsHub({ initialTab }: { initialTab?: string }) {
 
 function SystemHub({ initialTab }: { initialTab?: string }) {
   const eng = useEngineer()
-  const valid = new Set(['settings', 'telegram', 'account', ...(eng ? ['api', 'audit'] : [])])
+  const valid = new Set(['settings', 'resources', 'telegram', 'account', ...(eng ? ['api', 'audit'] : [])])
   const saved = getUIState('hub.system', 'settings')
   const [tab, setTabState] = useState(initialTab && valid.has(initialTab) ? initialTab : valid.has(saved) ? saved : 'settings')
   const setTab = (next: string) => { setUIState('hub.system', next); setTabState(next) }
@@ -269,6 +270,7 @@ function SystemHub({ initialTab }: { initialTab?: string }) {
   }, [initialTab, eng])
   const items = [
     { id: 'settings', label: t('common.settings') },
+    { id: 'resources', label: t('main.resources') },
     { id: 'telegram', label: 'Telegram' },
     ...(eng ? [
       { id: 'api', label: t('integrations.title') },
@@ -283,6 +285,7 @@ function SystemHub({ initialTab }: { initialTab?: string }) {
         onChange={setTab}
         onHover={(id) => {
           if (id === 'settings') prefetch('settings', () => get('settings'), 30000)
+          if (id === 'resources') prefetch('geo-files', () => get('geo/files'), 15000)
           if (id === 'telegram') prefetch('bot', () => get('bot'), 10000)
           if (id === 'api') prefetch('integrations', () => get('integrations'), 15000)
           if (id === 'audit') prefetch('audit:300', () => get('audit?limit=300'), 15000)
@@ -294,6 +297,7 @@ function SystemHub({ initialTab }: { initialTab?: string }) {
         items={items}
       />
       {tab === 'settings' && <Settings />}
+      {tab === 'resources' && <GeoFiles />}
       {tab === 'telegram' && <Telegram />}
       {tab === 'api' && eng && <Api />}
       {tab === 'audit' && eng && <Audit />}

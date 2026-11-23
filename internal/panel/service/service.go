@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/certs"
+	"github.com/vyto4ka/vynel/internal/geostore"
 	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/store"
+	"github.com/vyto4ka/vynel/internal/warp"
 )
 
 // ErrInvalid marks input validation failures.
@@ -120,6 +122,12 @@ type Service struct {
 	SelfCertStatus func(domain string) (certs.Status, bool)
 	// SelfCertRenew force-renews certificates of the panel's own nginx (empty domain = all).
 	SelfCertRenew func(ctx context.Context, domain string) ([]string, error)
+	// Geo manages panel .dat geo assets (geosite/geoip) and their in-memory index.
+	Geo *geostore.Store
+	// WarpProvision registers a Cloudflare WARP account (or binds WARP+) from a connected node.
+	WarpProvision func(ctx context.Context, nodeID int64, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error)
+	// WarpCheck runs a live cdn-cgi/trace check through a node's WARP tunnel.
+	WarpCheck func(ctx context.Context, nodeID int64, req warp.CheckRequest) (*warp.CheckResult, error)
 }
 
 // New creates a service over a store.

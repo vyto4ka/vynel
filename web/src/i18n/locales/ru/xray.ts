@@ -60,7 +60,9 @@ export default {
   origin_outbound_block: '{note} — блок адресов сверх лимита IP',
   origin_outbound_egress: '{note} — выход через отдельный IP',
   origin_outbound_cascade: '{note} — выход каскада',
+  origin_outbound_warp: '{note} — туннель Cloudflare WARP',
   origin_rule_egress: 'правило: инбаунды → {note}',
   origin_rule_cascade: 'правило каскада → {note}',
+  origin_rule_warp: 'правило WARP → {note}',
   origin_routing: 'routing — пустой раздел: без него API нод не принимает правила',
 }
