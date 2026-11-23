@@ -9,7 +9,6 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,7 +27,7 @@ import (
 )
 
 const (
-	DefaultAPIBase        = "https://api.cloudflareclient.com/v0a2158"
+	DefaultAPIBase        = "https://api.cloudflareclient.com/v0a4005"
 	DefaultEndpoint       = "engage.cloudflareclient.com:2408"
 	DefaultPeerPublicKey  = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 	DefaultMTU            = 1280
@@ -171,17 +170,13 @@ func Provision(ctx context.Context, client *http.Client, apiBase, licenseKey str
 	if err != nil {
 		return nil, err
 	}
-	var serial [8]byte
-	_, _ = rand.Read(serial[:])
-
+	hostName, _ := os.Hostname()
 	body, _ := json.Marshal(map[string]any{
-		"key":           pub,
-		"install_id":    "",
-		"fcm_token":     "",
-		"tos":           time.Now().UTC().Format(time.RFC3339Nano),
-		"model":         "PC",
-		"serial_number": hex.EncodeToString(serial[:]),
-		"locale":        "en_US",
+		"key":   pub,
+		"tos":   time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"type":  "PC",
+		"model": "vynel",
+		"name":  hostName,
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/reg", bytes.NewReader(body))
@@ -360,8 +355,7 @@ func credentialsFromCF(reg *cfRegResponse, priv, pub string) (*Credentials, erro
 
 func setCFHeaders(req *http.Request, token string) {
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
-	req.Header.Set("User-Agent", "okhttp/3.12.1")
-	req.Header.Set("CF-Client-Version", "a-6.30-2158")
+	req.Header.Set("CF-Client-Version", "a-6.30-3596")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -551,7 +545,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		wgSettings["reserved"] = req.Reserved
 	}
 	cfg := map[string]any{
-		"log": map[string]any{"loglevel": "warning"},
+		"log": map[string]any{"loglevel": "debug"},
 		"inbounds": []any{
 			map[string]any{
 				"tag":      "probe-in",
@@ -589,7 +583,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		return res
 	}
 
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 16*time.Second)
 	defer cancel()
 
 	var stderr bytes.Buffer
@@ -645,7 +639,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
 			return dialer.Dial(network, addr)
 		},
-		TLSHandshakeTimeout:   8 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 	}
 	defer tr.CloseIdleConnections()
@@ -661,7 +655,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	if err != nil {
 		stopCmd()
 		detail := fmt.Sprintf("туннель WARP (%s) не отвечает: %v", req.Endpoint, err)
-		if tail := lastNonEmptyLine(stderr.String()); tail != "" {
+		if tail := summarizeXrayProbeLog(stderr.String()); tail != "" {
 			detail += " | xray: " + tail
 		}
 		res.Error = detail
@@ -697,8 +691,26 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	return res
 }
 
-func lastNonEmptyLine(s string) string {
+func summarizeXrayProbeLog(s string) string {
 	lines := strings.Split(s, "\n")
+	// Prefer explicit WireGuard/handshake/dial errors over generic "accepted" lines.
+	priorities := []string{
+		"Handshake did not complete",
+		"Failed to send handshake",
+		"failed to create TCP",
+		"failed to dial",
+		"Received handshake response",
+		"Sending handshake initiation",
+		"[Error]",
+		"[Warning]",
+	}
+	for _, needle := range priorities {
+		for i := len(lines) - 1; i >= 0; i-- {
+			if t := strings.TrimSpace(lines[i]); strings.Contains(t, needle) {
+				return t
+			}
+		}
+	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		if t := strings.TrimSpace(lines[i]); t != "" {
 			return t
