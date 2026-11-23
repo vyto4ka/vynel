@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -87,6 +88,23 @@ func normalizeCIDR(s string, defaultBits int) string {
 		return fmt.Sprintf("%s/%d", ip.String(), defaultBits)
 	}
 	return s
+}
+
+// NormalizeEndpoint ensures a WireGuard endpoint has a valid non-zero UDP port.
+// Cloudflare WARP registration often returns "engage.cloudflareclient.com:0".
+func NormalizeEndpoint(ep string) string {
+	ep = strings.TrimSpace(ep)
+	if ep == "" {
+		return DefaultEndpoint
+	}
+	host, port, err := net.SplitHostPort(ep)
+	if err != nil {
+		return net.JoinHostPort(strings.Trim(ep, "[]"), "2408")
+	}
+	if port == "" || port == "0" {
+		port = "2408"
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // GenerateKeyPair creates a WireGuard X25519 key pair in standard base64 encoding.
@@ -193,12 +211,45 @@ func Provision(ctx context.Context, client *http.Client, apiBase, licenseKey str
 	if err != nil {
 		return nil, err
 	}
+	if err := EnableWarp(ctx, client, apiBase, creds.DeviceID, creds.AccessToken); err != nil {
+		return nil, err
+	}
 	if lk := strings.TrimSpace(licenseKey); lk != "" {
 		if err := SetLicense(ctx, client, apiBase, creds, lk); err != nil {
 			return creds, err
 		}
 	}
 	return creds, nil
+}
+
+// EnableWarp activates the WireGuard tunnel (warp_enabled=true) for a registered Cloudflare WARP device.
+// Without this PATCH call, Cloudflare Edge silently drops WireGuard handshakes for newly created devices.
+func EnableWarp(ctx context.Context, client *http.Client, apiBase, deviceID, accessToken string) error {
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
+	if apiBase == "" {
+		apiBase = DefaultAPIBase
+	}
+	apiBase = strings.TrimRight(apiBase, "/")
+	if deviceID == "" || accessToken == "" {
+		return errors.New("missing deviceID or accessToken for WARP enable")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, apiBase+"/reg/"+deviceID, bytes.NewReader([]byte(`{"warp_enabled":true}`)))
+	if err != nil {
+		return err
+	}
+	setCFHeaders(req, accessToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("cloudflare warp enable: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("cloudflare warp enable HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return nil
 }
 
 // SetLicense binds a WARP+ license key to an existing Cloudflare WARP device and refreshes its config.
@@ -273,7 +324,7 @@ func credentialsFromCF(reg *cfRegResponse, priv, pub string) (*Credentials, erro
 			peerPub = reg.Config.Peers[0].PublicKey
 		}
 		if reg.Config.Peers[0].Endpoint.Host != "" {
-			endpoint = reg.Config.Peers[0].Endpoint.Host
+			endpoint = NormalizeEndpoint(reg.Config.Peers[0].Endpoint.Host)
 		}
 	}
 	reserved, err := DecodeReserved(reg.Config.ClientID)
@@ -355,7 +406,7 @@ func ParseWireGuardConf(raw string) (*Credentials, error) {
 		case "presharedkey":
 			creds.PresharedKey = v
 		case "endpoint":
-			creds.Endpoint = v
+			creds.Endpoint = NormalizeEndpoint(v)
 		case "mtu":
 			if n, err := strconv.Atoi(v); err == nil && n >= 576 && n <= 9000 {
 				creds.MTU = n
@@ -454,6 +505,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		res.Error = "не заданы параметры туннеля WARP"
 		return res
 	}
+	req.Endpoint = NormalizeEndpoint(req.Endpoint)
 	if req.PeerPublicKey == "" {
 		req.PeerPublicKey = DefaultPeerPublicKey
 	}
@@ -481,6 +533,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	peer := map[string]any{
 		"publicKey":  req.PeerPublicKey,
 		"endpoint":   req.Endpoint,
+		"keepAlive":  DefaultKeepalive,
 		"allowedIPs": []string{"0.0.0.0/0", "::/0"},
 	}
 	if req.PresharedKey != "" {
@@ -541,12 +594,16 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		res.Error = fmt.Sprintf("запуск xray: %v", err)
 		return res
 	}
-	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = cmd.Wait()
-	}()
+	var stopOnce sync.Once
+	stopCmd := func() {
+		stopOnce.Do(func() {
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			_ = cmd.Wait()
+		})
+	}
+	defer stopCmd()
 
 	// Wait until the temporary SOCKS5 listener accepts connections.
 	ready := false
@@ -563,6 +620,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		time.Sleep(100 * time.Millisecond)
 	}
 	if !ready {
+		stopCmd()
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
 			res.Error = fmt.Sprintf("xray не поднял тестовый туннель: %s", msg)
@@ -595,7 +653,12 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	}
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		res.Error = fmt.Sprintf("туннель WARP не отвечает: %v", err)
+		stopCmd()
+		detail := fmt.Sprintf("туннель WARP (%s) не отвечает: %v", req.Endpoint, err)
+		if tail := lastNonEmptyLine(stderr.String()); tail != "" {
+			detail += " | xray: " + tail
+		}
+		res.Error = detail
 		return res
 	}
 	defer resp.Body.Close()
@@ -626,4 +689,14 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	}
 	res.OK = true
 	return res
+}
+
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); t != "" {
+			return t
+		}
+	}
+	return ""
 }
