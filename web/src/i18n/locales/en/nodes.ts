@@ -117,6 +117,7 @@ export default {
   this_is_the_panel_server: ' This is the panel server: the panel will be unavailable until it boots (usually 1–2 minutes).',
   this_node_s_parameters: 'This node’s parameters',
   today: 'Today',
+  check_updates: 'Check for updates',
   update: 'Update',
   update_all: 'Update all',
   update_all_2: 'Update all ({count})',

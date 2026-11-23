@@ -117,6 +117,7 @@ export default {
   this_is_the_panel_server: ' Это сервер панели: панель будет недоступна, пока он не загрузится (обычно 1–2 минуты).',
   this_node_s_parameters: 'Параметры этой ноды',
   today: 'Сегодня',
+  check_updates: 'Проверить обновления',
   update: 'Обновить',
   update_all: 'Обновить все',
   update_all_2: 'Обновить все ({count})',

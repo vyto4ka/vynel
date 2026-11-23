@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { CertInfo, del, get, Group, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap, Variable } from '../api'
-import { LogTarget, UpdateChip, UpdateLog, useRunUpdate, useUpdates } from '../updates'
+import { LogTarget, UpdateChip, UpdateLog, useCheckUpdates, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ProviderIcon } from './Billing'
@@ -30,6 +30,7 @@ export function Nodes() {
   const confirm = useConfirm()
   const reload = nodes.reload
   const updates = useUpdates(15000)
+  const checkUpd = useCheckUpdates()
   const [updLog, setUpdLog] = useState<LogTarget[] | null>(null)
   const upd = useRunUpdate(updates.data, () => { updates.reload(); reload(); selfHost.reload() }, (targets) => setUpdLog(targets))
   const engineer = useAdvanced()
@@ -67,6 +68,14 @@ export function Nodes() {
     <>
       <div className="toolbar">
         <div className="grow" />
+        <button
+          className="btn"
+          disabled={checkUpd.checking}
+          onClick={checkUpd.check}
+          title={updates.data?.checkedAt ? t('updates.last_checked', { v: ago(updates.data.checkedAt) }) : undefined}
+        >
+          {checkUpd.checking ? <span className="spinner" /> : <Icon name="refresh" />}{' '}{t('nodes.check_updates')}
+        </button>
         {(updates.data?.count || 0) > 0 && <button className="btn" onClick={async () => {
           if (await confirm(<><Trans k="nodes.update_all_outdated_servers" v={{ latest: updates.data!.latest }} /></>, t('nodes.update_all'), false))
             upd.run('all')

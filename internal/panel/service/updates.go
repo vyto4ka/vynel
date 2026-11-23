@@ -25,7 +25,6 @@ func (s *Service) RecordUpdateSent(ctx context.Context, nodeID int64, fromVersio
 		UpdatedAt:   now,
 	}
 	if prev != nil {
-		r.DismissedAt = prev.DismissedAt
 		if errMsg == "" && prev.StartedAt >= now-10 && (prev.State == "running" || prev.State == "done") {
 			r.State = prev.State
 			r.OK = prev.OK
