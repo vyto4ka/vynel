@@ -2,8 +2,13 @@ package warp
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -193,5 +198,50 @@ func TestParseRules(t *testing.T) {
 	}
 	if _, err := ParseRules([]string{"ext-domain:../bad.dat:ai"}, nil); err == nil {
 		t.Fatal("expected error for traversal filename")
+	}
+}
+
+func TestProvisionMasque(t *testing.T) {
+	epKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epDER, _ := x509.MarshalPKIXPublicKey(&epKey.PublicKey)
+	epPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: epDER}))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/reg":
+			_, _ = w.Write([]byte(`{"id":"m-dev","token":"m-tok","account":{"account_type":"free","license":"L1"}}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/reg/m-dev":
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["key_type"] != "secp256r1" || body["tunnel_type"] != "masque" {
+				http.Error(w, "bad enroll", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      "m-dev",
+				"account": map[string]any{"account_type": "free", "license": "L1"},
+				"config": map[string]any{
+					"interface": map[string]any{"addresses": map[string]any{"v4": "172.16.0.2", "v6": "2606:4700:110::2"}},
+					"peers": []any{map[string]any{
+						"public_key": epPEM,
+						"endpoint":   map[string]any{"v4": "162.159.198.1:0"},
+					}},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	creds, err := ProvisionMasque(context.Background(), srv.Client(), srv.URL, "", TransportMasqueH3)
+	if err != nil {
+		t.Fatalf("ProvisionMasque: %v", err)
+	}
+	if creds.Transport != TransportMasqueH3 || !IsMasqueKey(creds.SecretKey) || creds.Endpoint != "162.159.198.1:443" {
+		t.Fatalf("unexpected masque creds: %+v", creds)
 	}
 }

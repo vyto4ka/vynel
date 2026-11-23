@@ -88,3 +88,47 @@ func TestBuildConfigWithWarpOrdering(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildConfigWithWarpMasque(t *testing.T) {
+	base, err := ParseBase(DefaultBaseJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range []string{"masque-h3", "masque-h2"} {
+		cfg, err := BuildConfig(NodeConfig{
+			Base:    base,
+			APIAddr: "127.0.0.1:10085",
+			Warp: &WarpConfig{
+				Transport:     tr,
+				SecretKey:     "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+				PeerPublicKey: "-----BEGIN PUBLIC KEY-----\npeer\n-----END PUBLIC KEY-----\n",
+				Addresses:     []string{"172.16.0.2/32", "2606:4700:110::2/128"},
+				Endpoint:      "162.159.198.2:443",
+				Domains:       []string{"geosite:openai"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("BuildConfig(%s): %v", tr, err)
+		}
+		obs := cfg["outbounds"].([]any)
+		var warpOut map[string]any
+		for _, o := range obs {
+			m := o.(map[string]any)
+			if m["tag"] == WarpTag {
+				warpOut = m
+			}
+		}
+		if warpOut == nil || warpOut["protocol"] != "masque" {
+			t.Fatalf("expected masque outbound for %s, got %#v", tr, warpOut)
+		}
+		ss := warpOut["streamSettings"].(map[string]any)
+		alpn := ss["tlsSettings"].(map[string]any)["alpn"].([]any)
+		wantALPN := "h3"
+		if tr == "masque-h2" {
+			wantALPN = "h2"
+		}
+		if len(alpn) != 1 || alpn[0] != wantALPN {
+			t.Fatalf("expected alpn [%s], got %#v", wantALPN, alpn)
+		}
+	}
+}

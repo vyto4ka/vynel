@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { get, Node, NodeWarpView, post, put, WarpCheckResult } from '../api'
+import { get, Node, NodeWarpView, post, put, WarpCheckResult, WarpTransport } from '../api'
 import { Badge, Field, Icon, Loading, Modal, Switch, useAction, useConfirm, useToast } from '../ui'
 import { t } from '../i18n'
 import { RuleListInput } from './RuleListInput'
@@ -17,7 +17,14 @@ const PRESETS: { id: string; labelKey: string; rules: string[] }[] = [
   { id: 'stream', labelKey: 'warp.preset_stream', rules: ['geosite:netflix', 'geosite:spotify', 'geosite:reddit', 'geosite:discord'] },
 ]
 
-const ENDPOINTS = [
+const MASQUE_ENDPOINTS = [
+  '162.159.198.2:443',
+  '162.159.198.1:443',
+  '162.159.198.2:8443',
+  '162.159.198.2:4500',
+]
+
+const WG_ENDPOINTS = [
   'engage.cloudflareclient.com:2408',
   'engage.cloudflareclient.com:4500',
   'engage.cloudflareclient.com:1701',
@@ -25,6 +32,12 @@ const ENDPOINTS = [
   '162.159.192.1:2408',
   '162.159.193.1:2408',
 ]
+
+function transportShortLabel(tr: WarpTransport): string {
+  if (tr === 'masque-h2') return 'MASQUE H2'
+  if (tr === 'wireguard') return 'WireGuard'
+  return 'MASQUE H3'
+}
 
 export function NodeWarpModal({ node, onClose, onSaved }: Props) {
   const act = useAction()
@@ -34,10 +47,11 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<NodeWarpView | null>(null)
   const [enabled, setEnabled] = useState(false)
+  const [transport, setTransport] = useState<WarpTransport>('masque-h3')
   const [ruleMode, setRuleMode] = useState<'rules' | 'all'>('rules')
   const [rulesText, setRulesText] = useState('')
   const [licenseKey, setLicenseKey] = useState('')
-  const [endpoint, setEndpoint] = useState(ENDPOINTS[0])
+  const [endpoint, setEndpoint] = useState(MASQUE_ENDPOINTS[0])
   const [domainStrategy, setDomainStrategy] = useState('ForceIPv4v6')
   const [mtu, setMtu] = useState(1280)
 
@@ -47,13 +61,27 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
   const [wgConf, setWgConf] = useState('')
 
   const syncFromView = (v: NodeWarpView) => {
+    const tr: WarpTransport = v.transport === 'masque-h2' || v.transport === 'wireguard' ? v.transport : 'masque-h3'
     setData(v)
     setEnabled(v.enabled)
+    setTransport(tr)
     setRuleMode(v.ruleMode === 'all' ? 'all' : 'rules')
     setRulesText((v.rules || []).join('\n'))
-    setEndpoint(v.endpoint || ENDPOINTS[0])
+    setEndpoint(v.endpoint || (tr === 'wireguard' ? WG_ENDPOINTS[0] : MASQUE_ENDPOINTS[0]))
     setDomainStrategy(v.domainStrategy || 'ForceIPv4v6')
     setMtu(v.mtu || 1280)
+  }
+
+  const handleTransportChange = (next: WarpTransport) => {
+    setTransport(next)
+    const ep = endpoint.trim().toLowerCase()
+    if (next === 'wireguard') {
+      if (!ep || ep.startsWith('162.159.198.') || ep.startsWith('consumer-masque.')) {
+        setEndpoint(WG_ENDPOINTS[0])
+      }
+    } else if (!ep || ep.startsWith('engage.cloudflareclient.com') || ep.startsWith('162.159.192.') || ep.startsWith('162.159.193.')) {
+      setEndpoint(MASQUE_ENDPOINTS[0])
+    }
   }
 
   useEffect(() => {
@@ -86,6 +114,7 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
     const rules = rulesText.split('\n').map((s) => s.trim()).filter(Boolean)
     const res = await act(() => put<NodeWarpView>(`nodes/${node.id}/warp`, {
       enabled,
+      transport,
       ruleMode,
       rules,
       licenseKey: licenseKey.trim(),
@@ -119,8 +148,10 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
 
   const reissue = async () => {
     if (!(await confirm(t('warp.reissue_confirm'), t('warp.reissue_btn')))) return
+    const reqTransport = transport === 'wireguard' && data && !data.lastCheckOk ? '' : transport
     const res = await act(() => post<NodeWarpView>(`nodes/${node.id}/warp/provision`, {
       forceNew: true,
+      transport: reqTransport,
       licenseKey: licenseKey.trim(),
     }), t('warp.provisioned'))
     if (res) {
@@ -141,6 +172,8 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
       onSaved()
     }
   }
+
+  const endpointOptions = transport === 'wireguard' ? WG_ENDPOINTS : MASQUE_ENDPOINTS
 
   return (
     <Modal
@@ -165,7 +198,8 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
                 <Switch checked={enabled} onChange={setEnabled} />
                 <span>{t('warp.enable_label')}</span>
               </label>
-              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Badge>{transportShortLabel(transport)}</Badge>
                 {data.hasCredentials ? (
                   <Badge color={data.lastCheckOk ? 'green' : undefined} dot>
                     {data.lastCheckOk && data.lastCheckColo
@@ -240,11 +274,18 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
           <details style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
             <summary style={{ cursor: 'pointer', fontWeight: 500 }}>{t('warp.advanced_title')}</summary>
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Field label={t('warp.transport_label')}>
+                <select value={transport} onChange={(e) => handleTransportChange(e.target.value as WarpTransport)}>
+                  <option value="masque-h3">{t('warp.transport_masque_h3')}</option>
+                  <option value="masque-h2">{t('warp.transport_masque_h2')}</option>
+                  <option value="wireguard">{t('warp.transport_wireguard')}</option>
+                </select>
+              </Field>
               <div className="grid2">
                 <Field label={t('warp.endpoint')}>
                   <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} list="warp-endpoints" className="mono" />
                   <datalist id="warp-endpoints">
-                    {ENDPOINTS.map((ep) => <option key={ep} value={ep} />)}
+                    {endpointOptions.map((ep) => <option key={ep} value={ep} />)}
                   </datalist>
                 </Field>
                 <Field label={t('warp.domain_strategy')}>

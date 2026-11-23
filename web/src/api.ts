@@ -220,8 +220,11 @@ export interface Node {
   warp?: NodeWarpSummary
 }
 
+export type WarpTransport = 'masque-h3' | 'masque-h2' | 'wireguard'
+
 export interface NodeWarpSummary {
   enabled: boolean
+  transport: WarpTransport
   ruleMode: string
   rulesCount: number
   accountType: string
@@ -233,6 +236,7 @@ export interface NodeWarpSummary {
 export interface NodeWarpView {
   nodeId: number
   enabled: boolean
+  transport: WarpTransport
   ruleMode: 'rules' | 'all'
   credMode: 'auto' | 'manual'
   hasCredentials: boolean
@@ -261,6 +265,7 @@ export interface NodeWarpView {
 
 export interface WarpCheckResult {
   ok: boolean
+  transport?: WarpTransport
   ip?: string
   colo?: string
   warpMode?: string
