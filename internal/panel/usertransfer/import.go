@@ -2,12 +2,44 @@ package usertransfer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
+
+var safeImportSubTokenRe = regexp.MustCompile(`^[A-Za-z0-9_-]{6,64}$`)
+
+func validImportUUID(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if r <= 0x20 || r >= 0x7f || r == '"' || r == '\\' {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeImportStatus(s, def string) string {
+	switch s {
+	case store.StatusActive, store.StatusDisabled, store.StatusLimited, store.StatusExpired:
+		return s
+	}
+	return def
+}
+
+func normalizeImportReset(s string) string {
+	switch s {
+	case "no", "day", "week", "month":
+		return s
+	}
+	return "no"
+}
 
 // Importer applies an export to a panel. It works on a bare store (the installer path, before
 // the panel exists) and reuses the service later.
@@ -63,6 +95,17 @@ func (im *Importer) Import(ctx context.Context, f *ExportFile) (*Report, error) 
 			rep.Problems = append(rep.Problems, fmt.Sprintf("%s: %v", t.Username, err))
 		}
 	}
+	if !im.opt.DryRun && (rep.Created > 0 || rep.Updated > 0) {
+		diff, _ := json.Marshal(map[string]int{"created": rep.Created, "updated": rep.Updated, "skipped": rep.Skipped, "failed": rep.Failed})
+		_ = im.st.Tx(ctx, func(q store.DBTX) error {
+			if err := store.AddAudit(ctx, q, store.AuditEntry{
+				Actor: im.opt.Actor, Action: "users.import", Entity: "user", Diff: string(diff),
+			}); err != nil {
+				return err
+			}
+			return store.AddEvent(ctx, q, "user.changed", 0, map[string]int{"created": rep.Created, "updated": rep.Updated})
+		})
+	}
 	return rep, nil
 }
 
@@ -70,8 +113,9 @@ func (im *Importer) one(ctx context.Context, t TransferUser, rep *Report) error 
 	if t.Username = strings.TrimSpace(t.Username); t.Username == "" {
 		return errFormat("empty username")
 	}
-	if t.UUID == "" {
-		return errFormat("no uuid")
+	t.UUID = strings.TrimSpace(t.UUID)
+	if !validImportUUID(t.UUID) {
+		return errFormat("bad uuid")
 	}
 	existing, exErr := store.GetUserByUsername(ctx, im.st.DB, t.Username)
 	if exErr != nil && !isNotFound(exErr) {
@@ -120,13 +164,10 @@ func (im *Importer) renamed(ctx context.Context, t TransferUser) TransferUser {
 
 func (im *Importer) create(ctx context.Context, t TransferUser, rep *Report) error {
 	u := t.user()
-	if u.Status == "" {
-		u.Status = store.StatusActive
-	}
-	if u.ResetStrategy == "" {
-		u.ResetStrategy = "no"
-	}
-	if u.SubToken == "" || im.opt.ReissueTokens {
+	u.Status = normalizeImportStatus(u.Status, store.StatusActive)
+	u.Disabled = u.Status == store.StatusDisabled
+	u.ResetStrategy = normalizeImportReset(u.ResetStrategy)
+	if u.SubToken == "" || im.opt.ReissueTokens || !safeImportSubTokenRe.MatchString(u.SubToken) {
 		tok, err := im.newToken()
 		if err != nil {
 			return err
@@ -177,14 +218,10 @@ func (im *Importer) upsert(ctx context.Context, existing *store.User, t Transfer
 	if !im.opt.WithTraffic {
 		u.TrafficUsedBytes = existing.TrafficUsedBytes
 	}
-	if u.Status == "" {
-		u.Status = existing.Status
-	}
+	u.Status = normalizeImportStatus(u.Status, existing.Status)
 	u.Disabled = u.Status == store.StatusDisabled
-	if u.ResetStrategy == "" {
-		u.ResetStrategy = "no"
-	}
-	if u.SubToken == "" {
+	u.ResetStrategy = normalizeImportReset(u.ResetStrategy)
+	if u.SubToken == "" || !safeImportSubTokenRe.MatchString(u.SubToken) {
 		u.SubToken = existing.SubToken
 	}
 	if im.opt.ReissueTokens {

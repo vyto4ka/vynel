@@ -473,3 +473,30 @@ func TestNoDeviceLimitGivesLinksWithoutHWID(t *testing.T) {
 		t.Fatalf("the user's own format lost:\n%.200s", body)
 	}
 }
+
+func TestMissBanSurvivesMinuteWindow(t *testing.T) {
+	e := newEnv(t)
+	e.h.MaxMisses = 2
+	short, err := e.svc.SetSubToken(context.Background(), actor, e.user.ID, "vasya-phone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		e.get("/s/wrong"+strconv.Itoa(i), "curl/8", "")
+	}
+	if rec := e.get(service.DefaultSubPrefix+short.SubToken, "Happ/3", "hw-1"); rec.Code != 404 {
+		t.Fatalf("expected ban 404, got %d", rec.Code)
+	}
+	// Simulate >1 minute passing since windowStart while bannedUntil is still ~1 hour away:
+	// an out-of-prefix probe must NOT wipe bannedUntil.
+	e.h.mu.Lock()
+	for _, c := range e.h.misses {
+		c.windowStart = time.Now().Add(-2 * time.Minute)
+	}
+	e.h.mu.Unlock()
+	req := httptest.NewRequest(http.MethodDelete, "/probe", nil)
+	e.h.ServeHTTP(httptest.NewRecorder(), req)
+	if rec := e.get(service.DefaultSubPrefix+short.SubToken, "Happ/3", "hw-1"); rec.Code != 404 {
+		t.Fatalf("ban was cleared after minute window: got %d, want 404", rec.Code)
+	}
+}

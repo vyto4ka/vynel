@@ -112,8 +112,20 @@ func TestPageExtrasAndDeviceDelete(t *testing.T) {
 		}
 	}
 
-	// Delete the device via POST {prefix}{token}/devices/{id}/delete.
+	// Cross-site POST without X-Vynel must be refused and keep the device intact.
+	noCSRFReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("%s%s/devices/%d/delete", prefix, e.user.SubToken, devs[0].ID), nil)
+	noCSRFW := httptest.NewRecorder()
+	e.h.ServeHTTP(noCSRFW, noCSRFReq)
+	if noCSRFW.Code != http.StatusForbidden {
+		t.Fatalf("device delete without X-Vynel: got %d, want 403", noCSRFW.Code)
+	}
+	if still, _ := e.svc.Devices(ctx, e.user.ID); len(still) != 1 {
+		t.Fatalf("device removed without X-Vynel: %d", len(still))
+	}
+
+	// Delete the device via POST {prefix}{token}/devices/{id}/delete with X-Vynel: 1.
 	delReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("%s%s/devices/%d/delete", prefix, e.user.SubToken, devs[0].ID), nil)
+	delReq.Header.Set("X-Vynel", "1")
 	delW := httptest.NewRecorder()
 	e.h.ServeHTTP(delW, delReq)
 	if delW.Code != http.StatusOK || !strings.Contains(delW.Body.String(), `"ok":true`) {
@@ -126,7 +138,7 @@ func TestPageExtrasAndDeviceDelete(t *testing.T) {
 		t.Fatalf("expected 0 devices after delete, got %d (err=%v)", len(after), err)
 	}
 
-	// Random POST path must return 404 (stealth).
+	// Random POST path must return 404 (stealth) even without X-Vynel.
 	badReq := httptest.NewRequest(http.MethodPost, prefix+e.user.SubToken+"/unknown", nil)
 	badW := httptest.NewRecorder()
 	e.h.ServeHTTP(badW, badReq)
@@ -134,6 +146,52 @@ func TestPageExtrasAndDeviceDelete(t *testing.T) {
 		t.Fatalf("expected 404 on bad POST, got %d", badW.Code)
 	}
 	_ = store.Device{}
+}
+
+func TestPageHostInjectionAndSafeURL(t *testing.T) {
+	e := newEnv(t)
+	if err := e.svc.SetSetting(e.ctx, actor, service.SettingSubDomain, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.SetSetting(e.ctx, actor, service.SettingWebDomain, "panel.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	prefix := e.svc.SubPrefix(e.ctx)
+
+	// Spoofed Host header when sub.domain is unset must never appear in rendered links or QR.
+	req := httptest.NewRequest(http.MethodGet, "https://evil.attacker.test"+prefix+e.user.SubToken, nil)
+	req.Host = "evil.attacker.test"
+	req.Header.Set("Accept", "text/html")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "evil.attacker.test") {
+		t.Fatalf("untrusted Host leaked into subscription page HTML")
+	}
+	if w.Header().Get("Referrer-Policy") != "no-referrer" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("missing security headers: %v", w.Header())
+	}
+
+	// Trusted web.domain is accepted as fallback.
+	okReq := httptest.NewRequest(http.MethodGet, "https://panel.example.com"+prefix+e.user.SubToken, nil)
+	okReq.Host = "panel.example.com"
+	okReq.Header.Set("Accept", "text/html")
+	okReq.Header.Set("User-Agent", "Mozilla/5.0")
+	okW := httptest.NewRecorder()
+	e.h.ServeHTTP(okW, okReq)
+	if okW.Code != http.StatusOK || !strings.Contains(okW.Body.String(), "https://panel.example.com"+prefix+e.user.SubToken) {
+		t.Fatalf("trusted web.domain fallback failed: %d", okW.Code)
+	}
+
+	// WHATWG control-character scheme bypasses are rejected by safeURL.
+	for _, bad := range []string{"java\tscript:alert(1)", "java\nscript:alert(1)", "\x01javascript:alert(1)", "DATA:text/html,<script>"} {
+		if got := safeURL(bad); got != "" {
+			t.Fatalf("safeURL(%q) = %q, want empty", bad, got)
+		}
+	}
 }
 
 func TestPreviewPageLangAndNoDuplicateHeader(t *testing.T) {

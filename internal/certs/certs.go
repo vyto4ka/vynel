@@ -43,7 +43,10 @@ const LetsEncrypt = "https://acme-v02.api.letsencrypt.org/directory"
 // RenewBefore is how long before expiry a certificate is renewed.
 const RenewBefore = 30 * 24 * time.Hour
 
-var domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+var (
+	domainRe    = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+	acmeTokenRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+)
 
 // Manager issues and renews certificates. Safe for concurrent use.
 type Manager struct {
@@ -106,6 +109,9 @@ type Status struct {
 
 // Status reads the certificate of a domain and attaches the latest renewal error/backoff if any.
 func (m *Manager) Status(domain string) (Status, error) {
+	if !domainRe.MatchString(domain) {
+		return Status{Domain: domain}, fmt.Errorf("%q is not a domain", domain)
+	}
 	cert, _ := m.Paths(domain)
 	st := Status{Domain: domain}
 	m.mu.Lock()
@@ -154,6 +160,10 @@ func (m *Manager) renew(ctx context.Context, domains []string, email, issuer str
 	var done []string
 	var errs []error
 	for _, d := range domains {
+		if !domainRe.MatchString(d) {
+			errs = append(errs, fmt.Errorf("%q is not a domain", d))
+			continue
+		}
 		if !force {
 			if !m.Due(d, now) {
 				continue
@@ -253,6 +263,9 @@ func (m *Manager) issueACME(ctx context.Context, domain, email string) error {
 		}
 		if chal == nil {
 			return fmt.Errorf("no http-01 challenge offered")
+		}
+		if !acmeTokenRe.MatchString(chal.Token) {
+			return fmt.Errorf("invalid acme http-01 token")
 		}
 		body, err := client.HTTP01ChallengeResponse(chal.Token)
 		if err != nil {
@@ -409,6 +422,9 @@ func (m *Manager) store(domain string, chain [][]byte, key crypto.Signer, placeh
 // Import copies a certificate obtained elsewhere (Caddy's storage) when the store has none or
 // only a placeholder and the imported one is valid for longer than RenewBefore.
 func (m *Manager) Import(domain string, certPEM, keyPEM []byte) (bool, error) {
+	if !domainRe.MatchString(domain) {
+		return false, fmt.Errorf("%q is not a domain", domain)
+	}
 	pair, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return false, err

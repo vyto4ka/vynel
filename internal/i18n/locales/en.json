@@ -483,5 +483,8 @@
  "эта версия ноды не умеет обновляться из панели: один раз обновите её командой установки с --mode update": "this node version cannot update from the panel: update it once with the install command with --mode update",
  "это не Xray-конфиг: нет ни inbounds, ни протокола инбаунда": "this is not an Xray config: no inbounds and no inbound protocol",
  "это текущая сессия — нажмите «Выйти»": "this is the current session — press “Log out”",
- "эту настройку нельзя менять отсюда": "this setting cannot be changed from here"
+ "эту настройку нельзя менять отсюда": "this setting cannot be changed from here",
+ "недопустимое значение настройки": "invalid setting value",
+ "ожидается корректное доменное имя без http://, порта и пути": "a valid domain name without http://, port or path is expected",
+ "отклонён редирект с HTTPS на незашифрованный HTTP": "refused redirect from HTTPS to plain HTTP"
 }

@@ -1,7 +1,9 @@
 package webapi
 
 import (
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -40,7 +42,7 @@ func (s *Server) magicLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, &httpError{http.StatusBadRequest, err.Error()})
 		return
 	}
-	done, err := s.guard.begin(clientIP(r))
+	done, err := s.guard.beginFast(clientIP(r))
 	if err != nil {
 		writeLoginError(w, r, err)
 		return
@@ -209,7 +211,7 @@ func (s *Server) downloadBackup(r *http.Request) (any, error) {
 		return nil, err
 	}
 	w := r.Context().Value(writerKey{}).(http.ResponseWriter)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(name)}))
 	ctype := "application/gzip"
 	if strings.HasSuffix(name, backup.EncryptedExt) {
 		ctype = "application/octet-stream"
@@ -232,7 +234,7 @@ func (s *Server) telegramLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, &httpError{http.StatusForbidden, "откройте панель кнопкой в боте"})
 		return
 	}
-	done, err := s.guard.begin(clientIP(r))
+	done, err := s.guard.beginFast(clientIP(r))
 	if err != nil {
 		writeLoginError(w, r, err)
 		return

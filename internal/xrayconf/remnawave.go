@@ -444,9 +444,6 @@ func ImportRemnawave(in RemnawaveImport, titleBase string) (*RemnawaveResult, er
 		fmt.Println(source)
 	}
 	if _, err := ParseTemplate([]byte(source)); err != nil {
-		if os.Getenv("VYNEL_DEBUG_IMPORT") != "" {
-			_ = os.WriteFile("remna-debug.yml", []byte(source), 0644)
-		}
 		return &RemnawaveResult{Source: source, ID: id, Notes: notes}, fmt.Errorf("сгенерированный шаблон не собрался: %w", err)
 	}
 	if _, err := SampleRender(mustParse(source)); err != nil {

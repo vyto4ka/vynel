@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -89,6 +90,9 @@ func (m *Manager) Apply(ctx context.Context, cfg []byte) error {
 	}
 	if err := json.Unmarshal(cfg, &meta); err != nil || meta.Admin.Listen == "" {
 		return fmt.Errorf("caddy config without admin.listen: %w", err)
+	}
+	if adminHost, adminPort, err := net.SplitHostPort(meta.Admin.Listen); err != nil || adminHost != "127.0.0.1" || adminPort == "" {
+		return fmt.Errorf("caddy admin.listen %q must be on 127.0.0.1", meta.Admin.Listen)
 	}
 	if err := m.installDecoys(); err != nil {
 		return err
@@ -179,7 +183,7 @@ func (m *Manager) startLocked(path, admin string) error {
 			return fmt.Errorf("caddy exited: %s", lastLines(m.tail.String(), 5))
 		default:
 		}
-		resp, err := http.Get("http://" + admin + "/config/")
+		resp, err := (&http.Client{Timeout: 5 * time.Second}).Get("http://" + admin + "/config/")
 		if err == nil {
 			resp.Body.Close()
 			m.Log.Info("caddy started", "pid", cmd.Process.Pid)
@@ -243,7 +247,7 @@ func (m *Manager) load(ctx context.Context, cfg []byte) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
 	if err != nil {
 		return fmt.Errorf("caddy reload: %w", err)
 	}

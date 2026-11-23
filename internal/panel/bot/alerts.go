@@ -230,12 +230,14 @@ func (b *Bot) backupNow(ctx context.Context, api *client, chat int64) {
 // Backup writes a backup and keeps the last ones in <data>/backups. It is also used by the web
 // panel («Скачать бэкап»).
 func (b *Bot) Backup(ctx context.Context) (string, []byte, *backup.Meta, error) {
+	b.backupMu.Lock()
+	defer b.backupMu.Unlock()
 	var buf bytes.Buffer
 	meta, err := backup.Create(ctx, b.svc.Store(), b.cfg.DataDir, b.cfg.Version, &buf)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	name := backup.FileName(meta, b.loc(ctx))
+	name := filepath.Base(backup.FileName(meta, b.loc(ctx)))
 	data := buf.Bytes()
 	if pw := b.svc.BackupPassword(ctx); pw != "" {
 		// Encryption is on: Telegram, the download and the local copy all get the age file.
@@ -246,7 +248,15 @@ func (b *Bot) Backup(ctx context.Context) (string, []byte, *backup.Meta, error) 
 	}
 	dir := filepath.Join(b.cfg.DataDir, "backups")
 	if err := os.MkdirAll(dir, 0o700); err == nil {
-		_ = os.WriteFile(filepath.Join(dir, name), data, 0o600)
+		if tmp, terr := os.CreateTemp(dir, ".backup-*"); terr == nil {
+			_, werr := tmp.Write(data)
+			cerr := tmp.Close()
+			if werr == nil && cerr == nil {
+				_ = os.Rename(tmp.Name(), filepath.Join(dir, name))
+			} else {
+				_ = os.Remove(tmp.Name())
+			}
+		}
 		pruneBackups(dir, keepLocal)
 	}
 	return name, data, meta, nil

@@ -111,7 +111,9 @@ type Service struct {
 	bindMu     sync.Mutex
 	bindFor    string // the bind code the wrong tries are counted for
 	bindFails  int
-	grantCheck int64 // when Maintenance last looked for ended grants
+	tgUsedMu   sync.Mutex
+	tgUsed     map[string]int64 // sha256(initData) -> unix expiry (prevents Mini App replay)
+	grantCheck int64            // when Maintenance last looked for ended grants
 	cache      confCache
 	snapMu     sync.Mutex // one snapshot builder at a time
 	api        apiState   // public API: token touches, webhook dispatcher
@@ -220,8 +222,12 @@ func (s *Service) Setting(ctx context.Context, key, def string) (string, error) 
 	return def, nil
 }
 
-// SetSetting stores a setting.
+// SetSetting stores a setting, redacting secret keys in the audit log.
 func (s *Service) SetSetting(ctx context.Context, actor Actor, key, value string) error {
-	return s.mutate(ctx, change{actor: actor, action: "setting.set", entity: "setting", event: EvSettingChanged, diff: map[string]string{key: value}},
+	shown := value
+	if IsSecretSetting(key) && value != "" {
+		shown = "***"
+	}
+	return s.mutate(ctx, change{actor: actor, action: "setting.set", entity: "setting", event: EvSettingChanged, diff: map[string]string{key: shown}},
 		func(q store.DBTX) error { return store.SetSetting(ctx, q, key, value) })
 }

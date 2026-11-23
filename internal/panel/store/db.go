@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +44,8 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	dsn := "file:" + path
 	if path == ":memory:" {
 		dsn = "file::memory:"
+	} else if dir := filepath.Dir(path); dir != "" && dir != "." {
+		_ = os.MkdirAll(dir, 0o700)
 	}
 	dsn += "?_pragma=busy_timeout(10000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
@@ -53,6 +57,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if path != ":memory:" {
+		for _, p := range []string{path, path + "-wal", path + "-shm"} {
+			_ = os.Chmod(p, 0o600)
+		}
 	}
 	goose.SetBaseFS(migrations)
 	goose.SetLogger(goose.NopLogger())

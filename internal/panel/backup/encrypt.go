@@ -77,7 +77,7 @@ func decryptTo(path, password, dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(out, r); err != nil {
+	if err := copyLimited(out, r, maxRestoreBytes); err != nil {
 		out.Close()
 		_ = os.Remove(out.Name())
 		return "", fmt.Errorf("cannot decrypt the backup: %w", err)

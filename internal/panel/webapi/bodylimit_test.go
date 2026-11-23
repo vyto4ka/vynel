@@ -51,3 +51,22 @@ func TestDecodeLimit(t *testing.T) {
 		t.Fatalf("got %T %v, want 413", err, err)
 	}
 }
+
+func TestV1DecodeBodyLimit(t *testing.T) {
+	oversized := `{"uuid":true,"pad":"` + strings.Repeat("x", maxV1Body+1) + `"}`
+	for name, fn := range map[string]func(*http.Request, any) error{
+		"v1Decode":         v1Decode,
+		"v1DecodeOptional": v1DecodeOptional,
+	} {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(oversized))
+		var v struct {
+			UUID bool   `json:"uuid"`
+			Pad  string `json:"pad"`
+		}
+		err := fn(r, &v)
+		var ae *apiError
+		if !errors.As(err, &ae) || ae.status != http.StatusRequestEntityTooLarge || ae.code != "body_too_large" {
+			t.Fatalf("%s: got %T %v, want 413 body_too_large", name, err, err)
+		}
+	}
+}

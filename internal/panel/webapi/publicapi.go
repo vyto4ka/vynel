@@ -93,8 +93,9 @@ func (v *v1State) clock() time.Time {
 
 // failedAuth counts wrong tokens per address; too many in a while block the address.
 type failedAuth struct {
-	mu sync.Mutex
-	m  map[string]*authFails
+	mu        sync.Mutex
+	m         map[string]*authFails
+	lastPrune time.Time
 }
 
 type authFails struct {
@@ -104,9 +105,10 @@ type authFails struct {
 }
 
 const (
-	authFailLimit  = 10
-	authFailWindow = 5 * time.Minute
-	authBanFor     = 15 * time.Minute
+	authFailLimit     = 10
+	authFailWindow    = 5 * time.Minute
+	authBanFor        = 15 * time.Minute
+	maxTrackedAuthIPs = 32768
 )
 
 // blocked says for how long an address is blocked (0 = it is not).
@@ -125,7 +127,8 @@ func (f *failedAuth) fail(ip string, now time.Time) (banned bool) {
 	if f.m == nil {
 		f.m = map[string]*authFails{}
 	}
-	if len(f.m) > 10000 { // forget what has expired
+	if len(f.m) > 10000 && (len(f.m) >= maxTrackedAuthIPs || now.Sub(f.lastPrune) >= time.Minute) {
+		f.lastPrune = now
 		for k, a := range f.m {
 			if now.After(a.until) && now.Sub(a.since) > authFailWindow {
 				delete(f.m, k)
@@ -133,9 +136,22 @@ func (f *failedAuth) fail(ip string, now time.Time) (banned bool) {
 		}
 	}
 	a := f.m[ip]
-	if a == nil || now.Sub(a.since) > authFailWindow {
+	if a == nil {
+		if len(f.m) >= maxTrackedAuthIPs {
+			for k, old := range f.m {
+				if now.After(old.until) {
+					delete(f.m, k)
+					break
+				}
+			}
+			if len(f.m) >= maxTrackedAuthIPs {
+				return false
+			}
+		}
 		a = &authFails{since: now}
 		f.m[ip] = a
+	} else if now.Sub(a.since) > authFailWindow {
+		a.n, a.since = 0, now
 	}
 	if a.n++; a.n >= authFailLimit {
 		a.until, a.n = now.Add(authBanFor), 0
@@ -452,11 +468,17 @@ func pathMatches(pattern, path string) bool {
 
 // ---- request helpers ----
 
+const maxV1Body = 1 << 20
+
 // v1Decode reads a JSON body into v; unknown fields are an error, so a typo is not silently ignored.
 func v1Decode(r *http.Request, v any) error {
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxV1Body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return apiErr(http.StatusRequestEntityTooLarge, "body_too_large", "the request body is over 1 MiB")
+		}
 		if errors.Is(err, io.EOF) {
 			return apiErr(http.StatusBadRequest, "bad_json", "a JSON body is required")
 		}
@@ -470,7 +492,14 @@ func v1Decode(r *http.Request, v any) error {
 
 // v1DecodeOptional is v1Decode for a body that may be absent.
 func v1DecodeOptional(r *http.Request, v any) error {
-	b, _ := io.ReadAll(r.Body)
+	b, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxV1Body))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return apiErr(http.StatusRequestEntityTooLarge, "body_too_large", "the request body is over 1 MiB")
+		}
+		return apiErr(http.StatusBadRequest, "bad_json", "bad JSON: "+err.Error())
+	}
 	if len(bytes.TrimSpace(b)) == 0 {
 		return nil
 	}

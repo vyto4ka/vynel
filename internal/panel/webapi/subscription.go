@@ -342,6 +342,10 @@ func (s *Server) subPreview(w http.ResponseWriter, r *http.Request) {
 			page = *d.Page
 		}
 		if d.Basics != nil {
+			if err := service.CheckSubBasics(*d.Basics); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			b = *d.Basics
 		}
 	}

@@ -464,6 +464,8 @@ func locations(w func(int, string, ...any), rs []Route) error {
 	return nil
 }
 
+var decoyNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
 func location(w func(int, string, ...any), r Route, decoy *string, seen map[string]bool) error {
 	p := r.PathPrefix
 	if p != "" && !prefixRe.MatchString(p) {
@@ -472,8 +474,8 @@ func location(w func(int, string, ...any), r Route, decoy *string, seen map[stri
 	if p == "/" {
 		p = ""
 	}
-	if r.Kind == KindDecoy && r.Decoy == "" {
-		return fmt.Errorf("decoy route without a site")
+	if r.Kind == KindDecoy && !decoyNameRe.MatchString(r.Decoy) {
+		return fmt.Errorf("invalid decoy site name %q", r.Decoy)
 	}
 	if r.Kind == KindDecoy && *decoy == "" {
 		// The error pages, also when another route took the decoy's path (the web panel
@@ -583,9 +585,14 @@ func forbiddenDirective(name string, args []string) string {
 			return fmt.Sprintf("directive %q is not allowed in a template", name)
 		}
 	}
+	isPass := n == "proxy_pass" || n == "grpc_pass" || n == "fastcgi_pass" || n == "uwsgi_pass" || n == "scgi_pass"
 	for _, a := range args {
-		if strings.Contains(strings.ToLower(a), "unix:") {
+		low := strings.ToLower(a)
+		if strings.Contains(low, "unix:") {
 			return fmt.Sprintf("%s: unix sockets are not allowed in a template", name)
+		}
+		if isPass && (strings.Contains(low, ":10085") || strings.HasSuffix(low, ":10085/")) {
+			return fmt.Sprintf("%s: proxying to the internal Xray API port 10085 is not allowed", name)
 		}
 	}
 	return ""
@@ -619,6 +626,9 @@ func checkSnippet(s string) error {
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		if (c < 0x20 && c != ' ' && c != '\t' && c != '\n' && c != '\r') || c == 0x7f {
+			return fmt.Errorf("control characters are not allowed in a template")
+		}
 		switch {
 		case inQuote != 0:
 			switch c {
@@ -632,6 +642,8 @@ func checkSnippet(s string) error {
 			default:
 				word.WriteByte(c)
 			}
+		case c == '\\':
+			return fmt.Errorf("backslash escape outside quotes is not allowed in a template")
 		case c == '"' || c == '\'':
 			inQuote, inWord = c, true
 		case c == '#':

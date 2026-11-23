@@ -30,13 +30,41 @@ type Step struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+func validCheckDomain(s string) bool {
+	if len(s) == 0 || len(s) > 253 || !strings.Contains(s, ".") || strings.Contains(s, "..") {
+		return false
+	}
+	if s[0] == '.' || s[0] == '-' || s[len(s)-1] == '.' || s[len(s)-1] == '-' {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // SiteCheck opens https://domain/ and reports whether it answers with a valid certificate;
 // tests replace it.
 var SiteCheck = func(ctx context.Context, domain string) error {
+	domain = strings.TrimSpace(domain)
+	if !validCheckDomain(domain) {
+		return fmt.Errorf("invalid domain %q", domain)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
+	d := &net.Dialer{Timeout: 6 * time.Second, Control: publicOnly}
 	c := &http.Client{
-		Transport:     &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, Proxy: nil},
+		Transport: &http.Transport{
+			DialContext:           d.DialContext,
+			TLSHandshakeTimeout:   6 * time.Second,
+			ResponseHeaderTimeout: 6 * time.Second,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+			Proxy:                 nil,
+		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+domain+"/", nil)

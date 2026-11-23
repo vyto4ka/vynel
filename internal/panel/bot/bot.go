@@ -46,6 +46,7 @@ type Bot struct {
 	menuSet  map[int64]string       // chat -> Mini App URL its menu button opens
 	loginMsg map[int64]int64        // chat -> the latest sign-in link message (the older one is deleted)
 	quickMu  sync.Mutex             // one quick-buttons check-and-send at a time
+	backupMu sync.Mutex             // serializes VACUUM INTO and local backup file writes
 
 	alerts  alertState
 	backup  backupState

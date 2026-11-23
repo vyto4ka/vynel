@@ -13,7 +13,7 @@ function postEvent(type: string, data: Record<string, unknown> = {}): boolean {
       return true
     }
     if (window.parent !== window) {
-      window.parent.postMessage(JSON.stringify({ eventType: type, eventData: data }), '*')
+      window.parent.postMessage(JSON.stringify({ eventType: type, eventData: data }), 'https://web.telegram.org')
       return true
     }
   } catch { /* не Telegram */ }
@@ -69,6 +69,7 @@ export function initTelegramMiniApp(fullscreen: boolean) {
       if (typeof prevReceive === 'function') prevReceive(eventType, eventData)
     }
     window.addEventListener('message', (e) => {
+      if (e.source !== window.parent || e.origin !== 'https://web.telegram.org') return
       if (typeof e.data !== 'string') return
       try {
         const msg = JSON.parse(e.data)

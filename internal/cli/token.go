@@ -40,6 +40,9 @@ func adminSettingCmd() *cobra.Command {
 				}
 				return s.SetSetting(ctx, service.ActorCLI, args[0], val)
 			}
+			if service.IsSecretSetting(args[0]) {
+				return fmt.Errorf("setting %q is secret and cannot be printed", args[0])
+			}
 			if args[0] == service.SettingSubPrefix {
 				fmt.Fprintln(cmd.OutOrStdout(), s.SubPrefix(ctx))
 				return nil

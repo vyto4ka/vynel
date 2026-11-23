@@ -509,6 +509,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get(csrfHeader) != "1" {
+		writeError(w, r, &httpError{http.StatusForbidden, "missing " + csrfHeader + " header"})
+		return
+	}
 	if c, err := r.Cookie(cookieName); err == nil {
 		if sess, ok := s.verify(r, c.Value); ok {
 			_ = s.svc.Logout(r.Context(), actor(r), sess.ID)

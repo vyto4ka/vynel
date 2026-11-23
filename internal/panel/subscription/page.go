@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -73,7 +74,7 @@ func DetectClientOS(r *http.Request) string {
 // bypass the HWID limit (docs/ARCHITECTURE.md §8.4). Its look comes from service.SubPage.
 var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
 <html lang="{{.Lang}}" translate="no" class="notranslate"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="robots" content="noindex"><meta name="google" content="notranslate"><title>{{.Heading}}</title>
+<meta name="robots" content="noindex"><meta name="referrer" content="no-referrer"><meta name="google" content="notranslate"><title>{{.Heading}}</title>
 <style>
 :root{--accent:{{.Accent}}}
 body{--bg:#191c20;--card:#23272c;--card2:#2b3036;--card3:#373b3e;--ink:#e6ecf0;--muted:#9ba8b4;--line:#393f46;--outline:#5a646e;
@@ -251,7 +252,7 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 </div>
 
 {{if .Description}}<div class="card desc">{{.Description}}</div>{{end}}
-{{if .Announce}}{{if .AnnounceURL}}<a class="ann" href="{{.AnnounceURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></a>{{else}}<div class="ann"><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></div>{{end}}{{end}}
+{{if .Announce}}{{if .AnnounceURL}}<a class="ann" href="{{.AnnounceURL}}"{{if .Preview}} target="_blank"{{end}} rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></a>{{else}}<div class="ann"><svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span>{{.Announce}}</span></div>{{end}}{{end}}
 
 {{if .ShowTraffic}}
 <div class="kpis">
@@ -291,7 +292,7 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
       <div class="app-actions">
         {{if .Link}}<a class="btn sm app-add" href="{{.Link}}"{{if $.Preview}} target="_blank" rel="noopener noreferrer"{{end}}{{if .HideAdd}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>{{$.T.Add}}</a>{{end}}
         <button type="button" class="btn sm app-copy"{{if and .Link (not .HideAdd)}} style="display:none"{{end}}><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>{{$.T.CopyLink}}</span></button>
-        {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{$.T.DownloadBtn}}</a>{{end}}
+        {{if .Download}}<a class="btn sec sm" href="{{.Download}}" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M12 4v11m-5-5 5 5 5-5M5 20h14"/></svg>{{$.T.DownloadBtn}}</a>{{end}}
       </div>
     </div>
     {{end}}
@@ -380,7 +381,7 @@ h2{font-size:15.5px;line-height:22px;font-weight:600;margin:0}
 </div>
 {{end}}
 
-{{if .SupportURL}}<div class="sec-support"><a class="btn sec wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank" rel="noopener noreferrer"{{end}}><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>{{.T.Support}}</a></div>{{end}}
+{{if .SupportURL}}<div class="sec-support"><a class="btn sec wide" href="{{.SupportURL}}"{{if .Preview}} target="_blank"{{end}} rel="noopener noreferrer"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>{{.T.Support}}</a></div>{{end}}
 </div>
 </div>
 
@@ -507,11 +508,17 @@ type PageData struct {
 }
 
 func safeURL(s string) template.URL {
-	l := strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimSpace(s)
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	l := strings.ToLower(s)
 	if l == "" || strings.HasPrefix(l, "javascript:") || strings.HasPrefix(l, "data:") || strings.HasPrefix(l, "vbscript:") {
 		return ""
 	}
-	return template.URL(s) // #nosec G203 -- deep links of app schemes; dangerous schemes are cut above
+	return template.URL(s) // #nosec G203 -- deep links of app schemes; dangerous schemes and control bytes are cut above
 }
 
 // BuildPage prepares the page for a user with a page config.
@@ -543,7 +550,7 @@ func BuildPage(u *store.User, subURL string, b service.SubBasics, p service.SubP
 	if u.TrafficLimitBytes != nil && *u.TrafficLimitBytes > 0 {
 		d.Percent = int(min(100, 100*u.TrafficUsedBytes / *u.TrafficLimitBytes))
 	}
-	if p.ShowQR {
+	if p.ShowQR && subURL != "" {
 		png, err := qrcode.Encode(subURL, qrcode.Medium, 512)
 		if err != nil {
 			return d, err
@@ -555,7 +562,10 @@ func BuildPage(u *store.User, subURL string, b service.SubBasics, p service.SubP
 		if !a.Enabled {
 			continue
 		}
-		link := strings.TrimSuffix(v.Expand(a.Link), "&outbound-dns=")
+		link := ""
+		if subURL != "" || !strings.Contains(a.Link, "{") {
+			link = strings.TrimSuffix(v.Expand(a.Link), "&outbound-dns=")
+		}
 		d.Apps = append(d.Apps, pageApp{ID: a.ID, Name: a.Name, Note: a.Note, Platforms: strings.Join(a.Platforms, " "),
 			Link: safeURL(link), Download: safeURL(a.Download), Recommended: first})
 		first = false
@@ -814,6 +824,8 @@ func RenderPage(w io.Writer, d PageData) error {
 	return pageTmpl.Execute(w, d)
 }
 
+const csrfHeader = "X-Vynel"
+
 func (h *Handler) handleDeviceDelete(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User, explicit string) {
 	rest, ok := strings.CutPrefix(explicit, "devices/")
 	if !ok {
@@ -830,6 +842,10 @@ func (h *Handler) handleDeviceDelete(ctx context.Context, w http.ResponseWriter,
 		h.notFound(ctx, w)
 		return
 	}
+	if r.Header.Get(csrfHeader) != "1" {
+		http.Error(w, "missing "+csrfHeader+" header", http.StatusForbidden)
+		return
+	}
 	if err := h.svc.DeleteDevice(ctx, service.Actor{Kind: "user", ID: u.Username}, u.ID, devID); err != nil {
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
@@ -839,10 +855,36 @@ func (h *Handler) handleDeviceDelete(ctx context.Context, w http.ResponseWriter,
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
+// trustedFallbackURL builds a subscription link from r.Host only when it matches the panel's
+// configured web.domain, refusing unvalidated Host headers when sub.domain is not set.
+func (h *Handler) trustedFallbackURL(ctx context.Context, r *http.Request) string {
+	webDom, _ := h.svc.Setting(ctx, service.SettingWebDomain, "")
+	webDom = strings.ToLower(strings.TrimSpace(webDom))
+	if webDom == "" || r.Host == "" {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host, port = r.Host, ""
+	}
+	if !strings.EqualFold(host, webDom) {
+		return ""
+	}
+	if port != "" {
+		if p, perr := strconv.Atoi(port); perr != nil || p < 1 || p > 65535 {
+			return ""
+		}
+		if port != "443" {
+			webDom = net.JoinHostPort(webDom, port)
+		}
+	}
+	return "https://" + webDom + r.URL.Path
+}
+
 func (h *Handler) page(ctx context.Context, w http.ResponseWriter, r *http.Request, u *store.User) {
 	subURL, err := h.svc.SubscriptionURL(ctx, u)
 	if err != nil {
-		subURL = "https://" + r.Host + r.URL.Path
+		subURL = h.trustedFallbackURL(ctx, r)
 	}
 	p, err := h.svc.SubPage(ctx)
 	if err != nil {
@@ -872,6 +914,12 @@ func (h *Handler) page(ctx context.Context, w http.ResponseWriter, r *http.Reque
 
 	hdr := w.Header()
 	hdr.Set("Content-Type", "text/html; charset=utf-8")
+	if hdr.Get("X-Content-Type-Options") == "" {
+		hdr.Set("X-Content-Type-Options", "nosniff")
+	}
+	if hdr.Get("Referrer-Policy") == "" {
+		hdr.Set("Referrer-Policy", "no-referrer")
+	}
 	hdr.Set("Accept-CH", "Sec-CH-UA-Platform")
 	hdr.Set("Vary", "User-Agent, Sec-CH-UA-Platform, Accept")
 	_ = RenderPage(w, d)

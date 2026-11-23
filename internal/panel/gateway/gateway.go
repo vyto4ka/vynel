@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/tap"
 
 	"github.com/vyto4ka/vynel/internal/panel/ca"
 	"github.com/vyto4ka/vynel/internal/panel/reconciler"
@@ -61,7 +63,7 @@ func (g *Server) TLSConfig() (*tls.Config, error) {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-			if hello.ServerName != g.sni {
+			if subtle.ConstantTimeCompare([]byte(hello.ServerName), []byte(g.sni)) != 1 {
 				return nil, errors.New("unknown server name")
 			}
 			return base, nil
@@ -81,6 +83,21 @@ func (g *Server) Serve(ctx context.Context, addr string) error {
 	}
 	srv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsCfg)),
+		grpc.MaxConcurrentStreams(16),
+		grpc.InTapHandle(func(ctx context.Context, info *tap.Info) (context.Context, error) {
+			if info.FullMethodName == nodev1.NodeGateway_Join_FullMethodName {
+				return ctx, nil
+			}
+			p, ok := peer.FromContext(ctx)
+			if !ok {
+				return nil, status.Error(codes.Unauthenticated, "no peer")
+			}
+			tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+			if !ok || len(tlsInfo.State.VerifiedChains) == 0 {
+				return nil, status.Error(codes.Unauthenticated, "client certificate required")
+			}
+			return ctx, nil
+		}),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 30 * time.Second, Timeout: 10 * time.Second}),
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
 		// Above gRPC's default 4 MB (large stats batches, whole snapshots for older agents).

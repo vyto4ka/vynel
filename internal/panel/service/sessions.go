@@ -405,5 +405,23 @@ func (s *Service) TelegramAppLogin(ctx context.Context, initData string) (int64,
 	if !s.IsBotAdmin(ctx, user.ID) {
 		return 0, invalid("this Telegram account is not a panel admin")
 	}
+	sum := sha256.Sum256([]byte(initData))
+	digest := hex.EncodeToString(sum[:])
+	nowUnix := s.now().Unix()
+	s.tgUsedMu.Lock()
+	if s.tgUsed == nil {
+		s.tgUsed = map[string]int64{}
+	}
+	for k, exp := range s.tgUsed {
+		if nowUnix >= exp {
+			delete(s.tgUsed, k)
+		}
+	}
+	if exp, seen := s.tgUsed[digest]; seen && nowUnix < exp {
+		s.tgUsedMu.Unlock()
+		return 0, invalid("init data has already been used: reopen the panel from the bot")
+	}
+	s.tgUsed[digest] = nowUnix + 360
+	s.tgUsedMu.Unlock()
 	return user.ID, nil
 }

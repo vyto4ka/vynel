@@ -296,9 +296,13 @@ func (s *Server) account(r *http.Request) (any, error) {
 		return nil, err
 	}
 	login, _ := s.svc.Setting(ctx, service.SettingWebLogin, "")
-	// The session key depends on the password: re-sign this browser's session so it stays in.
+	// The session key depends on the password: re-sign this browser's session so it stays in,
+	// and explicitly revoke all other server-side web_sessions (firewall allowlist, session paths).
 	w := r.Context().Value(writerKey{}).(http.ResponseWriter)
 	sess := current(r)
+	if sess.ID != "" {
+		_, _ = s.svc.EndWebSessions(ctx, actor(r), "", sess.ID)
+	}
 	sess.Login = login
 	if err := s.writeCookie(w, r, sess); err != nil {
 		return nil, err
@@ -939,6 +943,14 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 			profiles[p.ID] = p.Name
 		}
 	}
+	var profSecrets map[int64]map[string]bool
+	if details {
+		profSecrets = map[int64]map[string]bool{}
+		ps, _ := s.svc.Profiles(ctx)
+		for _, p := range ps {
+			profSecrets[p.ID] = secretNames(s.templateOf(ctx, p.TemplateID))
+		}
+	}
 	var providers map[int64]*store.Provider
 	var warps map[int64]*service.NodeWarpSummary
 	if details {
@@ -979,7 +991,7 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 				return nil, err
 			}
 			for _, ni := range nis {
-				d.Inbounds = append(d.Inbounds, s.inboundDTO(r, ni, profiles))
+				d.Inbounds = append(d.Inbounds, s.inboundDTO(r, ni, profiles, profSecrets[ni.ProfileID]))
 			}
 			addrs, err := s.svc.Addresses(ctx, n.ID)
 			if err != nil {
@@ -1002,9 +1014,9 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	return out, nil
 }
 
-func (s *Server) inboundDTO(r *http.Request, ni *store.NodeInbound, profiles map[int64]string) Inbound {
+func (s *Server) inboundDTO(r *http.Request, ni *store.NodeInbound, profiles map[int64]string, secret map[string]bool) Inbound {
 	d := Inbound{ID: ni.ID, NodeID: ni.NodeID, ProfileID: ni.ProfileID, ProfileName: profiles[ni.ProfileID], Tag: ni.Tag,
-		Enabled: ni.Enabled, Values: publicValues(ni.Values), HostOverride: ni.Host}
+		Enabled: ni.Enabled, Values: publicValues(ni.Values, secret), HostOverride: ni.Host}
 	if d.HostOverride == nil {
 		d.HostOverride = map[string]any{}
 	}
@@ -1026,11 +1038,11 @@ func (s *Server) inboundDTO(r *http.Request, ni *store.NodeInbound, profiles map
 	return d
 }
 
-// publicValues hides private keys from the UI.
-func publicValues(v map[string]any) map[string]any {
+// publicValues hides private keys and secret template variables from the UI.
+func publicValues(v map[string]any, secret map[string]bool) map[string]any {
 	out := map[string]any{}
 	for k, x := range v {
-		if strings.Contains(k, "PRIVATE") || strings.Contains(k, "SECRET") {
+		if secret[k] || strings.Contains(k, "PRIVATE") || strings.Contains(k, "SECRET") {
 			out[k] = "•••"
 			continue
 		}
@@ -1250,8 +1262,10 @@ func (s *Server) profiles(r *http.Request) (any, error) {
 		return nil, err
 	}
 	titles := map[string]string{}
+	secrets := map[string]map[string]bool{}
 	for _, t := range tpls {
 		titles[t.ID] = t.Title
+		secrets[t.ID] = secretNames(s.templateOf(ctx, t.ID))
 	}
 	out := make([]map[string]any, 0, len(ps))
 	for _, p := range ps {
@@ -1269,7 +1283,7 @@ func (s *Server) profiles(r *http.Request) (any, error) {
 			over = map[string]any{}
 		}
 		out = append(out, map[string]any{"id": p.ID, "name": p.Name, "templateId": p.TemplateID, "templateTitle": titles[p.TemplateID],
-			"values": publicValues(p.Values), "override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "inbounds": tags,
+			"values": publicValues(p.Values, secrets[p.TemplateID]), "override": over, "tagPattern": p.TagPattern, "remarkPattern": p.RemarkPattern, "inbounds": tags,
 			"clientCustom": service.ClientOf(p).Custom})
 	}
 	return localize(r, out, "templateTitle"), nil
@@ -1483,19 +1497,39 @@ func (s *Server) settings(r *http.Request) (any, error) {
 	return out, nil
 }
 
+func validSettingDomain(s string) bool {
+	if len(s) == 0 || len(s) > 253 || !strings.Contains(s, ".") || strings.Contains(s, "..") {
+		return false
+	}
+	if s[0] == '.' || s[0] == '-' || s[len(s)-1] == '.' || s[len(s)-1] == '-' {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) setSetting(r *http.Request) (any, error) {
 	var in struct{ Key, Value string }
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
 	in.Key = strings.TrimSpace(in.Key)
-	if in.Key == "" || service.IsSecretSetting(in.Key) || in.Key == service.SettingWebLogin {
+	if in.Key == "" || service.IsSecretSetting(in.Key) || hiddenSettings[in.Key] {
 		return nil, badRequest("эту настройку нельзя менять отсюда")
 	}
+	in.Value = strings.TrimSpace(in.Value)
+	known := false
 	for _, d := range settingDefs {
 		if d.Key != in.Key {
 			continue
 		}
+		known = true
 		switch d.Type {
 		case "bool":
 			if in.Value != "" && in.Value != "true" && in.Value != "false" {
@@ -1507,10 +1541,27 @@ func (s *Server) setSetting(r *http.Request) (any, error) {
 					return nil, badRequest("ожидается число")
 				}
 			}
+		case "select":
+			if !ipSettings[d.Key] && len(d.Options) > 0 && in.Value != "" && !slices.Contains(d.Options, in.Value) {
+				return nil, badRequest("недопустимое значение настройки")
+			}
 		}
 	}
-	in.Value = strings.TrimSpace(in.Value)
+	if !known {
+		stored, err := s.svc.Settings(r.Context())
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := stored[in.Key]; !exists {
+			return nil, badRequest("эту настройку нельзя менять отсюда")
+		}
+	}
 	switch in.Key {
+	case service.SettingWebDomain, service.SettingSubDomain:
+		if in.Value != "" && !validSettingDomain(in.Value) {
+			return nil, badRequest("ожидается корректное доменное имя без http://, порта и пути")
+		}
+		in.Value = strings.ToLower(in.Value)
 	case service.SettingWebPort, service.SettingSubPort:
 		if in.Value != "" {
 			if p, _ := strconv.Atoi(in.Value); p < 1 || p > 65535 || p == 80 {
