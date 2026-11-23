@@ -32,4 +32,8 @@ export default {
   waiting_for_the_first_log: 'Ждём первые строки лога…',
   command_sent_to: 'Команда обновления отправлена: {v}',
   reload_page: 'Обновить страницу',
+  up_to_date: 'Установлена последняя версия ({latest})',
+  up_to_date_no_ver: 'Обновлений нет',
+  updates_found: 'Доступна версия {latest} (устарело серверов: {count})',
+  last_checked: 'Последняя проверка: {v}',
 }

@@ -32,4 +32,8 @@ export default {
   waiting_for_the_first_log: 'Waiting for the first log lines…',
   command_sent_to: 'Update command sent: {v}',
   reload_page: 'Reload page',
+  up_to_date: 'Up to date ({latest})',
+  up_to_date_no_ver: 'No updates available',
+  updates_found: 'Version {latest} is available ({count} outdated)',
+  last_checked: 'Last checked: {v}',
 }

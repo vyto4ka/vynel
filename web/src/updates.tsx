@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, get, post, UpdateInfo, UpdateNode } from './api'
+import { setCacheEntry } from './cache'
 import { fmtVersion } from './format'
 import { Badge, copyText, Icon, Modal, Tabs, useAction, useConfirm, useLoad, useToast } from './ui'
 import { t, Trans } from './i18n'
 
-type RunResult = { started: string[]; startedIds?: number[]; panelStarted?: boolean; failed: Record<string, string> }
+type RunResult = { started: string[]; startedIds?: number[]; panelStarted?: boolean; targets?: UpdateNode[]; failed: Record<string, string> }
 export type LogTarget = { id: number; name: string; initial?: UpdateNode }
 
 // Обновление идёт: опрашивать чаще.
@@ -18,6 +19,34 @@ export function useUpdates(slowMs = 20000) {
   return res
 }
 
+// Принудительная проверка новой версии через POST /api/updates/check.
+export function useCheckUpdates() {
+  const act = useAction()
+  const toast = useToast()
+  const [checking, setChecking] = useState(false)
+  const check = useCallback(async () => {
+    if (checking) return
+    setChecking(true)
+    try {
+      const info = await act(() => post<UpdateInfo>('updates/check'))
+      if (!info) return
+      setCacheEntry('updates', info)
+      if (info.checkError) {
+        toast(info.checkError, true)
+      } else if (info.count > 0) {
+        toast(t('updates.updates_found', { latest: info.latest, count: info.count }))
+      } else if (info.latest) {
+        toast(t('updates.up_to_date', { latest: info.latest }))
+      } else {
+        toast(t('updates.up_to_date_no_ver'))
+      }
+    } finally {
+      setChecking(false)
+    }
+  }, [act, checking, toast])
+  return { checking, check }
+}
+
 // Запуск обновления. После успешного старта вызывает onStarted со списком запущенных серверов,
 // чтобы сразу открыть окно с живым логом.
 export function useRunUpdate(info: UpdateInfo | null, reload: () => void, onStarted?: (targets: LogTarget[]) => void) {
@@ -26,6 +55,8 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void, onStar
   const [waiting, setWaiting] = useState(false)
   const [panelUpdated, setPanelUpdated] = useState(false)
   const fromVersion = useRef('')
+  const reloadRef = useRef(reload)
+  reloadRef.current = reload
 
   useEffect(() => {
     if (!waiting) return
@@ -39,12 +70,12 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void, onStar
         if (fromVersion.current && s.version && s.version !== fromVersion.current) {
           setWaiting(false)
           setPanelUpdated(true)
-          reload()
+          reloadRef.current()
         }
       }, () => {})
     }, 2500)
     return () => clearInterval(timer)
-  }, [waiting, info?.panel.version, info?.panel.state, reload])
+  }, [waiting, info?.panel.version, info?.panel.state])
 
   return {
     waiting,
@@ -62,15 +93,17 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void, onStar
       }
       if (onStarted && r.startedIds && r.startedIds.length > 0) {
         const nowSec = Math.floor(Date.now() / 1000)
+        const snapById = new Map<number, UpdateNode>((r.targets || []).map((x) => [x.id, x]))
         const targets: LogTarget[] = r.startedIds.map((sid, i) => {
+          const snap = snapById.get(sid)
           const prev = sid === 0 ? info?.panel : info?.nodes.find((n) => n.id === sid)
-          const label = sid === 0
+          const label = snap?.name || (sid === 0
             ? (r.started[i] || info?.panel.name || t('common.panel'))
-            : (r.started[i] || prev?.name || `#${sid}`)
+            : (r.started[i] || prev?.name || `#${sid}`))
           return {
             id: sid,
             name: label,
-            initial: {
+            initial: snap || {
               id: sid,
               code: prev?.code || '',
               name: label,
@@ -87,7 +120,7 @@ export function useRunUpdate(info: UpdateInfo | null, reload: () => void, onStar
         })
         onStarted(targets)
       }
-      reload()
+      reloadRef.current()
     },
   }
 }
@@ -152,7 +185,26 @@ function mergeNodeLog(prev: UpdateNode | undefined, incoming: UpdateNode): Updat
   return incoming
 }
 
-const isTerminal = (n?: UpdateNode) => !!n && !n.updating && (n.state === 'done' || n.state === 'failed' || n.state === '')
+function isSettled(target: LogTarget, n?: UpdateNode): boolean {
+  if (!n || n.updating) return false
+  if (n.state === 'done' || n.state === 'failed') return true
+  if (n.state === '') {
+    // Сразу после запуска обновления не останавливаем опрос при кратковременном пустом статусе.
+    if (target.initial?.updating && target.initial.startedAt && Date.now() / 1000 - target.initial.startedAt < 30) {
+      return false
+    }
+    return true
+  }
+  return false
+}
+
+function stripLogs(info: UpdateInfo): UpdateInfo {
+  return {
+    ...info,
+    panel: { ...info.panel, log: undefined },
+    nodes: (info.nodes || []).map((n) => ({ ...n, log: undefined })),
+  }
+}
 
 export function UpdateLog({ id, name, targets, onClose }: { id: number; name: string; targets?: LogTarget[]; onClose: () => void }) {
   const list: LogTarget[] = targets && targets.length > 0 ? targets : [{ id, name }]
@@ -178,6 +230,8 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
   byIdRef.current = byId
   const loadedRef = useRef(loadedIds)
   loadedRef.current = loadedIds
+  const listRef = useRef(list)
+  listRef.current = list
   const listKey = list.map((x) => x.id).join(',')
 
   useEffect(() => {
@@ -197,15 +251,15 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
 
   useEffect(() => {
     let stopped = false
+    let inFlight = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let ac: AbortController | null = null
-    const multi = list.length > 1
-    const targetId = curTarget.id
 
     const poll = async () => {
-      if (stopped) return
+      if (stopped || inFlight) return
       let nextDelay: number | null = 1500
       if (!document.hidden) {
+        inFlight = true
         ac = new AbortController()
         let timedOut = false
         const reqTimeout = setTimeout(() => {
@@ -213,10 +267,12 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
           ac?.abort()
         }, 8000)
         try {
-          if (multi) {
-            const info = await get<UpdateInfo>('updates?logs=1', ac.signal)
-            clearTimeout(reqTimeout)
-            if (stopped || !info || typeof info !== 'object') return
+          const info = await get<UpdateInfo>('updates?logs=1', ac.signal)
+          clearTimeout(reqTimeout)
+          if (stopped) return
+          if (!info || typeof info !== 'object') {
+            nextDelay = 1500
+          } else {
             const next: Record<number, UpdateNode> = { ...byIdRef.current }
             if (info.panel) next[0] = mergeNodeLog(next[0], info.panel)
             for (const n of info.nodes || []) next[n.id] = mergeNodeLog(next[n.id], n)
@@ -228,22 +284,11 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
             setLoadedIds(nextLoaded)
             setIsOffline(false)
             setError(null)
-            const allSettled = list.every((t) => nextLoaded[t.id] && isTerminal(next[t.id]))
-            const anyActive = list.some((t) => !next[t.id] || next[t.id].updating)
+            if (info.panel) setCacheEntry('updates', stripLogs(info))
+            const curList = listRef.current
+            const allSettled = curList.every((t) => nextLoaded[t.id] && isSettled(t, next[t.id]))
+            const anyActive = curList.some((t) => !next[t.id] || next[t.id].updating)
             nextDelay = allSettled ? null : anyActive ? 1500 : 3000
-          } else {
-            const node = await get<UpdateNode>(`updates/log?id=${targetId}`, ac.signal)
-            clearTimeout(reqTimeout)
-            if (stopped || !node || typeof node.id !== 'number') return
-            const next = { ...byIdRef.current, [node.id]: mergeNodeLog(byIdRef.current[node.id], node) }
-            const nextLoaded: Record<number, boolean> = { ...loadedRef.current, [node.id]: true }
-            byIdRef.current = next
-            loadedRef.current = nextLoaded
-            setById(next)
-            setLoadedIds(nextLoaded)
-            setIsOffline(false)
-            setError(null)
-            nextDelay = isTerminal(next[node.id]) ? null : node.updating ? 1500 : 3000
           }
         } catch (e: any) {
           clearTimeout(reqTimeout)
@@ -258,6 +303,8 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
             setError(e?.message || String(e))
             nextDelay = 4000
           }
+        } finally {
+          inFlight = false
         }
       }
       if (!stopped && nextDelay !== null) {
@@ -265,14 +312,24 @@ export function UpdateLog({ id, name, targets, onClose }: { id: number; name: st
       }
     }
 
+    const onVis = () => {
+      if (!document.hidden && !stopped && !inFlight) {
+        if (timer !== undefined) {
+          clearTimeout(timer)
+          timer = undefined
+        }
+        poll()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
     poll()
     return () => {
       stopped = true
+      document.removeEventListener('visibilitychange', onVis)
       if (timer !== undefined) clearTimeout(timer)
       ac?.abort()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listKey, list.length > 1 ? 0 : curTarget.id])
+  }, [listKey])
 
   const shown = byId[curTarget.id] || null
   const logLoaded = !!loadedIds[curTarget.id] || !!shown?.log

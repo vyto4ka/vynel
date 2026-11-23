@@ -88,6 +88,7 @@ func (u *updates) markSent(id int64, version string, err error) {
 	if u.jobs == nil {
 		u.jobs = map[int64]*updJob{}
 	}
+	delete(u.hidden, id)
 	j := &updJob{sentAt: time.Now(), version: version}
 	if err != nil {
 		j.failAt, j.failMsg = j.sentAt, updateError(err)
@@ -397,7 +398,14 @@ func (s *Server) dismissUpdate(r *http.Request) (any, error) {
 
 // updateLog is GET /api/updates/log?id=N (0 = the panel): the server's state and its log.
 func (s *Server) updateLog(r *http.Request) (any, error) {
-	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	var id int64
+	if raw := strings.TrimSpace(r.URL.Query().Get("id")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, badRequest("bad id")
+		}
+		id = parsed
+	}
 	info, err := s.updateInfo(r.Context(), true)
 	if err != nil {
 		return nil, err
@@ -409,6 +417,14 @@ func (s *Server) updateLog(r *http.Request) (any, error) {
 	for _, n := range info.Nodes {
 		if n.ID == id {
 			return n, nil
+		}
+	}
+	if sts, serr := s.svc.NodeStatuses(r.Context(), s.cfg.Connected); serr == nil {
+		for _, ns := range sts {
+			if ns.Node.Local && ns.Node.ID == id {
+				info.Panel.Name = i18n.T(i18n.FromRequest(r), info.Panel.Name)
+				return info.Panel, nil
+			}
 		}
 	}
 	return nil, service.ErrNotFound
@@ -518,10 +534,27 @@ func (s *Server) runUpdates(r *http.Request) (any, error) {
 		started = append(started, panelName)
 		startedIDs = append(startedIDs, 0)
 	}
+	targets := make([]UpdateNode, 0, len(startedIDs))
+	if len(startedIDs) > 0 {
+		if fresh, ferr := s.updateInfo(ctx, true); ferr == nil {
+			byID := make(map[int64]UpdateNode, len(fresh.Nodes)+1)
+			fresh.Panel.Name = i18n.T(i18n.FromRequest(r), fresh.Panel.Name)
+			byID[0] = fresh.Panel
+			for _, n := range fresh.Nodes {
+				byID[n.ID] = n
+			}
+			for _, sid := range startedIDs {
+				if n, ok := byID[sid]; ok {
+					targets = append(targets, n)
+				}
+			}
+		}
+	}
 	return map[string]any{
 		"started":      started,
 		"startedIds":   startedIDs,
 		"panelStarted": panelStarted,
+		"targets":      targets,
 		"failed":       failed,
 	}, nil
 }

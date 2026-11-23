@@ -171,6 +171,16 @@ func TestRunUpdatesAndLogsAcrossPanelRestart(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("updates/run: %d %s", w.Code, w.Body.String())
 	}
+	var runResp struct {
+		StartedIDs []int64      `json:"startedIds"`
+		Targets    []UpdateNode `json:"targets"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &runResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(runResp.Targets) != 1 || runResp.Targets[0].ID != nl.ID || !strings.Contains(runResp.Targets[0].Log, "Нидерланды: скачиваем релиз") {
+		t.Fatalf("expected initial targets with log in updates/run response, got %+v", runResp.Targets)
+	}
 
 	// Simulate panel restart: new Server instance, in-memory liveStatus cleared until node reconnects.
 	liveStatus = nil
@@ -186,5 +196,99 @@ func TestRunUpdatesAndLogsAcrossPanelRestart(t *testing.T) {
 	}
 	if len(info.Nodes) != 1 || !strings.Contains(info.Nodes[0].Log, "Нидерланды: скачиваем релиз") || !info.Nodes[0].Updating {
 		t.Fatalf("expected persisted live log after panel restart, got %+v", info.Nodes)
+	}
+
+	// GET /api/updates/log?id=<nodeID> returns the same node log; bad id returns 400.
+	w = c2.do("GET", "/api/updates/log?id="+strconv.FormatInt(nl.ID, 10), "", false)
+	if w.Code != http.StatusOK {
+		t.Fatalf("updates/log: %d %s", w.Code, w.Body.String())
+	}
+	var single UpdateNode
+	if err := json.Unmarshal(w.Body.Bytes(), &single); err != nil {
+		t.Fatal(err)
+	}
+	if single.ID != nl.ID || !strings.Contains(single.Log, "Нидерланды: скачиваем релиз") {
+		t.Fatalf("unexpected single log response: %+v", single)
+	}
+	w = c2.do("GET", "/api/updates/log?id=abc", "", false)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad id, got %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateLogLocalNodeIDAndDismissReset(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	svc := service.New(st)
+	if err := svc.EnsureDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.EnsureWebDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pw, err := svc.SetAdminCredentials(ctx, service.ActorCLI, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loc, _, err := svc.CreateNode(ctx, service.ActorCLI, service.NodeInput{Name: "Финляндия", Country: "FI", Local: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rem, _, err := svc.CreateNode(ctx, service.ActorCLI, service.NodeInput{Name: "Эстония", Country: "EE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base, _ := svc.WebPath(ctx)
+	srv := New(Config{
+		Service:   svc,
+		Version:   "v0.3.1",
+		Connected: func(id int64) bool { return true },
+		NodeAction: func(ctx context.Context, nodeID int64, action string) (string, error) {
+			return "the update is running", nil
+		},
+	})
+	srv.upd.latest = "v0.3.1"
+	srv.upd.checkedAt = time.Now()
+	c := &client{t: t, srv: srv, base: strings.TrimSuffix(base, "/")}
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != http.StatusOK {
+		t.Fatalf("login: %d %s", w.Code, w.Body.String())
+	}
+
+	// Passing local node's numeric ID to /api/updates/log must resolve to panel (ID 0), not 404.
+	w := c.do("GET", "/api/updates/log?id="+strconv.FormatInt(loc.ID, 10), "", false)
+	if w.Code != http.StatusOK {
+		t.Fatalf("updates/log local node id: %d %s", w.Code, w.Body.String())
+	}
+	var panelNode UpdateNode
+	if err := json.Unmarshal(w.Body.Bytes(), &panelNode); err != nil {
+		t.Fatal(err)
+	}
+	if panelNode.ID != 0 || !panelNode.Local {
+		t.Fatalf("expected panel node for local node id, got %+v", panelNode)
+	}
+
+	// Dismiss then immediately start a new update in the same second: status must not stay hidden.
+	if w := c.do("POST", "/api/updates/dismiss", `{"id":`+strconv.FormatInt(rem.ID, 10)+`}`, true); w.Code != http.StatusOK {
+		t.Fatalf("dismiss: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("POST", "/api/updates/run", `{"target":"node","id":`+strconv.FormatInt(rem.ID, 10)+`}`, true); w.Code != http.StatusOK {
+		t.Fatalf("run after dismiss: %d %s", w.Code, w.Body.String())
+	}
+	runs, err := svc.UpdateRuns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs[rem.ID] == nil || runs[rem.ID].DismissedAt != 0 {
+		t.Fatalf("expected DismissedAt reset to 0 on new run, got %+v", runs[rem.ID])
+	}
+	var fresh updates
+	fresh.hydrate(runs, time.Now())
+	if state, _, _, _ := fresh.state(rem.ID, nil, true, "v0.3.1", time.Now()); state != UpdSent {
+		t.Fatalf("expected hydrated state %q after dismiss+run, got %q", UpdSent, state)
 	}
 }
