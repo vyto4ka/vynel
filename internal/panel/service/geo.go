@@ -250,9 +250,10 @@ func (s *Service) AddGeoFile(ctx context.Context, actor Actor, in GeoFileAddInpu
 		return nil, invalid("имя %s зарезервировано для системной базы; включите замену системной базы или укажите другое имя", cleanName)
 	}
 	var expectedKind geostore.Kind
-	if cleanName == geostore.SystemGeoSite {
+	switch cleanName {
+	case geostore.SystemGeoSite:
 		expectedKind = geostore.KindGeoSite
-	} else if cleanName == geostore.SystemGeoIP {
+	case geostore.SystemGeoIP:
 		expectedKind = geostore.KindGeoIP
 	}
 

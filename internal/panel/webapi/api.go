@@ -172,8 +172,8 @@ type Node struct {
 	Addresses    []Address `json:"addresses"`
 	// SetupStep is the node's place in the setup wizard: 0 = finished, 2 = choose profiles,
 	// 3 = node variables, 4 = requirements. -1 = unknown (the step could not be computed).
-	SetupStep      int                `json:"setupStep"`
-	Provider       *Provider          `json:"provider"` // where the node is rented, nil = not set
+	SetupStep      int                      `json:"setupStep"`
+	Provider       *Provider                `json:"provider"` // where the node is rented, nil = not set
 	Certs          []service.SelfCert       `json:"certs,omitempty"`
 	CertsSupported bool                     `json:"certsSupported,omitempty"`
 	Warp           *service.NodeWarpSummary `json:"warp,omitempty"`
