@@ -563,8 +563,14 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		},
 		"outbounds": []any{
 			map[string]any{
-				"tag":      "probe-warp",
-				"protocol": "wireguard",
+				"tag":            "probe-warp",
+				"protocol":       "wireguard",
+				"targetStrategy": req.DomainStrategy,
+				"streamSettings": map[string]any{
+					"sockopt": map[string]any{
+						"domainStrategy": req.DomainStrategy,
+					},
+				},
 				"settings": wgSettings,
 			},
 		},

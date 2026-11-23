@@ -366,8 +366,14 @@ func addWarp(cfg map[string]any, w *WarpConfig) error {
 		settings["reserved"] = []any{w.Reserved[0], w.Reserved[1], w.Reserved[2]}
 	}
 	outbound := map[string]any{
-		"tag":      WarpTag,
-		"protocol": "wireguard",
+		"tag":            WarpTag,
+		"protocol":       "wireguard",
+		"targetStrategy": ds,
+		"streamSettings": map[string]any{
+			"sockopt": map[string]any{
+				"domainStrategy": ds,
+			},
+		},
 		"settings": settings,
 	}
 	if w.SendThrough != "" {
