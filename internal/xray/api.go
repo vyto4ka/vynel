@@ -7,11 +7,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xtls/xray-core/app/proxyman"
 	handler "github.com/xtls/xray-core/app/proxyman/command"
 	stats "github.com/xtls/xray-core/app/stats/command"
+	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
+	"github.com/xtls/xray-core/core"
 	hyaccount "github.com/xtls/xray-core/proxy/hysteria/account"
+	"github.com/xtls/xray-core/proxy/socks"
 	"github.com/xtls/xray-core/proxy/vless"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -103,6 +107,35 @@ func (a *API) InboundUsers(ctx context.Context, tag string) ([]string, error) {
 		out = append(out, u.Email)
 	}
 	return out, nil
+}
+
+// AddLoopbackSocksInbound attaches a temporary 127.0.0.1 SOCKS5 inbound via HandlerService.
+func (a *API) AddLoopbackSocksInbound(ctx context.Context, tag string, port uint32) error {
+	_, err := a.handler.AddInbound(ctx, &handler.AddInboundRequest{
+		Inbound: &core.InboundHandlerConfig{
+			Tag: tag,
+			ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
+				Listen: xnet.NewIPOrDomain(xnet.LocalHostIP),
+				PortList: &xnet.PortList{
+					Range: []*xnet.PortRange{xnet.SinglePortRange(xnet.Port(port))},
+				},
+			}),
+			ProxySettings: serial.ToTypedMessage(&socks.ServerConfig{
+				AuthType:   socks.AuthType_NO_AUTH,
+				UdpEnabled: false,
+			}),
+		},
+	})
+	return err
+}
+
+// RemoveInbound detaches a dynamically added inbound. Removing a missing tag is treated as success.
+func (a *API) RemoveInbound(ctx context.Context, tag string) error {
+	_, err := a.handler.RemoveInbound(ctx, &handler.RemoveInboundRequest{Tag: tag})
+	if err != nil && (strings.Contains(err.Error(), "not found") || status.Code(err) == codes.NotFound) {
+		return nil
+	}
+	return err
 }
 
 // Stat is one counter, e.g. user>>>7>>>traffic>>>uplink.

@@ -9,15 +9,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/geostore"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 	"github.com/vyto4ka/vynel/internal/warp"
+	"github.com/vyto4ka/vynel/internal/xray"
+	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
 
 // CapGeo is the capability of agents that sync Snapshot.geo_assets into <DataDir>/geo.
@@ -237,10 +241,117 @@ func (a *Agent) handleWarpCheck(ctx context.Context, payload []byte) (string, er
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return "", fmt.Errorf("bad warp check payload: %w", err)
 	}
-	res := warp.CheckViaXray(ctx, a.cfg.Xray.Path, req)
+	var res *warp.CheckResult
+	if liveRes, usedLive := a.checkWarpViaLiveXray(ctx, req); usedLive {
+		res = liveRes
+	} else {
+		res = warp.CheckViaXray(ctx, a.cfg.Xray.Path, req)
+	}
 	b, err := json.Marshal(res)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// checkWarpViaLiveXray reuses the running main Xray's VYNEL_WARP outbound when it is already
+// active with the same WireGuard secretKey and endpoint. Spawning a second Xray process with the
+// same private key collides with the active WireGuard session on Cloudflare Edge.
+func (a *Agent) checkWarpViaLiveXray(ctx context.Context, req warp.CheckRequest) (*warp.CheckResult, bool) {
+	a.mu.Lock()
+	var api *xray.API
+	var activeCfg []byte
+	if a.proc != nil && a.proc.Running() && a.api != nil && a.cur != nil {
+		api = a.api
+		activeCfg = a.cur.Config
+	}
+	a.mu.Unlock()
+
+	if api == nil || !activeConfigHasMatchingWarp(activeCfg, req) {
+		return nil, false
+	}
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, false
+	}
+	socksAddr := lis.Addr().String()
+	_, portStr, _ := net.SplitHostPort(socksAddr)
+	port, err := strconv.Atoi(portStr)
+	_ = lis.Close()
+	if err != nil || port <= 0 {
+		return nil, false
+	}
+
+	addCtx, addCancel := context.WithTimeout(ctx, 3*time.Second)
+	_ = api.RemoveInbound(addCtx, xrayconf.WarpProbeTag)
+	err = api.AddLoopbackSocksInbound(addCtx, xrayconf.WarpProbeTag, uint32(port))
+	addCancel()
+	if err != nil {
+		return nil, false
+	}
+	defer func() {
+		rmCtx, rmCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = api.RemoveInbound(rmCtx, xrayconf.WarpProbeTag)
+		rmCancel()
+	}()
+
+	pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return warp.CheckViaSocks(pctx, socksAddr, req.TraceURL, req.Endpoint), true
+}
+
+func activeConfigHasMatchingWarp(rawCfg []byte, req warp.CheckRequest) bool {
+	if len(rawCfg) == 0 || req.SecretKey == "" {
+		return false
+	}
+	var cfg struct {
+		Outbounds []struct {
+			Tag      string `json:"tag"`
+			Settings struct {
+				SecretKey string `json:"secretKey"`
+				Peers     []struct {
+					Endpoint string `json:"endpoint"`
+				} `json:"peers"`
+			} `json:"settings"`
+		} `json:"outbounds"`
+		Routing struct {
+			Rules []struct {
+				InboundTag  []string `json:"inboundTag"`
+				OutboundTag string   `json:"outboundTag"`
+			} `json:"rules"`
+		} `json:"routing"`
+	}
+	if err := json.Unmarshal(rawCfg, &cfg); err != nil {
+		return false
+	}
+	wantEP := warp.NormalizeEndpoint(req.Endpoint)
+	hasOutbound := false
+	for _, ob := range cfg.Outbounds {
+		if ob.Tag != xrayconf.WarpTag {
+			continue
+		}
+		if ob.Settings.SecretKey != req.SecretKey || len(ob.Settings.Peers) == 0 {
+			return false
+		}
+		if warp.NormalizeEndpoint(ob.Settings.Peers[0].Endpoint) != wantEP {
+			return false
+		}
+		hasOutbound = true
+		break
+	}
+	if !hasOutbound {
+		return false
+	}
+	for _, r := range cfg.Routing.Rules {
+		if r.OutboundTag != xrayconf.WarpTag {
+			continue
+		}
+		for _, tag := range r.InboundTag {
+			if tag == xrayconf.WarpProbeTag {
+				return true
+			}
+		}
+	}
+	return false
 }

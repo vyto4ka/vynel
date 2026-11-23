@@ -75,9 +75,9 @@ func TestBuildConfigWithWarpOrdering(t *testing.T) {
 		t.Fatalf("expected IPIfNonMatch, got %v", routing["domainStrategy"])
 	}
 
-	// Verify exact rule order: CASCADE -> BLOCK(x3) -> WARP_DOM -> WARP_IP -> DIRECT@ip -> DIRECT.
+	// Verify exact rule order: CASCADE -> BLOCK(x3) -> WARP_PROBE -> WARP_DOM -> WARP_IP -> DIRECT@ip -> DIRECT.
 	rules := routing["rules"].([]any)
-	wantTags := []string{"CASCADE_1", "BLOCK", "BLOCK", "BLOCK", WarpTag, WarpTag, "DIRECT@203.0.113.10", "DIRECT"}
+	wantTags := []string{"CASCADE_1", "BLOCK", "BLOCK", "BLOCK", WarpTag, WarpTag, WarpTag, "DIRECT@203.0.113.10", "DIRECT"}
 	if len(rules) != len(wantTags) {
 		t.Fatalf("expected %d rules, got %d: %#v", len(wantTags), len(rules), rules)
 	}
