@@ -630,6 +630,24 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 		return res
 	}
 
+	res = CheckViaSocks(cctx, socksAddr, traceURL, req.Endpoint)
+	if !res.OK {
+		stopCmd()
+		if tail := summarizeXrayProbeLog(stderr.String()); tail != "" {
+			res.Error += " | xray: " + tail
+		}
+	}
+	return res
+}
+
+// CheckViaSocks performs a cdn-cgi/trace check through an already listening local SOCKS5 proxy.
+func CheckViaSocks(ctx context.Context, socksAddr, traceURL, endpoint string) *CheckResult {
+	res := &CheckResult{}
+	if traceURL == "" {
+		traceURL = DefaultTraceURL
+	}
+	endpoint = NormalizeEndpoint(endpoint)
+
 	dialer, err := proxy.SOCKS5("tcp", socksAddr, nil, proxy.Direct)
 	if err != nil {
 		res.Error = err.Error()
@@ -646,19 +664,14 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	httpClient := &http.Client{Transport: tr, Timeout: 12 * time.Second}
 
 	start := time.Now()
-	httpReq, err := http.NewRequestWithContext(cctx, http.MethodGet, traceURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, traceURL, nil)
 	if err != nil {
 		res.Error = err.Error()
 		return res
 	}
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		stopCmd()
-		detail := fmt.Sprintf("туннель WARP (%s) не отвечает: %v", req.Endpoint, err)
-		if tail := summarizeXrayProbeLog(stderr.String()); tail != "" {
-			detail += " | xray: " + tail
-		}
-		res.Error = detail
+		res.Error = fmt.Sprintf("туннель WARP (%s) не отвечает: %v", endpoint, err)
 		return res
 	}
 	defer resp.Body.Close()

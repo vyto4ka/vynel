@@ -36,6 +36,10 @@ const IPBlockTag = "VYNEL_BLOCK"
 // WarpTag is the panel-managed Cloudflare WARP WireGuard outbound tag.
 const WarpTag = "VYNEL_WARP"
 
+// WarpProbeTag is the temporary loopback SOCKS5 inbound tag added via HandlerService during
+// live WARP checks so the probe reuses the running VYNEL_WARP WireGuard session without key collision.
+const WarpProbeTag = "VYNEL_WARP_PROBE"
+
 // WarpConfig describes the panel-managed WireGuard/WARP outbound and routing rules for one node.
 type WarpConfig struct {
 	SecretKey      string
@@ -384,7 +388,13 @@ func addWarp(cfg map[string]any, w *WarpConfig) error {
 	}
 	cfg["outbounds"] = append(outbounds, outbound)
 
-	var rules []any
+	rules := []any{
+		map[string]any{
+			"ruleTag":     "WARP_PROBE",
+			"inboundTag":  []any{WarpProbeTag},
+			"outboundTag": WarpTag,
+		},
+	}
 	if w.RouteAll {
 		rules = append(rules, map[string]any{
 			"ruleTag":     "WARP_ALL",
