@@ -37,6 +37,14 @@ type ClientRouting struct {
 	Block  []string `json:"block"`
 	// Fragment cuts the TLS ClientHello into pieces on the way out (Xray JSON only).
 	Fragment ClientFragment `json:"fragment"`
+	// GeoProfile is reserved for future client-side custom geo asset delivery.
+	GeoProfile *ClientGeoProfile `json:"geoProfile,omitempty"`
+}
+
+// ClientGeoProfile is reserved for future client-side geo-file selection.
+type ClientGeoProfile struct {
+	GeoSite string `json:"geosite,omitempty"`
+	GeoIP   string `json:"geoip,omitempty"`
 }
 
 // ClientFragment is Xray's finalmask "fragment": the client sends its TLS ClientHello in small
@@ -256,6 +264,9 @@ func ParseRuleEntry(e string) RuleEntry {
 }
 
 func checkRuleEntry(e string) error {
+	if strings.HasPrefix(e, "ext-domain:") || strings.HasPrefix(e, "ext-ip:") || strings.HasPrefix(e, "ext:") {
+		return invalid("собственные geo-файлы (ext:...) сейчас поддерживаются в правилах WARP и роутинге серверов; поддержка для клиентских приложений будет добавлена отдельно")
+	}
 	r := ParseRuleEntry(e)
 	switch r.Kind {
 	case "ip":

@@ -28,5 +28,6 @@ import format from './format'
 import code from './code'
 import integrations from './integrations'
 import xray from './xray'
+import warp from './warp'
 
-export default { account, audit, billing, charts, common, dashboard, extras, groups, insights, login, main, nodes, overview, profiles, routing, serverload, settings, setup, stats, subscription, telegram, templates, ui, updates, users, format, code, api, integrations, xray }
+export default { account, audit, billing, charts, common, dashboard, extras, groups, insights, login, main, nodes, overview, profiles, routing, serverload, settings, setup, stats, subscription, telegram, templates, ui, updates, users, format, code, api, integrations, xray, warp }

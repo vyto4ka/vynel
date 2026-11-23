@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"time"
@@ -133,6 +134,37 @@ func (g *Server) Connect(stream grpc.BidiStreamingServer[nodev1.NodeMessage, nod
 	}
 	g.notePeer(stream.Context(), node.ID)
 	return g.rec.Serve(node.ID, stream)
+}
+
+// FetchGeoAsset streams a panel-managed .dat file to an authenticated node in 256 KiB chunks.
+func (g *Server) FetchGeoAsset(req *nodev1.FetchGeoAssetRequest, stream grpc.ServerStreamingServer[nodev1.GeoAssetChunk]) error {
+	if _, err := g.authenticate(stream.Context()); err != nil {
+		return err
+	}
+	rc, _, err := g.svc.OpenGeoAsset(stream.Context(), req.Name, req.Sha256)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			return status.Error(codes.NotFound, "geo asset not found")
+		}
+		return status.Error(codes.Internal, err.Error())
+	}
+	defer rc.Close()
+
+	buf := make([]byte, 256*1024)
+	for {
+		n, rerr := rc.Read(buf)
+		if n > 0 {
+			if err := stream.Send(&nodev1.GeoAssetChunk{Data: buf[:n]}); err != nil {
+				return err
+			}
+		}
+		if errors.Is(rerr, io.EOF) {
+			return nil
+		}
+		if rerr != nil {
+			return status.Error(codes.Internal, rerr.Error())
+		}
+	}
 }
 
 func (g *Server) authenticate(ctx context.Context) (*store.Node, error) {

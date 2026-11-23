@@ -217,6 +217,112 @@ export interface Node {
   provider: Provider | null // где арендован сервер
   certs?: CertInfo[]
   certsSupported?: boolean
+  warp?: NodeWarpSummary
+}
+
+export interface NodeWarpSummary {
+  enabled: boolean
+  ruleMode: string
+  rulesCount: number
+  accountType: string
+  lastCheckOk: boolean
+  lastCheckAt: number
+  colo?: string
+}
+
+export interface NodeWarpView {
+  nodeId: number
+  enabled: boolean
+  ruleMode: 'rules' | 'all'
+  credMode: 'auto' | 'manual'
+  hasCredentials: boolean
+  accountType: string
+  hasLicenseKey: boolean
+  publicKey: string
+  peerPublicKey: string
+  addrV4: string
+  addrV6: string
+  reserved: number[]
+  endpoint: string
+  mtu: number
+  keepalive: number
+  domainStrategy: string
+  rules: string[]
+  lastCheckAt: number
+  lastCheckOk: boolean
+  lastCheckIp: string
+  lastCheckColo: string
+  lastCheckMs: number
+  lastCheckErr: string
+  canWarp: boolean
+  canGeo: boolean
+  connected: boolean
+}
+
+export interface WarpCheckResult {
+  ok: boolean
+  ip?: string
+  colo?: string
+  warpMode?: string
+  rttMs?: number
+  error?: string
+}
+
+export interface GeoFileView {
+  id: number
+  name: string
+  title: string
+  kind: 'geosite' | 'geoip'
+  isSystem: boolean
+  isSystemOverride: boolean
+  sourceUrl: string
+  autoUpdate: boolean
+  sha256: string
+  sizeBytes: number
+  categoriesCount: number
+  entriesCount: number
+  fetchedAt: number
+  lastError: string
+  enabled: boolean
+  available: boolean
+  usedByNodes: string[]
+}
+
+export interface GeoSearchHit {
+  file: string
+  kind: 'geosite' | 'geoip'
+  code: string
+  count: number
+  attributes?: string[]
+  rule: string
+  isSystem: boolean
+}
+
+export interface GeoDomainItem {
+  type: 'domain' | 'full' | 'keyword' | 'regexp'
+  value: string
+  attrs?: string[]
+  rule: string
+}
+
+export interface GeoIPItem {
+  cidr: string
+  family: 4 | 6
+}
+
+export interface GeoCategoryDetails {
+  file: string
+  kind: 'geosite' | 'geoip'
+  code: string
+  total: number
+  filtered: number
+  offset: number
+  limit: number
+  attributes?: Record<string, number>
+  typeCounts?: Record<string, number>
+  domains?: GeoDomainItem[]
+  ips?: GeoIPItem[]
+  familyCount?: Record<string, number>
 }
 
 export interface CertInfo {

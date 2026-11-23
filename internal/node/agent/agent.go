@@ -87,16 +87,19 @@ type Config struct {
 	FactsInterval time.Duration
 	// CheckFacts overrides sysctl.Check in tests.
 	CheckFacts func() []string
+	// FetchGeo streams panel-managed .dat files (gRPC FetchGeoAsset or direct local read).
+	FetchGeo GeoFetcher
 }
 
 // Agent applies the panel's desired state to Xray.
 type Agent struct {
-	cfg   Config
-	log   *slog.Logger
-	st    *state.Store
-	proc  *xray.Process
-	caddy *caddy.Manager
-	nginx *nginx.Manager
+	cfg          Config
+	baseAssetDir string
+	log          *slog.Logger
+	st           *state.Store
+	proc         *xray.Process
+	caddy        *caddy.Manager
+	nginx        *nginx.Manager
 
 	mu           sync.Mutex
 	cur          *state.State
@@ -173,16 +176,22 @@ func New(cfg Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	baseAssetDir := cfg.Xray.AssetDir
+	cfg.Xray.AssetDir = filepath.Join(cfg.DataDir, "geo")
 	web := filepath.Join(cfg.DataDir, "web")
 	www := cfg.WWWDir
 	if www == "" {
 		www = filepath.Join(web, "www")
 	}
-	a := &Agent{cfg: cfg, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
+	a := &Agent{cfg: cfg, baseAssetDir: baseAssetDir, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
 		caddy: &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")},
 		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, Log: cfg.Log.With("component", "nginx"),
 			CaddyStorage: filepath.Join(web, "caddy", "caddy")},
 		statsCh: make(chan struct{}, 1), certKick: make(chan struct{}, 1), certReportCh: make(chan struct{}, 1)}
+	if err := a.ensureGeoDir(); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if !cfg.Manual {
 		if err := a.nginx.Init(); err != nil {
 			st.Close()
@@ -268,7 +277,7 @@ func (a *Agent) buildHello() *nodev1.Hello {
 		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: addrs,
 		CaddyVersion: a.caddyVer, Warnings: warnings, NginxVersion: nginxVer,
 	}
-	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit)
+	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit, CapGeo, CapWarp)
 	if !a.cfg.Manual && nginxVer != "" {
 		hello.Capabilities = append(hello.Capabilities, CapNginx, CapCerts)
 	}
@@ -673,6 +682,10 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 		if len(done) > 0 {
 			res.Detail = strings.Join(done, ", ")
 		}
+	case nodev1.Command_ACTION_WARP_PROVISION:
+		res.Detail, err = a.handleWarpProvision(ctx, c.Payload)
+	case nodev1.Command_ACTION_WARP_CHECK:
+		res.Detail, err = a.handleWarpCheck(ctx, c.Payload)
 	case nodev1.Command_ACTION_REBOOT:
 		res.Detail = "the server reboots now"
 		after = func() {
@@ -694,6 +707,9 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 // Xray API without a restart. Different structure (or API failure): full config and restart.
 func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	next := &state.State{Revision: s.Revision, Hash: s.Hash, Config: s.XrayConfig, Caddy: s.CaddyConfig, Nginx: s.NginxConfig}
+	for _, g := range s.GeoAssets {
+		next.GeoAssets = append(next.GeoAssets, state.GeoAsset{Name: g.Name, SHA256: g.Sha256, Size: g.Size})
+	}
 	for _, in := range s.Inbounds {
 		si := state.Inbound{Tag: in.Tag, Protocol: in.Protocol, Flow: in.Flow}
 		for _, u := range in.Users {
@@ -707,6 +723,10 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 		// A manual node applies only the Xray part; the panel sends no web config for it, and
 		// anything that slips through (a mixed-version panel) is ignored rather than applied.
 		next.Caddy, next.Nginx = nil, ""
+	}
+	geoChanged, err := a.syncGeoAssetsLocked(ctx, s.GeoAssets)
+	if err != nil {
+		return err
 	}
 	var webErr error
 	commit := func() error {
@@ -740,7 +760,8 @@ func (a *Agent) ApplySnapshot(ctx context.Context, s *nodev1.Snapshot) error {
 	if webErr == nil {
 		a.syncFirewall(ctx) // e.g. port 80 for certificates, even if Xray then fails
 	}
-	if a.cur != nil && bytes.Equal(a.cur.Config, next.Config) && a.proc.Running() && a.api != nil {
+	if a.cur != nil && !geoChanged && slices.Equal(a.cur.GeoAssets, next.GeoAssets) &&
+		bytes.Equal(a.cur.Config, next.Config) && a.proc.Running() && a.api != nil {
 		err := a.syncUsersLocked(ctx, a.cur, next)
 		if err == nil {
 			return commit()

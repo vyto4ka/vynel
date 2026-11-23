@@ -11,6 +11,23 @@ service NodeGateway {
   rpc Join(JoinRequest) returns (JoinResponse);
   // Main channel (mTLS with the certificate obtained from Join).
   rpc Connect(stream NodeMessage) returns (stream PanelMessage);
+  // Stream a panel-managed geo asset (.dat) to an authenticated node.
+  rpc FetchGeoAsset(FetchGeoAssetRequest) returns (stream GeoAssetChunk);
+}
+
+message GeoAsset {
+  string name = 1;
+  string sha256 = 2;
+  int64 size = 3;
+}
+
+message FetchGeoAssetRequest {
+  string name = 1;
+  string sha256 = 2;
+}
+
+message GeoAssetChunk {
+  bytes data = 1;
 }
 
 message JoinRequest {
@@ -138,7 +155,9 @@ message Command {
     ACTION_RESTART_AGENT = 3; // restart the vynel service (systemd starts it again)
     ACTION_REBOOT = 4;        // reboot the server
     ACTION_UPDATE = 5;        // update vynel, Xray and nginx (`vynel update`, in the background)
-    ACTION_RENEW_CERTS = 6;   // force-renew TLS certificates (all or one domain)
+    ACTION_RENEW_CERTS = 6;    // force-renew TLS certificates (all or one domain)
+    ACTION_WARP_PROVISION = 7; // register Cloudflare WARP account or bind WARP+ license from the node
+    ACTION_WARP_CHECK = 8;     // live-check WARP tunnel via cdn-cgi/trace from the node
   }
   string id = 1;
   Action action = 2;
@@ -149,6 +168,8 @@ message Command {
   string ref = 4;
   // ACTION_RENEW_CERTS: domain to force-renew; empty = all certificate domains of the node.
   string domain = 5;
+  // JSON payload for structured commands (ACTION_WARP_PROVISION, ACTION_WARP_CHECK).
+  bytes payload = 6;
 }
 
 // CommandResult answers a Command. For a service restart or reboot it is sent before acting.
@@ -214,6 +235,8 @@ message Snapshot {
   // applies the snapshot once the last part (parts-1) of the same revision and hash is in.
   int32 part = 7;
   int32 parts = 8;
+  // Panel-managed custom or overridden .dat files required by this node's config.
+  repeated GeoAsset geo_assets = 9;
 }
 
 message InboundUsers {

@@ -33,6 +33,26 @@ const DirectTag = "DIRECT"
 // §6.1): the agent routes them there through the routing API.
 const IPBlockTag = "VYNEL_BLOCK"
 
+// WarpTag is the panel-managed Cloudflare WARP WireGuard outbound tag.
+const WarpTag = "VYNEL_WARP"
+
+// WarpConfig describes the panel-managed WireGuard/WARP outbound and routing rules for one node.
+type WarpConfig struct {
+	SecretKey      string
+	Addresses      []string
+	PeerPublicKey  string
+	PresharedKey   string
+	Reserved       []int
+	Endpoint       string
+	MTU            int
+	Keepalive      int
+	DomainStrategy string
+	SendThrough    string
+	RouteAll       bool
+	Domains        []string
+	IPs            []string
+}
+
 // Client is a user written into an inbound's clients list.
 type Client struct {
 	Email string `json:"email"` // stable user key for stats, never the username
@@ -50,6 +70,8 @@ type NodeConfig struct {
 	// the base routing rules, which usually end with a catch-all.
 	Outbounds  []any
 	FrontRules []any
+	// Warp configures the optional panel-managed Cloudflare WARP outbound and routing rules.
+	Warp *WarpConfig
 }
 
 // SystemKeys are the top-level sections the panel owns. They are hidden from the editor.
@@ -103,6 +125,11 @@ func BuildConfig(nc NodeConfig) (map[string]any, error) {
 	}
 	cfg["inbounds"] = inbounds
 
+	// WARP rules go before DIRECT@<ip> egress rules and before the catch-all DIRECT rule,
+	// while keeping base BLOCK rules and cascade FrontRules ahead of WARP.
+	if err := addWarp(cfg, nc.Warp); err != nil {
+		return nil, err
+	}
 	if err := addEgress(cfg, nc.Inbounds); err != nil {
 		return nil, err
 	}
@@ -259,6 +286,139 @@ func addEgress(cfg map[string]any, inbounds []*RenderedInbound) error {
 	if routing == nil {
 		routing = map[string]any{}
 		cfg["routing"] = routing
+	}
+	existing, _ := routing["rules"].([]any)
+	at := len(existing)
+	for i, r := range existing {
+		if m, ok := r.(map[string]any); ok && m["outboundTag"] == DirectTag {
+			at = i
+			break
+		}
+	}
+	merged := make([]any, 0, len(existing)+len(rules))
+	merged = append(merged, existing[:at]...)
+	merged = append(merged, rules...)
+	merged = append(merged, existing[at:]...)
+	routing["rules"] = merged
+	return nil
+}
+
+// addWarp appends the VYNEL_WARP WireGuard outbound (always with noKernelTun=true) and inserts
+// WARP routing rules right before the first rule targeting DIRECT.
+func addWarp(cfg map[string]any, w *WarpConfig) error {
+	if w == nil || w.SecretKey == "" {
+		return nil
+	}
+	if len(w.Addresses) == 0 {
+		return fmt.Errorf("warp: at least one interface address is required")
+	}
+	if w.Endpoint == "" {
+		return fmt.Errorf("warp: endpoint is required")
+	}
+	if !w.RouteAll && len(w.Domains) == 0 && len(w.IPs) == 0 {
+		return nil
+	}
+
+	outbounds, _ := cfg["outbounds"].([]any)
+	for _, o := range outbounds {
+		if m, ok := o.(map[string]any); ok && m["tag"] == WarpTag {
+			return fmt.Errorf("base config already defines outbound %q", WarpTag)
+		}
+	}
+
+	peerPub := w.PeerPublicKey
+	if peerPub == "" {
+		peerPub = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+	}
+	peer := map[string]any{
+		"publicKey":  peerPub,
+		"endpoint":   w.Endpoint,
+		"allowedIPs": []any{"0.0.0.0/0", "::/0"},
+	}
+	if w.Keepalive > 0 {
+		peer["keepAlive"] = w.Keepalive
+	}
+	if w.PresharedKey != "" {
+		peer["preSharedKey"] = w.PresharedKey
+	}
+
+	addrs := make([]any, 0, len(w.Addresses))
+	for _, a := range w.Addresses {
+		addrs = append(addrs, a)
+	}
+	mtu := w.MTU
+	if mtu <= 0 {
+		mtu = 1280
+	}
+	ds := w.DomainStrategy
+	if ds == "" {
+		ds = "ForceIPv4v6"
+	}
+	settings := map[string]any{
+		"noKernelTun":    true,
+		"secretKey":      w.SecretKey,
+		"address":        addrs,
+		"peers":          []any{peer},
+		"mtu":            mtu,
+		"domainStrategy": ds,
+	}
+	if len(w.Reserved) == 3 {
+		settings["reserved"] = []any{w.Reserved[0], w.Reserved[1], w.Reserved[2]}
+	}
+	outbound := map[string]any{
+		"tag":      WarpTag,
+		"protocol": "wireguard",
+		"settings": settings,
+	}
+	if w.SendThrough != "" {
+		if net.ParseIP(w.SendThrough) == nil {
+			return fmt.Errorf("warp: bad sendThrough IP %q", w.SendThrough)
+		}
+		outbound["sendThrough"] = w.SendThrough
+	}
+	cfg["outbounds"] = append(outbounds, outbound)
+
+	var rules []any
+	if w.RouteAll {
+		rules = append(rules, map[string]any{
+			"ruleTag":     "WARP_ALL",
+			"network":     "tcp,udp",
+			"outboundTag": WarpTag,
+		})
+	} else {
+		if len(w.Domains) > 0 {
+			doms := make([]any, 0, len(w.Domains))
+			for _, d := range w.Domains {
+				doms = append(doms, d)
+			}
+			rules = append(rules, map[string]any{
+				"ruleTag":     "WARP_DOM",
+				"domain":      doms,
+				"outboundTag": WarpTag,
+			})
+		}
+		if len(w.IPs) > 0 {
+			ips := make([]any, 0, len(w.IPs))
+			for _, ip := range w.IPs {
+				ips = append(ips, ip)
+			}
+			rules = append(rules, map[string]any{
+				"ruleTag":     "WARP_IP",
+				"ip":          ips,
+				"outboundTag": WarpTag,
+			})
+		}
+	}
+
+	routing, _ := cfg["routing"].(map[string]any)
+	if routing == nil {
+		routing = map[string]any{}
+		cfg["routing"] = routing
+	}
+	if len(w.IPs) > 0 {
+		if cur, _ := routing["domainStrategy"].(string); cur == "" {
+			routing["domainStrategy"] = "IPIfNonMatch"
+		}
 	}
 	existing, _ := routing["rules"].([]any)
 	at := len(existing)

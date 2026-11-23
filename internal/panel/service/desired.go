@@ -31,14 +31,15 @@ type DesiredInbound struct {
 // Config holds the structure without clients; users are listed separately so that user
 // changes become hot API operations while structural changes restart Xray.
 type DesiredState struct {
-	NodeID   int64
-	Config   []byte
-	Caddy    []byte // Caddy JSON config for agents without nginx; nil = Caddy not needed
-	Nginx    string // nginx config for agents with the "nginx" capability; "" = no web server
-	Inbounds []DesiredInbound
-	Users    map[string][]xrayconf.Client // by inbound tag, sorted by email
-	Hash     string
-	Problems []string // inbounds skipped because they failed to render
+	NodeID    int64
+	Config    []byte
+	Caddy     []byte // Caddy JSON config for agents without nginx; nil = Caddy not needed
+	Nginx     string // nginx config for agents with the "nginx" capability; "" = no web server
+	Inbounds  []DesiredInbound
+	Users     map[string][]xrayconf.Client // by inbound tag, sorted by email
+	GeoAssets []DesiredGeoAsset            // panel-managed .dat files required by this node
+	Hash      string
+	Problems  []string // inbounds skipped because they failed to render
 }
 
 // UserEmail is the stable Xray "email" of a user: its id. Stats are keyed by it.
@@ -127,10 +128,14 @@ func (s *Service) desiredStatesWithOverrides(ctx context.Context, baseJSON *stri
 	if err != nil {
 		return nil, err
 	}
+	wp, err := s.planWarp(ctx, q, nodes)
+	if err != nil {
+		return nil, err
+	}
 
 	out := make(map[int64]*DesiredState, len(nodes))
 	for _, n := range nodes {
-		ds := &DesiredState{NodeID: n.ID, Users: map[string][]xrayconf.Client{}}
+		ds := &DesiredState{NodeID: n.ID, Users: map[string][]xrayconf.Client{}, GeoAssets: wp.assets[n.ID]}
 		// Per-node override exists for several nodes sharing one host (tests, unusual setups).
 		nodePort, err := s.Setting(ctx, SettingXrayAPIPort+"."+n.Code, apiPort)
 		if err != nil {
@@ -197,8 +202,15 @@ func (s *Service) desiredStatesWithOverrides(ctx context.Context, baseJSON *stri
 			return nil, err
 		}
 		ds.Problems = append(ds.Problems, casc.problems[n.ID]...)
+		ds.Problems = append(ds.Problems, wp.problems[n.ID]...)
 		cfg, err := xrayconf.BuildConfig(xrayconf.NodeConfig{Base: baseMap, Inbounds: rendered, APIAddr: apiAddr,
-			Outbounds: casc.outbounds[n.ID], FrontRules: casc.rules[n.ID]})
+			Outbounds: casc.outbounds[n.ID], FrontRules: casc.rules[n.ID], Warp: wp.configs[n.ID]})
+		if err != nil && wp.configs[n.ID] != nil {
+			// Fail-safe: a WARP config conflict must never take down the node's inbounds/users.
+			ds.Problems = append(ds.Problems, "warp: "+err.Error())
+			cfg, err = xrayconf.BuildConfig(xrayconf.NodeConfig{Base: baseMap, Inbounds: rendered, APIAddr: apiAddr,
+				Outbounds: casc.outbounds[n.ID], FrontRules: casc.rules[n.ID]})
+		}
 		if err != nil {
 			// A structural conflict (e.g. two inbounds on one port) blocks the whole node config.
 			ds.Problems = append(ds.Problems, err.Error())
@@ -277,6 +289,12 @@ func hashState(ds *DesiredState) string {
 	h.Write(ds.Caddy)
 	if ds.Nginx != "" {
 		h.Write([]byte("\x00nginx" + ds.Nginx))
+	}
+	if len(ds.GeoAssets) > 0 {
+		h.Write([]byte("\x00geo"))
+		for _, a := range ds.GeoAssets {
+			h.Write([]byte("\x01" + a.Name + "\x02" + a.SHA256))
+		}
 	}
 	tags := make([]string, 0, len(ds.Users))
 	for t := range ds.Users {

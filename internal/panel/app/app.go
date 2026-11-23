@@ -6,8 +6,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -29,6 +31,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/panel/webapi"
 	nodev1 "github.com/vyto4ka/vynel/internal/proto/vynel/node/v1"
 	"github.com/vyto4ka/vynel/internal/update"
+	"github.com/vyto4ka/vynel/internal/warp"
 	"github.com/vyto4ka/vynel/internal/xray"
 )
 
@@ -114,6 +117,20 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	rec := reconciler.New(svc, cfg.Log.With("component", "reconciler"))
 	svc.OnChange = rec.Notify
 	svc.NodeConnected = rec.Connected
+	svc.WarpProvision = nodeWarpProvision(rec)
+	svc.WarpCheck = nodeWarpCheck(rec)
+
+	geoDir := filepath.Join(cfg.DataDir, "geo")
+	sysAssetDir := cfg.Xray.AssetDir
+	if sysAssetDir == "" {
+		sysAssetDir = "/usr/local/share/xray"
+	}
+	if err := svc.InitGeoStore(geoDir, sysAssetDir); err != nil {
+		cfg.Log.Warn("geostore init", "err", err)
+	}
+	testerBin := cfg.Xray
+	testerBin.AssetDir = geoDir
+
 	p := &Panel{Service: svc, CA: authority, Reconciler: rec, SNI: sni,
 		Gateway:       gateway.New(svc, authority, rec, sni, cfg.Log.With("component", "gateway")),
 		Subscriptions: subscription.NewHandler(svc, cfg.Log.With("component", "subscriptions"))}
@@ -121,11 +138,60 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
 		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
-		UpdateStatus: rec.UpdateStatus, CertStatus: rec.CertStatus, RenewCerts: nodeRenewCerts(rec), XrayTest: xrayTester(cfg.Xray)})
+		UpdateStatus: rec.UpdateStatus, CertStatus: rec.CertStatus, RenewCerts: nodeRenewCerts(rec), XrayTest: xrayTester(testerBin)})
 	if st := update.LocalStatus(); st != nil {
 		_ = svc.RecordUpdateStatus(ctx, 0, st)
 	}
 	return p, func() { st.Close() }, nil
+}
+
+// nodeWarpProvision asks a connected node to register a Cloudflare WARP account (or bind WARP+).
+func nodeWarpProvision(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error) {
+	return func(ctx context.Context, nodeID int64, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error) {
+		payload, _ := json.Marshal(map[string]any{"licenseKey": licenseKey, "existing": existing})
+		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		res, err := rec.Command(cctx, nodeID, &nodev1.Command{Action: nodev1.Command_ACTION_WARP_PROVISION, Payload: payload})
+		if err != nil {
+			return nil, err
+		}
+		if res.Error != "" {
+			return nil, errors.New(res.Error)
+		}
+		var creds warp.Credentials
+		if err := json.Unmarshal([]byte(res.Detail), &creds); err != nil {
+			return nil, fmt.Errorf("parse warp provision result: %w", err)
+		}
+		return &creds, nil
+	}
+}
+
+// nodeWarpCheck runs a live cdn-cgi/trace check through a node's WARP tunnel.
+func nodeWarpCheck(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, req warp.CheckRequest) (*warp.CheckResult, error) {
+	return func(ctx context.Context, nodeID int64, req warp.CheckRequest) (*warp.CheckResult, error) {
+		payload, _ := json.Marshal(req)
+		cctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+		defer cancel()
+		res, err := rec.Command(cctx, nodeID, &nodev1.Command{Action: nodev1.Command_ACTION_WARP_CHECK, Payload: payload})
+		if err != nil {
+			return nil, err
+		}
+		if res.Error != "" {
+			return nil, errors.New(res.Error)
+		}
+		var out warp.CheckResult
+		if err := json.Unmarshal([]byte(res.Detail), &out); err != nil {
+			return nil, fmt.Errorf("parse warp check result: %w", err)
+		}
+		return &out, nil
+	}
+}
+
+func localGeoFetcher(svc *service.Service) agent.GeoFetcher {
+	return func(ctx context.Context, name, sha string) (io.ReadCloser, error) {
+		rc, _, err := svc.OpenGeoAsset(ctx, name, sha)
+		return rc, err
+	}
 }
 
 // xrayTester lets this server's Xray read a config before the panel hands it to nodes; nil when
@@ -210,6 +276,8 @@ func Run(ctx context.Context, cfg Config) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	go p.Service.EnsureGeoFiles(ctx)
+
 	var wg sync.WaitGroup
 	errs := make(chan error, 16) // one slot per runner: a failing runner never blocks
 	run := func(name string, fn func() error) {
@@ -254,6 +322,7 @@ func Run(ctx context.Context, cfg Config) error {
 		a, err := agent.New(agent.Config{
 			DataDir: filepath.Join(cfg.DataDir, "node"), Xray: cfg.Xray, Version: cfg.Version,
 			Log: cfg.Log.With("component", "local-node"), Dial: LocalDialer(ctx, p.Reconciler, node.ID),
+			FetchGeo: localGeoFetcher(p.Service),
 			CaddyBin: cfg.CaddyBin, NginxBin: cfg.NginxBin, WWWDir: cfg.WWWDir, TuneSysctl: cfg.TuneSysctl,
 			Firewall: fw, ExtraPorts: gatewayPorts(ctx, p.Service, cfg.GatewayListen),
 		})

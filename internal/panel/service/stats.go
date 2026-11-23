@@ -190,6 +190,7 @@ func (s *Service) Maintenance(ctx context.Context, prune bool) error {
 	}
 	s.grantCheck = now
 	s.refreshDueExternals(ctx)
+	s.refreshDueGeoFiles(ctx)
 	// Node load for the dashboard: the last hour's finished 5 minutes, again each run (cheap, and
 	// late samples from a node that was offline land too).
 	if err := store.RollupMetrics(ctx, s.st.DB, now-now%300-3600, now-now%300); err != nil {
