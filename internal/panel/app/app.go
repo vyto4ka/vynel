@@ -146,10 +146,10 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 }
 
 // nodeWarpProvision asks a connected node to register a Cloudflare WARP account (or bind WARP+).
-func nodeWarpProvision(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error) {
-	return func(ctx context.Context, nodeID int64, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error) {
-		payload, _ := json.Marshal(map[string]any{"licenseKey": licenseKey, "existing": existing})
-		cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+func nodeWarpProvision(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64, transport, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error) {
+	return func(ctx context.Context, nodeID int64, transport, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error) {
+		payload, _ := json.Marshal(map[string]any{"transport": transport, "licenseKey": licenseKey, "existing": existing})
+		cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 		defer cancel()
 		res, err := rec.Command(cctx, nodeID, &nodev1.Command{Action: nodev1.Command_ACTION_WARP_PROVISION, Payload: payload})
 		if err != nil {

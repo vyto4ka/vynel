@@ -28,6 +28,7 @@ type DesiredGeoAsset struct {
 // NodeWarpSummary is the compact WARP badge payload embedded in GET /api/nodes.
 type NodeWarpSummary struct {
 	Enabled     bool   `json:"enabled"`
+	Transport   string `json:"transport"`
 	RuleMode    string `json:"ruleMode"`
 	RulesCount  int    `json:"rulesCount"`
 	AccountType string `json:"accountType"`
@@ -40,6 +41,7 @@ type NodeWarpSummary struct {
 type NodeWarpView struct {
 	NodeID         int64    `json:"nodeId"`
 	Enabled        bool     `json:"enabled"`
+	Transport      string   `json:"transport"`
 	RuleMode       string   `json:"ruleMode"`
 	CredMode       string   `json:"credMode"`
 	HasCredentials bool     `json:"hasCredentials"`
@@ -69,8 +71,9 @@ type NodeWarpView struct {
 // NodeWarpInput is the payload for PUT /api/nodes/{id}/warp.
 type NodeWarpInput struct {
 	Enabled        bool     `json:"enabled"`
-	RuleMode       string   `json:"ruleMode"` // "rules" | "all"
-	CredMode       string   `json:"credMode"` // "auto" | "manual"
+	Transport      string   `json:"transport"` // "masque-h3" | "masque-h2" | "wireguard"
+	RuleMode       string   `json:"ruleMode"`  // "rules" | "all"
+	CredMode       string   `json:"credMode"`  // "auto" | "manual"
 	LicenseKey     string   `json:"licenseKey"`
 	SecretKey      string   `json:"secretKey"`
 	PeerPublicKey  string   `json:"peerPublicKey"`
@@ -88,9 +91,20 @@ type NodeWarpInput struct {
 
 // NodeWarpProvisionInput is the payload for POST /api/nodes/{id}/warp/provision.
 type NodeWarpProvisionInput struct {
+	Transport     string `json:"transport"`
 	LicenseKey    string `json:"licenseKey"`
 	WireGuardConf string `json:"wireguardConf"`
 	ForceNew      bool   `json:"forceNew"`
+}
+
+func effectiveTransport(w *store.NodeWarp) string {
+	if warp.ValidTransports[w.Transport] {
+		return w.Transport
+	}
+	if w.SecretKey == "" || warp.IsMasqueKey(w.SecretKey) {
+		return warp.TransportMasqueH3
+	}
+	return warp.TransportWireGuard
 }
 
 // NodeWarpSummaries returns compact WARP badges for all nodes (keyed by node_id).
@@ -106,6 +120,7 @@ func (s *Service) NodeWarpSummaries(ctx context.Context) (map[int64]*NodeWarpSum
 		}
 		out[id] = &NodeWarpSummary{
 			Enabled:     w.Enabled,
+			Transport:   effectiveTransport(w),
 			RuleMode:    w.RuleMode,
 			RulesCount:  len(w.Rules),
 			AccountType: w.AccountType,
@@ -127,10 +142,10 @@ func (s *Service) NodeWarp(ctx context.Context, nodeID int64) (*NodeWarpView, er
 	if errors.Is(err, store.ErrNotFound) {
 		w = &store.NodeWarp{
 			NodeID:         nodeID,
+			Transport:      warp.DefaultTransport,
 			RuleMode:       warp.RuleModeSelected,
 			CredMode:       "auto",
-			PeerPublicKey:  warp.DefaultPeerPublicKey,
-			Endpoint:       warp.DefaultEndpoint,
+			Endpoint:       warp.DefaultMasqueEndpoint,
 			MTU:            warp.DefaultMTU,
 			Keepalive:      warp.DefaultKeepalive,
 			DomainStrategy: warp.DefaultDomainStrategy,
@@ -151,10 +166,12 @@ func (s *Service) nodeWarpToView(n *store.Node, w *store.NodeWarp) *NodeWarpView
 	if rules == nil {
 		rules = []string{}
 	}
+	tr := effectiveTransport(w)
 	connected := s.NodeConnected != nil && s.NodeConnected(n.ID)
 	return &NodeWarpView{
 		NodeID:         n.ID,
 		Enabled:        w.Enabled,
+		Transport:      tr,
 		RuleMode:       w.RuleMode,
 		CredMode:       w.CredMode,
 		HasCredentials: w.SecretKey != "",
@@ -165,7 +182,7 @@ func (s *Service) nodeWarpToView(n *store.Node, w *store.NodeWarp) *NodeWarpView
 		AddrV4:         w.AddrV4,
 		AddrV6:         w.AddrV6,
 		Reserved:       res,
-		Endpoint:       warp.NormalizeEndpoint(w.Endpoint),
+		Endpoint:       warp.NormalizeEndpointForTransport(w.Endpoint, tr),
 		MTU:            w.MTU,
 		Keepalive:      w.Keepalive,
 		DomainStrategy: w.DomainStrategy,
@@ -183,8 +200,8 @@ func (s *Service) nodeWarpToView(n *store.Node, w *store.NodeWarp) *NodeWarpView
 }
 
 // SaveNodeWarp validates and saves a node's WARP configuration. When enabled for the first time
-// without credentials, it automatically provisions a Cloudflare WARP account (via the node agent
-// with fallback to the panel).
+// without credentials (or when switching between MASQUE and WireGuard in auto mode), it
+// automatically provisions a Cloudflare WARP account via the node agent with fallback to the panel.
 func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, in NodeWarpInput) (*NodeWarpView, error) {
 	n, err := store.GetNode(ctx, s.st.DB, nodeID)
 	if err != nil {
@@ -194,10 +211,10 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 	if errors.Is(err, store.ErrNotFound) {
 		w = &store.NodeWarp{
 			NodeID:         nodeID,
+			Transport:      warp.DefaultTransport,
 			RuleMode:       warp.RuleModeSelected,
 			CredMode:       "auto",
-			PeerPublicKey:  warp.DefaultPeerPublicKey,
-			Endpoint:       warp.DefaultEndpoint,
+			Endpoint:       warp.DefaultMasqueEndpoint,
 			MTU:            warp.DefaultMTU,
 			Keepalive:      warp.DefaultKeepalive,
 			DomainStrategy: warp.DefaultDomainStrategy,
@@ -211,6 +228,13 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 	}
 	if in.RuleMode != warp.RuleModeSelected && in.RuleMode != warp.RuleModeAll {
 		return nil, invalid("некорректный режим правил WARP: %q", in.RuleMode)
+	}
+	targetTransport := effectiveTransport(w)
+	if t := strings.TrimSpace(strings.ToLower(in.Transport)); t != "" {
+		if !warp.ValidTransports[t] {
+			return nil, invalid("некорректный режим правил WARP: %q", in.Transport)
+		}
+		targetTransport = t
 	}
 
 	// Validate rules and check custom geo files exist.
@@ -253,6 +277,7 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 			return nil, invalid("%v", err)
 		}
 		applyCredsToStore(w, creds)
+		targetTransport = warp.TransportWireGuard
 	} else if in.CredMode == "manual" {
 		w.CredMode = "manual"
 		if strings.TrimSpace(in.SecretKey) != "" {
@@ -276,13 +301,20 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 		if w.AccountType == "" {
 			w.AccountType = "custom"
 		}
+		if !warp.IsMasqueKey(w.SecretKey) {
+			targetTransport = warp.TransportWireGuard
+		}
 	}
+
+	w.Transport = targetTransport
 
 	if ep := strings.TrimSpace(in.Endpoint); ep != "" {
 		if _, _, err := net.SplitHostPort(ep); err != nil {
 			return nil, invalid("некорректный endpoint WARP %q: нужен формат host:port", ep)
 		}
-		w.Endpoint = warp.NormalizeEndpoint(ep)
+		w.Endpoint = warp.NormalizeEndpointForTransport(ep, w.Transport)
+	} else {
+		w.Endpoint = warp.NormalizeEndpointForTransport(w.Endpoint, w.Transport)
 	}
 	if in.MTU > 0 {
 		if in.MTU < 576 || in.MTU > 9000 {
@@ -300,21 +332,26 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 		w.DomainStrategy = ds
 	}
 
-	// Auto-provision Cloudflare WARP credentials on first enable if none exist.
-	if in.Enabled && w.SecretKey == "" {
+	// Auto-provision when enabling without credentials OR when switching between MASQUE and WireGuard families.
+	familyMismatch := w.SecretKey != "" && w.CredMode == "auto" && warp.IsMasqueTransport(w.Transport) != warp.IsMasqueKey(w.SecretKey)
+	if (in.Enabled && w.SecretKey == "") || familyMismatch {
 		if w.CredMode == "manual" {
 			return nil, invalid("в ручном режиме укажите SecretKey и Address (или импортируйте .conf)")
 		}
-		creds, err := s.provisionWarpCreds(ctx, n, strings.TrimSpace(in.LicenseKey), nil)
+		lk := strings.TrimSpace(in.LicenseKey)
+		if lk == "" {
+			lk = w.LicenseKey
+		}
+		creds, err := s.provisionWarpCreds(ctx, n, w.Transport, lk, nil)
 		if err != nil {
 			return nil, invalid("не удалось зарегистрировать аккаунт Cloudflare WARP: %v", err)
 		}
 		applyCredsToStore(w, creds)
 		if ep := strings.TrimSpace(in.Endpoint); ep != "" {
-			w.Endpoint = warp.NormalizeEndpoint(ep)
+			w.Endpoint = warp.NormalizeEndpointForTransport(ep, w.Transport)
 		}
 	} else if lk := strings.TrimSpace(in.LicenseKey); lk != "" && lk != w.LicenseKey && w.CredMode == "auto" && w.DeviceID != "" {
-		creds, err := s.provisionWarpCreds(ctx, n, lk, w)
+		creds, err := s.provisionWarpCreds(ctx, n, w.Transport, lk, w)
 		if err != nil {
 			return nil, invalid("не удалось привязать ключ WARP+: %v", err)
 		}
@@ -329,7 +366,7 @@ func (s *Service) SaveNodeWarp(ctx context.Context, actor Actor, nodeID int64, i
 		actor: actor, action: "node.warp.save", entity: "node",
 		entityID: func() int64 { return nodeID },
 		event:    EvNodeChanged,
-		diff:     map[string]any{"enabled": w.Enabled, "ruleMode": w.RuleMode, "rules": len(w.Rules)},
+		diff:     map[string]any{"enabled": w.Enabled, "transport": w.Transport, "ruleMode": w.RuleMode, "rules": len(w.Rules)},
 	}, func(q store.DBTX) error {
 		return store.UpsertNodeWarp(ctx, q, w)
 	})
@@ -349,10 +386,10 @@ func (s *Service) ProvisionNodeWarp(ctx context.Context, actor Actor, nodeID int
 	if errors.Is(err, store.ErrNotFound) {
 		w = &store.NodeWarp{
 			NodeID:         nodeID,
+			Transport:      warp.DefaultTransport,
 			RuleMode:       warp.RuleModeSelected,
 			CredMode:       "auto",
-			PeerPublicKey:  warp.DefaultPeerPublicKey,
-			Endpoint:       warp.DefaultEndpoint,
+			Endpoint:       warp.DefaultMasqueEndpoint,
 			MTU:            warp.DefaultMTU,
 			Keepalive:      warp.DefaultKeepalive,
 			DomainStrategy: warp.DefaultDomainStrategy,
@@ -369,11 +406,29 @@ func (s *Service) ProvisionNodeWarp(ctx context.Context, actor Actor, nodeID int
 		}
 		applyCredsToStore(w, creds)
 	} else {
+		targetTransport := strings.TrimSpace(strings.ToLower(in.Transport))
+		if targetTransport != "" && !warp.ValidTransports[targetTransport] {
+			return nil, invalid("некорректный режим правил WARP: %q", in.Transport)
+		}
+		if targetTransport == "" {
+			// When reissuing an unhealthy legacy WireGuard account without forcing wireguard,
+			// auto-upgrade to MASQUE (h3 -> h2 fallback).
+			if w.Transport == warp.TransportWireGuard && w.LastCheckOK {
+				targetTransport = warp.TransportWireGuard
+			} else {
+				targetTransport = warp.DefaultTransport
+			}
+		}
 		var existing *store.NodeWarp
-		if !in.ForceNew && w.CredMode == "auto" && w.DeviceID != "" && strings.TrimSpace(in.LicenseKey) != "" {
+		if !in.ForceNew && w.CredMode == "auto" && w.DeviceID != "" && strings.TrimSpace(in.LicenseKey) != "" &&
+			warp.IsMasqueTransport(targetTransport) == warp.IsMasqueKey(w.SecretKey) {
 			existing = w
 		}
-		creds, err := s.provisionWarpCreds(ctx, n, strings.TrimSpace(in.LicenseKey), existing)
+		lk := strings.TrimSpace(in.LicenseKey)
+		if lk == "" && in.ForceNew {
+			lk = w.LicenseKey
+		}
+		creds, err := s.provisionWarpCreds(ctx, n, targetTransport, lk, existing)
 		if err != nil {
 			return nil, invalid("не удалось получить ключи Cloudflare WARP: %v", err)
 		}
@@ -384,7 +439,7 @@ func (s *Service) ProvisionNodeWarp(ctx context.Context, actor Actor, nodeID int
 		actor: actor, action: "node.warp.provision", entity: "node",
 		entityID: func() int64 { return nodeID },
 		event:    EvNodeChanged,
-		diff:     map[string]any{"credMode": w.CredMode, "accountType": w.AccountType},
+		diff:     map[string]any{"credMode": w.CredMode, "transport": w.Transport, "accountType": w.AccountType},
 	}, func(q store.DBTX) error {
 		return store.UpsertNodeWarp(ctx, q, w)
 	})
@@ -395,6 +450,8 @@ func (s *Service) ProvisionNodeWarp(ctx context.Context, actor Actor, nodeID int
 }
 
 // CheckNodeWarp runs a live cdn-cgi/trace check through the node's WARP tunnel via ACTION_WARP_CHECK.
+// When an auto-managed tunnel fails (e.g. hoster blocks WireGuard UDP 2408 or QUIC UDP 443),
+// CheckNodeWarp automatically heals it by switching to MASQUE HTTP/3 (UDP 443) or MASQUE HTTP/2 (TCP 443).
 func (s *Service) CheckNodeWarp(ctx context.Context, nodeID int64) (*warp.CheckResult, error) {
 	n, err := store.GetNode(ctx, s.st.DB, nodeID)
 	if err != nil {
@@ -417,8 +474,8 @@ func (s *Service) CheckNodeWarp(ctx context.Context, nodeID int64) (*warp.CheckR
 		return nil, invalid("агент ноды %s не поддерживает живую проверку WARP; обновите агент ноды", n.Code)
 	}
 
-	// Best-effort activation for devices registered before warp_enabled=true PATCH was added.
-	if !w.LastCheckOK && w.CredMode == "auto" && w.DeviceID != "" && w.AccessToken != "" {
+	curTransport := effectiveTransport(w)
+	if curTransport == warp.TransportWireGuard && !w.LastCheckOK && w.CredMode == "auto" && w.DeviceID != "" && w.AccessToken != "" {
 		enCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_ = warp.EnableWarp(enCtx, &http.Client{Timeout: 5 * time.Second}, "", w.DeviceID, w.AccessToken)
 		cancel()
@@ -426,6 +483,7 @@ func (s *Service) CheckNodeWarp(ctx context.Context, nodeID int64) (*warp.CheckR
 
 	creds := warpCredsFromStore(w)
 	res, err := s.WarpCheck(ctx, n.ID, warp.CheckRequest{
+		Transport:      curTransport,
 		SecretKey:      creds.SecretKey,
 		Addresses:      creds.Addresses(),
 		PeerPublicKey:  creds.PeerPublicKey,
@@ -439,18 +497,103 @@ func (s *Service) CheckNodeWarp(ctx context.Context, nodeID int64) (*warp.CheckR
 		_ = store.UpdateNodeWarpCheck(ctx, s.st.DB, n.ID, false, "", "", 0, err.Error())
 		return &warp.CheckResult{OK: false, Error: err.Error()}, nil
 	}
-	_ = store.UpdateNodeWarpCheck(ctx, s.st.DB, n.ID, res.OK, res.IP, res.Colo, res.RTTMs, res.Error)
+	if res.OK {
+		_ = store.UpdateNodeWarpCheck(ctx, s.st.DB, n.ID, true, res.IP, res.Colo, res.RTTMs, "")
+		return res, nil
+	}
+
+	// Auto-heal auto-managed nodes when UDP 2408 (WireGuard) or UDP 443 (MASQUE H3) is blocked by the hoster.
+	if w.CredMode == "auto" {
+		if healed := s.tryAutoHealWarp(ctx, n, w, curTransport); healed != nil && healed.OK {
+			return healed, nil
+		}
+	}
+
+	_ = store.UpdateNodeWarpCheck(ctx, s.st.DB, n.ID, false, "", "", 0, res.Error)
 	return res, nil
 }
 
-func (s *Service) provisionWarpCreds(ctx context.Context, n *store.Node, licenseKey string, existing *store.NodeWarp) (*warp.Credentials, error) {
+func (s *Service) tryAutoHealWarp(ctx context.Context, n *store.Node, w *store.NodeWarp, curTransport string) *warp.CheckResult {
+	saveHealed := func(res *warp.CheckResult) *warp.CheckResult {
+		w.LastCheckAt = time.Now().Unix()
+		w.LastCheckOK = true
+		w.LastCheckIP = res.IP
+		w.LastCheckColo = res.Colo
+		w.LastCheckMs = res.RTTMs
+		w.LastCheckErr = ""
+		_ = s.mutate(ctx, change{
+			actor: ActorSystem, action: "node.warp.autoheal", entity: "node",
+			entityID: func() int64 { return n.ID },
+			event:    EvNodeChanged,
+			diff:     map[string]any{"transport": w.Transport, "endpoint": w.Endpoint},
+		}, func(q store.DBTX) error {
+			return store.UpsertNodeWarp(ctx, q, w)
+		})
+		return res
+	}
+
+	// 1. If MASQUE HTTP/3 (UDP 443) failed, try MASQUE HTTP/2 (TCP 443) with the same enrolled ECDSA key.
+	if curTransport == warp.TransportMasqueH3 && warp.IsMasqueKey(w.SecretKey) {
+		creds := warpCredsFromStore(w)
+		ep := warp.NormalizeEndpointForTransport(w.Endpoint, warp.TransportMasqueH2)
+		if res2, err := s.WarpCheck(ctx, n.ID, warp.CheckRequest{
+			Transport:      warp.TransportMasqueH2,
+			SecretKey:      creds.SecretKey,
+			Addresses:      creds.Addresses(),
+			PeerPublicKey:  creds.PeerPublicKey,
+			Endpoint:       ep,
+			MTU:            creds.MTU,
+			DomainStrategy: w.DomainStrategy,
+		}); err == nil && res2 != nil && res2.OK {
+			w.Transport = warp.TransportMasqueH2
+			w.Endpoint = ep
+			res2.Transport = warp.TransportMasqueH2
+			return saveHealed(res2)
+		}
+		return nil
+	}
+
+	// 2. If legacy auto WireGuard failed (UDP 2408 filtered), enroll MASQUE and test h3 -> h2.
+	if curTransport == warp.TransportWireGuard {
+		newCreds, err := s.provisionWarpCreds(ctx, n, warp.TransportMasqueH3, w.LicenseKey, nil)
+		if err != nil || newCreds == nil || !warp.IsMasqueKey(newCreds.SecretKey) {
+			return nil
+		}
+		candidates := []string{warp.TransportMasqueH3, warp.TransportMasqueH2}
+		if newCreds.Transport == warp.TransportMasqueH2 {
+			candidates = []string{warp.TransportMasqueH2, warp.TransportMasqueH3}
+		}
+		for _, cand := range candidates {
+			ep := warp.NormalizeEndpointForTransport(newCreds.Endpoint, cand)
+			resM, cerr := s.WarpCheck(ctx, n.ID, warp.CheckRequest{
+				Transport:      cand,
+				SecretKey:      newCreds.SecretKey,
+				Addresses:      newCreds.Addresses(),
+				PeerPublicKey:  newCreds.PeerPublicKey,
+				Endpoint:       ep,
+				MTU:            newCreds.MTU,
+				DomainStrategy: w.DomainStrategy,
+			})
+			if cerr == nil && resM != nil && resM.OK {
+				applyCredsToStore(w, newCreds)
+				w.Transport = cand
+				w.Endpoint = ep
+				resM.Transport = cand
+				return saveHealed(resM)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) provisionWarpCreds(ctx context.Context, n *store.Node, transport, licenseKey string, existing *store.NodeWarp) (*warp.Credentials, error) {
 	// Prefer provisioning from the node's own IP when connected and capable.
 	if s.WarpProvision != nil && n.Can(CapWarp) && (s.NodeConnected == nil || s.NodeConnected(n.ID)) {
 		var prev *warp.Credentials
 		if existing != nil {
 			prev = warpCredsFromStore(existing)
 		}
-		if creds, err := s.WarpProvision(ctx, n.ID, licenseKey, prev); err == nil && creds != nil {
+		if creds, err := s.WarpProvision(ctx, n.ID, transport, licenseKey, prev); err == nil && creds != nil {
 			return creds, nil
 		}
 	}
@@ -463,10 +606,20 @@ func (s *Service) provisionWarpCreds(ctx context.Context, n *store.Node, license
 		}
 		return c, nil
 	}
-	return warp.Provision(ctx, hc, "", licenseKey)
+	if transport == warp.TransportWireGuard {
+		return warp.Provision(ctx, hc, "", licenseKey)
+	}
+	return warp.ProvisionMasque(ctx, hc, "", licenseKey, transport)
 }
 
 func applyCredsToStore(w *store.NodeWarp, c *warp.Credentials) {
+	if warp.ValidTransports[c.Transport] {
+		w.Transport = c.Transport
+	} else if warp.IsMasqueKey(c.SecretKey) {
+		w.Transport = warp.TransportMasqueH3
+	} else {
+		w.Transport = warp.TransportWireGuard
+	}
 	w.CredMode = c.CredMode
 	w.DeviceID = c.DeviceID
 	w.AccessToken = c.AccessToken
@@ -482,7 +635,7 @@ func applyCredsToStore(w *store.NodeWarp, c *warp.Credentials) {
 	w.AddrV6 = c.AddrV6
 	w.Reserved = c.Reserved
 	if c.Endpoint != "" {
-		w.Endpoint = c.Endpoint
+		w.Endpoint = warp.NormalizeEndpointForTransport(c.Endpoint, w.Transport)
 	}
 	if c.MTU > 0 {
 		w.MTU = c.MTU
@@ -493,7 +646,9 @@ func applyCredsToStore(w *store.NodeWarp, c *warp.Credentials) {
 }
 
 func warpCredsFromStore(w *store.NodeWarp) *warp.Credentials {
+	tr := effectiveTransport(w)
 	return &warp.Credentials{
+		Transport:     tr,
 		CredMode:      w.CredMode,
 		DeviceID:      w.DeviceID,
 		AccessToken:   w.AccessToken,
@@ -506,7 +661,7 @@ func warpCredsFromStore(w *store.NodeWarp) *warp.Credentials {
 		AddrV4:        w.AddrV4,
 		AddrV6:        w.AddrV6,
 		Reserved:      slices.Clone(w.Reserved),
-		Endpoint:      warp.NormalizeEndpoint(w.Endpoint),
+		Endpoint:      warp.NormalizeEndpointForTransport(w.Endpoint, tr),
 		MTU:           w.MTU,
 		Keepalive:     w.Keepalive,
 	}
@@ -598,6 +753,7 @@ func (s *Service) planWarp(ctx context.Context, q store.DBTX, nodes []*store.Nod
 					plan.problems[n.ID] = append(plan.problems[n.ID], "warp: не заданы адреса интерфейса")
 				} else if w.RuleMode == warp.RuleModeAll {
 					plan.configs[n.ID] = &xrayconf.WarpConfig{
+						Transport:      creds.Transport,
 						SecretKey:      creds.SecretKey,
 						Addresses:      addrs,
 						PeerPublicKey:  creds.PeerPublicKey,
@@ -629,6 +785,7 @@ func (s *Service) planWarp(ctx context.Context, q store.DBTX, nodes []*store.Nod
 						}
 						if assetsOK {
 							plan.configs[n.ID] = &xrayconf.WarpConfig{
+								Transport:      creds.Transport,
 								SecretKey:      creds.SecretKey,
 								Addresses:      addrs,
 								PeerPublicKey:  creds.PeerPublicKey,

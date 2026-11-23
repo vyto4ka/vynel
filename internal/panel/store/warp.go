@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
-// NodeWarp stores per-node Cloudflare WARP / WireGuard configuration and last check status.
+// NodeWarp stores per-node Cloudflare WARP (MASQUE / WireGuard) configuration and last check status.
 type NodeWarp struct {
 	NodeID         int64
 	Enabled        bool
+	Transport      string // "masque-h3" | "masque-h2" | "wireguard"
 	RuleMode       string // "rules" | "all"
 	CredMode       string // "auto" | "manual"
 	DeviceID       string
@@ -47,7 +49,7 @@ func boolToInt(b bool) int {
 // GetNodeWarp loads a node's WARP configuration, returning ErrNotFound when none exists.
 func GetNodeWarp(ctx context.Context, q DBTX, nodeID int64) (*NodeWarp, error) {
 	row := q.QueryRowContext(ctx, `
-		SELECT node_id, enabled, rule_mode, cred_mode, device_id, access_token, license_key,
+		SELECT node_id, enabled, transport, rule_mode, cred_mode, device_id, access_token, license_key,
 		       account_type, secret_key, public_key, peer_public_key, preshared_key,
 		       addr_v4, addr_v6, reserved_json, endpoint, mtu, keepalive, domain_strategy,
 		       rules_json, last_check_at, last_check_ok, last_check_ip, last_check_colo,
@@ -59,7 +61,7 @@ func GetNodeWarp(ctx context.Context, q DBTX, nodeID int64) (*NodeWarp, error) {
 // ListNodeWarps returns all stored node_warp rows indexed by node_id.
 func ListNodeWarps(ctx context.Context, q DBTX) (map[int64]*NodeWarp, error) {
 	rows, err := q.QueryContext(ctx, `
-		SELECT node_id, enabled, rule_mode, cred_mode, device_id, access_token, license_key,
+		SELECT node_id, enabled, transport, rule_mode, cred_mode, device_id, access_token, license_key,
 		       account_type, secret_key, public_key, peer_public_key, preshared_key,
 		       addr_v4, addr_v6, reserved_json, endpoint, mtu, keepalive, domain_strategy,
 		       rules_json, last_check_at, last_check_ok, last_check_ip, last_check_colo,
@@ -88,6 +90,13 @@ func UpsertNodeWarp(ctx context.Context, q DBTX, w *NodeWarp) error {
 		w.CreatedAt = now
 	}
 	w.UpdatedAt = now
+	if w.Transport == "" {
+		if strings.Contains(w.SecretKey, "PRIVATE KEY") || w.SecretKey == "" {
+			w.Transport = "masque-h3"
+		} else {
+			w.Transport = "wireguard"
+		}
+	}
 	if w.RuleMode == "" {
 		w.RuleMode = "rules"
 	}
@@ -95,7 +104,11 @@ func UpsertNodeWarp(ctx context.Context, q DBTX, w *NodeWarp) error {
 		w.CredMode = "auto"
 	}
 	if w.Endpoint == "" {
-		w.Endpoint = "engage.cloudflareclient.com:2408"
+		if w.Transport == "masque-h3" || w.Transport == "masque-h2" {
+			w.Endpoint = "162.159.198.2:443"
+		} else {
+			w.Endpoint = "engage.cloudflareclient.com:2408"
+		}
 	}
 	if w.MTU <= 0 {
 		w.MTU = 1280
@@ -118,14 +131,15 @@ func UpsertNodeWarp(ctx context.Context, q DBTX, w *NodeWarp) error {
 	}
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO node_warp (
-			node_id, enabled, rule_mode, cred_mode, device_id, access_token, license_key,
+			node_id, enabled, transport, rule_mode, cred_mode, device_id, access_token, license_key,
 			account_type, secret_key, public_key, peer_public_key, preshared_key,
 			addr_v4, addr_v6, reserved_json, endpoint, mtu, keepalive, domain_strategy,
 			rules_json, last_check_at, last_check_ok, last_check_ip, last_check_colo,
 			last_check_ms, last_check_err, created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(node_id) DO UPDATE SET
 			enabled = excluded.enabled,
+			transport = excluded.transport,
 			rule_mode = excluded.rule_mode,
 			cred_mode = excluded.cred_mode,
 			device_id = excluded.device_id,
@@ -151,7 +165,7 @@ func UpsertNodeWarp(ctx context.Context, q DBTX, w *NodeWarp) error {
 			last_check_ms = excluded.last_check_ms,
 			last_check_err = excluded.last_check_err,
 			updated_at = excluded.updated_at`,
-		w.NodeID, boolToInt(w.Enabled), w.RuleMode, w.CredMode, w.DeviceID, w.AccessToken, w.LicenseKey,
+		w.NodeID, boolToInt(w.Enabled), w.Transport, w.RuleMode, w.CredMode, w.DeviceID, w.AccessToken, w.LicenseKey,
 		w.AccountType, w.SecretKey, w.PublicKey, w.PeerPublicKey, w.PresharedKey,
 		w.AddrV4, w.AddrV6, resJSON, w.Endpoint, w.MTU, w.Keepalive, w.DomainStrategy,
 		rulesJSON, w.LastCheckAt, boolToInt(w.LastCheckOK), w.LastCheckIP, w.LastCheckColo,
@@ -181,7 +195,7 @@ func scanNodeWarp(s rowScanner) (*NodeWarp, error) {
 	var enabled, checkOK int
 	var resJSON, rulesJSON string
 	err := s.Scan(
-		&w.NodeID, &enabled, &w.RuleMode, &w.CredMode, &w.DeviceID, &w.AccessToken, &w.LicenseKey,
+		&w.NodeID, &enabled, &w.Transport, &w.RuleMode, &w.CredMode, &w.DeviceID, &w.AccessToken, &w.LicenseKey,
 		&w.AccountType, &w.SecretKey, &w.PublicKey, &w.PeerPublicKey, &w.PresharedKey,
 		&w.AddrV4, &w.AddrV6, &resJSON, &w.Endpoint, &w.MTU, &w.Keepalive, &w.DomainStrategy,
 		&rulesJSON, &w.LastCheckAt, &checkOK, &w.LastCheckIP, &w.LastCheckColo,

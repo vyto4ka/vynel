@@ -7,9 +7,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdh"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -27,16 +31,51 @@ import (
 )
 
 const (
-	DefaultAPIBase        = "https://api.cloudflareclient.com/v0a4005"
-	DefaultEndpoint       = "engage.cloudflareclient.com:2408"
-	DefaultPeerPublicKey  = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
-	DefaultMTU            = 1280
-	DefaultKeepalive      = 25
-	DefaultDomainStrategy = "ForceIPv4v6"
-	DefaultTraceURL       = "https://www.cloudflare.com/cdn-cgi/trace"
+	TransportMasqueH3  = "masque-h3"
+	TransportMasqueH2  = "masque-h2"
+	TransportWireGuard = "wireguard"
+	DefaultTransport   = TransportMasqueH3
+
+	DefaultAPIBase         = "https://api.cloudflareclient.com/v0a4005"
+	DefaultMasqueAPIBase   = "https://api.cloudflareclient.com/v0a4471"
+	DefaultMasqueClientVer = "a-6.35-4471"
+	DefaultEndpoint        = "engage.cloudflareclient.com:2408"
+	DefaultMasqueEndpoint  = "162.159.198.2:443"
+	DefaultMasqueSNI       = "consumer-masque.cloudflareclient.com"
+	DefaultPeerPublicKey   = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+	DefaultMTU             = 1280
+	DefaultKeepalive       = 25
+	DefaultDomainStrategy  = "ForceIPv4v6"
+	DefaultTraceURL        = "https://www.cloudflare.com/cdn-cgi/trace"
 )
 
-// ValidDomainStrategies lists allowed Xray WireGuard domainStrategy values.
+// ValidTransports lists allowed WARP tunnel transports.
+var ValidTransports = map[string]bool{
+	TransportMasqueH3:  true,
+	TransportMasqueH2:  true,
+	TransportWireGuard: true,
+}
+
+// IsMasqueTransport reports whether t uses Xray's native MASQUE WARP transport (h3 or h2).
+func IsMasqueTransport(t string) bool {
+	return t == TransportMasqueH3 || t == TransportMasqueH2
+}
+
+// NormalizeTransport returns a valid WARP transport, defaulting to DefaultTransport ("masque-h3").
+func NormalizeTransport(t string) string {
+	t = strings.TrimSpace(strings.ToLower(t))
+	if ValidTransports[t] {
+		return t
+	}
+	return DefaultTransport
+}
+
+// IsMasqueKey reports whether secretKey holds a PEM-encoded ECDSA P-256 key enrolled for MASQUE.
+func IsMasqueKey(secretKey string) bool {
+	return strings.Contains(secretKey, "PRIVATE KEY")
+}
+
+// ValidDomainStrategies lists allowed Xray WireGuard/MASQUE domainStrategy values.
 var ValidDomainStrategies = map[string]bool{
 	"ForceIPv4v6": true,
 	"ForceIPv4":   true,
@@ -44,9 +83,10 @@ var ValidDomainStrategies = map[string]bool{
 	"ForceIPv6v4": true,
 }
 
-// Credentials holds Cloudflare WARP or custom WireGuard tunnel parameters.
+// Credentials holds Cloudflare WARP (MASQUE or WireGuard) or custom WireGuard tunnel parameters.
 type Credentials struct {
-	CredMode      string `json:"credMode"` // "auto" | "manual"
+	Transport     string `json:"transport,omitempty"` // "masque-h3" | "masque-h2" | "wireguard"
+	CredMode      string `json:"credMode"`            // "auto" | "manual"
 	DeviceID      string `json:"deviceId,omitempty"`
 	AccessToken   string `json:"accessToken,omitempty"`
 	LicenseKey    string `json:"licenseKey,omitempty"`
@@ -63,7 +103,7 @@ type Credentials struct {
 	Keepalive     int    `json:"keepalive"`
 }
 
-// Addresses returns non-empty interface CIDR addresses for Xray WireGuard outbound.
+// Addresses returns non-empty interface CIDR addresses for Xray WireGuard/MASQUE outbound.
 func (c *Credentials) Addresses() []string {
 	var out []string
 	if a := normalizeCIDR(c.AddrV4, 32); a != "" {
@@ -92,8 +132,27 @@ func normalizeCIDR(s string, defaultBits int) string {
 // NormalizeEndpoint ensures a WireGuard endpoint has a valid non-zero UDP port.
 // Cloudflare WARP registration often returns "engage.cloudflareclient.com:0".
 func NormalizeEndpoint(ep string) string {
+	return NormalizeEndpointForTransport(ep, TransportWireGuard)
+}
+
+// NormalizeEndpointForTransport normalizes a WARP endpoint for either MASQUE (:443) or WireGuard (:2408),
+// replacing stale default endpoints when switching between the two families.
+func NormalizeEndpointForTransport(ep, transport string) string {
 	ep = strings.TrimSpace(ep)
-	if ep == "" {
+	if IsMasqueTransport(transport) {
+		if ep == "" || strings.HasPrefix(strings.ToLower(ep), "engage.cloudflareclient.com") || strings.HasPrefix(ep, "162.159.192.") || strings.HasPrefix(ep, "162.159.193.") {
+			return DefaultMasqueEndpoint
+		}
+		host, port, err := net.SplitHostPort(ep)
+		if err != nil {
+			return net.JoinHostPort(strings.Trim(ep, "[]"), "443")
+		}
+		if port == "" || port == "0" {
+			port = "443"
+		}
+		return net.JoinHostPort(host, port)
+	}
+	if ep == "" || strings.HasPrefix(ep, "162.159.198.") || strings.HasPrefix(strings.ToLower(ep), "consumer-masque.") {
 		return DefaultEndpoint
 	}
 	host, port, err := net.SplitHostPort(ep)
@@ -145,6 +204,8 @@ type cfRegResponse struct {
 			PublicKey string `json:"public_key"`
 			Endpoint  struct {
 				Host string `json:"host"`
+				V4   string `json:"v4"`
+				V6   string `json:"v6"`
 			} `json:"endpoint"`
 		} `json:"peers"`
 		Interface struct {
@@ -156,7 +217,7 @@ type cfRegResponse struct {
 	} `json:"config"`
 }
 
-// Provision registers a new Cloudflare WARP device and optionally binds a WARP+ license key.
+// Provision registers a new Cloudflare WARP WireGuard device and optionally binds a WARP+ license key.
 func Provision(ctx context.Context, client *http.Client, apiBase, licenseKey string) (*Credentials, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 20 * time.Second}
@@ -217,6 +278,165 @@ func Provision(ctx context.Context, client *http.Client, apiBase, licenseKey str
 	return creds, nil
 }
 
+// ProvisionMasque registers a Cloudflare WARP device and enrolls an ECDSA P-256 key for Xray's
+// native MASQUE (HTTP/3 QUIC over UDP 443 or HTTP/2 over TCP 443) transport.
+func ProvisionMasque(ctx context.Context, client *http.Client, apiBase, licenseKey, transport string) (*Credentials, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
+	if apiBase == "" {
+		apiBase = DefaultMasqueAPIBase
+	}
+	apiBase = strings.TrimRight(apiBase, "/")
+	if !IsMasqueTransport(transport) {
+		transport = TransportMasqueH3
+	}
+
+	_, wgPub, err := GenerateKeyPair()
+	if err != nil {
+		return nil, err
+	}
+	hostName, _ := os.Hostname()
+	regBody, _ := json.Marshal(map[string]any{
+		"key":   wgPub,
+		"tos":   time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"type":  "PC",
+		"model": "vynel",
+		"name":  hostName,
+	})
+	regReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiBase+"/reg", bytes.NewReader(regBody))
+	if err != nil {
+		return nil, err
+	}
+	setCFMasqueHeaders(regReq, "")
+	regResp, err := client.Do(regReq)
+	if err != nil {
+		return nil, fmt.Errorf("cloudflare warp masque reg: %w", err)
+	}
+	regRaw, err := io.ReadAll(io.LimitReader(regResp.Body, 1<<20))
+	regResp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read warp masque reg response: %w", err)
+	}
+	if regResp.StatusCode < 200 || regResp.StatusCode >= 300 {
+		return nil, fmt.Errorf("cloudflare warp masque reg HTTP %d: %s", regResp.StatusCode, strings.TrimSpace(string(regRaw)))
+	}
+	var baseReg cfRegResponse
+	if err := json.Unmarshal(regRaw, &baseReg); err != nil {
+		return nil, fmt.Errorf("parse warp masque reg: %w", err)
+	}
+	if baseReg.ID == "" || baseReg.Token == "" {
+		return nil, errors.New("cloudflare warp masque reg: missing id or token")
+	}
+
+	// Bind WARP+ license before enrolling MASQUE so the enrollment response carries updated account_type.
+	if lk := strings.TrimSpace(licenseKey); lk != "" {
+		licBody, _ := json.Marshal(map[string]string{"license": lk})
+		licReq, err := http.NewRequestWithContext(ctx, http.MethodPut, apiBase+"/reg/"+baseReg.ID+"/account", bytes.NewReader(licBody))
+		if err != nil {
+			return nil, err
+		}
+		setCFMasqueHeaders(licReq, baseReg.Token)
+		licResp, err := client.Do(licReq)
+		if err != nil {
+			return nil, fmt.Errorf("bind warp license: %w", err)
+		}
+		licRaw, _ := io.ReadAll(io.LimitReader(licResp.Body, 1<<20))
+		licResp.Body.Close()
+		if licResp.StatusCode < 200 || licResp.StatusCode >= 300 {
+			return nil, fmt.Errorf("cloudflare license HTTP %d: %s", licResp.StatusCode, strings.TrimSpace(string(licRaw)))
+		}
+	}
+
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate ecdsa p256 key: %w", err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(&ecKey.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ecdsa public key: %w", err)
+	}
+	privDER, err := x509.MarshalPKCS8PrivateKey(ecKey)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ecdsa private key: %w", err)
+	}
+	privPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER}))
+	pubB64 := base64.StdEncoding.EncodeToString(pubDER)
+
+	enrollBody, _ := json.Marshal(map[string]string{
+		"key":         pubB64,
+		"key_type":    "secp256r1",
+		"tunnel_type": "masque",
+		"name":        hostName,
+	})
+	enReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, apiBase+"/reg/"+baseReg.ID, bytes.NewReader(enrollBody))
+	if err != nil {
+		return nil, err
+	}
+	setCFMasqueHeaders(enReq, baseReg.Token)
+	enResp, err := client.Do(enReq)
+	if err != nil {
+		return nil, fmt.Errorf("cloudflare warp masque enroll: %w", err)
+	}
+	enRaw, err := io.ReadAll(io.LimitReader(enResp.Body, 1<<20))
+	enResp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read warp masque enroll: %w", err)
+	}
+	if enResp.StatusCode < 200 || enResp.StatusCode >= 300 {
+		return nil, fmt.Errorf("cloudflare warp masque enroll HTTP %d: %s", enResp.StatusCode, strings.TrimSpace(string(enRaw)))
+	}
+	var enrolled cfRegResponse
+	if err := json.Unmarshal(enRaw, &enrolled); err != nil {
+		return nil, fmt.Errorf("parse warp masque enroll: %w", err)
+	}
+	if len(enrolled.Config.Peers) == 0 || enrolled.Config.Peers[0].PublicKey == "" {
+		return nil, errors.New("cloudflare warp masque enroll: missing peer public key")
+	}
+	peer := enrolled.Config.Peers[0]
+	endpoint := DefaultMasqueEndpoint
+	if peer.Endpoint.V4 != "" {
+		endpoint = NormalizeEndpointForTransport(peer.Endpoint.V4, transport)
+	}
+	addrV4 := normalizeCIDR(enrolled.Config.Interface.Addresses.V4, 32)
+	addrV6 := normalizeCIDR(enrolled.Config.Interface.Addresses.V6, 128)
+	if addrV4 == "" && addrV6 == "" {
+		return nil, errors.New("cloudflare не вернул IP-адреса интерфейса WARP MASQUE")
+	}
+	accType := enrolled.Account.AccountType
+	if accType == "" {
+		accType = baseReg.Account.AccountType
+	}
+	if accType == "" {
+		accType = "free"
+	}
+	lic := strings.TrimSpace(licenseKey)
+	if lic == "" {
+		lic = enrolled.Account.License
+	}
+	if lic == "" {
+		lic = baseReg.Account.License
+	}
+	reserved, _ := DecodeReserved(enrolled.Config.ClientID)
+	return &Credentials{
+		Transport:     transport,
+		CredMode:      "auto",
+		DeviceID:      baseReg.ID,
+		AccessToken:   baseReg.Token,
+		LicenseKey:    lic,
+		AccountType:   accType,
+		SecretKey:     privPEM,
+		PublicKey:     pubB64,
+		PeerPublicKey: peer.PublicKey,
+		AddrV4:        addrV4,
+		AddrV6:        addrV6,
+		Reserved:      reserved,
+		Endpoint:      endpoint,
+		MTU:           DefaultMTU,
+		Keepalive:     DefaultKeepalive,
+	}, nil
+}
+
 // EnableWarp activates the WireGuard tunnel (warp_enabled=true) for a registered Cloudflare WARP device.
 // Without this PATCH call, Cloudflare Edge silently drops WireGuard handshakes for newly created devices.
 func EnableWarp(ctx context.Context, client *http.Client, apiBase, deviceID, accessToken string) error {
@@ -253,7 +473,11 @@ func SetLicense(ctx context.Context, client *http.Client, apiBase string, creds 
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
 	if apiBase == "" {
-		apiBase = DefaultAPIBase
+		if IsMasqueTransport(creds.Transport) {
+			apiBase = DefaultMasqueAPIBase
+		} else {
+			apiBase = DefaultAPIBase
+		}
 	}
 	apiBase = strings.TrimRight(apiBase, "/")
 	if creds.DeviceID == "" || creds.AccessToken == "" {
@@ -265,7 +489,11 @@ func SetLicense(ctx context.Context, client *http.Client, apiBase string, creds 
 	if err != nil {
 		return err
 	}
-	setCFHeaders(req, creds.AccessToken)
+	if IsMasqueTransport(creds.Transport) {
+		setCFMasqueHeaders(req, creds.AccessToken)
+	} else {
+		setCFHeaders(req, creds.AccessToken)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("bind warp license: %w", err)
@@ -281,7 +509,11 @@ func SetLicense(ctx context.Context, client *http.Client, apiBase string, creds 
 	if err != nil {
 		return err
 	}
-	setCFHeaders(getReq, creds.AccessToken)
+	if IsMasqueTransport(creds.Transport) {
+		setCFMasqueHeaders(getReq, creds.AccessToken)
+	} else {
+		setCFHeaders(getReq, creds.AccessToken)
+	}
 	getResp, err := client.Do(getReq)
 	if err != nil {
 		return fmt.Errorf("refresh warp device: %w", err)
@@ -336,6 +568,7 @@ func credentialsFromCF(reg *cfRegResponse, priv, pub string) (*Credentials, erro
 		return nil, errors.New("cloudflare не вернул IP-адреса интерфейса WARP")
 	}
 	return &Credentials{
+		Transport:     TransportWireGuard,
 		CredMode:      "auto",
 		DeviceID:      reg.ID,
 		AccessToken:   reg.Token,
@@ -361,9 +594,19 @@ func setCFHeaders(req *http.Request, token string) {
 	}
 }
 
+func setCFMasqueHeaders(req *http.Request, token string) {
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("CF-Client-Version", DefaultMasqueClientVer)
+	req.Header.Set("User-Agent", "WARP for Android")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+}
+
 // ParseWireGuardConf parses an INI-style WireGuard / wgcf-profile.conf into Credentials.
 func ParseWireGuardConf(raw string) (*Credentials, error) {
 	creds := &Credentials{
+		Transport:     TransportWireGuard,
 		CredMode:      "manual",
 		AccountType:   "custom",
 		PeerPublicKey: DefaultPeerPublicKey,
@@ -466,6 +709,7 @@ func ParseReserved(s string) ([]int, error) {
 
 // CheckRequest carries tunnel parameters for ACTION_WARP_CHECK on a node.
 type CheckRequest struct {
+	Transport      string   `json:"transport,omitempty"` // "masque-h3" | "masque-h2" | "wireguard"
 	SecretKey      string   `json:"secretKey"`
 	Addresses      []string `json:"addresses"`
 	PeerPublicKey  string   `json:"peerPublicKey"`
@@ -479,30 +723,38 @@ type CheckRequest struct {
 
 // CheckResult is returned by ACTION_WARP_CHECK.
 type CheckResult struct {
-	OK       bool   `json:"ok"`
-	IP       string `json:"ip,omitempty"`
-	Colo     string `json:"colo,omitempty"`
-	WarpMode string `json:"warpMode,omitempty"` // on | plus | off
-	RTTMs    int64  `json:"rttMs,omitempty"`
-	Error    string `json:"error,omitempty"`
+	OK        bool   `json:"ok"`
+	Transport string `json:"transport,omitempty"`
+	IP        string `json:"ip,omitempty"`
+	Colo      string `json:"colo,omitempty"`
+	WarpMode  string `json:"warpMode,omitempty"` // on | plus | off
+	RTTMs     int64  `json:"rttMs,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
-// CheckViaXray verifies a WireGuard/WARP tunnel in complete isolation by starting a short-lived
-// Xray process with a temporary loopback SOCKS5 inbound and requesting Cloudflare's cdn-cgi/trace.
+// CheckViaXray verifies a MASQUE or WireGuard WARP tunnel in complete isolation by starting a
+// short-lived Xray process with a temporary loopback SOCKS5 inbound and requesting cdn-cgi/trace.
 func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckResult {
 	res := &CheckResult{}
 	if xrayBin == "" {
 		res.Error = "бинарник xray не найден на ноде"
 		return res
 	}
-	if req.SecretKey == "" || len(req.Addresses) == 0 || req.Endpoint == "" {
+	transport := req.Transport
+	if transport == "" {
+		if IsMasqueKey(req.SecretKey) {
+			transport = TransportMasqueH3
+		} else {
+			transport = TransportWireGuard
+		}
+	}
+	res.Transport = transport
+
+	if req.SecretKey == "" || len(req.Addresses) == 0 {
 		res.Error = "не заданы параметры туннеля WARP"
 		return res
 	}
-	req.Endpoint = NormalizeEndpoint(req.Endpoint)
-	if req.PeerPublicKey == "" {
-		req.PeerPublicKey = DefaultPeerPublicKey
-	}
+	req.Endpoint = NormalizeEndpointForTransport(req.Endpoint, transport)
 	if req.MTU <= 0 {
 		req.MTU = DefaultMTU
 	}
@@ -524,26 +776,85 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	socksPort, _ := strconv.Atoi(portStr)
 	_ = lis.Close()
 
-	peer := map[string]any{
-		"publicKey":  req.PeerPublicKey,
-		"endpoint":   req.Endpoint,
-		"keepAlive":  DefaultKeepalive,
-		"allowedIPs": []string{"0.0.0.0/0", "::/0"},
+	var probeOutbound map[string]any
+	if IsMasqueTransport(transport) {
+		epHost, epPortStr, err := net.SplitHostPort(req.Endpoint)
+		if err != nil {
+			epHost = req.Endpoint
+			epPortStr = "443"
+		}
+		epPort, err := strconv.Atoi(epPortStr)
+		if err != nil || epPort <= 0 {
+			epPort = 443
+		}
+		alpn := "h3"
+		if transport == TransportMasqueH2 {
+			alpn = "h2"
+		}
+		probeOutbound = map[string]any{
+			"tag":            "probe-warp",
+			"protocol":       "masque",
+			"targetStrategy": req.DomainStrategy,
+			"settings": map[string]any{
+				"address": epHost,
+				"port":    epPort,
+			},
+			"streamSettings": map[string]any{
+				"network":  "masque",
+				"security": "tls",
+				"sockopt": map[string]any{
+					"domainStrategy": req.DomainStrategy,
+				},
+				"tlsSettings": map[string]any{
+					"serverName": DefaultMasqueSNI,
+					"alpn":       []string{alpn},
+				},
+				"masqueSettings": map[string]any{
+					"warp": map[string]any{
+						"privateKey": req.SecretKey,
+						"publicKey":  req.PeerPublicKey,
+						"address":    req.Addresses,
+					},
+				},
+			},
+		}
+	} else {
+		if req.PeerPublicKey == "" {
+			req.PeerPublicKey = DefaultPeerPublicKey
+		}
+		peer := map[string]any{
+			"publicKey":  req.PeerPublicKey,
+			"endpoint":   req.Endpoint,
+			"keepAlive":  DefaultKeepalive,
+			"allowedIPs": []string{"0.0.0.0/0", "::/0"},
+		}
+		if req.PresharedKey != "" {
+			peer["preSharedKey"] = req.PresharedKey
+		}
+		wgSettings := map[string]any{
+			"noKernelTun":    true,
+			"secretKey":      req.SecretKey,
+			"address":        req.Addresses,
+			"peers":          []any{peer},
+			"mtu":            req.MTU,
+			"domainStrategy": req.DomainStrategy,
+		}
+		if len(req.Reserved) == 3 {
+			wgSettings["reserved"] = req.Reserved
+		}
+		probeOutbound = map[string]any{
+			"tag":            "probe-warp",
+			"protocol":       "wireguard",
+			"targetStrategy": req.DomainStrategy,
+			"streamSettings": map[string]any{
+				"sockopt": map[string]any{
+					"domainStrategy": req.DomainStrategy,
+				},
+			},
+			"settings": wgSettings,
+		}
 	}
-	if req.PresharedKey != "" {
-		peer["preSharedKey"] = req.PresharedKey
-	}
-	wgSettings := map[string]any{
-		"noKernelTun":    true,
-		"secretKey":      req.SecretKey,
-		"address":        req.Addresses,
-		"peers":          []any{peer},
-		"mtu":            req.MTU,
-		"domainStrategy": req.DomainStrategy,
-	}
-	if len(req.Reserved) == 3 {
-		wgSettings["reserved"] = req.Reserved
-	}
+
 	cfg := map[string]any{
 		"log": map[string]any{"loglevel": "debug"},
 		"inbounds": []any{
@@ -555,19 +866,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 				"settings": map[string]any{"udp": false},
 			},
 		},
-		"outbounds": []any{
-			map[string]any{
-				"tag":            "probe-warp",
-				"protocol":       "wireguard",
-				"targetStrategy": req.DomainStrategy,
-				"streamSettings": map[string]any{
-					"sockopt": map[string]any{
-						"domainStrategy": req.DomainStrategy,
-					},
-				},
-				"settings": wgSettings,
-			},
-		},
+		"outbounds": []any{probeOutbound},
 	}
 
 	tmpDir, err := os.MkdirTemp("", "vynel-warp-check-")
@@ -631,6 +930,7 @@ func CheckViaXray(ctx context.Context, xrayBin string, req CheckRequest) *CheckR
 	}
 
 	res = CheckViaSocks(cctx, socksAddr, traceURL, req.Endpoint)
+	res.Transport = transport
 	if !res.OK {
 		stopCmd()
 		if tail := summarizeXrayProbeLog(stderr.String()); tail != "" {
@@ -646,7 +946,10 @@ func CheckViaSocks(ctx context.Context, socksAddr, traceURL, endpoint string) *C
 	if traceURL == "" {
 		traceURL = DefaultTraceURL
 	}
-	endpoint = NormalizeEndpoint(endpoint)
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		endpoint = DefaultEndpoint
+	}
 
 	dialer, err := proxy.SOCKS5("tcp", socksAddr, nil, proxy.Direct)
 	if err != nil {

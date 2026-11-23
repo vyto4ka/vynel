@@ -6,6 +6,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // DefaultBaseJSON is the shared base config (docs/PROFILES.md §2): the same log/outbounds/routing
@@ -33,15 +34,16 @@ const DirectTag = "DIRECT"
 // §6.1): the agent routes them there through the routing API.
 const IPBlockTag = "VYNEL_BLOCK"
 
-// WarpTag is the panel-managed Cloudflare WARP WireGuard outbound tag.
+// WarpTag is the panel-managed Cloudflare WARP WireGuard/MASQUE outbound tag.
 const WarpTag = "VYNEL_WARP"
 
 // WarpProbeTag is the temporary loopback SOCKS5 inbound tag added via HandlerService during
-// live WARP checks so the probe reuses the running VYNEL_WARP WireGuard session without key collision.
+// live WARP checks so the probe reuses the running VYNEL_WARP session without key collision.
 const WarpProbeTag = "VYNEL_WARP_PROBE"
 
-// WarpConfig describes the panel-managed WireGuard/WARP outbound and routing rules for one node.
+// WarpConfig describes the panel-managed MASQUE/WireGuard WARP outbound and routing rules for one node.
 type WarpConfig struct {
+	Transport      string // "masque-h3" | "masque-h2" | "wireguard" (empty defaults by key format)
 	SecretKey      string
 	Addresses      []string
 	PeerPublicKey  string
@@ -330,22 +332,6 @@ func addWarp(cfg map[string]any, w *WarpConfig) error {
 		}
 	}
 
-	peerPub := w.PeerPublicKey
-	if peerPub == "" {
-		peerPub = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
-	}
-	peer := map[string]any{
-		"publicKey":  peerPub,
-		"endpoint":   w.Endpoint,
-		"allowedIPs": []any{"0.0.0.0/0", "::/0"},
-	}
-	if w.Keepalive > 0 {
-		peer["keepAlive"] = w.Keepalive
-	}
-	if w.PresharedKey != "" {
-		peer["preSharedKey"] = w.PresharedKey
-	}
-
 	addrs := make([]any, 0, len(w.Addresses))
 	for _, a := range w.Addresses {
 		addrs = append(addrs, a)
@@ -358,27 +344,99 @@ func addWarp(cfg map[string]any, w *WarpConfig) error {
 	if ds == "" {
 		ds = "ForceIPv4v6"
 	}
-	settings := map[string]any{
-		"noKernelTun":    true,
-		"secretKey":      w.SecretKey,
-		"address":        addrs,
-		"peers":          []any{peer},
-		"mtu":            mtu,
-		"domainStrategy": ds,
+
+	transport := w.Transport
+	if transport == "" {
+		if strings.Contains(w.SecretKey, "PRIVATE KEY") {
+			transport = "masque-h3"
+		} else {
+			transport = "wireguard"
+		}
 	}
-	if len(w.Reserved) == 3 {
-		settings["reserved"] = []any{w.Reserved[0], w.Reserved[1], w.Reserved[2]}
-	}
-	outbound := map[string]any{
-		"tag":            WarpTag,
-		"protocol":       "wireguard",
-		"targetStrategy": ds,
-		"streamSettings": map[string]any{
-			"sockopt": map[string]any{
-				"domainStrategy": ds,
+
+	var outbound map[string]any
+	if transport == "masque-h3" || transport == "masque-h2" {
+		if w.PeerPublicKey == "" {
+			return fmt.Errorf("warp masque: peerPublicKey is required")
+		}
+		epHost, epPortStr, err := net.SplitHostPort(w.Endpoint)
+		if err != nil {
+			epHost = w.Endpoint
+			epPortStr = "443"
+		}
+		epPort, err := strconv.Atoi(epPortStr)
+		if err != nil || epPort <= 0 {
+			epPort = 443
+		}
+		alpn := "h3"
+		if transport == "masque-h2" {
+			alpn = "h2"
+		}
+		outbound = map[string]any{
+			"tag":            WarpTag,
+			"protocol":       "masque",
+			"targetStrategy": ds,
+			"settings": map[string]any{
+				"address": epHost,
+				"port":    epPort,
 			},
-		},
-		"settings": settings,
+			"streamSettings": map[string]any{
+				"network":  "masque",
+				"security": "tls",
+				"sockopt": map[string]any{
+					"domainStrategy": ds,
+				},
+				"tlsSettings": map[string]any{
+					"serverName": "consumer-masque.cloudflareclient.com",
+					"alpn":       []any{alpn},
+				},
+				"masqueSettings": map[string]any{
+					"warp": map[string]any{
+						"privateKey": w.SecretKey,
+						"publicKey":  w.PeerPublicKey,
+						"address":    addrs,
+					},
+				},
+			},
+		}
+	} else {
+		peerPub := w.PeerPublicKey
+		if peerPub == "" {
+			peerPub = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
+		}
+		peer := map[string]any{
+			"publicKey":  peerPub,
+			"endpoint":   w.Endpoint,
+			"allowedIPs": []any{"0.0.0.0/0", "::/0"},
+		}
+		if w.Keepalive > 0 {
+			peer["keepAlive"] = w.Keepalive
+		}
+		if w.PresharedKey != "" {
+			peer["preSharedKey"] = w.PresharedKey
+		}
+		settings := map[string]any{
+			"noKernelTun":    true,
+			"secretKey":      w.SecretKey,
+			"address":        addrs,
+			"peers":          []any{peer},
+			"mtu":            mtu,
+			"domainStrategy": ds,
+		}
+		if len(w.Reserved) == 3 {
+			settings["reserved"] = []any{w.Reserved[0], w.Reserved[1], w.Reserved[2]}
+		}
+		outbound = map[string]any{
+			"tag":            WarpTag,
+			"protocol":       "wireguard",
+			"targetStrategy": ds,
+			"streamSettings": map[string]any{
+				"sockopt": map[string]any{
+					"domainStrategy": ds,
+				},
+			},
+			"settings": settings,
+		}
 	}
 	if w.SendThrough != "" {
 		if net.ParseIP(w.SendThrough) == nil {

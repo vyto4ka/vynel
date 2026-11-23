@@ -74,8 +74,9 @@ func TestWarpAndGeoEndToEnd(t *testing.T) {
 
 	geoDir := filepath.Join(t.TempDir(), "geo")
 	svc.Geo = geostore.New(geoDir, "", srv.Client())
-	svc.WarpProvision = func(_ context.Context, _ int64, _ string, _ *warp.Credentials) (*warp.Credentials, error) {
+	svc.WarpProvision = func(_ context.Context, _ int64, _, _ string, _ *warp.Credentials) (*warp.Credentials, error) {
 		return &warp.Credentials{
+			Transport:     warp.TransportWireGuard,
 			CredMode:      "auto",
 			DeviceID:      "dev-nl",
 			AccessToken:   "tok-nl",
@@ -118,9 +119,10 @@ func TestWarpAndGeoEndToEnd(t *testing.T) {
 
 	// Enable WARP on node using the custom .dat rule (auto-provisions credentials).
 	view, err := svc.SaveNodeWarp(ctx, ActorCLI, node.ID, NodeWarpInput{
-		Enabled:  true,
-		RuleMode: warp.RuleModeSelected,
-		Rules:    []string{"ext-domain:ai.dat:openai", "104.28.0.0/16"},
+		Enabled:   true,
+		Transport: warp.TransportWireGuard,
+		RuleMode:  warp.RuleModeSelected,
+		Rules:     []string{"ext-domain:ai.dat:openai", "104.28.0.0/16"},
 	})
 	if err != nil {
 		t.Fatalf("SaveNodeWarp: %v", err)
@@ -193,5 +195,101 @@ func TestWarpAndGeoEndToEnd(t *testing.T) {
 	cr.Proxy = []string{"ext-domain:ai.dat:openai"}
 	if err := CheckClientRouting(&cr); err == nil || !strings.Contains(err.Error(), "WARP") {
 		t.Fatalf("expected friendly error for ext-domain in client routing, got %v", err)
+	}
+}
+
+func TestCheckNodeWarpAutoHealsWireGuardToMasque(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	svc := New(st)
+	if err := svc.EnsureDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	node, _, err := svc.CreateNode(ctx, ActorCLI, NodeInput{Code: "ee", Name: "Estonia", Country: "EE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetNodeFacts(ctx, st.DB, node.ID, store.NodeFacts{Capabilities: []string{CapGeo, CapWarp}}); err != nil {
+		t.Fatal(err)
+	}
+	svc.NodeConnected = func(int64) bool { return true }
+
+	svc.WarpProvision = func(_ context.Context, _ int64, transport, _ string, _ *warp.Credentials) (*warp.Credentials, error) {
+		if warp.IsMasqueTransport(transport) {
+			return &warp.Credentials{
+				Transport:     warp.TransportMasqueH3,
+				CredMode:      "auto",
+				DeviceID:      "masque-dev",
+				AccessToken:   "masque-tok",
+				AccountType:   "free",
+				SecretKey:     "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg\n-----END PRIVATE KEY-----\n",
+				PeerPublicKey: "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE\n-----END PUBLIC KEY-----\n",
+				AddrV4:        "172.16.0.2/32",
+				AddrV6:        "2606:4700:110::2/128",
+				Endpoint:      "162.159.198.2:443",
+				MTU:           1280,
+				Keepalive:     25,
+			}, nil
+		}
+		return &warp.Credentials{
+			Transport:     warp.TransportWireGuard,
+			CredMode:      "auto",
+			DeviceID:      "wg-dev",
+			AccessToken:   "wg-tok",
+			AccountType:   "free",
+			SecretKey:     "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+			PeerPublicKey: warp.DefaultPeerPublicKey,
+			AddrV4:        "172.16.0.2/32",
+			Endpoint:      warp.DefaultEndpoint,
+			MTU:           1280,
+			Keepalive:     25,
+		}, nil
+	}
+
+	_, err = svc.SaveNodeWarp(ctx, ActorCLI, node.ID, NodeWarpInput{
+		Enabled:   true,
+		Transport: warp.TransportWireGuard,
+		RuleMode:  warp.RuleModeSelected,
+		Rules:     []string{"geosite:openai"},
+	})
+	if err != nil {
+		t.Fatalf("SaveNodeWarp wireguard: %v", err)
+	}
+
+	// Simulate hoster blocking ALL UDP (WireGuard UDP 2408 + MASQUE H3 UDP 443), allowing only MASQUE H2 (TCP 443).
+	svc.WarpCheck = func(_ context.Context, _ int64, req warp.CheckRequest) (*warp.CheckResult, error) {
+		if req.Transport == warp.TransportMasqueH2 {
+			return &warp.CheckResult{OK: true, Transport: warp.TransportMasqueH2, IP: "104.28.1.1", Colo: "TLL", WarpMode: "on", RTTMs: 18}, nil
+		}
+		return &warp.CheckResult{OK: false, Transport: req.Transport, Error: "TLS handshake timeout"}, nil
+	}
+
+	res, err := svc.CheckNodeWarp(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("CheckNodeWarp: %v", err)
+	}
+	if !res.OK || res.Transport != warp.TransportMasqueH2 || res.Colo != "TLL" {
+		t.Fatalf("expected auto-heal to masque-h2, got %+v", res)
+	}
+
+	view, err := svc.NodeWarp(ctx, node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Transport != warp.TransportMasqueH2 || view.Endpoint != "162.159.198.2:443" || !view.LastCheckOK {
+		t.Fatalf("expected persisted masque-h2 view, got %+v", view)
+	}
+
+	ds, err := svc.DesiredState(ctx, node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ds.Config), `"protocol":"masque"`) || !strings.Contains(string(ds.Config), `"alpn":["h2"]`) {
+		t.Fatalf("expected DesiredState to switch to masque h2, got: %s", ds.Config)
 	}
 }

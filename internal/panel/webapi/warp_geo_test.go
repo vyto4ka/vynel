@@ -55,8 +55,9 @@ func TestWarpAndGeoAPI(t *testing.T) {
 	defer srv.Close()
 
 	svc.Geo = geostore.New(filepath.Join(t.TempDir(), "geo"), "", srv.Client())
-	svc.WarpProvision = func(_ context.Context, _ int64, _ string, _ *warp.Credentials) (*warp.Credentials, error) {
+	svc.WarpProvision = func(_ context.Context, _ int64, _, _ string, _ *warp.Credentials) (*warp.Credentials, error) {
 		return &warp.Credentials{
+			Transport:     warp.TransportWireGuard,
 			CredMode:      "auto",
 			DeviceID:      "dev-1",
 			AccessToken:   "tok-1",

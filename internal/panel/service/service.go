@@ -125,7 +125,7 @@ type Service struct {
 	// Geo manages panel .dat geo assets (geosite/geoip) and their in-memory index.
 	Geo *geostore.Store
 	// WarpProvision registers a Cloudflare WARP account (or binds WARP+) from a connected node.
-	WarpProvision func(ctx context.Context, nodeID int64, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error)
+	WarpProvision func(ctx context.Context, nodeID int64, transport, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error)
 	// WarpCheck runs a live cdn-cgi/trace check through a node's WARP tunnel.
 	WarpCheck func(ctx context.Context, nodeID int64, req warp.CheckRequest) (*warp.CheckResult, error)
 }

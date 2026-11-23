@@ -206,6 +206,7 @@ func writeGeoAssetAtomic(dir, dst string, rc io.Reader, wantSHA string, wantSize
 }
 
 type warpProvisionPayload struct {
+	Transport  string            `json:"transport,omitempty"`
 	LicenseKey string            `json:"licenseKey,omitempty"`
 	Existing   *warp.Credentials `json:"existing,omitempty"`
 }
@@ -223,8 +224,45 @@ func (a *Agent) handleWarpProvision(ctx context.Context, payload []byte) (string
 	if req.Existing != nil && req.Existing.DeviceID != "" && req.Existing.AccessToken != "" && req.LicenseKey != "" {
 		creds = req.Existing
 		err = warp.SetLicense(ctx, hc, "", creds, req.LicenseKey)
-	} else {
+	} else if req.Transport == warp.TransportWireGuard {
 		creds, err = warp.Provision(ctx, hc, "", req.LicenseKey)
+	} else {
+		desired := req.Transport
+		if !warp.IsMasqueTransport(desired) {
+			desired = warp.TransportMasqueH3
+		}
+		creds, err = warp.ProvisionMasque(ctx, hc, "", req.LicenseKey, desired)
+		// When auto-selecting (or defaulting to masque-h3), verify UDP 443 QUIC on this host and
+		// automatically switch to masque-h2 (TCP 443) if outbound UDP/QUIC is filtered.
+		if err == nil && creds != nil && req.Transport != warp.TransportMasqueH2 && a.cfg.Xray.Path != "" {
+			pctx1, cancel1 := context.WithTimeout(ctx, 7*time.Second)
+			r1 := warp.CheckViaXray(pctx1, a.cfg.Xray.Path, warp.CheckRequest{
+				Transport:      warp.TransportMasqueH3,
+				SecretKey:      creds.SecretKey,
+				Addresses:      creds.Addresses(),
+				PeerPublicKey:  creds.PeerPublicKey,
+				Endpoint:       creds.Endpoint,
+				MTU:            creds.MTU,
+				DomainStrategy: warp.DefaultDomainStrategy,
+			})
+			cancel1()
+			if !r1.OK {
+				pctx2, cancel2 := context.WithTimeout(ctx, 8*time.Second)
+				r2 := warp.CheckViaXray(pctx2, a.cfg.Xray.Path, warp.CheckRequest{
+					Transport:      warp.TransportMasqueH2,
+					SecretKey:      creds.SecretKey,
+					Addresses:      creds.Addresses(),
+					PeerPublicKey:  creds.PeerPublicKey,
+					Endpoint:       creds.Endpoint,
+					MTU:            creds.MTU,
+					DomainStrategy: warp.DefaultDomainStrategy,
+				})
+				cancel2()
+				if r2.OK {
+					creds.Transport = warp.TransportMasqueH2
+				}
+			}
+		}
 	}
 	if err != nil {
 		return "", err
@@ -255,8 +293,7 @@ func (a *Agent) handleWarpCheck(ctx context.Context, payload []byte) (string, er
 }
 
 // checkWarpViaLiveXray reuses the running main Xray's VYNEL_WARP outbound when it is already
-// active with the same WireGuard secretKey and endpoint. Spawning a second Xray process with the
-// same private key collides with the active WireGuard session on Cloudflare Edge.
+// active with the same transport, secretKey, and endpoint.
 func (a *Agent) checkWarpViaLiveXray(ctx context.Context, req warp.CheckRequest) (*warp.CheckResult, bool) {
 	a.mu.Lock()
 	var api *xray.API
@@ -298,7 +335,9 @@ func (a *Agent) checkWarpViaLiveXray(ctx context.Context, req warp.CheckRequest)
 
 	pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return warp.CheckViaSocks(pctx, socksAddr, req.TraceURL, req.Endpoint), true
+	res := warp.CheckViaSocks(pctx, socksAddr, req.TraceURL, req.Endpoint)
+	res.Transport = req.Transport
+	return res, true
 }
 
 func activeConfigHasMatchingWarp(rawCfg []byte, req warp.CheckRequest) bool {
@@ -308,12 +347,25 @@ func activeConfigHasMatchingWarp(rawCfg []byte, req warp.CheckRequest) bool {
 	var cfg struct {
 		Outbounds []struct {
 			Tag      string `json:"tag"`
+			Protocol string `json:"protocol"`
 			Settings struct {
 				SecretKey string `json:"secretKey"`
+				Address   string `json:"address"`
+				Port      int    `json:"port"`
 				Peers     []struct {
 					Endpoint string `json:"endpoint"`
 				} `json:"peers"`
 			} `json:"settings"`
+			StreamSettings struct {
+				TLSSettings struct {
+					ALPN []string `json:"alpn"`
+				} `json:"tlsSettings"`
+				MasqueSettings struct {
+					Warp struct {
+						PrivateKey string `json:"privateKey"`
+					} `json:"warp"`
+				} `json:"masqueSettings"`
+			} `json:"streamSettings"`
 		} `json:"outbounds"`
 		Routing struct {
 			Rules []struct {
@@ -325,17 +377,42 @@ func activeConfigHasMatchingWarp(rawCfg []byte, req warp.CheckRequest) bool {
 	if err := json.Unmarshal(rawCfg, &cfg); err != nil {
 		return false
 	}
-	wantEP := warp.NormalizeEndpoint(req.Endpoint)
+	transport := req.Transport
+	if transport == "" {
+		if warp.IsMasqueKey(req.SecretKey) {
+			transport = warp.TransportMasqueH3
+		} else {
+			transport = warp.TransportWireGuard
+		}
+	}
+	wantEP := warp.NormalizeEndpointForTransport(req.Endpoint, transport)
 	hasOutbound := false
 	for _, ob := range cfg.Outbounds {
 		if ob.Tag != xrayconf.WarpTag {
 			continue
 		}
-		if ob.Settings.SecretKey != req.SecretKey || len(ob.Settings.Peers) == 0 {
-			return false
-		}
-		if warp.NormalizeEndpoint(ob.Settings.Peers[0].Endpoint) != wantEP {
-			return false
+		if warp.IsMasqueTransport(transport) {
+			if ob.Protocol != "masque" || ob.StreamSettings.MasqueSettings.Warp.PrivateKey != req.SecretKey {
+				return false
+			}
+			wantALPN := "h3"
+			if transport == warp.TransportMasqueH2 {
+				wantALPN = "h2"
+			}
+			if len(ob.StreamSettings.TLSSettings.ALPN) == 0 || ob.StreamSettings.TLSSettings.ALPN[0] != wantALPN {
+				return false
+			}
+			curEP := net.JoinHostPort(ob.Settings.Address, strconv.Itoa(ob.Settings.Port))
+			if warp.NormalizeEndpointForTransport(curEP, transport) != wantEP {
+				return false
+			}
+		} else {
+			if ob.Protocol != "wireguard" || ob.Settings.SecretKey != req.SecretKey || len(ob.Settings.Peers) == 0 {
+				return false
+			}
+			if warp.NormalizeEndpoint(ob.Settings.Peers[0].Endpoint) != wantEP {
+				return false
+			}
 		}
 		hasOutbound = true
 		break
