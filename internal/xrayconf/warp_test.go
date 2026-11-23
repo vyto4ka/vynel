@@ -61,6 +61,13 @@ func TestBuildConfigWithWarpOrdering(t *testing.T) {
 	if settings["noKernelTun"] != true {
 		t.Fatalf("noKernelTun must be true, got %v", settings["noKernelTun"])
 	}
+	if warpOut["targetStrategy"] != "ForceIPv4v6" {
+		t.Fatalf("targetStrategy must be ForceIPv4v6, got %v", warpOut["targetStrategy"])
+	}
+	sockopt := warpOut["streamSettings"].(map[string]any)["sockopt"].(map[string]any)
+	if sockopt["domainStrategy"] != "ForceIPv4v6" {
+		t.Fatalf("sockopt.domainStrategy must be ForceIPv4v6, got %v", sockopt["domainStrategy"])
+	}
 
 	// Verify routing.domainStrategy auto-set to IPIfNonMatch.
 	routing := cfg["routing"].(map[string]any)
