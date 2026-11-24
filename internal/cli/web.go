@@ -32,7 +32,7 @@ func adminWebCmd() *cobra.Command {
 	var initLogin string
 	initCmd := &cobra.Command{
 		Use: "init", Short: "Create the admin with a generated password unless one exists (used by the installer)",
-		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
+		RunE: withServiceOrCreate(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
 			if err := s.EnsureWebDefaults(ctx); err != nil {
 				return err
 			}

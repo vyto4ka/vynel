@@ -28,11 +28,22 @@ var adminDataDir string
 
 // openService opens the panel database for admin commands. It works while the panel runs:
 // SQLite WAL allows concurrent access and the panel picks up changes from the outbox.
-func openService(ctx context.Context) (*service.Service, func(), error) {
+// When allowCreate is false, a missing panel.db fails with a hint instead of silently creating
+// an empty database (for instance when running `vynel admin` on a standalone node).
+func openService(ctx context.Context, allowCreate bool) (*service.Service, func(), error) {
+	dbPath := filepath.Join(adminDataDir, "panel.db")
+	if !allowCreate {
+		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+			if adminDataDir == DefaultPanelDataDir && isStandaloneNodeHost() {
+				return nil, nil, fmt.Errorf("panel database not found in %s: this server runs a VPN node (vynel-node); run `vynel admin` commands on the panel server", adminDataDir)
+			}
+			return nil, nil, fmt.Errorf("panel database not found (%s): initialize or install the panel first, or pass --data-dir", dbPath)
+		}
+	}
 	if err := os.MkdirAll(adminDataDir, 0o700); err != nil {
 		return nil, nil, err
 	}
-	st, err := store.Open(ctx, filepath.Join(adminDataDir, "panel.db"))
+	st, err := store.Open(ctx, dbPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -44,10 +55,33 @@ func openService(ctx context.Context) (*service.Service, func(), error) {
 	return s, func() { st.Close() }, nil
 }
 
-// withService wraps a RunE that needs the service.
+func isStandaloneNodeHost() bool {
+	if _, err := os.Stat(filepath.Join(DefaultNodeDataDir, "panel.json")); err == nil {
+		return true
+	}
+	if _, err := os.Stat("/etc/systemd/system/vynel-node.service"); err == nil {
+		return true
+	}
+	return false
+}
+
+// withService wraps a RunE that requires an existing panel database.
 func withService(fn func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		s, closeFn, err := openService(cmd.Context())
+		s, closeFn, err := openService(cmd.Context(), false)
+		if err != nil {
+			return err
+		}
+		defer closeFn()
+		return fn(cmd.Context(), s, cmd, args)
+	}
+}
+
+// withServiceOrCreate wraps bootstrap commands (`admin setup`, `admin web init`) that may
+// initialize a fresh panel database.
+func withServiceOrCreate(fn func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		s, closeFn, err := openService(cmd.Context(), true)
 		if err != nil {
 			return err
 		}
@@ -276,7 +310,15 @@ func adminProfileCmd() *cobra.Command {
 			for _, gname := range groups {
 				g, err := s.GroupByName(ctx, gname)
 				if err != nil {
-					return fmt.Errorf("group %q: %w", gname, err)
+					if !cmd.Flags().Changed("group") {
+						if gs, gerr := s.Groups(ctx); gerr == nil && len(gs) > 0 {
+							g = gs[0]
+							err = nil
+						}
+					}
+					if err != nil {
+						return fmt.Errorf("group %q: %w", gname, err)
+					}
 				}
 				if err := s.GrantAccess(ctx, service.ActorCLI, g.ID, store.AccessProfile, p.ID); err != nil {
 					return err
@@ -704,6 +746,9 @@ func adminUserCmd() *cobra.Command {
 				return err
 			}
 			printUser(cmd.OutOrStdout(), u)
+			if url, err := s.SubscriptionURL(ctx, u); err == nil && url != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "sub url   %s\n", url)
+			}
 			return nil
 		}),
 	}
@@ -938,7 +983,7 @@ func adminSetupCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Configure an all-in-one server: local node, Reality self-steal, subscriptions (idempotent)",
-		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
+		RunE: withServiceOrCreate(func(ctx context.Context, s *service.Service, cmd *cobra.Command, _ []string) error {
 			res, err := s.SetupAllInOne(ctx, service.ActorCLI, in)
 			if err != nil {
 				return err

@@ -43,7 +43,7 @@ PANEL_UNIT=/etc/systemd/system/vynel.service
 NODE_UNIT=/etc/systemd/system/vynel-node.service
 
 MODE="" DOMAIN="" SUB_DOMAIN="" EMAIL="" NAME="" COUNTRY="" PUBLIC_IP="" GATEWAY_LISTEN=":9443"
-ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" USERS_FILE="" ASSUME_YES=0 PURGE=0 WIZARD=0
+ADMIN_LOGIN="admin" TOKEN="" BOT_TOKEN="" RESTORE="" BACKUP_PASSWORD="" USERS_FILE="" ASSUME_YES=0 PURGE=0 WIZARD=0
 GH_PROXY="${VYNEL_GH_PROXY:-}" FROM_SOURCE=0
 VPN_IP="" SUB_IP="" FIREWALL="" SSH_PORT="" SSH_KEYS_ONLY="" SUB_PATH="" PANEL_PATH=""
 LOGIN_MODE="" SESSION_PATHS="" MANUAL=0
@@ -270,6 +270,9 @@ if [[ -z "$MODE" ]]; then
   if [[ -n "$TOKEN" ]]; then MODE=node
   elif [[ -n "$DOMAIN" ]]; then MODE=aio
   fi
+fi
+if [[ "$MANUAL" == 1 && "$MODE" == node ]]; then
+  MODE=node-manual
 fi
 
 # clear_screen: the questions start at the top of a clean terminal (the download and the curl
@@ -780,6 +783,7 @@ print_security_block() {
 
 # Ports 80/443 must be free (our own services are stopped first when updating).
 check_ports() {
+  [[ "$MODE" == node-manual ]] && return 0
   if [[ "$MODE" == node ]]; then
     systemctl stop vynel-node 2>/dev/null || true
   else
@@ -791,6 +795,20 @@ check_ports() {
     red "ports 80/443 are in use:"
     echo "$busy"
     die "stop the web server / old VPN using them (e.g. systemctl disable --now nginx) and run again"
+  fi
+}
+
+# preflight_ports: warn and stop before the plain-text wizard asks all questions on a fresh server.
+preflight_ports() {
+  [[ "$MODE" == node-manual ]] && return 0
+  [[ $PANEL_INSTALLED -eq 1 || $NODE_INSTALLED -eq 1 ]] && return 0
+  command -v ss >/dev/null 2>&1 || return 0
+  local busy
+  busy="$(ss -Hltnp '( sport = :443 or sport = :80 )' 2>/dev/null || true)"
+  if [[ -n "$busy" ]]; then
+    red "Порты 80/443 уже заняты другим процессом:"
+    echo "$busy"
+    die "остановите веб-сервер (например: systemctl disable --now nginx apache2) и запустите установщик заново"
   fi
 }
 
@@ -1384,9 +1402,41 @@ script_command() {
 
 admin() { vynel admin --data-dir "$DATA" "$@"; }
 
+NTP_CHECKED=0
 ensure_ntp() {
+  [[ $NTP_CHECKED -eq 1 ]] && return 0
+  NTP_CHECKED=1
+  local synced="no" i
   if command -v timedatectl >/dev/null 2>&1; then
     timedatectl set-ntp true >/dev/null 2>&1 || true
+    for i in 1 2 3 4; do
+      synced="$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)"
+      [[ "$synced" == yes ]] && return 0
+      (( i < 4 )) && sleep 2
+    done
+  fi
+  # NTP may be missing or UDP/123 blocked on a snapshot VM: compare local clock against HTTP Date.
+  local url hdr remote_ts local_ts diff abs
+  hdr=""
+  for url in http://1.1.1.1 http://clients3.google.com/generate_204; do
+    hdr="$(curl -fsSI --max-time 5 "$url" 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /^date:/ {sub(/^[^:]+:[ \t]*/, ""); sub(/\r$/, ""); print; exit}' || true)"
+    [[ -n "$hdr" ]] && break
+  done
+  [[ -n "$hdr" ]] || return 0
+  remote_ts="$(date -u -d "$hdr" +%s 2>/dev/null || true)"
+  [[ "$remote_ts" =~ ^[0-9]+$ ]] || return 0
+  local_ts="$(date -u +%s)"
+  diff=$(( remote_ts - local_ts ))
+  abs="${diff#-}"
+  if (( abs <= 60 )); then
+    return 0
+  fi
+  red "  часы сервера расходятся с точным временем на ${abs} с (на сервере $(date -u '+%F %T') UTC)"
+  if date -u -s "@$remote_ts" >/dev/null 2>&1; then
+    hwclock --systohc >/dev/null 2>&1 || true
+    green "  ✓ системное время синхронизировано: $(date -u '+%F %T') UTC"
+  else
+    red "  не удалось автоматически выставить время (контейнер без прав?) — TLS, apt и Xray Reality могут не работать"
   fi
 }
 
@@ -1655,6 +1705,7 @@ do_aio() {
   detect_ip
   detect_country
   if [[ $WIZARD -eq 1 ]]; then
+    preflight_ports
     echo
     green "Всё на одном сервере: панель + VPN-нода"
     echo "  Enter — оставить значение в скобках."
@@ -1716,6 +1767,7 @@ do_aio() {
   NAME="${NAME:-$(country_name "$COUNTRY")}"
   info "server $PUBLIC_IP, country ${COUNTRY:-?}, domain $DOMAIN, subscriptions on $SUB_DOMAIN"
   if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then check_dns "$DOMAIN@${VPN_IP:-$PUBLIC_IP}" "$SUB_DOMAIN@${SUB_IP:-$PUBLIC_IP}"; else check_dns "$DOMAIN"; fi
+  ensure_ntp
   ensure_packages "${BASE_PKGS[@]}"
   check_ports
 
@@ -1801,6 +1853,7 @@ do_aio() {
 do_panel() {
   detect_ip
   if [[ $WIZARD -eq 1 ]]; then
+    preflight_ports
     echo
     green "Только панель: пользователи, подписки и веб-панель. VPN-ноды — на других серверах."
     echo "  Enter — оставить значение в скобках."
@@ -1833,6 +1886,7 @@ do_panel() {
   SUB_DOMAIN="${SUB_DOMAIN:-$DOMAIN}"
   FIREWALL="${FIREWALL:-on}"
   if [[ "$SUB_DOMAIN" != "$DOMAIN" ]]; then check_dns "$DOMAIN" "$SUB_DOMAIN"; else check_dns "$DOMAIN"; fi
+  ensure_ntp
   ensure_packages "${BASE_PKGS[@]}"
   check_ports
 
@@ -1909,6 +1963,7 @@ do_node() {
   local joined=0
   [[ -f "$NODE_DATA/node.crt" ]] && joined=1
   if [[ $WIZARD -eq 1 && -z "$TOKEN" && $joined -eq 0 ]]; then
+    preflight_ports
     echo
     green "VPN-нода для существующей панели"
     echo "  Токен выдаёт панель: «Ноды» → «Добавить сервер» (или «Новый токен» у ноды)."
@@ -1921,8 +1976,9 @@ do_node() {
   if [[ $joined -eq 0 ]]; then
     [[ "$TOKEN" == vyn1.* ]] || die "a join token from the panel is required (--token vyn1.…)"
   fi
+  ensure_ntp
   ensure_packages "${BASE_PKGS[@]}"
-  check_ports
+  [[ "$MODE" != node-manual ]] && check_ports
 
   install_vynel
   install_xray
@@ -1940,12 +1996,11 @@ do_node() {
   if [[ -n "$TOKEN" ]]; then
     info "joining the panel"
     if [[ $joined -eq 1 ]]; then
-      rm -rf "$NODE_DATA"
+      rm -f "$NODE_DATA/node.crt" "$NODE_DATA/node.key" "$NODE_DATA/ca.crt" "$NODE_DATA/panel.json"
     fi
     detect_country
-    vynel node join --data-dir "$NODE_DATA" ${COUNTRY:+--country "$COUNTRY"} "$TOKEN" || die "the panel did not accept the token: is it fresh (24 h, single use) and is port 9443 open on the panel?"
+    vynel node join --data-dir "$NODE_DATA" ${COUNTRY:+--country "$COUNTRY"} "$TOKEN" || die "не удалось подключить ноду к панели (см. причину выше)"
   fi
-  [[ "$MODE" != node-manual ]] && ensure_ntp
   write_node_unit
   start_unit vynel-node
   info "starting the node"
@@ -2019,6 +2074,7 @@ do_update() {
   if [[ $WIZARD -eq 1 ]]; then
     ask_yes "Обновить vynel, Xray и nginx? Данные сохранятся" y || die "отменено"
   fi
+  ensure_ntp
   ensure_packages "${BASE_PKGS[@]}"
   backup_before_update
   install_vynel || exit 1
@@ -2205,6 +2261,7 @@ run_tui() {
   # shellcheck disable=SC1090
   source "$out"
   rm -f "$out"
+  [[ -n "${BACKUP_PASSWORD:-}" ]] && export VYNEL_BACKUP_PASSWORD="$BACKUP_PASSWORD"
   TUI=1 ASSUME_YES=1 WIZARD=0
   [[ -z "$SUB_DOMAIN" ]] && SUB_DOMAIN="$DOMAIN"
   [[ "$MANUAL" == 1 ]] && MODE=node-manual

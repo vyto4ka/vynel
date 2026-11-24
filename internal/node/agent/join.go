@@ -15,11 +15,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
 
 	"github.com/vyto4ka/vynel/internal/jointoken"
 	"github.com/vyto4ka/vynel/internal/panel/ca"
@@ -81,7 +84,7 @@ func Join(ctx context.Context, dir, tokenStr, country string) (code string, err 
 	defer cancel()
 	resp, err := nodev1.NewNodeGatewayClient(conn).Join(ctx, &nodev1.JoinRequest{Token: tok.Secret, CsrDer: csr, Country: country})
 	if err != nil {
-		return "", fmt.Errorf("join: %w", err)
+		return "", formatJoinError(tok.Addr, err)
 	}
 	if ca.Fingerprint(resp.CaDer) != tok.CAFingerprint {
 		return "", errors.New("join: panel returned a different CA than the token pins")
@@ -125,6 +128,31 @@ func pinnedVerifier(sni, fingerprint string) func(tls.ConnectionState) error {
 		_, err := cs.PeerCertificates[0].Verify(x509.VerifyOptions{DNSName: sni, Roots: pool})
 		return err
 	}
+}
+
+// formatJoinError turns raw gRPC/TLS errors into an actionable reason (clock skew, expired
+// token, foreign server, or network reachability) while keeping the underlying error wrapped.
+func formatJoinError(addr string, err error) error {
+	msg := err.Error()
+	var certErr x509.CertificateInvalidError
+	switch {
+	case (errors.As(err, &certErr) && certErr.Reason == x509.Expired) ||
+		strings.Contains(msg, "certificate has expired or is not yet valid"):
+		return fmt.Errorf("join: системные часы на ноде или панели не синхронизированы (сейчас на ноде %s UTC); включите NTP: timedatectl set-ntp true && timedatectl status (%w)",
+			time.Now().UTC().Format(time.RFC3339), err)
+	case status.Code(err) == codes.PermissionDenied:
+		return fmt.Errorf("join: панель отклонила токен (одноразовый, действует 24 часа) — выпустите новый токен в панели (%w)", err)
+	case strings.Contains(msg, "not signed by the pinned CA") || strings.Contains(msg, "unknown server name"):
+		return fmt.Errorf("join: по адресу %s отвечает другой сервер или панель — проверьте, что токен взят с нужной панели (%w)", addr, err)
+	case errors.Is(err, context.DeadlineExceeded) ||
+		status.Code(err) == codes.DeadlineExceeded ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "no route to host") ||
+		strings.Contains(msg, "network is unreachable"):
+		return fmt.Errorf("join: не удалось подключиться к панели %s — проверьте, что служба vynel запущена и порт шлюза не закрыт у хостера (%w)", addr, err)
+	}
+	return fmt.Errorf("join: %w", err)
 }
 
 // SetPanelAddr changes the panel address the node dials (`vynel node set-panel`, docs/ARCHITECTURE.md §11.3).

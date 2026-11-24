@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -84,14 +86,29 @@ func nodeCmd() *cobra.Command {
 
 	setPanel := &cobra.Command{
 		Use: "set-panel HOST:PORT", Short: "Point the node to a moved panel (same CA)", Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error { return agent.SetPanelAddr(dataDir, args[0]) },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := agent.SetPanelAddr(dataDir, args[0]); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "panel address updated to %s; restart the node to apply: systemctl restart vynel-node\n", args[0])
+			return nil
+		},
 	}
 	var diagBin xray.Binary
 	var diagCaddy, diagNginx string
 	diag := &cobra.Command{
 		Use: "diag", Short: "Print a troubleshooting report (no keys or user ids): `vynel node diag > diag.txt`",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			agent.Diagnose(cmd.Context(), cmd.OutOrStdout(), dataDir, buildinfo.Version, diagBin, diagCaddy, diagNginx)
+			dir := dataDir
+			if !cmd.Flags().Changed("data-dir") && dir == DefaultNodeDataDir {
+				if _, err := os.Stat(filepath.Join(dir, "panel.json")); os.IsNotExist(err) {
+					aioDir := filepath.Join(DefaultPanelDataDir, "node")
+					if _, err := os.Stat(aioDir); err == nil {
+						dir = aioDir
+					}
+				}
+			}
+			agent.Diagnose(cmd.Context(), cmd.OutOrStdout(), dir, buildinfo.Version, diagBin, diagCaddy, diagNginx)
 			return nil
 		},
 	}

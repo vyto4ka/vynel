@@ -191,8 +191,15 @@ func (m *commandMenu) browse(cmd *cobra.Command) error {
 	selected := ""
 	for {
 		children := menuChildren(cmd)
+		role, overview := "", ""
+		if cmd == m.root {
+			role, overview = m.hostOverview()
+		}
 		items := make([]menuItem, 0, len(children)+3)
 		for _, child := range children {
+			if cmd == m.root && role == "node" && (child.Name() == "admin" || child.Name() == "panel" || child.Name() == "restore") {
+				continue
+			}
 			if commandKey(cmd) == "admin user" && child.Name() == "enable" {
 				continue // both states are managed on the user's access page
 			}
@@ -204,6 +211,9 @@ func (m *commandMenu) browse(cmd *cobra.Command) error {
 		}
 		title := "vynel — управление"
 		description := "Выберите раздел · " + buildinfo.Version
+		if overview != "" {
+			description = buildinfo.Version + " · " + overview
+		}
 		if cmd != m.root {
 			t := commandText(cmd)
 			title, description = "vynel › "+t.title, t.description

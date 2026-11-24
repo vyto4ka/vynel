@@ -287,3 +287,117 @@ func TestUpdateCheckDoesNotInstallAndChannelPageDoesNotCheck(t *testing.T) {
 		t.Fatalf("channel selection executed a command or did not persist: %+v %v", got, commands)
 	}
 }
+
+func TestAdminReadOnlyDoesNotCreateEmptyDB(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+	root := newRootCommand()
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"admin", "--data-dir", dir, "stats"})
+	if err := root.ExecuteContext(context.Background()); err == nil {
+		t.Fatal("admin stats on an empty directory must fail instead of creating panel.db")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "panel.db")); !os.IsNotExist(err) {
+		t.Fatal("admin stats created panel.db")
+	}
+
+	// Bootstrap write via `admin setting KEY VALUE` initializes the database.
+	var out strings.Builder
+	root = newRootCommand()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"admin", "--data-dir", dir, "setting", "sub.domain", "sub.example.com"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("admin setting bootstrap: %v (%s)", err, out.String())
+	}
+
+	// Creating a user now prints the subscription URL right away.
+	out.Reset()
+	root = newRootCommand()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"admin", "--data-dir", dir, "user", "add", "alice"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("admin user add: %v (%s)", err, out.String())
+	}
+	if !strings.Contains(out.String(), "sub url   https://sub.example.com/") {
+		t.Fatalf("expected sub url in user add output, got:\n%s", out.String())
+	}
+
+	// TUI entityChoices picks up existing users from panel.db.
+	m := logicMenu(t)
+	m.panelDir = dir
+	items := m.entityChoices(menuTestCommand(t, m.root, "admin user show"), "USERNAME", nil)
+	if !slices.ContainsFunc(items, func(it menuItem) bool { return it.value == "alice" }) {
+		t.Fatalf("entityChoices did not return alice: %+v", items)
+	}
+}
+
+func TestFirewallAllowWarnsOn9443AndDisabledFirewall(t *testing.T) {
+	t.Setenv("VYNEL_FIREWALL_CONF", filepath.Join(t.TempDir(), "firewall.json"))
+	var out strings.Builder
+	root := newRootCommand()
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"firewall", "allow", "9443"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("firewall allow 9443: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "9443") || !strings.Contains(got, "gateway") {
+		t.Fatalf("expected warning about manual port 9443 allow, got:\n%s", got)
+	}
+	if !strings.Contains(got, "firewall is currently off") {
+		t.Fatalf("expected warning about disabled firewall, got:\n%s", got)
+	}
+}
+
+func TestMenuReviewShowsNonSecretSettingValue(t *testing.T) {
+	root := newRootCommand()
+	review := menuReview(menuTestCommand(t, root, "admin setting"), []string{"web.domain", "panel.example.com"}, nil)
+	if !strings.Contains(review, "panel.example.com") || strings.Contains(review, "••••••") {
+		t.Fatalf("non-secret setting value should not be masked: %s", review)
+	}
+}
+
+func TestMenuHidesPanelSectionsOnStandaloneNodeAndShowsNTPWarning(t *testing.T) {
+	t.Setenv("VYNEL_FIREWALL_CONF", filepath.Join(t.TempDir(), "firewall.json"))
+	m := logicMenu(t)
+	if err := os.MkdirAll(m.nodeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(m.nodeDir, "panel.json"), []byte(`{"addr":"203.0.113.10:9443"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.host = func(name string, args ...string) (string, error) {
+		if name == "timedatectl" {
+			return "no\n", nil
+		}
+		if name == "systemctl" && len(args) > 0 && args[len(args)-1] == "vynel-node.service" {
+			return "LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\n", nil
+		}
+		return "LoadState=not-found\n", nil
+	}
+	m.selectItem = func(_ string, desc string, items []menuItem, _ string) (string, error) {
+		if !strings.Contains(desc, "VPN-нода") || !strings.Contains(desc, "часы не синхронизированы") {
+			t.Fatalf("unexpected node overview header: %s", desc)
+		}
+		for _, forbidden := range []string{"admin", "panel", "restore"} {
+			if slices.ContainsFunc(items, func(it menuItem) bool { return it.value == forbidden }) {
+				t.Fatalf("standalone node menu exposed panel item %q", forbidden)
+			}
+		}
+		return ":back", nil
+	}
+	if err := m.browse(m.root); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMenuOutputRawCopyKey(t *testing.T) {
+	p := &menuOutput{title: "Token", body: "vyn1.longtoken", width: 80, height: 24}
+	p.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	if !p.printRaw || p.quit {
+		t.Fatalf("expected printRaw=true quit=false, got printRaw=%v quit=%v", p.printRaw, p.quit)
+	}
+}

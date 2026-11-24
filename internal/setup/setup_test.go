@@ -73,8 +73,8 @@ func TestShellStripsLineBreaksAndSubPathRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
-	if len(lines) != 24 {
-		t.Fatalf("expected 24 single-line assignments, got %d:\n%s", len(lines), buf.String())
+	if len(lines) != 25 {
+		t.Fatalf("expected 25 single-line assignments, got %d:\n%s", len(lines), buf.String())
 	}
 	if cleanSubPath("/") != "/" || cleanSubPath("sub") != "/sub/" || cleanSubPath("") != "" {
 		t.Fatalf("cleanSubPath: %q %q %q", cleanSubPath("/"), cleanSubPath("sub"), cleanSubPath(""))
