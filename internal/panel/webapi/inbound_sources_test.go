@@ -51,8 +51,28 @@ func TestInboundSourcesAPI(t *testing.T) {
 			t.Fatalf("get lacks %s: %s", want, body[:400])
 		}
 	}
-	if strings.Contains(body, "privateKey") && !strings.Contains(body, masked) {
-		t.Fatal("secrets not masked")
+	// The real Reality private key must never appear anywhere in the response, and every
+	// "privateKey" outside the "sources" label map must be masked or an unexpanded ${...}.
+	rendered, err := svc.RenderNodeInbound(ctx, ni.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, _ := rendered.Values["REALITY_PRIVATE_KEY"].(string)
+	if priv == "" {
+		t.Fatal("expected generated REALITY_PRIVATE_KEY on node inbound")
+	}
+	if strings.Contains(body, priv) {
+		t.Fatalf("raw REALITY_PRIVATE_KEY leaked in /api/inbounds response")
+	}
+	for _, part := range strings.Split(body, `"privateKey":"`)[1:] {
+		val, _, _ := strings.Cut(part, `"`)
+		switch val {
+		case masked, "template", "profile", "node":
+		default:
+			if !strings.HasPrefix(val, "${") {
+				t.Fatalf("raw privateKey leaked in /api/inbounds response: %q", val)
+			}
+		}
 	}
 
 	// An override that breaks lint is rejected.

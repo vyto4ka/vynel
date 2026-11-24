@@ -8,9 +8,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -25,26 +28,64 @@ type RemnawavePanel struct {
 
 // remnawaveFetchPrivate reaches private addresses too (CLI: the panel may sit in the admin's
 // own network, or behind a Caddy on the same host). Tests set it to reach their servers.
-var remnawaveFetchPrivate = false
+var remnawaveFetchPrivate atomic.Bool
+
+var nonPublicRemnaPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("2001:db8::/32"),
+}
+
+func remnawavePublicOnly(_, address string, _ syscall.RawConn) error {
+	if remnawaveFetchPrivate.Load() {
+		return nil
+	}
+	host, _, _ := net.SplitHostPort(address)
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("address %s is not public", host)
+	}
+	addr = addr.Unmap()
+	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
+		addr.IsMulticast() || addr.IsUnspecified() {
+		return fmt.Errorf("address %s is not public", host)
+	}
+	for _, p := range nonPublicRemnaPrefixes {
+		if p.Contains(addr) {
+			return fmt.Errorf("address %s is not public", host)
+		}
+	}
+	return nil
+}
 
 // remnawaveClient fetches panels (tests replace it). Public addresses only unless
 // remnawaveFetchPrivate: the panel address is typed by an admin, and the panel must not probe
-// its own network (127.0.0.1, the cloud metadata service).
-var remnawaveClient = &http.Client{
-	Timeout: 30 * time.Second,
-	Transport: &http.Transport{
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, _, _ := net.SplitHostPort(address)
-			if ip := net.ParseIP(host); ip != nil && !remnawaveFetchPrivate &&
-				(ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() ||
-					ip.IsLinkLocalMulticast() || ip.IsMulticast()) {
-				return nil, fmt.Errorf("address %s is not public", host)
-			}
-			var d net.Dialer
-			return d.DialContext(ctx, network, address)
+// its own network (127.0.0.1, the cloud metadata service) or follow redirects with Bearer tokens.
+var remnawaveClient = func() *http.Client {
+	d := &net.Dialer{Timeout: 10 * time.Second, Control: remnawaveDialControl}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext:           d.DialContext,
+			TLSHandshakeTimeout:   6 * time.Second,
+			ResponseHeaderTimeout: 15 * time.Second,
 		},
-		TLSHandshakeTimeout: 6 * time.Second,
-	},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}()
+
+func remnawaveDialControl(network, address string, c syscall.RawConn) error {
+	return remnawavePublicOnly(network, address, c)
 }
 
 // rnUser is one user of the Remnawave answer (the fields we read of GetUsersCommand).
@@ -73,8 +114,9 @@ type rnUser struct {
 // shortUuid becomes SubToken so existing subscription links keep working when the subscription
 // domain moves to vynel; if a user has no shortUuid, import mints a fresh token.
 func FetchRemnawave(ctx context.Context, p RemnawavePanel) (*ExportFile, error) {
-	base := strings.TrimSuffix(p.BaseURL, "/")
-	if u, err := url.Parse(base); err != nil || u.Scheme == "" || u.Host == "" {
+	base := strings.TrimSuffix(strings.TrimSpace(p.BaseURL), "/")
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("bad panel address %q", p.BaseURL)
 	}
 	if p.Token == "" {
@@ -252,6 +294,6 @@ func rnReset(s string) string {
 
 // RnSetPrivate lets tests reach test servers (and the CLI reach panels in its own network).
 func RnSetPrivate(v bool) func() {
-	remnawaveFetchPrivate = v
-	return func() { remnawaveFetchPrivate = false }
+	prev := remnawaveFetchPrivate.Swap(v)
+	return func() { remnawaveFetchPrivate.Store(prev) }
 }

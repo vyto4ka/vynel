@@ -72,23 +72,50 @@ func TestLoginGuardBlocks(t *testing.T) {
 	}
 }
 
-// A flood never queues: once the few check slots are taken, the rest are told to come back.
+// A flood never queues: per-IP concurrency is capped so one address cannot grab the whole
+// bcrypt pool, and lightweight magic/Telegram sign-ins still proceed when the bcrypt pool is full.
 func TestLoginGuardBusy(t *testing.T) {
 	g := newLoginGuard()
+	d1, err := g.begin("192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2, err := g.begin("192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Third concurrent attempt from the same IP is refused even though global slots remain.
+	if _, err := g.begin("192.0.2.1"); !errors.Is(err, errLoginBusy) {
+		t.Fatalf("per-IP cap: %v", err)
+	}
+	d1(true)
+	d2(true)
+
+	// Fill the global bcrypt pool using distinct addresses.
 	var dones []func(bool)
 	for i := 0; i < cap(g.sem); i++ {
-		done, err := g.begin("192.0.2.1")
+		done, err := g.begin("198.51.100." + itoa(int64(i+1)))
 		if err != nil {
 			t.Fatal(err)
 		}
 		dones = append(dones, done)
 	}
-	if _, err := g.begin("192.0.2.2"); !errors.Is(err, errLoginBusy) {
-		t.Fatalf("full: %v", err)
+	if _, err := g.begin("203.0.113.99"); !errors.Is(err, errLoginBusy) {
+		t.Fatalf("full bcrypt pool: %v", err)
 	}
+	// Magic link / Telegram Mini App login is unaffected by a saturated bcrypt semaphore.
+	fastDone, err := g.beginFast("203.0.113.50")
+	if err != nil {
+		t.Fatalf("beginFast blocked by bcrypt pool: %v", err)
+	}
+	fastDone(true)
+
 	dones[0](true)
-	if _, err := g.begin("192.0.2.2"); err != nil {
+	if _, err := g.begin("203.0.113.99"); err != nil {
 		t.Fatalf("a slot came back: %v", err)
+	}
+	for _, d := range dones[1:] {
+		d(true)
 	}
 }
 

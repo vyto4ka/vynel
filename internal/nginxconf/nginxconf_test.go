@@ -72,8 +72,10 @@ func TestSnippets(t *testing.T) {
 		// Serving or writing the node's own files.
 		"root /etc;", "alias /etc/;", "access_log /etc/cron.d/x;", "auth_basic_user_file /etc/shadow;",
 		"client_body_temp_path /etc;", "proxy_store on;", "ssl_trusted_certificate /etc/x.pem;", "js_import x.js;",
-		// Local unix sockets (the Docker API and the like).
-		"proxy_pass http://unix:/var/run/docker.sock:/;", "grpc_pass unix:/run/x.sock;"} {
+		// Local unix sockets (the Docker API and the like), backslash escapes and internal Xray API.
+		"proxy_pass http://unix:/var/run/docker.sock:/;", "grpc_pass unix:/run/x.sock;",
+		`\include /etc/passwd;`, `al\ias /etc/;`, `proxy_pass http://u\nix:/run/x.sock:/;`,
+		"proxy_pass http://127.0.0.1:10085;", "grpc_pass grpc://127.0.0.1:10085;"} {
 		if checkSnippet(bad) == nil {
 			t.Fatalf("accepted %q", bad)
 		}
@@ -95,6 +97,9 @@ func TestSnippets(t *testing.T) {
 	_, err := Build(Spec{Sites: []Site{{Domain: "a.example.com", Routes: []Route{{Kind: KindRaw, PathPrefix: "/upload", Raw: "include x;"}}}}})
 	if err == nil {
 		t.Fatal("raw location with include accepted")
+	}
+	if _, err := Build(Spec{Sites: []Site{{Domain: "a.example.com", Routes: []Route{{Kind: KindDecoy, Decoy: "../etc"}}}}}); err == nil {
+		t.Fatal("path traversal decoy accepted")
 	}
 }
 

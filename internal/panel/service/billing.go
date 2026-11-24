@@ -10,6 +10,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"syscall"
@@ -186,14 +187,48 @@ func FetchSiteInfo(ctx context.Context, site string) SiteInfo {
 	return info
 }
 
-// publicOnly is a net.Dialer Control: it refuses private, loopback and link-local addresses. It
-// runs on the address that is about to be dialled, so a name that resolves to a private address
-// (or is rebound to one after a check) and redirects to one are refused as well.
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),       // RFC 1122 "this network" (0.0.0.1 routes locally on Linux)
+	netip.MustParsePrefix("100.64.0.0/10"),   // RFC 6598 CGNAT (Alibaba Cloud metadata 100.100.100.200, Tailscale)
+	netip.MustParsePrefix("192.0.0.0/24"),    // RFC 6890 IETF protocol assignments
+	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
+	netip.MustParsePrefix("198.18.0.0/15"),   // RFC 2544 benchmarking
+	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
+	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
+	netip.MustParsePrefix("240.0.0.0/4"),     // RFC 1112 reserved / broadcast
+	netip.MustParsePrefix("64:ff9b::/96"),    // RFC 6052 NAT64 well-known prefix
+	netip.MustParsePrefix("64:ff9b:1::/48"),  // RFC 8215 NAT64 local-use prefix
+	netip.MustParsePrefix("2001:db8::/32"),   // documentation
+}
+
+// IsPublicHostAddr reports whether host is a globally routable unicast IP address.
+func IsPublicHostAddr(host string) bool {
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
+		addr.IsMulticast() || addr.IsUnspecified() {
+		return false
+	}
+	for _, p := range nonPublicPrefixes {
+		if p.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+// publicOnly is a net.Dialer Control: it refuses private, loopback, link-local, CGNAT and
+// reserved addresses. It runs on the address that is about to be dialled, so a name that resolves
+// to a non-public address (or is rebound to one) and redirects to one are refused as well.
 func publicOnly(_, address string, _ syscall.RawConn) error {
+	if FetchPrivate {
+		return nil
+	}
 	host, _, _ := net.SplitHostPort(address)
-	ip := net.ParseIP(host)
-	if !FetchPrivate && (ip == nil || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() ||
-		ip.IsLinkLocalMulticast() || ip.IsMulticast()) {
+	if !IsPublicHostAddr(host) {
 		return fmt.Errorf("address %s is not public", host)
 	}
 	return nil

@@ -64,7 +64,7 @@ func (s *Service) SetBackupPassword(ctx context.Context, actor Actor, password s
 	if password != "" && len([]rune(password)) < 8 {
 		return invalid("пароль бэкапа — не короче 8 символов")
 	}
-	return s.SetSetting(ctx, actor, SettingBackupPassword, password)
+	return s.setSecret(ctx, actor, SettingBackupPassword, password)
 }
 
 // BotAdmin is a Telegram account allowed to use the bot.

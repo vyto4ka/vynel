@@ -3,6 +3,7 @@ package webapi
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -32,15 +33,12 @@ const masked = "•••"
 
 // maskSecrets hides the values of secret variables (Reality private keys…) in a rendered tree.
 func maskSecrets(r *xrayconf.RenderedInbound) map[string]any {
-	secrets := map[string]bool{}
-	if r.Template != nil {
-		for _, v := range r.Template.Variables {
-			if v.Secret {
-				if s, ok := r.Values[v.Name].(string); ok && s != "" {
-					secrets[s] = true
-				}
-			}
-		}
+	return maskInboundMap(r.Inbound, secretValues(r.Template, r.Values))
+}
+
+func maskInboundMap(in any, secrets map[string]bool) map[string]any {
+	if in == nil {
+		return nil
 	}
 	var walk func(any) any
 	walk = func(x any) any {
@@ -64,10 +62,13 @@ func maskSecrets(r *xrayconf.RenderedInbound) map[string]any {
 		}
 		return x
 	}
-	m, _ := walk(r.Inbound).(map[string]any)
+	m, _ := walk(in).(map[string]any)
+	if m == nil {
+		return nil
+	}
 	if ss, ok := m["streamSettings"].(map[string]any); ok {
 		if rs, ok := ss["realitySettings"].(map[string]any); ok {
-			if _, ok := rs["privateKey"]; ok {
+			if pk, ok := rs["privateKey"].(string); ok && pk != "" && !strings.HasPrefix(pk, "${") {
 				rs["privateKey"] = masked
 			}
 		}
@@ -380,7 +381,7 @@ func (s *Server) previewProfile(r *http.Request) (any, error) {
 				}
 				vals["INBOUND_PORT"] = pv.Rendered.Inbound["port"]
 				if host, err := xrayconf.ExpandTree(t.Host, vals); err == nil {
-					item["host"] = host
+					item["host"] = maskTree(host, secretValues(t, pv.Rendered.Values))
 				} else {
 					item["hostError"] = err.Error()
 				}
@@ -524,7 +525,9 @@ func (s *Server) inbound(r *http.Request) (any, error) {
 		// The profile's inbound with ${VARIABLES} in place: the page shows which lines a field fills.
 		out["inboundSource"], out["hostSource"] = service.ProfileSources(t, prof)
 	}
+	var renderedVals map[string]any
 	if rendered, err := s.svc.RenderNodeInbound(ctx, id); err == nil {
+		renderedVals = rendered.Values
 		out["rendered"] = maskSecrets(rendered)
 	} else {
 		out["error"] = err.Error()
@@ -535,8 +538,19 @@ func (s *Server) inbound(r *http.Request) (any, error) {
 		if st, ok := sources["settings"].(map[string]any); ok {
 			delete(st, "clients")
 		}
+		sec := secretValues(t, renderedVals)
+		for k, v := range secretValues(t, prof.Values) {
+			sec[k] = v
+		}
+		for k, v := range secretValues(t, ni.Values) {
+			sec[k] = v
+		}
 		out["sources"] = sources
-		out["levels"] = map[string]any{"template": levels["template"], "profile": levels["profile"], "node": final}
+		out["levels"] = map[string]any{
+			"template": maskInboundMap(levels["template"], sec),
+			"profile":  maskInboundMap(levels["profile"], sec),
+			"node":     maskInboundMap(final, sec),
+		}
 	} else {
 		out["error"] = err.Error()
 	}

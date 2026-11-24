@@ -14,18 +14,21 @@ import (
 // every repeat up to MaxBlock; a success clears it. Only a few checks run at once (bcrypt is
 // slow on purpose): the rest are answered at once instead of queueing behind a flood.
 type loginGuard struct {
-	MaxFails int
-	Window   time.Duration
-	Block    time.Duration
-	MaxBlock time.Duration
+	MaxFails         int
+	MaxInFlightPerIP int
+	Window           time.Duration
+	Block            time.Duration
+	MaxBlock         time.Duration
 	// OnBlock is told when an address gets blocked (audit, Telegram).
 	OnBlock func(ip string, fails int, until time.Time)
 
 	now func() time.Time
-	sem chan struct{}
+	sem chan struct{} // bounds heavy password (bcrypt) checks only
 
-	mu  sync.Mutex
-	ips map[string]*loginFails
+	mu        sync.Mutex
+	ips       map[string]*loginFails
+	inFlight  map[string]int
+	lastPrune time.Time
 }
 
 type loginFails struct {
@@ -36,9 +39,15 @@ type loginFails struct {
 	last    time.Time
 }
 
+const maxTrackedLoginIPs = 32768
+
 func newLoginGuard() *loginGuard {
-	return &loginGuard{MaxFails: 5, Window: 15 * time.Minute, Block: time.Minute, MaxBlock: time.Hour,
-		now: time.Now, sem: make(chan struct{}, 4), ips: map[string]*loginFails{}}
+	return &loginGuard{
+		MaxFails: 5, MaxInFlightPerIP: 2,
+		Window: 15 * time.Minute, Block: time.Minute, MaxBlock: time.Hour,
+		now: time.Now, sem: make(chan struct{}, 8),
+		ips: map[string]*loginFails{}, inFlight: map[string]int{},
+	}
 }
 
 // errLoginBusy and loginBlocked are answered with 429.
@@ -57,22 +66,62 @@ func waitText(d time.Duration) string {
 	return strconv.Itoa(int(d.Round(time.Second)/time.Second)) + " с"
 }
 
-// begin admits one sign-in attempt from ip. done must be called with its outcome.
+// begin admits one password (bcrypt) sign-in attempt from ip. done must be called with its outcome.
 func (g *loginGuard) begin(ip string) (done func(ok bool), err error) {
+	return g.admit(ip, true)
+}
+
+// beginFast admits a lightweight sign-in check (one-time link, Telegram Mini App HMAC) without
+// competing for the bcrypt worker semaphore, while enforcing IP bans and per-IP concurrency.
+func (g *loginGuard) beginFast(ip string) (done func(ok bool), err error) {
+	return g.admit(ip, false)
+}
+
+func (g *loginGuard) admit(ip string, heavy bool) (done func(ok bool), err error) {
 	g.mu.Lock()
-	if f := g.ips[ip]; f != nil && g.now().Before(f.until) {
-		wait := f.until.Sub(g.now())
+	now := g.now()
+	if f := g.ips[ip]; f != nil && now.Before(f.until) {
+		wait := f.until.Sub(now)
 		g.mu.Unlock()
 		return nil, &loginBlocked{wait}
 	}
-	g.mu.Unlock()
-	select {
-	case g.sem <- struct{}{}:
-	default:
+	if g.inFlight == nil {
+		g.inFlight = map[string]int{}
+	}
+	perIP := g.MaxInFlightPerIP
+	if perIP <= 0 {
+		perIP = 2
+	}
+	if g.inFlight[ip] >= perIP {
+		g.mu.Unlock()
 		return nil, errLoginBusy
 	}
+	g.inFlight[ip]++
+	g.mu.Unlock()
+
+	releaseIP := func() {
+		g.mu.Lock()
+		if g.inFlight[ip] <= 1 {
+			delete(g.inFlight, ip)
+		} else {
+			g.inFlight[ip]--
+		}
+		g.mu.Unlock()
+	}
+
+	if heavy {
+		select {
+		case g.sem <- struct{}{}:
+		default:
+			releaseIP()
+			return nil, errLoginBusy
+		}
+	}
 	return func(ok bool) {
-		<-g.sem
+		if heavy {
+			<-g.sem
+		}
+		releaseIP()
 		g.record(ip, ok)
 	}, nil
 }
@@ -88,6 +137,18 @@ func (g *loginGuard) record(ip string, ok bool) {
 	g.prune(now)
 	f := g.ips[ip]
 	if f == nil {
+		if len(g.ips) >= maxTrackedLoginIPs {
+			for k, old := range g.ips {
+				if now.After(old.until) {
+					delete(g.ips, k)
+					break
+				}
+			}
+			if len(g.ips) >= maxTrackedLoginIPs {
+				g.mu.Unlock()
+				return
+			}
+		}
 		f = &loginFails{}
 		g.ips[ip] = f
 	}
@@ -114,11 +175,15 @@ func (g *loginGuard) record(ip string, ok bool) {
 	}
 }
 
-// prune forgets addresses quiet for a day, so the map does not grow without bound.
+// prune forgets addresses quiet for a day, throttled so a flood cannot trigger O(N^2) scans.
 func (g *loginGuard) prune(now time.Time) {
 	if len(g.ips) < 1000 {
 		return
 	}
+	if len(g.ips) < maxTrackedLoginIPs && now.Sub(g.lastPrune) < time.Minute {
+		return
+	}
+	g.lastPrune = now
 	for ip, f := range g.ips {
 		if now.Sub(f.last) > 24*time.Hour && now.After(f.until) {
 			delete(g.ips, ip)

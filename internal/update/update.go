@@ -232,7 +232,18 @@ func Latest(ctx context.Context, s Source) (string, error) {
 
 // httpClient bounds every download even when the caller's context has no deadline (`vynel update
 // --foreground` has none): a server that stops answering must not hang the update for good.
-var httpClient = &http.Client{Timeout: 2 * time.Minute}
+var httpClient = &http.Client{
+	Timeout: 2 * time.Minute,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("too many redirects")
+		}
+		if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return errors.New("refusing redirect from HTTPS to plain HTTP")
+		}
+		return nil
+	},
+}
 
 func get(ctx context.Context, url string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

@@ -121,7 +121,15 @@ func NewHandler(svc *service.Service, log *slog.Logger) *Handler {
 
 // Serve listens on addr until ctx ends.
 func (h *Handler) Serve(ctx context.Context, addr string) error {
-	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: time.Minute}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       time.Minute,
+		MaxHeaderBytes:    1 << 20,
+	}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -207,7 +215,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.svc.TouchSubscription(ctx, u.ID, r.UserAgent()); err != nil {
+	if err := h.svc.TouchSubscription(ctx, u.ID, clipUTF8(r.UserAgent(), 300)); err != nil {
 		h.log.Warn("touch subscription", "err", err)
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -369,12 +377,21 @@ func (h *Handler) miss(ip string) {
 	defer h.mu.Unlock()
 	now := time.Now()
 	c := h.misses[ip]
-	if c == nil || now.Sub(c.windowStart) > time.Minute {
-		if len(h.misses) > 100000 { // crude memory bound
-			h.misses = map[string]*missCounter{}
+	if c == nil {
+		if len(h.misses) >= 100000 {
+			for k, m := range h.misses {
+				if now.After(m.bannedUntil) && now.Sub(m.windowStart) > time.Minute {
+					delete(h.misses, k)
+				}
+			}
+			if len(h.misses) >= 100000 {
+				return
+			}
 		}
 		c = &missCounter{windowStart: now}
 		h.misses[ip] = c
+	} else if now.Sub(c.windowStart) > time.Minute {
+		c.n, c.windowStart = 0, now
 	}
 	c.n++
 	if c.n > h.MaxMisses && now.After(c.bannedUntil) {

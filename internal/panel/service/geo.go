@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"sort"
@@ -85,12 +86,44 @@ func (s *Service) InitGeoStore(dir, systemDir string) error {
 			return nil
 		},
 	}
-	// Separate client for admin-configured VYNEL_GH_PROXY (may live on 127.0.0.1 / private net).
+	// Separate client for admin-configured VYNEL_GH_PROXY (may live on 127.0.0.1 / private net),
+	// while still refusing redirects away from the configured proxy onto non-public addresses.
+	ghProxyHost := func() string {
+		raw := strings.TrimSpace(update.LoadSource().GHProxy)
+		if raw == "" {
+			return ""
+		}
+		u, err := url.Parse(raw)
+		if err != nil {
+			return ""
+		}
+		h, _, err := net.SplitHostPort(u.Host)
+		if err != nil {
+			h = u.Host
+		}
+		return strings.ToLower(h)
+	}
+	proxyDialer := &net.Dialer{Timeout: 10 * time.Second}
 	proxyClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+				reqHost, _, _ := net.SplitHostPort(address)
+				allowed := ghProxyHost()
+				if allowed != "" && strings.EqualFold(reqHost, allowed) {
+					return proxyDialer.DialContext(ctx, network, address)
+				}
+				return d.DialContext(ctx, network, address)
+			},
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+		},
 		Timeout: 90 * time.Second,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 6 {
 				return errors.New("слишком много редиректов")
+			}
+			if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+				return errors.New("отклонён редирект с HTTPS на незашифрованный HTTP")
 			}
 			return nil
 		},

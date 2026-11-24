@@ -75,11 +75,40 @@ func Create(ctx context.Context, st *store.Store, dataDir, version string, w io.
 	return meta, gz.Close()
 }
 
+const (
+	maxMetaBytes    = 1 << 20
+	maxRestoreBytes = 4 << 30
+)
+
+func safeBackupHost(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
+			b.WriteRune(r)
+			if b.Len() >= 128 {
+				break
+			}
+		}
+	}
+	return strings.Trim(b.String(), ".-_")
+}
+
+func copyLimited(dst io.Writer, src io.Reader, limit int64) error {
+	n, err := io.Copy(dst, io.LimitReader(src, limit+1))
+	if err != nil {
+		return err
+	}
+	if n > limit {
+		return fmt.Errorf("backup archive exceeds the %d MiB safety limit", limit>>20)
+	}
+	return nil
+}
+
 // FileName is the archive name for a backup.
 func FileName(m *Meta, loc *time.Location) string {
 	name := "vynel-backup"
-	if m.Domain != "" {
-		name += "-" + m.Domain
+	if dom := safeBackupHost(m.Domain); dom != "" {
+		name += "-" + dom
 	}
 	return name + "-" + time.Unix(m.CreatedAt, 0).In(loc).Format("2006-01-02-1504") + ".tar.gz"
 }
@@ -115,7 +144,7 @@ func Inspect(r io.Reader) (*Meta, error) {
 	err := walk(r, func(name string, _ *tar.Header, body io.Reader) error {
 		if name == "meta.json" {
 			meta = &Meta{}
-			return json.NewDecoder(body).Decode(meta)
+			return json.NewDecoder(io.LimitReader(body, maxMetaBytes)).Decode(meta)
 		}
 		return nil
 	})
@@ -194,6 +223,7 @@ func Restore(archive, dataDir, password string) (*Meta, string, error) {
 	}
 	defer os.RemoveAll(stage)
 	gotDB := false
+	var remaining int64 = maxRestoreBytes
 	err = walk(f, func(name string, _ *tar.Header, body io.Reader) error {
 		clean := filepath.Clean(filepath.FromSlash(name))
 		if clean == "meta.json" {
@@ -213,9 +243,15 @@ func Restore(archive, dataDir, password string) (*Meta, string, error) {
 		if err != nil {
 			return err
 		}
-		if _, err := io.Copy(out, body); err != nil {
+		n, err := io.Copy(out, io.LimitReader(body, remaining+1))
+		if err != nil {
 			out.Close()
 			return err
+		}
+		remaining -= n
+		if remaining < 0 {
+			out.Close()
+			return fmt.Errorf("backup archive exceeds the %d MiB safety limit", maxRestoreBytes>>20)
 		}
 		gotDB = gotDB || clean == "panel.db"
 		return out.Close()

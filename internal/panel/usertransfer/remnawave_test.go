@@ -192,3 +192,36 @@ func TestRawRemnawaveUnmarshalAndImport(t *testing.T) {
 		t.Errorf("u2 duplicate tg collision not handled: %+v", u2)
 	}
 }
+
+func TestFetchRemnawaveSSRFAndRedirectGuard(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_ = json.NewEncoder(w).Encode(map[string]any{"response": map[string]any{"users": []any{}, "total": 0}})
+	}))
+	defer srv.Close()
+
+	// With private addresses forbidden (web panel default), both 127.0.0.1 and DNS hostname
+	// resolving to loopback ("localhost") must be refused before connecting.
+	restore := RnSetPrivate(false)
+	defer restore()
+	if _, err := FetchRemnawave(context.Background(), RemnawavePanel{BaseURL: srv.URL, Token: "tok"}); err == nil || hits != 0 {
+		t.Fatalf("loopback IP accepted: err=%v hits=%d", err, hits)
+	}
+	port := srv.Listener.Addr().String()[len("127.0.0.1:"):]
+	if _, err := FetchRemnawave(context.Background(), RemnawavePanel{BaseURL: "http://localhost:" + port, Token: "tok"}); err == nil || hits != 0 {
+		t.Fatalf("localhost DNS SSRF bypass accepted: err=%v hits=%d", err, hits)
+	}
+	if _, err := FetchRemnawave(context.Background(), RemnawavePanel{BaseURL: "file:///etc/passwd", Token: "tok"}); err == nil {
+		t.Fatal("non-http scheme accepted")
+	}
+
+	// Redirects must not be followed (prevents leaking Authorization: Bearer or probing internal targets).
+	restorePriv := RnSetPrivate(true)
+	defer restorePriv()
+	redir := httptest.NewServer(http.RedirectHandler(srv.URL+"/api/users", http.StatusFound))
+	defer redir.Close()
+	if _, err := FetchRemnawave(context.Background(), RemnawavePanel{BaseURL: redir.URL, Token: "tok"}); err == nil || hits != 0 {
+		t.Fatalf("redirect followed: err=%v hits=%d", err, hits)
+	}
+}

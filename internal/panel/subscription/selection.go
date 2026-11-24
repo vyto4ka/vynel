@@ -4,11 +4,25 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 )
+
+func clipUTF8(s string, maxBytes int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= maxBytes {
+		return s
+	}
+	s = s[:maxBytes]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
 
 // ServerSummary contains no credentials or raw subscription links.
 type ServerSummary struct {
@@ -76,7 +90,14 @@ func selectHosts(ctx context.Context, svc *service.Service, u *store.User, r *ht
 		out.Headers = []HeaderValue{{Name: "x-hwid-max-devices-reached", Value: "true"}}
 		return out, nil
 	}
-	d := service.DeviceInfo{HWID: r.Header.Get("x-hwid"), Platform: r.Header.Get("x-device-os"), OSVersion: r.Header.Get("x-ver-os"), Model: r.Header.Get("x-device-model"), UserAgent: r.UserAgent(), IP: clientIP(r)}
+	d := service.DeviceInfo{
+		HWID:      clipUTF8(r.Header.Get("x-hwid"), 200),
+		Platform:  clipUTF8(r.Header.Get("x-device-os"), 200),
+		OSVersion: clipUTF8(r.Header.Get("x-ver-os"), 200),
+		Model:     clipUTF8(r.Header.Get("x-device-model"), 200),
+		UserAgent: clipUTF8(r.UserAgent(), 300),
+		IP:        clientIP(r),
+	}
 	var err error
 	if register {
 		out.HWID, err = svc.CheckDevice(ctx, u, d)

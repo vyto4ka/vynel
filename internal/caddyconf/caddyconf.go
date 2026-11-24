@@ -221,6 +221,31 @@ func siteHeaders() map[string]any {
 	}
 }
 
+func validCaddyDecoy(s string) bool {
+	if len(s) == 0 || len(s) > 63 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func checkCaddyUpstream(a string) error {
+	host, port, err := net.SplitHostPort(a)
+	if err != nil || host == "" || strings.ContainsAny(a, " ;{}\"'\n\r") {
+		return fmt.Errorf("upstream %q is not host:port", a)
+	}
+	if p, err := strconv.Atoi(port); err != nil || p <= 0 || p > 65535 {
+		return fmt.Errorf("upstream %q: bad port", a)
+	}
+	return nil
+}
+
 // siteRoutes renders the routes of one domain and returns the decoy used for its 404 page.
 // Routes with a path prefix go first, so a catch-all decoy never shadows them.
 func siteRoutes(rs []Route) ([]any, string, error) {
@@ -232,14 +257,20 @@ func siteRoutes(rs []Route) ([]any, string, error) {
 		var handler map[string]any
 		switch r.Kind {
 		case KindDecoy:
-			if r.Decoy == "" {
-				return nil, "", fmt.Errorf("decoy route without a site")
+			if !validCaddyDecoy(r.Decoy) {
+				return nil, "", fmt.Errorf("invalid decoy site %q", r.Decoy)
 			}
 			decoy = r.Decoy
 			handler = map[string]any{"handler": "file_server", "root": DecoyDirPlaceholder + "/" + r.Decoy}
 		case KindProxy:
+			if err := checkCaddyUpstream(r.Upstream); err != nil {
+				return nil, "", err
+			}
 			handler = map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": r.Upstream}}}
 		case KindStream:
+			if err := checkCaddyUpstream(r.Upstream); err != nil {
+				return nil, "", err
+			}
 			handler = map[string]any{
 				"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": r.Upstream}},
 				"flush_interval": -1,
