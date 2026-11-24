@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -152,6 +154,7 @@ type menuOutput struct {
 	width, height int
 	offset        int
 	quit          bool
+	printRaw      bool
 }
 
 func (p *menuOutput) Init() tea.Cmd { return nil }
@@ -166,6 +169,9 @@ func (p *menuOutput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			p.quit = true
+			return p, tea.Quit
+		case "p":
+			p.printRaw = true
 			return p, tea.Quit
 		case "enter", "esc", "left", "backspace":
 			return p, tea.Quit
@@ -190,9 +196,9 @@ func (p *menuOutput) View() string {
 	th := termui.Theme()
 	lines := p.lines()
 	end := min(len(lines), p.offset+max(1, p.height-5))
-	help := "↑/↓ — прокрутить · Enter / Esc — назад · Ctrl+C — выход"
-	if p.width < 70 {
-		help = "↑/↓ прокрутка · Enter / Esc назад"
+	help := "↑/↓ — прокрутить · p — вывести для копирования · Enter / Esc — назад"
+	if p.width < 74 {
+		help = "↑/↓ · p копировать · Enter / Esc назад"
 	}
 	return th.Focused.Base.Render(th.Focused.Title.Render(p.title)+"\n\n"+strings.Join(lines[p.offset:end], "\n")) +
 		"\n\n" + th.Focused.Description.Render(help)
@@ -210,6 +216,10 @@ func (m *commandMenu) outputPage(title, body string) error {
 	}
 	if p.quit {
 		return context.Canceled
+	}
+	if p.printRaw {
+		fmt.Fprintf(m.out, "\n%s\n%s\n\nНажмите Enter, чтобы вернуться в меню… ", title, body)
+		_, _ = bufio.NewReader(m.in).ReadString('\n')
 	}
 	return err
 }

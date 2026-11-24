@@ -132,3 +132,45 @@ func TestServerCert(t *testing.T) {
 		t.Fatal("valid for another name")
 	}
 }
+
+func TestServerCertReissuesFutureNotBefore(t *testing.T) {
+	dir := t.TempDir()
+	c, err := LoadOrCreate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	futureTpl := &x509.Certificate{
+		SerialNumber: randomSerial(),
+		Subject:      pkix.Name{CommonName: "gw-future.internal"},
+		DNSNames:     []string{"gw-future.internal"},
+		NotBefore:    time.Now().Add(48 * time.Hour),
+		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, futureTpl, c.Cert, &key.PublicKey, c.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := savePair(dir+"/gateway.crt", dir+"/gateway.key", der, key); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.ServerCert("gw-future.internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Certificate[0]) == string(der) {
+		t.Fatal("gateway certificate with future NotBefore was reused instead of reissued")
+	}
+	leaf, err := x509.ParseCertificate(got.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Now().Before(leaf.NotBefore) {
+		t.Fatalf("reissued certificate still has future NotBefore: %v", leaf.NotBefore)
+	}
+}

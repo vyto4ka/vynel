@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
@@ -212,16 +213,106 @@ func (m *commandMenu) webAccessPage() error {
 	}
 }
 
+func (m *commandMenu) entityChoices(cmd *cobra.Command, argName string, prev []string) []menuItem {
+	key := commandKey(cmd)
+	if cmd.Name() == "add" || cmd.Name() == "create" {
+		return nil
+	}
+	svc, closeFn, err := m.readPanel()
+	if err != nil {
+		return nil
+	}
+	defer closeFn()
+	ctx := m.root.Context()
+	var items []menuItem
+	switch {
+	case argName == "USERNAME":
+		us, err := svc.Users(ctx, store.UserFilter{})
+		if err != nil {
+			return nil
+		}
+		for _, u := range us {
+			items = append(items, menuItem{menuText{u.Username, u.Status}, u.Username})
+		}
+	case argName == "CODE" || argName == "NODE" || (argName == "REF" && len(prev) == 2 && prev[1] == "node"):
+		ns, err := svc.NodeStatuses(ctx, nil)
+		if err != nil {
+			return nil
+		}
+		for _, s := range ns {
+			items = append(items, menuItem{menuText{s.Node.Code, s.Node.Name + " · " + s.State()}, s.Node.Code})
+		}
+	case argName == "TAG" || (argName == "REF" && len(prev) == 2 && prev[1] == "inbound"):
+		nis, err := svc.NodeInbounds(ctx, 0)
+		if err != nil {
+			return nil
+		}
+		for _, ni := range nis {
+			st := "включён"
+			if !ni.Enabled {
+				st = "выключен"
+			}
+			items = append(items, menuItem{menuText{ni.Tag, st}, ni.Tag})
+		}
+	case argName == "GROUP":
+		gs, err := svc.Groups(ctx)
+		if err != nil {
+			return nil
+		}
+		for _, g := range gs {
+			items = append(items, menuItem{menuText{title: g.Name}, g.Name})
+		}
+	case (argName == "NAME" && key == "admin profile set") || (argName == "REF" && len(prev) == 2 && prev[1] == "profile"):
+		ps, err := svc.Profiles(ctx)
+		if err != nil {
+			return nil
+		}
+		for _, p := range ps {
+			items = append(items, menuItem{menuText{p.Name, p.TemplateID}, p.Name})
+		}
+	case argName == "ID" && key == "admin api-token revoke":
+		ts, err := svc.APITokens(ctx)
+		if err != nil {
+			return nil
+		}
+		for _, t := range ts {
+			if t.RevokedAt != nil {
+				continue
+			}
+			id := strconv.FormatInt(t.ID, 10)
+			items = append(items, menuItem{menuText{id + " · " + t.Name, t.Prefix + "…"}, id})
+		}
+	}
+	return items
+}
+
 func (m *commandMenu) updatesPage() error {
 	selected := "check"
 	for {
 		source := update.LoadSource()
-		choice, err := m.pick("Обновления", "Установлено: "+buildinfo.Version+"\nКанал: "+menuCurrent(source.Channel())+" · "+source.Release+"\nПроверка версии не устанавливает обновление.", []menuItem{
+		desc := "Установлено: " + buildinfo.Version + "\nКанал: " + menuCurrent(source.Channel()) + " · " + source.Release
+		st := update.LocalStatus()
+		if st != nil {
+			switch {
+			case st.Running:
+				desc += "\nПоследнее обновление: выполняется сейчас"
+			case st.OK:
+				desc += "\nПоследнее обновление: успешно (" + time.Unix(st.FinishedAt, 0).Format("2006-01-02 15:04") + ")"
+			default:
+				desc += "\nПоследнее обновление: ошибка (" + time.Unix(st.FinishedAt, 0).Format("2006-01-02 15:04") + ")"
+			}
+		}
+		desc += "\nПроверка версии не устанавливает обновление."
+		items := []menuItem{
 			{menuText{"Проверить версию", "показать доступную версию без установки"}, "check"},
 			{menuText{"Обновить сервер", "обновление в фоне с сохранением данных"}, "update"},
 			{menuText{"Канал обновлений", "релизы stable или тестовая ветка dev"}, "channel"},
-			{menuText{title: "← Назад"}, ":back"},
-		}, selected)
+		}
+		if st != nil && st.Log != "" {
+			items = append(items, menuItem{menuText{"Журнал обновления", "посмотреть лог последнего обновления"}, "log"})
+		}
+		items = append(items, menuItem{menuText{title: "← Назад"}, ":back"})
+		choice, err := m.pick("Обновления", desc, items, selected)
 		if errors.Is(err, errMenuBack) || choice == ":back" {
 			return nil
 		}
@@ -239,6 +330,10 @@ func (m *commandMenu) updatesPage() error {
 			}
 		case "channel":
 			err = m.updateChannel(source)
+		case "log":
+			if st != nil {
+				err = m.note("Журнал обновления", st.Log)
+			}
 		}
 		if err != nil && !errors.Is(err, errMenuBack) {
 			return err

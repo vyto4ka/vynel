@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -48,6 +49,7 @@ type Options struct {
 type Answers struct {
 	Mode, Domain, SubDomain, Email, Name, Country, PublicIP, VPNIP, SubIP string
 	GatewayListen, AdminLogin, BotToken, Restore, UsersFile, Token        string
+	BackupPassword                                                        string `json:"-"`
 	SubPath, PanelPath                                                    string
 	LoginMode, SessionPaths                                               string // password | link | miniapp; "yes" = random path per session
 	Manual                                                                bool
@@ -257,6 +259,9 @@ func Run(o Options) (*Answers, error) {
 		if o.Installed == "panel" {
 			modes = append(modes, huh.NewOption("Перенастроить                       · домены, бот (данные сохранятся)", "panel"))
 		}
+		if o.Installed == "node" {
+			modes = append(modes, huh.NewOption("Переподключить к панели             · новый токен (данные Xray сохранятся)", "node"))
+		}
 	}
 	modes = append(modes, huh.NewOption("Удалить", "uninstall"))
 	header := "Сейчас на сервере: " + installedNames[o.Installed]
@@ -277,12 +282,10 @@ func Run(o Options) (*Answers, error) {
 		return nil, err
 	}
 
-	// Pre-flight: a fresh aio/panel install puts vynel's own nginx on ports 80 and 443. If a
-	// system nginx or apache already holds them, the install would hang silently at the
-	// Let's Encrypt step, so stop here with a readable error instead. Reinstalls (state from
-	// a previous run, or update/reconfigure on top of an existing install) are exempt: there
-	// vynel-nginx itself is listening.
-	if (a.Mode == "aio" || a.Mode == "panel") && !installed && saved == nil {
+	// Pre-flight: a fresh aio/panel/node install puts vynel's own nginx on ports 80 and 443.
+	// If a system nginx or apache already holds them, stop here with a readable error instead
+	// of failing after apt-get. Manual nodes and reinstalls are exempt.
+	if (a.Mode == "aio" || a.Mode == "panel" || a.Mode == "node") && !installed && saved == nil {
 		if err := CheckPortsFree(); err != nil {
 			skipSave = true
 			_ = run(huh.NewGroup(
@@ -453,7 +456,39 @@ func Run(o Options) (*Answers, error) {
 					huh.NewConfirm().Title("Подключать другие серверы (ноды) в будущем?").Description("Откроет порт 9443 для нод").
 						Affirmative("Да").Negative("Нет").Value(&nodes))
 			}
+			advanced := a.SubPath != "" || a.PanelPath != "" || a.Restore != "" || a.UsersFile != ""
 			fields = append(fields,
+				huh.NewSelect[string]().Title("Вход в панель").Value(&a.LoginMode).
+					Options(huh.NewOption("Логин и пароль", "password"),
+						huh.NewOption("Без пароля: одноразовая ссылка из бота или vynel admin login-link", "link"),
+						huh.NewOption("Только через Telegram (Mini App в боте)", "miniapp")).
+					Description("Без пароля его нельзя подобрать; режим меняется потом в панели (Аккаунт)"),
+				huh.NewInput().Title("Токен Telegram-бота").Placeholder("от @BotFather, можно потом в панели").Value(&a.BotToken).
+					Description("Пользователи из чата, вход без пароля, ночные бэкапы, уведомления").
+					Validate(func(s string) error {
+						if s != "" && !botRe.MatchString(strings.TrimSpace(s)) {
+							return errors.New("токен вида 123456789:AA…")
+						}
+						if strings.TrimSpace(s) == "" && a.LoginMode == "miniapp" {
+							return errors.New("для входа только через Telegram нужен бот")
+						}
+						return nil
+					}),
+				huh.NewConfirm().Title("Дополнительные настройки и перенос данных?").
+					Description("Свои пути подписок и панели, восстановление из бэкапа или импорт пользователей").
+					Affirmative("Настроить").Negative("По умолчанию").Value(&advanced))
+			groups = append(groups, huh.NewGroup(fields...).Title("Панель"))
+			groups = append(groups, huh.NewGroup(
+				huh.NewInput().Title("Логин веб-панели").Value(&a.AdminLogin).
+					Description("Пароль сгенерируется сам и будет показан в конце").
+					Validate(func(s string) error {
+						if !loginRe.MatchString(s) {
+							return errors.New("латиница, цифры и _ . - @")
+						}
+						return nil
+					}),
+			).Title("Вход по паролю").WithHideFunc(func() bool { return a.LoginMode != "password" }))
+			groups = append(groups, huh.NewGroup(
 				huh.NewInput().Title("Путь ссылок подписки").Placeholder("/s/").Value(&a.SubPath).
 					DescriptionFunc(func() string {
 						d := cleanDomain(a.SubDomain)
@@ -484,35 +519,6 @@ func Run(o Options) (*Answers, error) {
 						}
 						return nil
 					}),
-				huh.NewSelect[string]().Title("Вход в панель").Value(&a.LoginMode).
-					Options(huh.NewOption("Логин и пароль", "password"),
-						huh.NewOption("Без пароля: одноразовая ссылка из бота или vynel admin login-link", "link"),
-						huh.NewOption("Только через Telegram (Mini App в боте)", "miniapp")).
-					Description("Без пароля его нельзя подобрать; режим меняется потом в панели (Аккаунт)"),
-				huh.NewInput().Title("Логин веб-панели").Value(&a.AdminLogin).
-					DescriptionFunc(func() string {
-						if a.LoginMode != "password" {
-							return "При входе без пароля не нужен — можно оставить"
-						}
-						return "Пароль сгенерируется сам и будет показан в конце"
-					}, &a.LoginMode).
-					Validate(func(s string) error {
-						if !loginRe.MatchString(s) {
-							return errors.New("латиница, цифры и _ . - @")
-						}
-						return nil
-					}),
-				huh.NewInput().Title("Токен Telegram-бота").Placeholder("от @BotFather, можно потом в панели").Value(&a.BotToken).
-					Description("Пользователи из чата, вход без пароля, ночные бэкапы, уведомления").
-					Validate(func(s string) error {
-						if s != "" && !botRe.MatchString(strings.TrimSpace(s)) {
-							return errors.New("токен вида 123456789:AA…")
-						}
-						if strings.TrimSpace(s) == "" && a.LoginMode == "miniapp" {
-							return errors.New("для входа только через Telegram нужен бот")
-						}
-						return nil
-					}),
 				huh.NewInput().Title("Восстановить из бэкапа").Placeholder("путь к .tar.gz или .age, обычно пусто").Value(&a.Restore).
 					Validate(func(s string) error {
 						if s = strings.TrimSpace(s); s != "" {
@@ -530,8 +536,15 @@ func Run(o Options) (*Answers, error) {
 							}
 						}
 						return nil
-					}))
-			groups = append(groups, huh.NewGroup(fields...).Title("Панель"))
+					}),
+			).Title("Дополнительно и перенос").WithHideFunc(func() bool { return !advanced }))
+			groups = append(groups, huh.NewGroup(
+				huh.NewInput().Title("Пароль зашифрованного бэкапа (.age)").EchoMode(huh.EchoModePassword).
+					Value(&a.BackupPassword).
+					Description("Оставьте пустым, чтобы ввести позже в терминале"),
+			).Title("Пароль бэкапа").WithHideFunc(func() bool {
+				return !strings.HasSuffix(strings.ToLower(strings.TrimSpace(a.Restore)), ".age")
+			}))
 			groups = append(groups, huh.NewGroup(
 				huh.NewSelect[string]().Title("Случайный адрес панели на каждую сессию?").Value(&a.SessionPaths).
 					Options(huh.NewOption("Нет, постоянный секретный путь", ""), huh.NewOption("Да", "yes")).
@@ -566,7 +579,7 @@ func Run(o Options) (*Answers, error) {
 				secOpts = append(secOpts, huh.NewOption("SSH только по ключу — недоступно: на сервере нет ключей (ssh-copy-id)", "nokeys"))
 			}
 			portNow := fmt.Sprint(sshPorts)
-			secOpts = append(secOpts, huh.NewOption("SSH на случайный порт вместо "+strings.Trim(portNow, "[]")+" — старый закроется после проверки входа", "port"))
+			secOpts = append(secOpts, huh.NewOption("Перенести SSH на другой порт вместо "+strings.Trim(portNow, "[]")+" — старый закроется после проверки входа", "port"))
 			sec = slices.DeleteFunc(sec, func(v string) bool {
 				return !slices.ContainsFunc(secOpts, func(o huh.Option[string]) bool { return o.Value == v })
 			})
@@ -581,6 +594,22 @@ func Run(o Options) (*Answers, error) {
 					return nil
 				}),
 			).Title("Безопасность"))
+			groups = append(groups, huh.NewGroup(
+				huh.NewInput().Title("Новый порт SSH").Placeholder("случайный (Enter) или число 1024–65535").
+					Value(&a.SSHPort).
+					Description("Оставьте пустым или random — выберется случайный порт").
+					Validate(func(s string) error {
+						s = strings.TrimSpace(s)
+						if s == "" || s == "random" {
+							return nil
+						}
+						n, err := strconv.Atoi(s)
+						if err != nil || n < 1024 || n > 65535 {
+							return errors.New("нужно random или число от 1024 до 65535")
+						}
+						return nil
+					}),
+			).Title("Порт SSH").WithHideFunc(func() bool { return !slices.Contains(sec, "port") }))
 		} else {
 			sec = nil
 		}
@@ -632,6 +661,9 @@ func Run(o Options) (*Answers, error) {
 		a.GatewayListen = "127.0.0.1:9443"
 	}
 	a.Firewall = "off"
+	a.SSHKeysOnly = ""
+	customPort := strings.TrimSpace(a.SSHPort)
+	a.SSHPort = ""
 	for _, s := range sec {
 		switch s {
 		case "firewall":
@@ -639,7 +671,7 @@ func Run(o Options) (*Answers, error) {
 		case "keys":
 			a.SSHKeysOnly = "yes"
 		case "port":
-			a.SSHPort = "random"
+			a.SSHPort = or(customPort, "random")
 		}
 	}
 	a.BotToken, a.Restore, a.UsersFile, a.Token = strings.TrimSpace(a.BotToken), strings.TrimSpace(a.Restore), strings.TrimSpace(a.UsersFile), strings.TrimSpace(a.Token)
@@ -692,7 +724,11 @@ func summary(a *Answers, domain string, nodes bool, sec []string, cache *dnsCach
 	}
 	var s []string
 	for _, x := range sec {
-		s = append(s, map[string]string{"firewall": "файрвол", "keys": "SSH по ключу", "port": "SSH на другой порт"}[x])
+		label := map[string]string{"firewall": "файрвол", "keys": "SSH по ключу", "port": "SSH на другой порт"}[x]
+		if x == "port" && strings.TrimSpace(a.SSHPort) != "" && strings.TrimSpace(a.SSHPort) != "random" {
+			label = "SSH на порт " + strings.TrimSpace(a.SSHPort)
+		}
+		s = append(s, label)
 	}
 	line("Защита", or(strings.Join(s, ", "), map[bool]string{true: "не трогаем (ручная нода)", false: "ничего"}[a.Manual]))
 	return b.String()
@@ -723,7 +759,8 @@ func (a *Answers) Shell(w io.Writer) error {
 		"MODE": a.Mode, "DOMAIN": a.Domain, "SUB_DOMAIN": a.SubDomain, "EMAIL": a.Email, "NAME": a.Name, "COUNTRY": a.Country,
 		"PUBLIC_IP": a.PublicIP, "VPN_IP": a.VPNIP, "SUB_IP": a.SubIP, "GATEWAY_LISTEN": a.GatewayListen,
 		"ADMIN_LOGIN": a.AdminLogin, "BOT_TOKEN": a.BotToken, "RESTORE": a.Restore, "USERS_FILE": a.UsersFile, "TOKEN": a.Token,
-		"FIREWALL": a.Firewall, "SSH_KEYS_ONLY": a.SSHKeysOnly, "SSH_PORT": a.SSHPort, "PURGE": "0",
+		"BACKUP_PASSWORD": a.BackupPassword,
+		"FIREWALL":        a.Firewall, "SSH_KEYS_ONLY": a.SSHKeysOnly, "SSH_PORT": a.SSHPort, "PURGE": "0",
 		"MANUAL":   map[bool]string{true: "1", false: "0"}[a.Manual],
 		"SUB_PATH": a.SubPath, "PANEL_PATH": a.PanelPath, "LOGIN_MODE": a.LoginMode, "SESSION_PATHS": a.SessionPaths,
 	}

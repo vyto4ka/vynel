@@ -121,7 +121,8 @@ func SerialHex(n *big.Int) string { return hex.EncodeToString(n.Bytes()) }
 func (c *CA) ServerCert(sni string) (tls.Certificate, error) {
 	certPath, keyPath := filepath.Join(c.dir, "gateway.crt"), filepath.Join(c.dir, "gateway.key")
 	cert, key, err := loadPair(certPath, keyPath)
-	if err == nil && len(cert.DNSNames) == 1 && cert.DNSNames[0] == sni && time.Until(cert.NotAfter) > 30*24*time.Hour {
+	now := time.Now()
+	if err == nil && len(cert.DNSNames) == 1 && cert.DNSNames[0] == sni && !now.Before(cert.NotBefore) && cert.NotAfter.Sub(now) > 30*24*time.Hour {
 		return tls.Certificate{Certificate: [][]byte{cert.Raw, c.Cert.Raw}, PrivateKey: key, Leaf: cert}, nil
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

@@ -13,6 +13,8 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/vyto4ka/vynel/internal/panel/service"
 )
 
 func nonEmpty(s string) error {
@@ -79,6 +81,19 @@ func (m *commandMenu) arguments(cmd *cobra.Command) ([]string, error) {
 		if a.name == "KIND" {
 			choices = []string{"profile", "node", "inbound", "all"}
 		}
+		if choices == nil {
+			if pickItems := m.entityChoices(cmd, a.name, args); len(pickItems) > 0 {
+				pickItems = append(pickItems, menuItem{menuText{"Ввести вручную…", "набрать значение с клавиатуры"}, ":manual"})
+				picked, err := m.pick(t.title, t.description, pickItems, "")
+				if err != nil {
+					return nil, err
+				}
+				if picked != ":manual" {
+					args = append(args, picked)
+					continue
+				}
+			}
+		}
 		switch {
 		case len(choices) > 0:
 			opts := make([]menuItem, len(choices))
@@ -95,7 +110,7 @@ func (m *commandMenu) arguments(cmd *cobra.Command) ([]string, error) {
 			field = huh.NewText().Title(t.title).Description(t.description).Lines(4).Value(&value).Validate(validate)
 		default:
 			input := huh.NewInput().Title(t.title).Description(t.description).Value(&value).Validate(validate)
-			if a.name == "TOKEN" || a.name == "VALUE" {
+			if a.name == "TOKEN" || (a.name == "VALUE" && len(args) > 0 && service.IsSecretSetting(args[0])) {
 				input.EchoMode(huh.EchoModePassword)
 			}
 			field = input
@@ -120,6 +135,12 @@ func (m *commandMenu) flags(cmd *cobra.Command) ([]string, error) {
 	flags := menuFlagsFor(cmd)
 	values := map[string]string{}
 	selected := ":continue"
+	for _, f := range flags {
+		if f.Name != "data-dir" && f.Name != "log-level" && requiredMenuFlag(f) {
+			selected = f.Name
+			break
+		}
+	}
 	message := "Откройте параметр, чтобы посмотреть описание и изменить значение.\nИзменения применятся только после выполнения команды."
 	for {
 		items := []menuItem{{menuText{"Продолжить", "проверить параметры и перейти к выполнению"}, ":continue"}}
@@ -375,7 +396,8 @@ func menuReview(cmd *cobra.Command, args, flags []string) string {
 	specs := menuArgsFor(cmd)
 	for i, arg := range args {
 		a := specs[min(i, len(specs)-1)]
-		lines = append(lines, menuArguments[a.name].title+": "+value(arg, a.name == "TOKEN" || a.name == "VALUE"))
+		secret := a.name == "TOKEN" || (a.name == "VALUE" && len(args) > 0 && service.IsSecretSetting(args[0]))
+		lines = append(lines, menuArguments[a.name].title+": "+value(arg, secret))
 	}
 	for _, flag := range flags {
 		name, v, _ := strings.Cut(strings.TrimPrefix(flag, "--"), "=")

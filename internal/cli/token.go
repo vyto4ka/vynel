@@ -32,7 +32,13 @@ func printJoinToken(ctx context.Context, w io.Writer, s *service.Service, n *sto
 func adminSettingCmd() *cobra.Command {
 	return &cobra.Command{
 		Use: "setting KEY [VALUE]", Short: "Read or change a setting", Args: cobra.RangeArgs(1, 2),
-		RunE: withService(func(ctx context.Context, s *service.Service, cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, closeFn, err := openService(cmd.Context(), len(args) == 2)
+			if err != nil {
+				return err
+			}
+			defer closeFn()
+			ctx := cmd.Context()
 			if len(args) == 2 {
 				val := args[1]
 				if args[0] == service.SettingSubPrefix && strings.Trim(strings.TrimSpace(val), "/") == "" {
@@ -53,6 +59,6 @@ func adminSettingCmd() *cobra.Command {
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), v)
 			return nil
-		}),
+		},
 	}
 }

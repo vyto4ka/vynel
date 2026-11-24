@@ -90,4 +90,12 @@ for line in "MODE=aio" "MODE='aio'; id" "MODE='x'\\'; id #'" "bad='1'"; do
   valid_shell_out "$tmp/bad.env" && bad "valid_shell_out accepted '$line'"
 done
 
+# ---- --manual normalizes node mode ----
+manual_block="$(sed -n '/^# Back-compatible guesses/,/^# clear_screen:/p' scripts/install.sh | sed '$d')"
+[[ -n "$manual_block" ]] || bad "manual mode normalization block not found in install.sh"
+got_mode="$(MODE=node TOKEN="" DOMAIN="" MANUAL=1 bash -c "$manual_block; echo \$MODE")"
+[[ "$got_mode" == node-manual ]] || bad "--mode node --manual: got '$got_mode', want 'node-manual'"
+got_mode="$(MODE="" TOKEN="vyn1.abc" DOMAIN="" MANUAL=1 bash -c "$manual_block; echo \$MODE")"
+[[ "$got_mode" == node-manual ]] || bad "--token --manual: got '$got_mode', want 'node-manual'"
+
 exit $fail

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -161,6 +162,9 @@ func restoreCmd() *cobra.Command {
 		Short: "Restore the panel from a backup (stop the panel first: systemctl stop vynel)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dataDir == DefaultPanelDataDir && exec.CommandContext(cmd.Context(), "systemctl", "is-active", "--quiet", "vynel.service").Run() == nil {
+				return fmt.Errorf("vynel.service is running: stop it before restoring (`systemctl stop vynel`)")
+			}
 			if password == "" {
 				password = os.Getenv("VYNEL_BACKUP_PASSWORD")
 			}

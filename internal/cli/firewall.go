@@ -82,6 +82,12 @@ func firewallCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "extra ports: %s\n", strings.Join(conf.Allow, " "))
+			if add && (slices.Contains(args, "9443") || slices.Contains(args, "9443/tcp")) {
+				fmt.Fprintln(cmd.OutOrStdout(), "note: port 9443 (node gateway) is opened automatically while an install token is pending; manual allow keeps it open to everyone permanently (prefer: vynel firewall gateway open|nodes)")
+			}
+			if !conf.Enabled {
+				fmt.Fprintln(cmd.OutOrStdout(), "note: firewall is currently off (enable with: vynel firewall on)")
+			}
 			return nil
 		}
 	}
@@ -127,6 +133,9 @@ func firewallCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "the node gateway port is open to everyone; once the nodes are back: vynel firewall gateway nodes")
 			} else {
 				fmt.Fprintln(cmd.OutOrStdout(), "the node gateway port is open only to the addresses the nodes connect from (and to everyone while an install token waits)")
+			}
+			if !conf.Enabled {
+				fmt.Fprintln(cmd.OutOrStdout(), "note: firewall is currently off (enable with: vynel firewall on)")
 			}
 			return nil
 		},

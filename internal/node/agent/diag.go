@@ -46,6 +46,22 @@ func Diagnose(ctx context.Context, w io.Writer, dataDir, version string, bin xra
 		run(caddyBin, "version")
 	}
 	fmt.Fprintf(w, "time %s (Reality needs the clock within ~1 minute of the client's)\n", time.Now().UTC().Format(time.RFC3339))
+	run("timedatectl", "show", "-p", "NTPSynchronized", "-p", "NTP", "-p", "Timezone")
+
+	section("panel connection")
+	if info, err := loadPanelInfo(dataDir); err == nil && info.Addr != "" {
+		fmt.Fprintf(w, "panel %s (node %s)\n", info.Addr, info.NodeCode)
+		fmt.Fprintf(w, "node.crt: %s\n", describeCert(filepath.Join(dataDir, fileCert)))
+		c, derr := net.DialTimeout("tcp", info.Addr, 5*time.Second)
+		if derr != nil {
+			fmt.Fprintf(w, "tcp dial %s: FAILED (%v)\n", info.Addr, derr)
+		} else {
+			_ = c.Close()
+			fmt.Fprintf(w, "tcp dial %s: OK\n", info.Addr)
+		}
+	} else {
+		fmt.Fprintln(w, "local in-process node (or not joined yet)")
+	}
 
 	section("inbounds (xray.json)")
 	raw, err := os.ReadFile(filepath.Join(dataDir, "xray.json"))
@@ -136,8 +152,12 @@ func Diagnose(ctx context.Context, w io.Writer, dataDir, version string, bin xra
 	run("ufw", "status")
 	run("nft", "list", "chain", "inet", "vynel", "input")
 
-	section("agent journal (last 300 lines)")
-	run("journalctl", "-u", "vynel-node", "-n", "300", "--no-pager", "-o", "short-iso")
+	unit := "vynel-node"
+	if filepath.Base(filepath.Clean(dataDir)) == "node" {
+		unit = "vynel"
+	}
+	section("agent journal (last 300 lines, " + unit + ")")
+	run("journalctl", "-u", unit, "-n", "300", "--no-pager", "-o", "short-iso")
 }
 
 func describeCert(path string) string {

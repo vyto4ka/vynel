@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/vyto4ka/vynel/internal/node/firewall"
 )
 
 type menuUnit struct {
@@ -132,4 +136,50 @@ func (m *commandMenu) servicePage(unit, title string) error {
 			selected = ":refresh"
 		}
 	}
+}
+
+// hostOverview detects the installed role (aio, panel, node or "") and builds a compact status
+// line for the root menu header without creating any files.
+func (m *commandMenu) hostOverview() (role, summary string) {
+	_, panelDBErr := os.Stat(filepath.Join(m.panelDir, "panel.db"))
+	_, nodeJSONErr := os.Stat(filepath.Join(m.nodeDir, "panel.json"))
+	hasPanelDB := panelDBErr == nil
+	hasNodeCreds := nodeJSONErr == nil
+
+	panelUnit, panelErr := m.unitState("vynel.service")
+	nodeUnit, nodeErr := m.unitState("vynel-node.service")
+	hasPanelUnit := panelErr == nil && panelUnit.load == "loaded"
+	hasNodeUnit := nodeErr == nil && nodeUnit.load == "loaded"
+
+	var parts []string
+	switch {
+	case hasPanelDB || hasPanelUnit:
+		if _, err := os.Stat(filepath.Join(m.panelDir, "node")); err == nil && !hasNodeUnit {
+			role = "aio"
+			parts = append(parts, "панель + нода")
+		} else {
+			role = "panel"
+			parts = append(parts, "панель")
+		}
+		if hasPanelUnit {
+			parts = append(parts, "служба: "+panelUnit.active)
+		}
+	case hasNodeCreds || hasNodeUnit:
+		role = "node"
+		parts = append(parts, "VPN-нода")
+		if hasNodeUnit {
+			parts = append(parts, "служба: "+nodeUnit.active)
+		}
+	}
+	if conf, err := firewall.LoadConf(); err == nil {
+		if conf.Enabled {
+			parts = append(parts, "файрвол: вкл")
+		} else {
+			parts = append(parts, "файрвол: выкл")
+		}
+	}
+	if out, err := m.hostCommand("timedatectl", "show", "-p", "NTPSynchronized", "--value"); err == nil && strings.TrimSpace(out) == "no" {
+		parts = append(parts, "часы не синхронизированы (NTP)")
+	}
+	return role, strings.Join(parts, " · ")
 }
