@@ -314,6 +314,7 @@ func Run(ctx context.Context, cfg Config) error {
 			return ips
 		}}
 	}
+	decoySeed, _ := p.Service.Setting(ctx, service.SettingDecoySeed, "")
 	if cfg.WithNode {
 		node, err := p.Service.EnsureLocalNode(ctx, cfg.LocalNode)
 		if err != nil {
@@ -323,7 +324,7 @@ func Run(ctx context.Context, cfg Config) error {
 			DataDir: filepath.Join(cfg.DataDir, "node"), Xray: cfg.Xray, Version: cfg.Version,
 			Log: cfg.Log.With("component", "local-node"), Dial: LocalDialer(ctx, p.Reconciler, node.ID),
 			FetchGeo: localGeoFetcher(p.Service),
-			CaddyBin: cfg.CaddyBin, NginxBin: cfg.NginxBin, WWWDir: cfg.WWWDir, TuneSysctl: cfg.TuneSysctl,
+			CaddyBin: cfg.CaddyBin, NginxBin: cfg.NginxBin, WWWDir: cfg.WWWDir, DecoySeed: decoySeed, TuneSysctl: cfg.TuneSysctl,
 			Firewall: fw, ExtraPorts: gatewayPorts(ctx, p.Service, cfg.GatewayListen),
 		})
 		if err != nil {
@@ -338,7 +339,7 @@ func Run(ctx context.Context, cfg Config) error {
 		run("local node", func() error { return a.Run(ctx) })
 	} else if web := filepath.Join(cfg.DataDir, "web"); (&nginx.Manager{Bin: cfg.NginxBin}).Available() {
 		// No local node: the panel runs nginx itself for the subscription and panel domains.
-		m := &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: cfg.WWWDir, Log: cfg.Log.With("component", "nginx"),
+		m := &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: cfg.WWWDir, DecoySeed: decoySeed, Log: cfg.Log.With("component", "nginx"),
 			CaddyStorage: filepath.Join(web, "caddy", "caddy")}
 		if err := m.Init(); err != nil {
 			return err
@@ -363,7 +364,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	} else {
 		// Without nginx (not installed yet): Caddy, as before.
-		m := &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")}
+		m := &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, DecoySeed: decoySeed, Log: cfg.Log.With("component", "caddy")}
 		defer m.Close()
 		run("caddy", func() error { return panelCaddyLoop(ctx, p.Service, m, cfg.Log) })
 		if fw != nil {

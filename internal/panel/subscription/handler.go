@@ -337,10 +337,16 @@ func RenderBody(format Format, hosts []service.Host, reason, uuid, ua, subURL st
 
 func (h *Handler) notFound(ctx context.Context, w http.ResponseWriter) {
 	name, _ := h.svc.Setting(ctx, service.SettingSubDecoy, "docs")
+	customPath, _ := h.svc.Setting(ctx, service.SettingSubDecoyPath, "")
+	seed, _ := h.svc.Setting(ctx, service.SettingDecoySeed, "")
 	decoy.SetSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write(decoy.NotFound(name))
+	if customPath != "" {
+		_, _ = w.Write(decoy.NotFoundCustom(customPath, name, seed))
+		return
+	}
+	_, _ = w.Write(decoy.NotFoundWithSeed(name, seed))
 }
 
 func (h *Handler) banned(ip string) bool {

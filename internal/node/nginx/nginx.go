@@ -43,6 +43,8 @@ type Manager struct {
 	// CaddyStorage is the storage of the Caddy this node ran before: its certificates are
 	// imported instead of asking Let's Encrypt again.
 	CaddyStorage string
+	// DecoySeed makes installed built-in decoys unique per install; "" loads/creates DataDir/decoy.seed.
+	DecoySeed string
 
 	Certs *certs.Manager
 
@@ -630,8 +632,12 @@ func (m *Manager) stopLocked() {
 }
 
 func (m *Manager) installDecoys() error {
+	seed := m.DecoySeed
+	if seed == "" {
+		seed = decoy.LoadOrCreateSeed(filepath.Join(m.DataDir, "decoy.seed"))
+	}
 	for _, name := range decoy.Names() {
-		if _, err := decoy.Install(m.decoyDir(), name); err != nil {
+		if _, err := decoy.InstallWithSeed(m.decoyDir(), name, seed); err != nil {
 			return err
 		}
 	}

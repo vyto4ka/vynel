@@ -50,7 +50,7 @@ variables:
   - name: FINGERPRINT
     scope: profile
     source: const
-    default: chrome
+    default: firefox
     options: [chrome, firefox, safari, ios, android, edge, "360", qq, random, randomized]
     description: TLS-отпечаток клиента (uTLS), под какой браузер маскируется подключение. Уходит в подписку.
   - name: DECOY_SITE

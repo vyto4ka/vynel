@@ -39,15 +39,17 @@ type certBridge struct {
 	caddyStorage string // Caddy's data dir: <storage>/certificates/<issuer>/<domain>/<domain>.crt
 	dir          string // where Xray reads them
 	decoyDir     string
+	decoySeed    string
 	selfSigned   map[string]bool // domains currently served with a placeholder certificate
 }
 
-func newCertBridge(dataDir, tlsStore, decoyDir string) *certBridge {
+func newCertBridge(dataDir, tlsStore, decoyDir, decoySeed string) *certBridge {
 	return &certBridge{
 		tlsStore:     tlsStore,
 		caddyStorage: filepath.Join(dataDir, "web", "caddy", "caddy"),
 		dir:          filepath.Join(dataDir, "certs"),
 		decoyDir:     decoyDir,
+		decoySeed:    decoySeed,
 		selfSigned:   map[string]bool{},
 	}
 }
@@ -118,7 +120,11 @@ func (b *certBridge) path(ph string) (string, string, error) {
 		}
 		return filepath.Join(b.dir, domain+ext), domain, nil
 	case "decoy":
-		dir, err := decoy.Install(b.decoyDir, arg)
+		seed := b.decoySeed
+		if seed == "" {
+			seed = decoy.LoadOrCreateSeed(filepath.Join(filepath.Dir(b.dir), "web", "decoy.seed"))
+		}
+		dir, err := decoy.InstallWithSeed(b.decoyDir, arg, seed)
 		if err != nil {
 			return "", "", fmt.Errorf("%s: %w", ph, err)
 		}

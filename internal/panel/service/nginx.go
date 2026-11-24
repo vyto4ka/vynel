@@ -309,7 +309,7 @@ func nginxSites(in []caddyconf.Site) []nginxconf.Site {
 	for _, s := range in {
 		ns := nginxconf.Site{Domain: s.Domain, Bind: s.Bind, Port: s.Port, LocalPort: s.LocalPort, ProxyProtocol: s.ProxyProtocol}
 		for _, r := range s.Routes {
-			ns.Routes = append(ns.Routes, nginxconf.Route{Kind: r.Kind, PathPrefix: r.PathPrefix, Decoy: r.Decoy, Upstream: r.Upstream, InterceptErrors: r.InterceptErrors})
+			ns.Routes = append(ns.Routes, nginxconf.Route{Kind: r.Kind, PathPrefix: r.PathPrefix, Decoy: r.Decoy, DecoyPath: r.DecoyPath, Upstream: r.Upstream, InterceptErrors: r.InterceptErrors})
 		}
 		out = append(out, ns)
 	}

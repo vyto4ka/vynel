@@ -20,6 +20,7 @@ const (
 	SettingSubUpdateHours = "sub.update_hours" // profile-update-interval
 	SettingSubSupportURL  = "sub.support_url"
 	SettingSubDecoy       = "sub.decoy"        // decoy site shown on the subscription domain
+	SettingSubDecoyPath   = "sub.decoy_path"   // custom HTML file or directory path for the subscription decoy
 	SettingSubPageEnabled = "sub.page_enabled" // "false" = browsers get the decoy instead of the page
 	SettingHWIDEnabled    = "hwid.enabled"
 	SettingHWIDLimit      = "hwid.default_limit" // used when a user has no own limit; 0 = unlimited

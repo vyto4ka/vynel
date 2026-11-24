@@ -163,3 +163,29 @@ func TestHTTP2ModesAndNginx2RootSnippetHardening(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomDecoyPath(t *testing.T) {
+	c, err := Build(Spec{Sites: []Site{
+		{Domain: "dir.example.com", Routes: []Route{{Kind: KindDecoy, DecoyPath: "/var/www/custom-site"}}},
+		{Domain: "file.example.com", Routes: []Route{{Kind: KindDecoy, DecoyPath: "/var/www/stubs/landing.html"}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"root /var/www/custom-site;",
+		"location = /404.html { root /var/www/custom-site; try_files /404.html /index.html =404; internal; }",
+		"root /var/www/stubs;",
+		"try_files /landing.html =404;",
+		"location = /404.html { root /var/www/stubs; try_files /landing.html =404; internal; }",
+	} {
+		if !strings.Contains(c, want) {
+			t.Fatalf("missing %q in:\n%s", want, c)
+		}
+	}
+	for _, bad := range []string{"../etc", "/etc/passwd", "/var/www/a;b", "relative/dir"} {
+		if _, err := Build(Spec{Sites: []Site{{Domain: "bad.example.com", Routes: []Route{{Kind: KindDecoy, DecoyPath: bad}}}}}); err == nil {
+			t.Fatalf("bad DecoyPath %q was accepted", bad)
+		}
+	}
+}

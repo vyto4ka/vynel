@@ -815,7 +815,7 @@ TCP :80  → nginx: ACME HTTP-01 → агент получает сертифи�
 | `XHTTP_PATH` | генерируется из `/assets/sync`, `/api/stream`, `/static/chunks`, `/media/feed` (в подписку уходит со слешем `${XHTTP_PATH}/`) |
 | `XHTTP_MODE` | `auto` (по умолчанию), `stream-up` или `packet-up` |
 | `xhttp_extra` | `{"mode":"${XHTTP_MODE}","xPaddingBytes":"100-1342"}` |
-| `FINGERPRINT` | `chrome` (по умолчанию) |
+| `FINGERPRINT` | `firefox` (по умолчанию) |
 | Клиенты | Xray JSON и `vless://`, Mihomo 1.19+ (`xhttp-opts`), Karing 1.2.26+ (`sing-box-extended` транспорт `xhttp`) |
 
 ---

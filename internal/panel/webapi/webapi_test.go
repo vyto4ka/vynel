@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -366,12 +368,28 @@ func TestSecurityHardeningWebAPI(t *testing.T) {
 		`{"key":"sub.headers","value":"[]"}`,
 		`{"key":"web.login_mode","value":"miniapp"}`,
 		`{"key":"unknown.internal","value":"x"}`,
+		`{"key":"decoy.seed","value":"deadbeef"}`,
 		`{"key":"web.decoy","value":"../../etc"}`,
+		`{"key":"web.decoy_path","value":"/etc/passwd"}`,
+		`{"key":"sub.decoy_path","value":"/nonexistent/path/index.html"}`,
 		`{"key":"web.domain","value":"evil.example/path#frag"}`,
 	} {
 		if w := c.do("PUT", "/api/settings", body, true); w.Code != 400 {
 			t.Fatalf("accepted unsafe setting %s: %d %s", body, w.Code, w.Body.String())
 		}
+	}
+
+	// Custom HTML decoy path accepts an existing HTML file and can be cleared.
+	customHTML := filepath.Join(t.TempDir(), "custom.html")
+	if err := os.WriteFile(customHTML, []byte("<!doctype html><h1>Own</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]string{"key": "web.decoy_path", "value": customHTML})
+	if w := c.do("PUT", "/api/settings", string(payload), true); w.Code != 200 {
+		t.Fatalf("valid web.decoy_path rejected: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("PUT", "/api/settings", `{"key":"web.decoy_path","value":""}`, true); w.Code != 200 {
+		t.Fatalf("clearing web.decoy_path rejected: %d %s", w.Code, w.Body.String())
 	}
 
 	// POST /api/logout requires X-Vynel: 1 (CSRF protection across sibling subdomains).

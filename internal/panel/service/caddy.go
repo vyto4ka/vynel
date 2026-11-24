@@ -228,11 +228,26 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, []string, e
 		webBind = bind
 	}
 	d, _ := s.Setting(ctx, SettingSubDecoy, "docs")
-	decoyRoute := caddyconf.Route{Kind: caddyconf.KindDecoy, Decoy: decoyName(d)}
+	dp, _ := s.Setting(ctx, SettingSubDecoyPath, "")
+	if cleaned, err := decoy.ValidateCustomPath(dp); err == nil {
+		dp = cleaned
+	} else {
+		dp = ""
+	}
+	decoyRoute := caddyconf.Route{Kind: caddyconf.KindDecoy, Decoy: decoyName(d), DecoyPath: dp}
 	wd, _ := s.Setting(ctx, SettingWebDecoy, "")
+	wdp, _ := s.Setting(ctx, SettingWebDecoyPath, "")
+	if cleaned, err := decoy.ValidateCustomPath(wdp); err == nil {
+		wdp = cleaned
+	} else {
+		wdp = ""
+	}
 	webDecoyRoute := decoyRoute
-	if wd != "" {
+	if wdp != "" {
+		webDecoyRoute.DecoyPath = wdp
+	} else if wd != "" {
 		webDecoyRoute.Decoy = decoyName(wd)
+		webDecoyRoute.DecoyPath = ""
 	}
 	var webRoute *caddyconf.Route
 	if path, _ := s.WebPath(ctx); path != "" {

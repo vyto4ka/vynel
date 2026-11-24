@@ -17,10 +17,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/vyto4ka/vynel/internal/decoy"
 )
 
 // Route kinds.
@@ -48,6 +51,7 @@ type Route struct {
 	Kind       string
 	PathPrefix string // "" matches everything
 	Decoy      string // KindDecoy: site name (see package decoy)
+	DecoyPath  string // KindDecoy: optional custom HTML file or directory path on the server
 	Upstream   string // KindProxy/KindStream: host:port
 	Raw        string // KindRaw: directives inside the location block
 	// InterceptErrors (KindProxy): the upstream's 404 becomes the site's own 404 page, so a
@@ -407,21 +411,45 @@ func certLines(w func(int, string, ...any), indent int, domain string) {
 	w(indent, "ssl_certificate_key %s/%s/privkey.pem;", TokCerts, domain)
 }
 
+type decoyTarget struct {
+	name string // built-in decoy name
+	path string // custom absolute directory or HTML file path
+}
+
+func (d decoyTarget) set() bool { return d.name != "" || d.path != "" }
+
 // decoyLocation serves a decoy site with clean URLs: /about is about.html or about/index.html.
-func decoyLocation(w func(int, string, ...any), indent int, path, decoy string) {
+func decoyLocation(w func(int, string, ...any), indent int, path string, d decoyTarget) {
 	w(indent, "location %s {", locationPath(path))
-	w(indent+1, "root %s/%s;", TokDecoy, decoy)
-	w(indent+1, "index index.html;")
-	w(indent+1, "try_files $uri $uri.html $uri/index.html =404;")
+	switch {
+	case d.path != "" && decoy.IsHTMLFile(d.path):
+		w(indent+1, "root %s;", filepath.Dir(d.path))
+		w(indent+1, "try_files /%s =404;", filepath.Base(d.path))
+	case d.path != "":
+		w(indent+1, "root %s;", d.path)
+		w(indent+1, "index index.html;")
+		w(indent+1, "try_files $uri $uri.html $uri/index.html =404;")
+	default:
+		w(indent+1, "root %s/%s;", TokDecoy, d.name)
+		w(indent+1, "index index.html;")
+		w(indent+1, "try_files $uri $uri.html $uri/index.html =404;")
+	}
 	w(indent, "}")
 }
 
-func errorPages(w func(int, string, ...any), indent int, decoy string) {
+func errorPages(w func(int, string, ...any), indent int, d decoyTarget) {
 	w(indent, "error_page 404 /404.html;")
 	// nginx's own error pages name nginx; a site whose backend is down or restarting shows its
 	// usual missing page instead.
 	w(indent, "error_page 403 500 502 503 504 =404 /404.html;")
-	w(indent, "location = /404.html { root %s/%s; internal; }", TokDecoy, decoy)
+	switch {
+	case d.path != "" && decoy.IsHTMLFile(d.path):
+		w(indent, "location = /404.html { root %s; try_files /%s =404; internal; }", filepath.Dir(d.path), filepath.Base(d.path))
+	case d.path != "":
+		w(indent, "location = /404.html { root %s; try_files /404.html /index.html =404; internal; }", d.path)
+	default:
+		w(indent, "location = /404.html { root %s/%s; internal; }", TokDecoy, d.name)
+	}
 }
 
 func locationPath(prefix string) string {
@@ -434,7 +462,7 @@ func locationPath(prefix string) string {
 // locations renders the routes of one domain. Routes with a path prefix are matched as
 // prefixes, the catch-all goes to "location /".
 func locations(w func(int, string, ...any), rs []Route) error {
-	decoy := ""
+	var dt decoyTarget
 	seen := map[string]bool{}
 	// Real routes go before decoys for the same path: with subscription links at the domain
 	// root the subscription proxy's "location /" must not be eaten by a decoy of another site
@@ -446,27 +474,27 @@ func locations(w func(int, string, ...any), rs []Route) error {
 			decoyRoutes = append(decoyRoutes, r)
 			continue
 		}
-		if err := location(w, r, &decoy, seen); err != nil {
+		if err := location(w, r, &dt, seen); err != nil {
 			return err
 		}
 	}
 	for _, r := range decoyRoutes {
-		if err := location(w, r, &decoy, seen); err != nil {
+		if err := location(w, r, &dt, seen); err != nil {
 			return err
 		}
 	}
 	if !seen[""] {
 		w(2, "location / { return 404; }")
 	}
-	if decoy != "" {
-		errorPages(w, 2, decoy)
+	if dt.set() {
+		errorPages(w, 2, dt)
 	}
 	return nil
 }
 
 var decoyNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
-func location(w func(int, string, ...any), r Route, decoy *string, seen map[string]bool) error {
+func location(w func(int, string, ...any), r Route, dt *decoyTarget, seen map[string]bool) error {
 	p := r.PathPrefix
 	if p != "" && !prefixRe.MatchString(p) {
 		return fmt.Errorf("path %q is not a URL path", p)
@@ -474,13 +502,25 @@ func location(w func(int, string, ...any), r Route, decoy *string, seen map[stri
 	if p == "/" {
 		p = ""
 	}
-	if r.Kind == KindDecoy && !decoyNameRe.MatchString(r.Decoy) {
-		return fmt.Errorf("invalid decoy site name %q", r.Decoy)
+	var cur decoyTarget
+	if r.Kind == KindDecoy {
+		if r.DecoyPath != "" {
+			cleaned, err := decoy.ValidateCustomPath(r.DecoyPath)
+			if err != nil {
+				return fmt.Errorf("invalid decoy path %q: %w", r.DecoyPath, err)
+			}
+			cur.path = cleaned
+		} else {
+			if !decoyNameRe.MatchString(r.Decoy) {
+				return fmt.Errorf("invalid decoy site name %q", r.Decoy)
+			}
+			cur.name = r.Decoy
+		}
 	}
-	if r.Kind == KindDecoy && *decoy == "" {
+	if r.Kind == KindDecoy && !dt.set() {
 		// The error pages, also when another route took the decoy's path (the web panel
 		// on the whole domain).
-		*decoy = r.Decoy
+		*dt = cur
 	}
 	if seen[p] {
 		return nil // the first route for a path wins, like the order of Caddy routes did
@@ -488,7 +528,7 @@ func location(w func(int, string, ...any), r Route, decoy *string, seen map[stri
 	seen[p] = true
 	switch r.Kind {
 	case KindDecoy:
-		decoyLocation(w, 2, p, r.Decoy)
+		decoyLocation(w, 2, p, cur)
 	case KindProxy:
 		if err := checkAddr(r.Upstream); err != nil {
 			return err

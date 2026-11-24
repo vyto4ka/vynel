@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/vyto4ka/vynel/internal/decoy"
 )
 
 // Route kinds.
@@ -23,6 +26,7 @@ type Route struct {
 	Kind       string
 	PathPrefix string // "" matches everything
 	Decoy      string // KindDecoy: site name (see package decoy)
+	DecoyPath  string // KindDecoy: optional custom HTML file or directory path on the server
 	Upstream   string // KindProxy/KindStream: host:port
 	// InterceptErrors: nginx answers the upstream's errors with the site's own error page (the
 	// subscriptions: an unknown token must look like any other missing page). Caddy ignores it.
@@ -105,7 +109,7 @@ func Build(spec Spec) ([]byte, error) {
 		var routes, errRoutes []any
 		routes = append(routes, map[string]any{"handle": []any{hideServer()}})
 		for _, d := range srv.domains {
-			sub, decoy, err := siteRoutes(srv.routes[d])
+			sub, dt, err := siteRoutes(srv.routes[d])
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", d, err)
 			}
@@ -114,13 +118,13 @@ func Build(spec Spec) ([]byte, error) {
 				"handle":   []any{map[string]any{"handler": "headers", "response": map[string]any{"set": siteHeaders()}}, map[string]any{"handler": "subroute", "routes": sub}},
 				"terminal": true,
 			})
-			if decoy != "" {
+			if dt.root != "" {
 				errRoutes = append(errRoutes, map[string]any{
 					"match": []any{map[string]any{"host": []string{d}}},
 					"handle": []any{hideServer(),
 						map[string]any{"handler": "headers", "response": map[string]any{"set": siteHeaders()}},
-						map[string]any{"handler": "rewrite", "uri": "/404.html"},
-						map[string]any{"handler": "file_server", "root": DecoyDirPlaceholder + "/" + decoy, "status_code": "{http.error.status_code}"}},
+						map[string]any{"handler": "rewrite", "uri": dt.errURI},
+						map[string]any{"handler": "file_server", "root": dt.root, "status_code": "{http.error.status_code}"}},
 				})
 			}
 		}
@@ -246,44 +250,67 @@ func checkCaddyUpstream(a string) error {
 	return nil
 }
 
+type caddyDecoy struct {
+	root   string
+	errURI string
+}
+
 // siteRoutes renders the routes of one domain and returns the decoy used for its 404 page.
 // Routes with a path prefix go first, so a catch-all decoy never shadows them.
-func siteRoutes(rs []Route) ([]any, string, error) {
+func siteRoutes(rs []Route) ([]any, caddyDecoy, error) {
 	rs = append([]Route(nil), rs...)
 	sort.SliceStable(rs, func(i, j int) bool { return rs[i].PathPrefix != "" && rs[j].PathPrefix == "" })
 	var out []any
-	decoy := ""
+	var dt caddyDecoy
 	for _, r := range rs {
-		var handler map[string]any
+		var handlers []any
 		switch r.Kind {
 		case KindDecoy:
-			if !validCaddyDecoy(r.Decoy) {
-				return nil, "", fmt.Errorf("invalid decoy site %q", r.Decoy)
+			if r.DecoyPath != "" {
+				cleaned, err := decoy.ValidateCustomPath(r.DecoyPath)
+				if err != nil {
+					return nil, caddyDecoy{}, fmt.Errorf("invalid decoy path %q: %w", r.DecoyPath, err)
+				}
+				if decoy.IsHTMLFile(cleaned) {
+					uri := "/" + filepath.Base(cleaned)
+					dt = caddyDecoy{root: filepath.Dir(cleaned), errURI: uri}
+					handlers = []any{
+						map[string]any{"handler": "rewrite", "uri": uri},
+						map[string]any{"handler": "file_server", "root": dt.root},
+					}
+				} else {
+					dt = caddyDecoy{root: cleaned, errURI: "/404.html"}
+					handlers = []any{map[string]any{"handler": "file_server", "root": dt.root}}
+				}
+			} else {
+				if !validCaddyDecoy(r.Decoy) {
+					return nil, caddyDecoy{}, fmt.Errorf("invalid decoy site %q", r.Decoy)
+				}
+				dt = caddyDecoy{root: DecoyDirPlaceholder + "/" + r.Decoy, errURI: "/404.html"}
+				handlers = []any{map[string]any{"handler": "file_server", "root": dt.root}}
 			}
-			decoy = r.Decoy
-			handler = map[string]any{"handler": "file_server", "root": DecoyDirPlaceholder + "/" + r.Decoy}
 		case KindProxy:
 			if err := checkCaddyUpstream(r.Upstream); err != nil {
-				return nil, "", err
+				return nil, caddyDecoy{}, err
 			}
-			handler = map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": r.Upstream}}}
+			handlers = []any{map[string]any{"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": r.Upstream}}}}
 		case KindStream:
 			if err := checkCaddyUpstream(r.Upstream); err != nil {
-				return nil, "", err
+				return nil, caddyDecoy{}, err
 			}
-			handler = map[string]any{
+			handlers = []any{map[string]any{
 				"handler": "reverse_proxy", "upstreams": []any{map[string]any{"dial": r.Upstream}},
 				"flush_interval": -1,
 				"transport":      map[string]any{"protocol": "http", "versions": []string{"1.1"}, "read_timeout": "1h", "write_timeout": "1h"},
-			}
+			}}
 		default:
-			return nil, "", fmt.Errorf("unknown route kind %q", r.Kind)
+			return nil, caddyDecoy{}, fmt.Errorf("unknown route kind %q", r.Kind)
 		}
-		route := map[string]any{"handle": []any{handler}, "terminal": true}
+		route := map[string]any{"handle": handlers, "terminal": true}
 		if r.PathPrefix != "" {
 			route["match"] = []any{map[string]any{"path": []string{r.PathPrefix + "*"}}}
 		}
 		out = append(out, route)
 	}
-	return out, decoy, nil
+	return out, dt, nil
 }
