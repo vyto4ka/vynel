@@ -64,7 +64,7 @@ func newXHTTPStdEnv(t *testing.T, values map[string]any, port int) *xhttpStdEnv 
 }
 
 // The link of the standard template matches the usual community config byte for byte:
-// type=xhttp, path=/, mode=auto, extra={"mode":"auto","xPaddingBytes":"100-1342"}, fp=chrome.
+// type=xhttp, path=/, mode=auto, extra={"mode":"auto","xPaddingBytes":"100-1342"}, fp=firefox.
 func TestXHTTPStdLink(t *testing.T) {
 	e := newXHTTPStdEnv(t, nil, 0)
 	ls := links(t, e.get(e.path(), "Happ/3.1.0", "hw-1"))
@@ -74,7 +74,7 @@ func TestXHTTPStdLink(t *testing.T) {
 	l := ls[0]
 	for _, want := range []string{"@example.test:443", "encryption=none", "type=xhttp", "path=%2F", "mode=auto",
 		"extra=%7B%22mode%22%3A%22auto%22%2C%22xPaddingBytes%22%3A%22100-1342%22%7D",
-		"security=reality", "sni=example.test", "fp=chrome", "pbk=", "sid="} {
+		"security=reality", "sni=example.test", "fp=firefox", "pbk=", "sid="} {
 		if !strings.Contains(l, want) {
 			t.Fatalf("link lacks %q: %s", want, l)
 		}

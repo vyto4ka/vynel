@@ -746,7 +746,7 @@ TCP :80  → nginx: ACME HTTP-01 → агент получает сертифи�
 
 ## 10. Шаблон E — VLESS + XHTTP + REALITY, стандартный
 
-Файл: `internal/xrayconf/templates/vless-xhttp-reality-std.yaml`. «Голый» XHTTP поверх REALITY self-steal: без обфускации разметки из шаблона C, с типовыми настройками сообщества. Ссылка получается в точности вида `vless://…@домен:443?encryption=none&type=xhttp&path=%2F&mode=auto&extra={"mode":"auto","xPaddingBytes":"100-1342"}&security=reality&sni=домен&fp=chrome&pbk=…&sid=…`.
+Файл: `internal/xrayconf/templates/vless-xhttp-reality-std.yaml`. «Голый» XHTTP поверх REALITY self-steal: без обфускации разметки из шаблона C, с типовыми настройками сообщества. Ссылка получается в точности вида `vless://…@домен:443?encryption=none&type=xhttp&path=%2F&mode=auto&extra={"mode":"auto","xPaddingBytes":"100-1342"}&security=reality&sni=домен&fp=firefox&pbk=…&sid=…`.
 
 ### 10.1 Технические характеристики
 
@@ -757,7 +757,7 @@ TCP :80  → nginx: ACME HTTP-01 → агент получает сертифи�
 | Flow | пусто: Vision поверх XHTTP не работает |
 | extra | один объект на сервер и клиента: `{"mode":"auto","xPaddingBytes":"100-1342"}`, сервер-only ключей нет |
 | Path | `/` (переменная `XHTTP_PATH`, можно свой) |
-| Fingerprint | `chrome` (переменная `FINGERPRINT`) |
+| Fingerprint | `firefox` (переменная `FINGERPRINT`) |
 | Mihomo | отдаётся (`xhttp-opts`, `support-x25519mlkem768: true`); нужен Mihomo 1.19+ |
 | sing-box | не отдаётся: в sing-box нет XHTTP |
 
@@ -769,7 +769,7 @@ TCP :80  → nginx: ACME HTTP-01 → агент получает сертифи�
 | `REALITY_PRIVATE_KEY`, `REALITY_SHORT_ID` | нода | генерируются, свои на каждой ноде |
 | `XHTTP_PATH` | профиль | `/` |
 | `XHTTP_MODE` | профиль | `auto`; варианты: stream-up, packet-up |
-| `FINGERPRINT` | профиль | `chrome`; варианты как в A |
+| `FINGERPRINT` | профиль | `firefox`; варианты как в A |
 | `SELFSTEAL_PORT`, `PORT` | профиль | `8443`, `443` |
 
 ### 10.3 Как делит порт с обычным Reality (A)
@@ -815,7 +815,7 @@ TCP :80  → nginx: ACME HTTP-01 → агент получает сертифи�
 | `XHTTP_PATH` | генерируется из `/assets/sync`, `/api/stream`, `/static/chunks`, `/media/feed` (в подписку уходит со слешем `${XHTTP_PATH}/`) |
 | `XHTTP_MODE` | `auto` (по умолчанию), `stream-up` или `packet-up` |
 | `xhttp_extra` | `{"mode":"${XHTTP_MODE}","xPaddingBytes":"100-1342"}` |
-| `FINGERPRINT` | `chrome` (по умолчанию) |
+| `FINGERPRINT` | `firefox` (по умолчанию) |
 | Клиенты | Xray JSON и `vless://`, Mihomo 1.19+ (`xhttp-opts`), Karing 1.2.26+ (`sing-box-extended` транспорт `xhttp`) |
 
 ---

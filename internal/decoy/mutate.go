@@ -164,9 +164,7 @@ func (p siteProfile) mutateFile(rel string, data []byte) []byte {
 			s += "\n<!-- " + p.noiseHex(clean, "head") + " -->\n"
 		}
 		tailComment := "<!-- " + p.noiseHex(clean, "tail") + " -->\n</body>"
-		if strings.Contains(s, "</body>") {
-			s = strings.Replace(s, "</body>", tailComment, 1)
-		}
+		s = strings.Replace(s, "</body>", tailComment, 1)
 		return []byte(s)
 	case ".css", ".js":
 		out := make([]byte, 0, len(data)+48)

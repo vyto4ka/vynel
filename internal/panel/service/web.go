@@ -21,11 +21,11 @@ import (
 // Web panel settings (docs/STEALTH.md §2.2). The panel lives under a secret path on the
 // subscription domain (or web.domain), proxied by Caddy to web.listen.
 const (
-	SettingWebPath      = "web.path"    // secret path, e.g. /k9Qm2xT7aB3c/
-	SettingWebListen    = "web.listen"  // internal listener behind Caddy
-	SettingWebDomain    = "web.domain"  // optional; empty = sub.domain
-	SettingWebPort      = "web.port"    // public port of the panel; empty = sub.port
-	SettingWebAddress   = "web.address" // IP the panel binds to; empty = sub.address
+	SettingWebPath      = "web.path"       // secret path, e.g. /k9Qm2xT7aB3c/
+	SettingWebListen    = "web.listen"     // internal listener behind Caddy
+	SettingWebDomain    = "web.domain"     // optional; empty = sub.domain
+	SettingWebPort      = "web.port"       // public port of the panel; empty = sub.port
+	SettingWebAddress   = "web.address"    // IP the panel binds to; empty = sub.address
 	SettingWebDecoy     = "web.decoy"      // decoy of the panel's own site; empty = sub.decoy
 	SettingWebDecoyPath = "web.decoy_path" // custom HTML file or directory path for the panel decoy
 	SettingDecoySeed    = "decoy.seed"     // per-install seed for decoy site mutation (anti-fingerprint)
