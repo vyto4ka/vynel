@@ -25,9 +25,10 @@ import (
 
 // Manager runs Caddy as a child process and reloads it through the admin API.
 type Manager struct {
-	Bin     string // path to caddy; "" or missing = Caddy unavailable
-	DataDir string // certificates, config, decoy sites
-	Log     *slog.Logger
+	Bin       string // path to caddy; "" or missing = Caddy unavailable
+	DataDir   string // certificates, config, decoy sites
+	DecoySeed string // per-install seed for built-in decoys; "" loads/creates DataDir/decoy.seed
+	Log       *slog.Logger
 
 	mu       sync.Mutex
 	cmd      *exec.Cmd
@@ -144,8 +145,12 @@ func (m *Manager) Restart() error {
 
 func (m *Manager) installDecoys() error {
 	dir := filepath.Join(m.DataDir, "decoy")
+	seed := m.DecoySeed
+	if seed == "" {
+		seed = decoy.LoadOrCreateSeed(filepath.Join(m.DataDir, "decoy.seed"))
+	}
 	for _, name := range decoy.Names() {
-		if _, err := decoy.Install(dir, name); err != nil {
+		if _, err := decoy.InstallWithSeed(dir, name, seed); err != nil {
 			return err
 		}
 	}

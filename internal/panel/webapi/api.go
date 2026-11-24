@@ -14,6 +14,7 @@ import (
 
 	qrcode "github.com/skip2/go-qrcode"
 
+	"github.com/vyto4ka/vynel/internal/decoy"
 	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -1571,6 +1572,14 @@ func (s *Server) setSetting(r *http.Request) (any, error) {
 	case service.SettingWebAddress, service.SettingSubAddress:
 		if in.Value != "" && net.ParseIP(in.Value) == nil {
 			return nil, badRequest("ожидается IP-адрес")
+		}
+	case service.SettingWebDecoyPath, service.SettingSubDecoyPath:
+		if in.Value != "" {
+			cleaned, _, err := decoy.CheckCustomPath(in.Value)
+			if err != nil {
+				return nil, badRequest("путь к заглушке должен быть абсолютным путём к существующему HTML-файлу или папке с index.html")
+			}
+			in.Value = cleaned
 		}
 	}
 	if in.Key == service.SettingSubPrefix {

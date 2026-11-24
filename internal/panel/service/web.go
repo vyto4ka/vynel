@@ -26,7 +26,9 @@ const (
 	SettingWebDomain    = "web.domain"  // optional; empty = sub.domain
 	SettingWebPort      = "web.port"    // public port of the panel; empty = sub.port
 	SettingWebAddress   = "web.address" // IP the panel binds to; empty = sub.address
-	SettingWebDecoy     = "web.decoy"   // decoy of the panel's own site; empty = sub.decoy
+	SettingWebDecoy     = "web.decoy"      // decoy of the panel's own site; empty = sub.decoy
+	SettingWebDecoyPath = "web.decoy_path" // custom HTML file or directory path for the panel decoy
+	SettingDecoySeed    = "decoy.seed"     // per-install seed for decoy site mutation (anti-fingerprint)
 	SettingWebLogin     = "web.login"
 	settingWebPassword  = "web.password_hash" // bcrypt
 	settingWebSessionKy = "web.session_key"   // HMAC key of session cookies
@@ -61,12 +63,17 @@ func (s *Service) setSecret(ctx context.Context, actor Actor, key, value string)
 		func(q store.DBTX) error { return store.SetSetting(ctx, q, key, value) })
 }
 
-// EnsureWebDefaults generates the secret path and the session key on first start.
+// EnsureWebDefaults generates the secret path, decoy seed and session key on first start.
 func (s *Service) EnsureWebDefaults(ctx context.Context) error {
 	if p, err := s.Setting(ctx, SettingWebPath, ""); err != nil {
 		return err
 	} else if p == "" {
-		r, err := randomString(12)
+		// Variable path length (10..16) so installations do not share a fixed-length URL shape.
+		extra := 0
+		if n, err := rand.Int(rand.Reader, big.NewInt(7)); err == nil {
+			extra = int(n.Int64())
+		}
+		r, err := randomString(10 + extra)
 		if err != nil {
 			return err
 		}
@@ -79,6 +86,14 @@ func (s *Service) EnsureWebDefaults(ctx context.Context) error {
 		return err
 	} else if d == "" {
 		if err := s.SetSetting(ctx, ActorSystem, SettingSubDecoy, decoy.Random()); err != nil {
+			return err
+		}
+	}
+	// Per-install decoy seed makes every installation's built-in decoy byte-unique.
+	if seed, err := s.Setting(ctx, SettingDecoySeed, ""); err != nil {
+		return err
+	} else if seed == "" {
+		if err := s.SetSetting(ctx, ActorSystem, SettingDecoySeed, decoy.NewSeed()); err != nil {
 			return err
 		}
 	}

@@ -61,6 +61,7 @@ type Config struct {
 	CaddyBin       string        // path to caddy ("" = not installed); only for panels that still send Caddy configs
 	NginxBin       string        // path to nginx ("" = /usr/sbin/nginx)
 	WWWDir         string        // decoys, ACME webroot and temp files nginx workers use; "" = <DataDir>/web/www
+	DecoySeed      string        // per-install seed for built-in decoys; "" loads/creates <DataDir>/web/decoy.seed
 	NginxUser      string        // nginx worker user; "" = www-data (tests use root)
 	TuneSysctl     bool          // apply BBR/fq/TFO on start (needs root)
 	Manual         bool          // manual node: no nginx/certs (the admin runs the web server); only Xray is managed
@@ -184,8 +185,8 @@ func New(cfg Config) (*Agent, error) {
 		www = filepath.Join(web, "www")
 	}
 	a := &Agent{cfg: cfg, baseAssetDir: baseAssetDir, log: cfg.Log, st: st, proc: xray.NewProcess(cfg.Xray, filepath.Join(cfg.DataDir, "xray.json"), cfg.Log),
-		caddy: &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, Log: cfg.Log.With("component", "caddy")},
-		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, Log: cfg.Log.With("component", "nginx"),
+		caddy: &caddy.Manager{Bin: cfg.CaddyBin, DataDir: web, DecoySeed: cfg.DecoySeed, Log: cfg.Log.With("component", "caddy")},
+		nginx: &nginx.Manager{Bin: cfg.NginxBin, DataDir: web, WWWDir: www, User: cfg.NginxUser, DecoySeed: cfg.DecoySeed, Log: cfg.Log.With("component", "nginx"),
 			CaddyStorage: filepath.Join(web, "caddy", "caddy")},
 		statsCh: make(chan struct{}, 1), certKick: make(chan struct{}, 1), certReportCh: make(chan struct{}, 1)}
 	if err := a.ensureGeoDir(); err != nil {
@@ -197,7 +198,7 @@ func New(cfg Config) (*Agent, error) {
 			st.Close()
 			return nil, err
 		}
-		a.certs = newCertBridge(cfg.DataDir, a.nginx.Certs.Dir, a.nginx.DecoyDir())
+		a.certs = newCertBridge(cfg.DataDir, a.nginx.Certs.Dir, a.nginx.DecoyDir(), cfg.DecoySeed)
 		a.nginx.OnCerts = func() {
 			a.mu.Lock()
 			a.syncCertsLocked(context.Background())

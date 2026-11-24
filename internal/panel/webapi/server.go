@@ -176,7 +176,16 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name, _ = s.svc.Setting(ctx, service.SettingSubDecoy, "")
 	}
-	decoy.Serve(w, r, name)
+	customPath, _ := s.svc.Setting(ctx, service.SettingWebDecoyPath, "")
+	if customPath == "" {
+		customPath, _ = s.svc.Setting(ctx, service.SettingSubDecoyPath, "")
+	}
+	seed, _ := s.svc.Setting(ctx, service.SettingDecoySeed, "")
+	if customPath != "" {
+		decoy.ServeCustom(w, r, customPath, name, seed)
+		return
+	}
+	decoy.ServeWithSeed(w, r, name, seed)
 }
 
 // firstSegment returns "/x/" for "/x/..." ("" when there is none).

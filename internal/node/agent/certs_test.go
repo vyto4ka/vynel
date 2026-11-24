@@ -29,7 +29,7 @@ import (
 func TestCertBridge(t *testing.T) {
 	dir := t.TempDir()
 	tlsStore, decoys := filepath.Join(dir, "web", "tls"), filepath.Join(dir, "web", "www", "decoy")
-	b := newCertBridge(dir, tlsStore, decoys)
+	b := newCertBridge(dir, tlsStore, decoys, "")
 	cfg := []byte(`{"inbounds":[{"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"vynel:cert:Node.Example.com","keyFile":"vynel:key:node.example.com"}]},
 		"hysteriaSettings":{"masquerade":{"type":"file","dir":"vynel:decoy:cloud"}}}}]}`)
 	out, doms, err := b.resolve(cfg)
@@ -55,7 +55,7 @@ func TestCertBridge(t *testing.T) {
 	}
 
 	// A restarted agent recognizes its own placeholder.
-	b2 := newCertBridge(dir, tlsStore, decoys)
+	b2 := newCertBridge(dir, tlsStore, decoys, "")
 	if _, _, err := b2.resolve(cfg); err != nil || !b2.pending("node.example.com") {
 		t.Fatalf("placeholder not recognized after restart: %v", err)
 	}
