@@ -610,4 +610,3 @@ func TestNginxNodeLevelDecoyPathAndOverride(t *testing.T) {
 		t.Fatalf("node-level decoy should be overridden by inbound DECOY_PATH:\n%s", ds.Nginx)
 	}
 }
-

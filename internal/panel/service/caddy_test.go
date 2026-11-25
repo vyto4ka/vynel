@@ -456,4 +456,3 @@ func TestCaddyNodeLevelDecoyPathAndPanelSites(t *testing.T) {
 		t.Fatalf("inbound DECOY_PATH override missing from Caddy config:\n%s", ds.Caddy)
 	}
 }
-
