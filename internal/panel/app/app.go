@@ -49,6 +49,7 @@ type Config struct {
 	TuneSysctl    bool
 	Firewall      bool // manage nftables (`vynel firewall on|off` decides whether rules are loaded)
 	Version       string
+	Commit        string
 	Log           *slog.Logger
 }
 
@@ -137,7 +138,7 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	p.Bot = bot.New(bot.Config{Service: svc, DataDir: cfg.DataDir, Version: cfg.Version, Connected: rec.Connected,
 		Log: cfg.Log.With("component", "bot"), API: os.Getenv("VYNEL_TELEGRAM_API")}) // own Bot API server / proxy if api.telegram.org is blocked
 	p.Web = webapi.New(webapi.Config{Service: svc, CAFingerprint: authority.Fingerprint, Connected: rec.Connected,
-		Version: cfg.Version, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
+		Version: cfg.Version, Commit: cfg.Commit, Log: cfg.Log.With("component", "web"), Bot: p.Bot, NodeAction: nodeAction(rec),
 		UpdateStatus: rec.UpdateStatus, CertStatus: rec.CertStatus, RenewCerts: nodeRenewCerts(rec), XrayTest: xrayTester(testerBin)})
 	if st := update.LocalStatus(); st != nil {
 		_ = svc.RecordUpdateStatus(ctx, 0, st)

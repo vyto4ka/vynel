@@ -3,12 +3,15 @@ package webapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/buildinfo"
 	"github.com/vyto4ka/vynel/internal/i18n"
 	"github.com/vyto4ka/vynel/internal/panel/service"
 	"github.com/vyto4ka/vynel/internal/panel/store"
@@ -289,9 +292,28 @@ type UpdateNode struct {
 	Log        string `json:"log,omitempty"`
 }
 
+var commitHexRe = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+func (s *Server) panelCommit() string {
+	c := strings.TrimSpace(s.cfg.Commit)
+	if c == "" {
+		c = strings.TrimSpace(buildinfo.Commit)
+	}
+	if c != "" && c != "none" && c != "unknown" {
+		return c
+	}
+	if _, tail, ok := strings.Cut(s.cfg.Version, "-dev."); ok && commitHexRe.MatchString(tail) {
+		return tail
+	}
+	return ""
+}
+
 // UpdateInfo is GET /api/updates.
 type UpdateInfo struct {
 	Release   string       `json:"release"`
+	Channel   string       `json:"channel"`
+	Ref       string       `json:"ref"`
+	Commit    string       `json:"commit,omitempty"`
 	Latest    string       `json:"latest"`
 	CheckErr  string       `json:"checkError,omitempty"`
 	CheckedAt int64        `json:"checkedAt"`
@@ -319,8 +341,17 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 	runs, _ := s.svc.UpdateRuns(ctx)
 	s.upd.hydrate(runs, now)
 
+	src := update.LoadSource()
 	s.upd.mu.Lock()
-	info := &UpdateInfo{Release: update.LoadSource().Release, Latest: s.upd.latest, CheckErr: s.upd.checkErr, Nodes: []UpdateNode{}}
+	info := &UpdateInfo{
+		Release:  src.Release,
+		Channel:  src.Channel(),
+		Ref:      src.Ref,
+		Commit:   s.panelCommit(),
+		Latest:   s.upd.latest,
+		CheckErr: s.upd.checkErr,
+		Nodes:    []UpdateNode{},
+	}
 	if !s.upd.checkedAt.IsZero() {
 		info.CheckedAt = s.upd.checkedAt.Unix()
 	}
@@ -365,9 +396,55 @@ func (s *Server) updateInfo(ctx context.Context, withLog bool) (*UpdateInfo, err
 	return info, nil
 }
 
+func (u *updates) reset() {
+	u.mu.Lock()
+	u.latest, u.checkErr, u.checkedAt = "", "", time.Time{}
+	u.mu.Unlock()
+}
+
 func (s *Server) getUpdates(r *http.Request) (any, error) { return s.localUpdateInfo(r) }
 
 func (s *Server) checkUpdates(r *http.Request) (any, error) {
+	s.upd.check(r.Context(), true)
+	return s.localUpdateInfo(r)
+}
+
+// setUpdateChannel is POST /api/updates/channel {"channel": "stable" | "dev", "ref": "..."}:
+// switches the release channel this panel (and its nodes on update) follows.
+func (s *Server) setUpdateChannel(r *http.Request) (any, error) {
+	var in struct {
+		Channel string `json:"channel"`
+		Ref     string `json:"ref"`
+	}
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	ch := strings.TrimSpace(in.Channel)
+	ref := strings.TrimSpace(in.Ref)
+	switch ch {
+	case update.ChannelStable:
+		ref = ""
+	case update.ChannelDev:
+		if ref == "" {
+			ref = "main"
+		}
+	default:
+		return nil, badRequest("неизвестный канал обновлений")
+	}
+	cur := update.LoadSource()
+	next, err := cur.WithChannel(ch, ref)
+	if err != nil {
+		return nil, badRequest("некорректное имя ветки")
+	}
+	if next != cur {
+		if err := update.SaveSource(next); err != nil {
+			return nil, fmt.Errorf("cannot save update channel: %w", err)
+		}
+		if s.svc != nil {
+			_ = s.svc.LogPanelAction(r.Context(), actor(r), "update-channel", next.Channel()+" ("+next.Release+")")
+		}
+		s.upd.reset()
+	}
 	s.upd.check(r.Context(), true)
 	return s.localUpdateInfo(r)
 }

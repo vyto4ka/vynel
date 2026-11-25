@@ -1,8 +1,14 @@
-import { useState } from 'react'
-import { get, Network, NetRole, post, put, Setting } from '../api'
-import { Badge, Field, Info, Loading, Switch, useAction, useConfirm, useLoad } from '../ui'
+import { useEffect, useRef, useState } from 'react'
+import { get, Network, NetRole, post, put, Setting, UpdateInfo } from '../api'
+import { getCacheEntry, setCacheEntry } from '../cache'
+import { fmtVersion } from '../format'
+import { useEngineer } from '../mode'
+import { LogTarget, UpdateChip, UpdateLog, useCheckUpdates, useRunUpdate, useUpdates } from '../updates'
+import { Badge, Field, Icon, Info, Loading, Modal, Switch, useAction, useConfirm, useLoad, useToast } from '../ui'
 import { t, Trans } from '../i18n'
 import { applyTheme, loadTheme, themes } from '../theme'
+
+const REPO_URL = 'https://github.com/vyto4ka/vynel'
 
 export function Settings() {
   const settings = useLoad(() => get<Setting[]>('settings'), [], 0, { cacheKey: 'settings', staleTimeMs: 30000 })
@@ -31,6 +37,9 @@ export function Settings() {
       <div className="settings-col">
         <NetworkCard data={network.data} error={network.error} reload={network.reload} />
         {rightSections.map(renderSection)}
+      </div>
+      <div className="settings-full">
+        <AboutCard />
       </div>
     </div>
   )
@@ -226,3 +235,204 @@ function SettingRow({ s, hasLocalNode, onSaved }: { s: Setting; hasLocalNode: bo
     </Field>
   )
 }
+
+// Сведения о сборке панели, ссылки на исходный код и переключение канала обновлений (stable / dev).
+function AboutCard() {
+  const updates = useUpdates(60000)
+  const checkUpd = useCheckUpdates()
+  const [logTargets, setLogTargets] = useState<LogTarget[] | null>(null)
+  const upd = useRunUpdate(updates.data, updates.reload, (targets) => setLogTargets(targets))
+  const engineer = useEngineer()
+  const act = useAction()
+  const confirm = useConfirm()
+  const toast = useToast()
+
+  const sess = getCacheEntry<{ version?: string; commit?: string }>('session')?.data
+  const info = updates.data
+  const version = info?.panel.version || sess?.version || ''
+  const commit = info?.commit || sess?.commit || ''
+  const curChannel: 'stable' | 'dev' = info?.channel || (info?.release?.startsWith('edge-') ? 'dev' : 'stable')
+  const curRef = info?.ref || (info?.release?.startsWith('edge-') ? info.release.slice(5) : 'main')
+  const isCustomBranch = curChannel === 'dev' && curRef !== 'main'
+
+  const [customMode, setCustomMode] = useState(isCustomBranch)
+  const [branch, setBranch] = useState(isCustomBranch ? curRef : '')
+  const [switching, setSwitching] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const taps = useRef(0)
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    if (curChannel === 'dev' && curRef !== 'main') {
+      setCustomMode(true)
+      setBranch(curRef)
+    } else if (curChannel === 'stable' || curRef === 'main') {
+      setCustomMode(false)
+    }
+  }, [curChannel, curRef])
+
+  useEffect(() => () => {
+    if (tapTimer.current) clearTimeout(tapTimer.current)
+  }, [])
+
+  const onVersionClick = () => {
+    if (tapTimer.current) clearTimeout(tapTimer.current)
+    taps.current += 1
+    if (taps.current >= 5) {
+      taps.current = 0
+      setModalOpen(true)
+      return
+    }
+    tapTimer.current = setTimeout(() => { taps.current = 0 }, 2000)
+  }
+
+  const switchChannel = async (channel: 'stable' | 'dev', ref: string) => {
+    if (switching) return
+    if (channel === curChannel && (channel === 'stable' || ref === curRef)) {
+      if (channel === 'stable' || ref === 'main') setCustomMode(false)
+      return
+    }
+    setSwitching(true)
+    try {
+      const next = await act(() => post<UpdateInfo>('updates/channel', { channel, ref }))
+      if (!next) return
+      setCacheEntry('updates', next)
+      toast(channel === 'stable'
+        ? t('settings.channel_switched_stable')
+        : t('settings.channel_switched_dev', { ref: next.ref || ref }))
+      if (next.checkError) toast(next.checkError, true)
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  const runUpdateAll = async () => {
+    if (!info) return
+    const nodes = info.nodes.filter((n) => n.available)
+    const what = [info.panel.available && t('common.panel'), nodes.length > 0 && t('common.nodes_count', { n: nodes.length })].filter(Boolean).join(t('updates.and'))
+    if (await confirm(<><Trans k="updates.update_now_everything_updates" v={{ what }} /></>, t('updates.update_all'), false)) {
+      upd.run('all')
+    }
+  }
+
+  const panelUpd = info?.panel
+  const showBranchOpt = engineer || isCustomBranch || customMode
+  const branchClean = branch.trim()
+  const branchDirty = customMode && branchClean.length > 0 && (curChannel !== 'dev' || branchClean !== curRef)
+
+  return (
+    <>
+      <div className="card">
+        <div className="card-head">
+          <div>
+            <h3>{t('settings.about_title')}</h3>
+            <div className="card-sub">{t('settings.about_sub')}</div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn ghost sm" disabled={checkUpd.checking || switching} onClick={checkUpd.check}>
+              {checkUpd.checking ? <span className="spinner" /> : <Icon name="refresh" size={15} />} {t('settings.check_updates')}
+            </button>
+            {(info?.count || 0) > 0 && !upd.waiting && (
+              <button type="button" className="btn primary sm" onClick={runUpdateAll}>
+                {t('updates.update_all')}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="card-pad about-split">
+          <div className="about-meta">
+            <div className="selfhost-kv">
+              <span className="k">{t('settings.about_version')}</span>
+              <span className="mono" style={{ userSelect: 'none' }} onClick={onVersionClick}>{fmtVersion(version)}</span>
+              {panelUpd?.state ? (
+                <UpdateChip n={panelUpd} latest={info?.latest || ''} onLog={() => setLogTargets([{ id: 0, name: panelUpd.name || t('common.panel'), initial: panelUpd }])} />
+              ) : panelUpd?.available && info?.latest ? (
+                <Badge color="amber" dot>{t('settings.about_update_available', { latest: fmtVersion(info.latest) })}</Badge>
+              ) : info?.latest ? (
+                <Badge color="green" dot>{t('settings.about_up_to_date')}</Badge>
+              ) : null}
+            </div>
+            {commit && (
+              <div className="selfhost-kv">
+                <span className="k">{t('settings.about_commit')}</span>
+                <a className="about-link mono" href={`${REPO_URL}/commit/${encodeURIComponent(commit)}`} target="_blank" rel="noreferrer">
+                  {commit.slice(0, 7)} <Icon name="external" size={13} />
+                </a>
+              </div>
+            )}
+            <div className="selfhost-kv">
+              <span className="k">{t('settings.about_repo')}</span>
+              <a className="about-link mono" href={REPO_URL} target="_blank" rel="noreferrer">
+                vyto4ka/vynel <Icon name="external" size={13} />
+              </a>
+            </div>
+          </div>
+
+          <div className="about-channel">
+            <div className="about-branch-row">
+              <span className="muted small">{t('settings.update_channel')}</span>
+              <div className="seg sm" role="group" aria-label={t('settings.update_channel')}>
+                <button
+                  type="button"
+                  disabled={switching}
+                  className={!customMode && curChannel === 'stable' ? 'on' : ''}
+                  onClick={() => { setCustomMode(false); switchChannel('stable', '') }}
+                >
+                  {t('settings.channel_stable')}
+                </button>
+                <button
+                  type="button"
+                  disabled={switching}
+                  className={!customMode && curChannel === 'dev' && curRef === 'main' ? 'on' : ''}
+                  onClick={() => { setCustomMode(false); switchChannel('dev', 'main') }}
+                >
+                  {t('settings.channel_main')}
+                </button>
+                {showBranchOpt && (
+                  <button
+                    type="button"
+                    disabled={switching}
+                    className={customMode ? 'on' : ''}
+                    onClick={() => { setCustomMode(true); if (!branch) setBranch(isCustomBranch ? curRef : '') }}
+                  >
+                    {isCustomBranch && !customMode ? curRef : t('settings.channel_branch')}
+                  </button>
+                )}
+              </div>
+              {customMode && (
+                <>
+                  <input
+                    className="input mono"
+                    value={branch}
+                    placeholder={t('settings.branch_placeholder')}
+                    onChange={(e) => setBranch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && branchDirty && switchChannel('dev', branchClean)}
+                  />
+                  {branchDirty && (
+                    <button type="button" className="btn primary sm" disabled={switching} onClick={() => switchChannel('dev', branchClean)}>
+                      {t('common.save')}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="muted small">
+              {curChannel === 'stable'
+                ? t('settings.channel_stable_hint')
+                : t('settings.channel_dev_hint', { ref: curRef })}
+            </div>
+          </div>
+        </div>
+      </div>
+      {logTargets && logTargets.length > 0 && (
+        <UpdateLog id={logTargets[0].id} name={logTargets[0].name} targets={logTargets} onClose={() => { setLogTargets(null); updates.reload() }} />
+      )}
+      {modalOpen && (
+        <Modal title="Чикенбурбе" onClose={() => setModalOpen(false)}>
+          <img src="Чикенбурбе.png" alt="Чикенбурбе" style={{ width: '100%', display: 'block', borderRadius: 10 }} />
+        </Modal>
+      )}
+    </>
+  )
+}
+

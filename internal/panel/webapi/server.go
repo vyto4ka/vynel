@@ -34,6 +34,7 @@ type Config struct {
 	CAFingerprint func() string    // for node join tokens
 	Connected     func(int64) bool // live node sessions; nil = guess from last_seen
 	Version       string
+	Commit        string
 	Log           *slog.Logger
 	UI            fs.FS    // built UI; nil = web.Dist
 	Bot           *bot.Bot // Telegram bot (status, backups); nil in tests
