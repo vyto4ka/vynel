@@ -340,3 +340,77 @@ func TestCaddyRootPrefixPanelFirst(t *testing.T) {
 		t.Fatalf("the panel's route must come before the root subscription route (panel %d, root %d):\n%s", panel, root, site)
 	}
 }
+
+func TestCaddyNodeCustomDecoy(t *testing.T) {
+	f := newFixture(t)
+	n := must(f.s.EnsureLocalNode(f.ctx, NodeInput{Name: "NL", Country: "nl", Domain: "nl.example.com"}))
+	prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: prof.ID, Values: map[string]any{"DECOY_PATH": "/var/www/site"}}))
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	contains(t, string(ds.Caddy), `"root":"/var/www/site"`)
+}
+
+func TestCaddyMergedSiteCustomDecoyWins(t *testing.T) {
+	f := newFixture(t)
+	n := must(f.s.EnsureLocalNode(f.ctx, NodeInput{Name: "NL", Country: "nl", Domain: "nl.example.com"}))
+	hy := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Hy", TemplateID: "hysteria2"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: hy.ID}))
+	re := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: re.ID, Values: map[string]any{"DECOY_PATH": "/var/www/site"}}))
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	var cfg struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]struct {
+					Listen []string         `json:"listen"`
+					Routes []any            `json:"routes"`
+					Errors map[string][]any `json:"errors"`
+				} `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(ds.Caddy, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	// fileRoots lists file_server roots in the order Caddy tries them (routes, then subroutes).
+	var fileRoots func(routes []any) []string
+	fileRoots = func(routes []any) (out []string) {
+		for _, r := range routes {
+			hs, _ := r.(map[string]any)["handle"].([]any)
+			for _, h := range hs {
+				hm := h.(map[string]any)
+				switch hm["handler"] {
+				case "file_server":
+					out = append(out, hm["root"].(string))
+				case "subroute":
+					sub, _ := hm["routes"].([]any)
+					out = append(out, fileRoots(sub)...)
+				}
+			}
+		}
+		return out
+	}
+	found := false
+	for _, srv := range cfg.Apps.HTTP.Servers {
+		if !slices.Contains(srv.Listen, "127.0.0.1:8443") {
+			continue
+		}
+		found = true
+		// The first file_server is the served page; the built-in decoy stays behind it.
+		if roots := fileRoots(srv.Routes); len(roots) == 0 || roots[0] != "/var/www/site" {
+			t.Fatalf("served roots %v, want the custom one first", roots)
+		}
+		if roots := fileRoots(srv.Errors["routes"]); len(roots) != 1 || roots[0] != "/var/www/site" {
+			t.Fatalf("error roots %v, want the custom one", roots)
+		}
+	}
+	if !found {
+		t.Fatalf("no 8443 server:\n%s", ds.Caddy)
+	}
+}

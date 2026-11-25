@@ -119,7 +119,7 @@ var WebRoles = []string{"selfsteal", "reverse_proxy_xhttp", "certificate"}
 
 // webKeys are the keys of the nginx section and what they hold.
 var webKeys = map[string]string{
-	"role": "string", "domain": "string", "local_port": "scalar", "decoy": "string", "upstream": "string",
+	"role": "string", "domain": "string", "local_port": "scalar", "decoy": "string", "decoy_path": "string", "upstream": "string",
 	"path": "string", "server_names": "list", "location": "string", "server": "string",
 }
 

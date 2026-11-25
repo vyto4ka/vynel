@@ -82,6 +82,7 @@ lint: [...]               # дополнительные правила вали
 | `local_port` | Локальный порт сайта (`selfsteal`, `certificate`), обычно `${SELFSTEAL_PORT}` = 8443 |
 | `upstream`, `path` | Куда и по какому пути проксировать (`reverse_proxy_xhttp`), например `127.0.0.1:${XRAY_PORT}` и `${UPLINK_PATH}` |
 | `decoy` | Сайт-заглушка (`${DECOY_SITE}`) |
+| `decoy_path` | Своя заглушка (`${DECOY_PATH}`), необязательно |
 | `server_names` | Ещё имена этого сайта **без своего сертификата**, например `${CDN_DOMAIN}`: CDN пересылает в Host своё имя |
 | `location: \|` | Свои директивы внутри `location` пути `path` вместо стандартного потокового прокси. Только для `reverse_proxy_xhttp` |
 | `server: \|` | Свои директивы уровня `server` |
@@ -207,6 +208,7 @@ nginx:
 | `SELFSTEAL_PORT` | profile | const | `8443` | Локальный порт nginx |
 | `PORT` | profile | const | `443` | |
 | `DECOY_SITE` | node | generate (случайный из списка) | `cloud` | Какой сайт-заглушку показать: `cloud`, `studio`, `docs`, `coffee`, `journal` |
+| `DECOY_PATH` | node | input (необязательная) | — | Своя заглушка вместо `DECOY_SITE`: абсолютный путь на сервере ноды к папке с `index.html` или к HTML-файлу, файлы должны читаться веб-сервером ноды (nginx или Caddy); пусто — встроенный сайт. Если на домене есть Hysteria2, её HTTP/3 всё равно показывает `DECOY_SITE` |
 
 Админу в итоге нужно ввести **только домен ноды**. Остальное генерируется.
 

@@ -468,17 +468,23 @@ func locations(w func(int, string, ...any), rs []Route) error {
 	// root the subscription proxy's "location /" must not be eaten by a decoy of another site
 	// merged into the same server (the self-steal on the shared Reality target). The decoys
 	// stay for the error pages.
-	var decoyRoutes []Route
+	// The admin's own decoy (DecoyPath) goes before built-in ones: the first decoy wins the
+	// location and the error pages.
+	var decoyRoutes, builtin []Route
 	for _, r := range rs {
 		if r.Kind == KindDecoy {
-			decoyRoutes = append(decoyRoutes, r)
+			if r.DecoyPath != "" {
+				decoyRoutes = append(decoyRoutes, r)
+			} else {
+				builtin = append(builtin, r)
+			}
 			continue
 		}
 		if err := location(w, r, &dt, seen); err != nil {
 			return err
 		}
 	}
-	for _, r := range decoyRoutes {
+	for _, r := range append(decoyRoutes, builtin...) {
 		if err := location(w, r, &dt, seen); err != nil {
 			return err
 		}

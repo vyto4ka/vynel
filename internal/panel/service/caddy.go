@@ -94,6 +94,8 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 			problems = append(problems, fmt.Sprintf("%s: caddy: %v", r.Tag, err))
 			continue
 		}
+		dn, dp := nodeDecoy(r.Tag, cm, &problems)
+		decoyRoute := caddyconf.Route{Kind: caddyconf.KindDecoy, Decoy: dn, DecoyPath: dp}
 		switch str(cm["role"]) {
 		case "selfsteal":
 			// Only when this inbound's Reality target really is the local Caddy.
@@ -107,7 +109,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 				continue // e.g. a profile override points Reality at a foreign site
 			}
 			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: front.localPort, ProxyProtocol: true,
-				Routes: []caddyconf.Route{{Kind: caddyconf.KindDecoy, Decoy: decoyName(str(cm["decoy"]))}}})
+				Routes: []caddyconf.Route{decoyRoute}})
 		case "certificate":
 			// The inbound needs Caddy's certificate for the domain (Hysteria2 uses it directly).
 			// The site lives on 127.0.0.1 only: the certificate comes over HTTP-01 on :80, and when a
@@ -117,7 +119,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 				port = 8443
 			}
 			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: port,
-				Routes: []caddyconf.Route{{Kind: caddyconf.KindDecoy, Decoy: decoyName(str(cm["decoy"]))}}})
+				Routes: []caddyconf.Route{decoyRoute}})
 		case "reverse_proxy_xhttp":
 			bind := str(vals["LISTEN_IP"])
 			if bind == "0.0.0.0" {
@@ -318,6 +320,18 @@ func (s *Service) PanelCaddyConfig(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	return caddyconf.Build(spec)
+}
+
+// nodeDecoy is the decoy route of a node site: the built-in site, or the admin's own page
+// (decoy_path) when it passes validation; a bad path becomes a problem and the built-in site stays.
+func nodeDecoy(tag string, cm map[string]any, problems *[]string) (name, path string) {
+	name = decoyName(str(cm["decoy"]))
+	p, err := decoy.ValidateCustomPath(str(cm["decoy_path"]))
+	if err != nil {
+		*problems = append(*problems, fmt.Sprintf("%s: decoy_path: %v", tag, err))
+		return name, ""
+	}
+	return name, p
 }
 
 func decoyName(n string) string {
