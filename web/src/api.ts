@@ -681,6 +681,9 @@ export interface UpdateNode {
 
 export interface UpdateInfo {
   release: string
+  channel?: 'stable' | 'dev'
+  ref?: string
+  commit?: string
   latest: string
   checkError?: string
   checkedAt: number

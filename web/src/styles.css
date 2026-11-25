@@ -1171,6 +1171,14 @@ a.chip { text-decoration: none; cursor: pointer; }
 .overview-split { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
 .settings-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.settings-full { grid-column: 1 / -1; }
+.about-split { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px 24px; flex-wrap: wrap; }
+.about-meta { display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap; }
+.about-link { display: inline-flex; align-items: center; gap: 4px; color: var(--on-surface); text-decoration: none; }
+.about-link:hover { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.about-channel { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: 100%; }
+.about-branch-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.about-branch-row .input { width: 180px; height: 32px; min-height: 32px; padding: 4px 10px; font-size: 13px; }
 .selfhost-card { margin-bottom: 18px; }
 .selfhost-grid { display: grid; grid-template-columns: minmax(240px, 0.78fr) minmax(320px, 1.4fr); gap: 18px; align-items: start; }
 .selfhost-inline { display: flex; align-items: center; gap: 10px 24px; flex-wrap: wrap; }
@@ -1183,5 +1191,6 @@ a.chip { text-decoration: none; cursor: pointer; }
 @media (max-width: 900px) {
   .overview-split, .selfhost-grid { grid-template-columns: 1fr; }
 }
-
-
+@media (max-width: 760px) {
+  .about-channel { align-items: flex-start; width: 100%; }
+}

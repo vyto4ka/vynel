@@ -17,6 +17,7 @@ func panelCmd() *cobra.Command {
 		Short: "Run the panel (node gateway, reconciler, optional local node)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg.Version = buildinfo.Version
+			cfg.Commit = buildinfo.Commit
 			cfg.Log = slog.Default()
 			return app.Run(cmd.Context(), cfg)
 		},

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/vyto4ka/vynel/internal/panel/service"
@@ -290,5 +292,109 @@ func TestUpdateLogLocalNodeIDAndDismissReset(t *testing.T) {
 	fresh.hydrate(runs, time.Now())
 	if state, _, _, _ := fresh.state(rem.ID, nil, true, "v0.3.1", time.Now()); state != UpdSent {
 		t.Fatalf("expected hydrated state %q after dismiss+run, got %q", UpdSent, state)
+	}
+}
+
+func TestSetUpdateChannelAndCommitInfo(t *testing.T) {
+	prevEnv := update.EnvFile
+	update.EnvFile = filepath.Join(t.TempDir(), "install.env")
+	t.Cleanup(func() { update.EnvFile = prevEnv })
+	if err := update.SaveSource(update.Source{
+		Ref:     "main",
+		Release: update.ReleaseLatest,
+		GHProxy: "https://127.0.0.1:1/",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	svc := service.New(st)
+	if err := svc.EnsureDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.EnsureWebDefaults(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pw, err := svc.SetAdminCredentials(ctx, service.ActorCLI, "boss")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base, _ := svc.WebPath(ctx)
+	srv := New(Config{
+		Service: svc,
+		Version: "v0.3.0",
+		Commit:  "8547660",
+		UI: fstest.MapFS{
+			"index.html":     {Data: []byte("<html></html>")},
+			"Чикенбурбе.png": {Data: []byte("\x89PNG\r\n\x1a\nburger")},
+		},
+	})
+	srv.upd.latest = "v0.3.0"
+	srv.upd.checkedAt = time.Now()
+	c := &client{t: t, srv: srv, base: strings.TrimSuffix(base, "/")}
+	if w := c.do("POST", "/api/login", `{"login":"boss","password":"`+pw+`"}`, true); w.Code != http.StatusOK {
+		t.Fatalf("login: %d %s", w.Code, w.Body.String())
+	}
+
+	if w := c.do("GET", "/%D0%A7%D0%B8%D0%BA%D0%B5%D0%BD%D0%B1%D1%83%D1%80%D0%B1%D0%B5.png", "", false); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("static png: %d ct=%q", w.Code, w.Header().Get("Content-Type"))
+	}
+
+	w := c.do("GET", "/api/updates", "", false)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get updates: %d %s", w.Code, w.Body.String())
+	}
+	var info UpdateInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Channel != update.ChannelStable || info.Release != update.ReleaseLatest || info.Ref != "main" || info.Commit != "8547660" {
+		t.Fatalf("unexpected initial update info: %+v", info)
+	}
+
+	// Switch to dev channel (main).
+	w = c.do("POST", "/api/updates/channel", `{"channel":"dev","ref":"main"}`, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set channel dev/main: %d %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info.Channel != update.ChannelDev || info.Release != "edge-main" || info.Ref != "main" {
+		t.Fatalf("unexpected dev/main update info: %+v", info)
+	}
+	if got := update.LoadSource(); got.Channel() != update.ChannelDev || got.Release != "edge-main" {
+		t.Fatalf("persisted source mismatch: %+v", got)
+	}
+
+	// Switch to custom branch and back to stable.
+	w = c.do("POST", "/api/updates/channel", `{"channel":"dev","ref":"feat/test"}`, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set channel dev/feat/test: %d %s", w.Code, w.Body.String())
+	}
+	if got := update.LoadSource(); got.Release != "edge-feat-test" || got.Ref != "feat/test" {
+		t.Fatalf("persisted custom branch mismatch: %+v", got)
+	}
+
+	w = c.do("POST", "/api/updates/channel", `{"channel":"stable"}`, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set channel stable: %d %s", w.Code, w.Body.String())
+	}
+	if got := update.LoadSource(); got.Channel() != update.ChannelStable || got.Release != update.ReleaseLatest {
+		t.Fatalf("persisted stable source mismatch: %+v", got)
+	}
+
+	// Validation errors.
+	if w := c.do("POST", "/api/updates/channel", `{"channel":"nightly"}`, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown channel, got %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("POST", "/api/updates/channel", `{"channel":"dev","ref":"bad branch!"}`, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad branch, got %d %s", w.Code, w.Body.String())
 	}
 }

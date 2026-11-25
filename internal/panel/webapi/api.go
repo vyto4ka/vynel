@@ -79,6 +79,7 @@ func (s *Server) routes() {
 	s.handle("POST /api/nodes/{id}/certs/renew", s.renewNodeCerts)
 	s.handle("GET /api/updates", s.getUpdates)
 	s.handle("POST /api/updates/check", s.checkUpdates)
+	s.handle("POST /api/updates/channel", s.setUpdateChannel)
 	s.handle("POST /api/updates/run", s.runUpdates)
 	s.handle("GET /api/updates/log", s.updateLog)
 	s.handle("POST /api/updates/dismiss", s.dismissUpdate)
@@ -249,7 +250,7 @@ func (s *Server) session(r *http.Request) (any, error) {
 	hwidDefault, _ := strconv.Atoi(hwid)
 	miniAppFS, _ := s.svc.Setting(ctx, service.SettingBotMiniAppFullscreen, "false")
 	showWelcome, _ := s.svc.ShowWelcome(ctx)
-	return map[string]any{"login": login, "method": s.svc.WebSessionMethod(ctx, current(r).ID), "version": s.cfg.Version, "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase,
+	return map[string]any{"login": login, "method": s.svc.WebSessionMethod(ctx, current(r).ID), "version": s.cfg.Version, "commit": s.panelCommit(), "webUrl": url, "passwordLogin": s.svc.PasswordLoginEnabled(ctx), "subBase": subBase,
 		"ipDefault": s.svc.IPLimitOf(ctx, &store.User{}), "hwidDefault": hwidDefault, "miniAppFullscreen": miniAppFS == "true", "showWelcome": showWelcome}, nil
 }
 

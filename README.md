@@ -16,7 +16,7 @@ VLESS Reality · XHTTP · Hysteria2 · один исполняемый файл 
 [![Platform](https://img.shields.io/badge/Ubuntu%20%7C%20Debian-amd64%20%7C%20arm64-ff5fa2?logo=linux&logoColor=white)](#требования)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-a6e3a1)](LICENSE)
 
-[Установка](#установка) · [Руководство](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html) · [Обзор](#обзор) · [Возможности](#возможности) · [Требования](#требования) · [Потребление памяти](#потребление-памяти) · [Документация](#документация) · [Лицензия](#лицензия)
+[Установка](#установка) · [Руководство](https://raw.githack.com/vyto4ka/vynel/main/docs/guide.html) · [Обзор](#обзор) · [Возможности](#возможности) · [Требования](#требования) · [Потребление памяти](#потребление-памяти) · [Документация](#документация) · [Лицензия](#лицензия) · [Спасибо](#спасибо)
 
 </div>
 
@@ -40,7 +40,7 @@ bash <(curl -fsSL https://github.com/vyto4ka/vynel/releases/latest/download/inst
 
 Отдельная панель и ноды, обновление, удаление, типичные проблемы — [INSTALL_GUIDE.md](docs/INSTALL_GUIDE.md).
 
-Установка и обновления идут из [релизов](https://github.com/vyto4ka/vynel/releases): сервер получает новую версию, когда выпущен релиз, а не с каждым коммитом. Проверить свежий коммит на своём сервере до выпуска можно командой `vynel update --channel dev --ref main` ([как это устроено](docs/DEVELOPMENT.md#сборки-и-релизы)).
+Установка и обновления идут из [релизов](https://github.com/vyto4ka/vynel/releases): сервер получает новую версию, когда выпущен релиз, а не с каждым коммитом. Проверить свежий коммит на своём сервере до выпуска можно переключателем канала внизу настроек панели или командой `vynel update --channel dev --ref main` ([как это устроено](docs/DEVELOPMENT.md#сборки-и-релизы)).
 
 ---
 
@@ -252,7 +252,16 @@ vynel firewall status                      # открытые порты и за
 
 [GNU AGPL-3.0](LICENSE). Пользоваться, изменять и распространять можно свободно. Если вы даёте другим доступ к изменённой панели по сети, исходный код этих изменений нужно открыть им на тех же условиях.
 
+---
+
+## Спасибо
+
+- [Lemonochka](https://github.com/Lemonochka): за Keqdroid и замечания по панельке
+- [mewmrow](https://github.com/mewmrow): за мяумяумяу
+- [kuroleesov](https://github.com/kuroleesov): за фиксы и нахождение багов
+
 <div align="center">
 <br>
 <sub>Построено на <a href="https://github.com/XTLS/Xray-core">Xray</a>, <a href="https://nginx.org">nginx</a>, Go и React.</sub>
 </div>
+
