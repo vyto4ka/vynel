@@ -12,11 +12,12 @@ export function Settings() {
   const sections = [...new Set(data.map((s) => s.section))]
   const leftSections = sections.filter((_, i) => i % 2 === 0)
   const rightSections = sections.filter((_, i) => i % 2 === 1)
+  const hasLocalNode = !!network.data?.nodes?.some((n) => n.local)
   const renderSection = (sec: string) => (
     <div key={sec} className="card">
       <div className="card-head"><h3>{sec}</h3></div>
       <div className="card-pad">
-        {data.filter((s) => s.section === sec).map((s) => <SettingRow key={s.key + (s.value ?? '')} s={s} onSaved={settings.reload} />)}
+        {data.filter((s) => s.section === sec).map((s) => <SettingRow key={s.key + (s.value ?? '')} s={s} hasLocalNode={hasLocalNode} onSaved={settings.reload} />)}
       </div>
     </div>
   )
@@ -158,7 +159,7 @@ function NetworkCard({ data, error, reload }: { data: Network | null; error: str
   )
 }
 
-function SettingRow({ s, onSaved }: { s: Setting; onSaved: () => void }) {
+function SettingRow({ s, hasLocalNode, onSaved }: { s: Setting; hasLocalNode: boolean; onSaved: () => void }) {
   const initial = s.value ?? ''
   const [val, setValue] = useState(initial)
   const act = useAction()
@@ -166,6 +167,7 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: () => void }) {
   const dirty = val !== initial
   const effective = s.set ? initial : s.default ?? ''
   const ip = s.key === 'web.address' || s.key === 'sub.address'
+  const decoyLink = s.key === 'web.decoy' || s.key === 'sub.decoy'
 
   const save = async (v: string) => {
     if (s.movesPanel && !(await confirm(t('settings.the_panel_will_move_to_2'), t('common.change'), false))) return
@@ -196,8 +198,17 @@ function SettingRow({ s, onSaved }: { s: Setting; onSaved: () => void }) {
   const label = s.title === s.key
     ? <span className="mono">{s.key}</span>
     : <><span>{s.title}</span><span className="muted mono" style={{ fontWeight: 400 }}>{s.key}</span></>
+  const help = decoyLink ? (
+    <>
+      {s.hint ? <>{s.hint}{' '}</> : null}
+      <Trans
+        k={hasLocalNode ? 'settings.custom_decoy_in_panel_node' : 'settings.custom_decoy_in_nodes'}
+        v={{ link: <a href={hasLocalNode ? '#/nodes/edit-local' : '#/nodes'}>{t(hasLocalNode ? 'settings.panel_node_settings' : 'common.nodes')}</a> }}
+      />
+    </>
+  ) : s.hint
   return (
-    <Field label={label} help={s.hint} info={s.help}>
+    <Field label={label} help={help} info={s.help}>
       <div className="row" style={{ flexWrap: 'nowrap' }}>
         {s.type === 'select' ? (
           <select className="input" value={val} onChange={(e) => setValue(e.target.value)}>

@@ -188,6 +188,7 @@ export interface Node {
   country: string
   flag: string
   domain: string
+  decoyPath: string
   local: boolean
   manual: boolean
   enabled: boolean

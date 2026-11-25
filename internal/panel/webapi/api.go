@@ -157,6 +157,7 @@ type Node struct {
 	Country      string    `json:"country"`
 	Flag         string    `json:"flag"`
 	Domain       string    `json:"domain"`
+	DecoyPath    string    `json:"decoyPath"`
 	Local        bool      `json:"local"`
 	Manual       bool      `json:"manual"`
 	Enabled      bool      `json:"enabled"`
@@ -965,7 +966,7 @@ func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {
 	out := make([]Node, 0, len(sts))
 	for _, ns := range sts {
 		n := ns.Node
-		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain,
+		d := Node{ID: n.ID, Code: n.Code, Name: n.Name, Country: n.Country, Flag: xrayconf.CountryFlag(n.Country), Domain: n.Domain, DecoyPath: n.DecoyPath,
 			Local: n.Local, Manual: n.Manual, Enabled: n.Enabled, State: ns.State(), LastSeenAt: n.LastSeenAt, XrayVersion: n.XrayVersion,
 			AgentVersion: n.AgentVersion, CaddyVersion: n.CaddyVersion, NginxVersion: n.NginxVersion, TodayBytes: ns.TodayBytes, Problems: []string{},
 			Inbounds: []Inbound{}, Addresses: []Address{}, SetupStep: -1, Warp: warps[n.ID]}
@@ -1053,10 +1054,11 @@ func publicValues(v map[string]any, secret map[string]bool) map[string]any {
 }
 
 type nodeIn struct {
-	Name    string `json:"name"`
-	Country string `json:"country"`
-	Domain  string `json:"domain"`
-	Code    string `json:"code"`
+	Name      string  `json:"name"`
+	Country   string  `json:"country"`
+	Domain    string  `json:"domain"`
+	DecoyPath *string `json:"decoyPath"`
+	Code      string  `json:"code"`
 	// Manual: the panel manages only the Xray config; nginx and the network are the admin's.
 	Manual bool `json:"manual"`
 	// Attach these profiles to a new node right away.
@@ -1069,7 +1071,7 @@ func (s *Server) createNode(r *http.Request) (any, error) {
 		return nil, err
 	}
 	ctx, a := r.Context(), actor(r)
-	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, Code: in.Code, Manual: in.Manual})
+	n, secret, err := s.svc.CreateNode(ctx, a, service.NodeInput{Name: in.Name, Country: in.Country, Domain: in.Domain, DecoyPath: in.DecoyPath, Code: in.Code, Manual: in.Manual})
 	if err != nil {
 		return nil, err
 	}
@@ -1104,11 +1106,12 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 		return nil, err
 	}
 	var in struct {
-		Name    string  `json:"name"`
-		Country string  `json:"country"`
-		Domain  *string `json:"domain"`
-		Enabled *bool   `json:"enabled"`
-		Manual  *bool   `json:"manual"`
+		Name      string  `json:"name"`
+		Country   string  `json:"country"`
+		Domain    *string `json:"domain"`
+		DecoyPath *string `json:"decoyPath"`
+		Enabled   *bool   `json:"enabled"`
+		Manual    *bool   `json:"manual"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -1127,7 +1130,7 @@ func (s *Server) updateNode(r *http.Request) (any, error) {
 	if in.Manual != nil {
 		manual = *in.Manual
 	}
-	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain, Manual: manual}, enabled)
+	_, err = s.svc.UpdateNode(r.Context(), actor(r), id, service.NodeInput{Name: in.Name, Country: in.Country, Domain: domain, DecoyPath: in.DecoyPath, Manual: manual}, enabled)
 	return nil, err
 }
 

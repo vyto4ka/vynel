@@ -23,9 +23,6 @@ var settingDefs = []settingDef{
 		Help: "На каком адресе сервера слушает панель. По умолчанию — как у подписок."},
 	{Key: service.SettingWebDecoy, Section: "Доступ к панели", Title: "Сайт-заглушка панели", Type: "select", Options: decoy.Names(),
 		Help: "Что видно вне секретного пути, когда у панели свой домен или порт. По умолчанию — как у подписок; разные заглушки не дают связать два адреса."},
-	{Key: service.SettingWebDecoyPath, Section: "Доступ к панели", Title: "Своя HTML-заглушка панели", Type: "string",
-		Hint: "Путь к папке с index.html или HTML-файлу; пусто — встроенный сайт",
-		Help: "Абсолютный путь на сервере панели, например /var/www/my-site или /var/www/stub.html. Файлы должны быть доступны для чтения веб-серверу. Если задано, используется вместо встроенного сайта."},
 
 	{Key: service.SettingWebIdleMinutes, Section: "Доступ к панели", Title: "Выход после бездействия, мин", Type: "int", Default: "5",
 		Hint: "0 — не завершать", Help: "Сессия завершается, если столько минут в панели ничего не нажимали (открытая страница со статистикой не считается действием)."},
@@ -38,9 +35,6 @@ var settingDefs = []settingDef{
 		Hint: "После смены старые ссылки перестанут работать", Help: "Начало пути ссылки подписки, например /s/. Пусто — ссылка с корня домена: sub.example.com/<свой-конец>."},
 	{Key: service.SettingSubDecoy, Section: "Подписки", Title: "Сайт-заглушка домена подписок", Type: "select", Options: decoy.Names(),
 		Help: "Что видит человек, открывший домен в браузере."},
-	{Key: service.SettingSubDecoyPath, Section: "Подписки", Title: "Своя HTML-заглушка подписок", Type: "string",
-		Hint: "Путь к папке с index.html или HTML-файлу; пусто — встроенный сайт",
-		Help: "Абсолютный путь на сервере панели, например /var/www/my-site или /var/www/stub.html. Файлы должны быть доступны для чтения веб-серверу. Если задано, используется вместо встроенного сайта."},
 	{Key: service.SettingSubPort, Section: "Подписки", Title: "Порт подписок", Type: "int", Default: "443"},
 	{Key: service.SettingSubAddress, Section: "Подписки", Title: "IP подписок", Type: "select",
 		Help: "На каком адресе сервера отвечают подписки (и панель, если у неё не задан свой). По умолчанию — на всех."},
@@ -77,6 +71,8 @@ var movesPanel = map[string]bool{service.SettingWebPath: true, service.SettingWe
 var hiddenSettings = map[string]bool{
 	service.SettingWebLogin: true, service.SettingGatewaySNI: true, service.SettingInstallCommand: true,
 	service.SettingDecoySeed: true,
+	// edited in the panel's local node settings
+	service.SettingWebDecoyPath: true, service.SettingSubDecoyPath: true,
 	// edited on the «Подписка» page
 	service.SettingSubTitle: true, service.SettingSubUpdateHours: true, service.SettingSubSupportURL: true,
 	service.SettingSubAnnounce: true, service.SettingSubAnnounceURL: true, service.SettingSubPageURL: true,

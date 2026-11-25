@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vyto4ka/vynel/internal/decoy"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/xrayconf"
 )
@@ -34,12 +35,32 @@ var pendingCodeRe = regexp.MustCompile(`^N[0-9]*$`)
 
 // NodeInput creates or edits a node.
 type NodeInput struct {
-	Name    string
-	Code    string // optional; derived from Country
-	Country string // ISO alpha-2
-	Domain  string
-	Local   bool
-	Manual  bool // the panel manages only Xray; nginx and the network are the admin's
+	Name      string
+	Code      string // optional; derived from Country
+	Country   string // ISO alpha-2
+	Domain    string
+	DecoyPath *string // nil = keep existing on update; empty string clears custom decoy
+	Local     bool
+	Manual    bool // the panel manages only Xray; nginx and the network are the admin's
+}
+
+func validateNodeDecoyPath(raw string, local bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if local {
+		cleaned, _, err := decoy.CheckCustomPath(raw)
+		if err != nil {
+			return "", invalid("путь к заглушке должен быть абсолютным путём к существующему HTML-файлу или папке с index.html")
+		}
+		return cleaned, nil
+	}
+	cleaned, err := decoy.ValidateCustomPath(raw)
+	if err != nil {
+		return "", invalid("decoy_path: %v", err)
+	}
+	return cleaned, nil
 }
 
 // CreateNode adds a node and returns it with a fresh install token (shown once).
@@ -50,13 +71,20 @@ func (s *Service) CreateNode(ctx context.Context, actor Actor, in NodeInput) (*s
 	if in.Country != "" && !countryRe.MatchString(in.Country) {
 		return nil, "", invalid("country must be a 2-letter code")
 	}
+	var decoyPath string
+	if in.DecoyPath != nil {
+		var err error
+		if decoyPath, err = validateNodeDecoyPath(*in.DecoyPath, in.Local); err != nil {
+			return nil, "", err
+		}
+	}
 	if in.Name == "" {
 		in.Name = xrayconf.CountryName(in.Country)
 		if in.Name == "" {
 			in.Name = PendingNodeName
 		}
 	}
-	n := &store.Node{Name: in.Name, Country: in.Country, Domain: strings.ToLower(strings.TrimSpace(in.Domain)), Local: in.Local, Manual: in.Manual, Enabled: true}
+	n := &store.Node{Name: in.Name, Country: in.Country, Domain: strings.ToLower(strings.TrimSpace(in.Domain)), DecoyPath: decoyPath, Local: in.Local, Manual: in.Manual, Enabled: true}
 	var token string
 	err := s.mutate(ctx, change{actor: actor, action: "node.create", entity: "node", entityID: idOf(&n.ID), event: EvNodeChanged, diff: in},
 		func(q store.DBTX) error {
@@ -126,6 +154,13 @@ func (s *Service) UpdateNode(ctx context.Context, actor Actor, id int64, in Node
 				n.Country = strings.ToUpper(in.Country)
 			}
 			n.Domain = strings.ToLower(strings.TrimSpace(in.Domain))
+			if in.DecoyPath != nil {
+				cleaned, err := validateNodeDecoyPath(*in.DecoyPath, n.Local)
+				if err != nil {
+					return err
+				}
+				n.DecoyPath = cleaned
+			}
 			n.Manual = in.Manual
 			if enabled && !n.Enabled {
 				if err := nodeSwitchedOn(ctx, q, id); err != nil {
@@ -136,6 +171,49 @@ func (s *Service) UpdateNode(ctx context.Context, actor Actor, id int64, in Node
 			return store.UpdateNode(ctx, q, n)
 		})
 	return n, err
+}
+
+// LocalDecoyPath returns the validated custom decoy path configured on the panel's local node,
+// or "" when there is no local node or its custom decoy path is empty/invalid.
+func (s *Service) LocalDecoyPath(ctx context.Context) string {
+	n, err := store.GetLocalNode(ctx, s.st.DB)
+	if err != nil || n.DecoyPath == "" {
+		return ""
+	}
+	cleaned, err := decoy.ValidateCustomPath(n.DecoyPath)
+	if err != nil {
+		return ""
+	}
+	return cleaned
+}
+
+// EffectiveSubDecoyPath returns the custom decoy path for the subscription domain: the local
+// node's DecoyPath first, falling back to the legacy sub.decoy_path setting.
+func (s *Service) EffectiveSubDecoyPath(ctx context.Context) string {
+	if p := s.LocalDecoyPath(ctx); p != "" {
+		return p
+	}
+	raw, _ := s.Setting(ctx, SettingSubDecoyPath, "")
+	cleaned, err := decoy.ValidateCustomPath(raw)
+	if err != nil {
+		return ""
+	}
+	return cleaned
+}
+
+// EffectiveWebDecoyPath returns the custom decoy path for the panel domain: the local node's
+// DecoyPath first, falling back to legacy web.decoy_path / sub.decoy_path settings.
+func (s *Service) EffectiveWebDecoyPath(ctx context.Context) string {
+	if p := s.LocalDecoyPath(ctx); p != "" {
+		return p
+	}
+	for _, key := range []string{SettingWebDecoyPath, SettingSubDecoyPath} {
+		raw, _ := s.Setting(ctx, key, "")
+		if cleaned, err := decoy.ValidateCustomPath(raw); err == nil && cleaned != "" {
+			return cleaned
+		}
+	}
+	return ""
 }
 
 // DeleteNode removes a node, its inbounds and the access rules pointing at them.

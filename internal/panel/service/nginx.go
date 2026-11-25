@@ -116,7 +116,7 @@ func (s *Service) nginxSpec(ctx context.Context, n *store.Node, inbounds []*xray
 				names = append(names, v)
 			}
 		}
-		dn, dp := nodeDecoy(r.Tag, cm, &problems)
+		dn, dp := nodeDecoy(r.Tag, cm, n.DecoyPath, &problems)
 		decoyRoute := nginxconf.Route{Kind: nginxconf.KindDecoy, Decoy: dn, DecoyPath: dp}
 		switch str(cm["role"]) {
 		case "selfsteal":

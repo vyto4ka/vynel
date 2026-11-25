@@ -337,7 +337,7 @@ func RenderBody(format Format, hosts []service.Host, reason, uuid, ua, subURL st
 
 func (h *Handler) notFound(ctx context.Context, w http.ResponseWriter) {
 	name, _ := h.svc.Setting(ctx, service.SettingSubDecoy, "docs")
-	customPath, _ := h.svc.Setting(ctx, service.SettingSubDecoyPath, "")
+	customPath := h.svc.EffectiveSubDecoyPath(ctx)
 	seed, _ := h.svc.Setting(ctx, service.SettingDecoySeed, "")
 	decoy.SetSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

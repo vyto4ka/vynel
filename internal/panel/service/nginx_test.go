@@ -578,3 +578,36 @@ func TestNginxMergedSiteCustomDecoyWins(t *testing.T) {
 		t.Fatalf("built-in decoy rendered:\n%s", ds.Nginx)
 	}
 }
+
+// Node-level DecoyPath applies to all sites on the node (including panel/subscription sites on
+// the local node), and an inbound's DECOY_PATH overrides the node-level path.
+func TestNginxNodeLevelDecoyPathAndOverride(t *testing.T) {
+	f := newFixture(t)
+	nodePath := "/var/www/node-decoy"
+	n, _, err := f.s.CreateNode(f.ctx, ActorCLI, NodeInput{Name: "DE", Country: "de", Domain: "de.example.com", DecoyPath: &nodePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+	ni := must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: re.ID}))
+	f.nginxNode(t, n)
+
+	// Without inbound DECOY_PATH, the node-level DecoyPath is used.
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	contains(t, ds.Nginx, "root /var/www/node-decoy;", "location = /404.html { root /var/www/node-decoy;")
+
+	// Inbound DECOY_PATH overrides the node-level DecoyPath.
+	must(f.s.UpdateNodeInbound(f.ctx, ActorCLI, ni.ID, NodeInboundInput{Values: map[string]any{"DECOY_PATH": "/var/www/inbound-decoy"}}))
+	ds = must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	contains(t, ds.Nginx, "root /var/www/inbound-decoy;", "location = /404.html { root /var/www/inbound-decoy;")
+	if strings.Contains(ds.Nginx, "root /var/www/node-decoy;") {
+		t.Fatalf("node-level decoy should be overridden by inbound DECOY_PATH:\n%s", ds.Nginx)
+	}
+}
+

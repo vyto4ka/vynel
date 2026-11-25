@@ -13,6 +13,7 @@ type Node struct {
 	Code                    string
 	Country                 string
 	Domain                  string
+	DecoyPath               string // custom decoy HTML file or directory on the node's server; "" = built-in
 	BaseConfigID            *int64
 	Tags                    []string
 	Local                   bool
@@ -49,7 +50,7 @@ func (n *Node) Can(capability string) bool {
 	return false
 }
 
-const nodeCols = `id, name, code, country, domain, base_config_id, tags, local, enabled, manual, cert_serial,
+const nodeCols = `id, name, code, country, domain, decoy_path, base_config_id, tags, local, enabled, manual, cert_serial,
 	agent_version, xray_version, last_seen_at, desired_revision, desired_hash, applied_hash, last_error, sort,
 	created_at, updated_at, requirements_confirmed_at, stats_epoch, stats_seq, warnings, caddy_version, nginx_version, capabilities, peer_ips`
 
@@ -57,7 +58,7 @@ func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	n := &Node{}
 	var base, seen sql.NullInt64
 	var tags, warnings, caps, peers string
-	err := sc.Scan(&n.ID, &n.Name, &n.Code, &n.Country, &n.Domain, &base, &tags, &n.Local, &n.Enabled, &n.Manual, &n.CertSerial,
+	err := sc.Scan(&n.ID, &n.Name, &n.Code, &n.Country, &n.Domain, &n.DecoyPath, &base, &tags, &n.Local, &n.Enabled, &n.Manual, &n.CertSerial,
 		&n.AgentVersion, &n.XrayVersion, &seen, &n.DesiredRevision, &n.DesiredHash, &n.AppliedHash, &n.LastError, &n.Sort,
 		&n.CreatedAt, &n.UpdatedAt, &n.RequirementsConfirmedAt, &n.StatsEpoch, &n.StatsSeq, &warnings, &n.CaddyVersion, &n.NginxVersion, &caps, &peers)
 	if err != nil {
@@ -78,9 +79,9 @@ func CreateNode(ctx context.Context, q DBTX, n *Node) error {
 	if n.Tags == nil {
 		n.Tags = []string{}
 	}
-	res, err := q.ExecContext(ctx, `INSERT INTO nodes (name, code, country, domain, base_config_id, tags, local, enabled, manual, sort, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.Name, n.Code, n.Country, n.Domain, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Local, n.Enabled, n.Manual, n.Sort, now, now)
+	res, err := q.ExecContext(ctx, `INSERT INTO nodes (name, code, country, domain, decoy_path, base_config_id, tags, local, enabled, manual, sort, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.Name, n.Code, n.Country, n.Domain, n.DecoyPath, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Local, n.Enabled, n.Manual, n.Sort, now, now)
 	if err != nil {
 		return mapErr(err)
 	}
@@ -94,13 +95,18 @@ func UpdateNode(ctx context.Context, q DBTX, n *Node) error {
 	if n.Tags == nil {
 		n.Tags = []string{}
 	}
-	return execOne(ctx, q, `UPDATE nodes SET name=?, code=?, country=?, domain=?, base_config_id=?, tags=?, enabled=?, manual=?, sort=?, updated_at=?
-		WHERE id=?`, n.Name, n.Code, n.Country, n.Domain, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Enabled, n.Manual, n.Sort, n.UpdatedAt, n.ID)
+	return execOne(ctx, q, `UPDATE nodes SET name=?, code=?, country=?, domain=?, decoy_path=?, base_config_id=?, tags=?, enabled=?, manual=?, sort=?, updated_at=?
+		WHERE id=?`, n.Name, n.Code, n.Country, n.Domain, n.DecoyPath, nullInt(n.BaseConfigID), toJSON(n.Tags), n.Enabled, n.Manual, n.Sort, n.UpdatedAt, n.ID)
 }
 
 // GetNode loads a node by id.
 func GetNode(ctx context.Context, q DBTX, id int64) (*Node, error) {
 	return scanNode(q.QueryRowContext(ctx, `SELECT `+nodeCols+` FROM nodes WHERE id=?`, id))
+}
+
+// GetLocalNode loads the panel's local node, if one exists.
+func GetLocalNode(ctx context.Context, q DBTX) (*Node, error) {
+	return scanNode(q.QueryRowContext(ctx, `SELECT `+nodeCols+` FROM nodes WHERE local=1 ORDER BY id LIMIT 1`))
 }
 
 // GetNodeByCode loads a node by its code.

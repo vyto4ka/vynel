@@ -198,10 +198,11 @@ function UsersHub({ initialTab }: { initialTab?: string }) {
 
 function NodesHub({ initialTab }: { initialTab?: string }) {
   const saved = getUIState('hub.nodes', 'servers')
-  const [tab, setTabState] = useState(initialTab === 'billing' ? 'billing' : saved)
+  const [tab, setTabState] = useState(initialTab === 'billing' ? 'billing' : initialTab === 'edit-local' ? 'servers' : saved)
   const setTab = (next: string) => { setUIState('hub.nodes', next); setTabState(next) }
   useEffect(() => {
     if (initialTab === 'billing') setTab('billing')
+    else if (initialTab === 'edit-local') setTab('servers')
   }, [initialTab])
   return (
     <>

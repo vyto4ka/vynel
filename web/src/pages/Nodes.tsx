@@ -38,6 +38,13 @@ export function Nodes() {
   // У локальной ноды версия панели: она обновляется вместе с панелью.
   const updOf = (n: Node) => n.local ? updates.data?.panel : updates.data?.nodes.find((x) => x.id === n.id)
 
+  useEffect(() => {
+    if (location.hash !== '#/nodes/edit-local' || !nodes.data) return
+    const local = nodes.data.find((x) => x.local)
+    if (local) setEditNode({ node: local, tab: 'general' })
+    history.replaceState(null, '', '#/nodes')
+  }, [nodes.data])
+
   // Действия с нодой через её живое соединение с панелью.
   const nodeAction = async (n: Node, action: string, done: string, warn?: React.ReactNode, ok?: string) => {
     if (warn && !(await confirm(warn, ok || t('common.yes')))) return
@@ -858,6 +865,7 @@ function EditNode({ n, initialTab = 'general', onClose, onSaved, onReload }: {
   const [name, setName] = useState(n.name)
   const [country, setCountry] = useState(n.country)
   const [domain, setDomain] = useState(n.domain)
+  const [decoyPath, setDecoyPath] = useState(n.decoyPath || '')
   const [providerId, setProviderId] = useState(n.provider?.id || 0)
   const [busyDomain, setBusyDomain] = useState<string | null>(null)
   const [liveCerts, setLiveCerts] = useState<CertInfo[] | null>(null)
@@ -871,7 +879,7 @@ function EditNode({ n, initialTab = 'general', onClose, onSaved, onReload }: {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const r = await act(async () => {
-      await patch(`nodes/${n.id}`, { name, country, domain })
+      await patch(`nodes/${n.id}`, { name, country, domain, ...(!n.manual ? { decoyPath } : {}) })
       if (providerId !== (n.provider?.id || 0)) await patch(`nodes/${n.id}/billing`, { providerId })
       return true
     }, t('common.saved'))
@@ -923,6 +931,15 @@ function EditNode({ n, initialTab = 'general', onClose, onSaved, onReload }: {
           <Field label={t('nodes.domain')} info={t('nodes.changing_the_domain_changes')}>
             <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} />
           </Field>
+          {!n.manual && (
+            <Field
+              label={t('nodes.decoy_path')}
+              info={n.local ? t('nodes.decoy_path_local_info') : t('nodes.decoy_path_info')}
+              help={t('nodes.decoy_path_help')}
+            >
+              <input className="input mono" value={decoyPath} onChange={(e) => setDecoyPath(e.target.value)} placeholder="/var/www/site" />
+            </Field>
+          )}
           <Field label={t('common.provider')} help={<><Trans k="nodes.price_payment_and_traffic_limit" v={{ v: <a href="#/billing" onClick={onClose}>{t('nodes.billing')}</a> }} /></>}>
             <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
               <option value={0}>{t('common.not_set')}</option>

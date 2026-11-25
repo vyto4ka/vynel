@@ -724,7 +724,7 @@ func (s *Server) v1NodeList(r *http.Request) ([]map[string]any, error) {
 		}
 		problems = append(problems, n.Warnings...)
 		d := map[string]any{"id": n.ID, "code": n.Code, "name": n.Name, "country": n.Country, "flag": xrayconf.CountryFlag(n.Country), "domain": n.Domain,
-			"enabled": n.Enabled, "state": ns.State(), "online": ns.Connected, "last_seen_at": rfc3339(n.LastSeenAt), "xray_version": n.XrayVersion,
+			"decoy_path": n.DecoyPath, "enabled": n.Enabled, "state": ns.State(), "online": ns.Connected, "last_seen_at": rfc3339(n.LastSeenAt), "xray_version": n.XrayVersion,
 			"agent_version": n.AgentVersion, "today_bytes": ns.TodayBytes, "problems": problems, "metrics": nil}
 		if m := ns.Metrics; m != nil {
 			d["metrics"] = map[string]any{"at": rfc3339v(m.TS), "cpu_percent": m.CPU, "memory_used_bytes": m.MemUsed, "memory_total_bytes": m.MemTotal,
