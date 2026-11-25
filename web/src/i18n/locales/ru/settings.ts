@@ -38,4 +38,7 @@ export default {
   what_a_stranger_who_found: 'что видит посторонний, который нашёл сервер',
   where_addresses_are_chosen: 'Где выбираются адреса',
   which_ip_serves_what_and: 'какой IP что обслуживает и куда смотрят домены',
+  custom_decoy_in_panel_node: 'Своя HTML-заглушка задаётся в {link}.',
+  custom_decoy_in_nodes: 'Своя HTML-заглушка задаётся в настройках ноды панели ({link}).',
+  panel_node_settings: 'настройках ноды панели',
 }

@@ -257,6 +257,7 @@
  "Сайт, который видит всё, что не является REALITY-клиентом.": "The site that anything other than a REALITY client sees.",
  "Сайт-заглушка домена подписок": "Subscription domain decoy site",
  "Сайт-заглушка на локальном nginx.": "Decoy site served by the local nginx.",
+ "Своя заглушка вместо DECOY_SITE — абсолютный путь на сервере ноды к папке с index.html или к HTML-файлу; файлы должны быть доступны веб-серверу ноды (nginx или Caddy) на чтение; пусто — встроенный сайт DECOY_SITE": "Your own decoy instead of DECOY_SITE: an absolute path on the node's server to a folder with index.html or to an HTML file; the node's web server (nginx or Caddy) must be able to read the files; empty means the built-in DECOY_SITE",
  "Сайт-заглушка панели": "Panel decoy site",
  "Сайт-заглушка — его отдают и nginx, и Hysteria тем, кто пришёл без пароля (masquerade).": "The decoy site — both nginx and Hysteria serve it to whoever comes without a password (masquerade).",
  "Сайт-заглушка, который видит всё, что не является Reality-клиентом.": "The decoy site that anything other than a Reality client sees.",

@@ -379,17 +379,43 @@ func TestSecurityHardeningWebAPI(t *testing.T) {
 		}
 	}
 
-	// Custom HTML decoy path accepts an existing HTML file and can be cleared.
+	// Custom HTML decoy path is configured on the node (local node checks the path on disk; remote checks syntax).
+	ctx := context.Background()
 	customHTML := filepath.Join(t.TempDir(), "custom.html")
 	if err := os.WriteFile(customHTML, []byte("<!doctype html><h1>Own</h1>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := json.Marshal(map[string]string{"key": "web.decoy_path", "value": customHTML})
-	if w := c.do("PUT", "/api/settings", string(payload), true); w.Code != 200 {
-		t.Fatalf("valid web.decoy_path rejected: %d %s", w.Code, w.Body.String())
+	localNode, err := svc.EnsureLocalNode(ctx, service.NodeInput{Name: "Panel", Country: "nl", Domain: "panel.example.com"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if w := c.do("PUT", "/api/settings", `{"key":"web.decoy_path","value":""}`, true); w.Code != 200 {
-		t.Fatalf("clearing web.decoy_path rejected: %d %s", w.Code, w.Body.String())
+	localPath := "/api/nodes/" + strconv.FormatInt(localNode.ID, 10)
+	for _, bad := range []string{"/etc/passwd", "/nonexistent/path/index.html"} {
+		payload, _ := json.Marshal(map[string]string{"decoyPath": bad})
+		if w := c.do("PATCH", localPath, string(payload), true); w.Code != 400 {
+			t.Fatalf("local node accepted bad decoyPath %q: %d %s", bad, w.Code, w.Body.String())
+		}
+	}
+	payload, _ := json.Marshal(map[string]string{"decoyPath": customHTML})
+	if w := c.do("PATCH", localPath, string(payload), true); w.Code != 200 {
+		t.Fatalf("local node rejected valid decoyPath: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("PATCH", localPath, `{"decoyPath":""}`, true); w.Code != 200 {
+		t.Fatalf("clearing local node decoyPath rejected: %d %s", w.Code, w.Body.String())
+	}
+	remoteNode, _, err := svc.CreateNode(ctx, service.ActorCLI, service.NodeInput{Name: "DE", Country: "de", Domain: "de.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remotePath := "/api/nodes/" + strconv.FormatInt(remoteNode.ID, 10)
+	if w := c.do("PATCH", remotePath, `{"decoyPath":"/etc/passwd"}`, true); w.Code != 400 {
+		t.Fatalf("remote node accepted /etc/passwd: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("PATCH", remotePath, `{"decoyPath":"/var/www/site/"}`, true); w.Code != 200 {
+		t.Fatalf("remote node rejected valid decoyPath with trailing slash: %d %s", w.Code, w.Body.String())
+	}
+	if got, err := svc.Node(ctx, remoteNode.ID); err != nil || got.DecoyPath != "/var/www/site" {
+		t.Fatalf("remote node decoyPath = %q (err=%v), want /var/www/site", got.DecoyPath, err)
 	}
 
 	// POST /api/logout requires X-Vynel: 1 (CSRF protection across sibling subdomains).

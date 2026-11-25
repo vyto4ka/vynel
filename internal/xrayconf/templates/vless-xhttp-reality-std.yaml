@@ -75,6 +75,12 @@ variables:
     options: [cloud, studio, docs, coffee, journal]
     default: cloud
     description: Сайт, который видит всё, что не является REALITY-клиентом.
+  - name: DECOY_PATH
+    scope: node
+    source: input
+    optional: true
+    validate: path
+    description: Своя заглушка вместо DECOY_SITE — абсолютный путь на сервере ноды к папке с index.html или к HTML-файлу; файлы должны быть доступны веб-серверу ноды (nginx или Caddy) на чтение; пусто — встроенный сайт DECOY_SITE
 
 # Server and client share one extra: it has no server-only keys. Matches the usual community
 # config: {"mode":"auto","xPaddingBytes":"100-1342"}.
@@ -130,6 +136,7 @@ nginx:
   domain: ${NODE_DOMAIN}
   local_port: ${SELFSTEAL_PORT}
   decoy: ${DECOY_SITE}
+  decoy_path: ${DECOY_PATH}
 
 node_requirements:
   ports: [443/tcp, 80/tcp]

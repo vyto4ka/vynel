@@ -770,6 +770,7 @@ components:
         country: { type: string, example: nl }
         flag: { type: string }
         domain: { type: string }
+        decoy_path: { type: string }
         enabled: { type: boolean }
         state: { type: string, enum: [disabled, pending, offline, in sync, syncing] }
         online: { type: boolean, description: The node has a live connection to the panel }

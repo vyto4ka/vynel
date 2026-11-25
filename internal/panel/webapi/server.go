@@ -176,10 +176,7 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name, _ = s.svc.Setting(ctx, service.SettingSubDecoy, "")
 	}
-	customPath, _ := s.svc.Setting(ctx, service.SettingWebDecoyPath, "")
-	if customPath == "" {
-		customPath, _ = s.svc.Setting(ctx, service.SettingSubDecoyPath, "")
-	}
+	customPath := s.svc.EffectiveWebDecoyPath(ctx)
 	seed, _ := s.svc.Setting(ctx, service.SettingDecoySeed, "")
 	if customPath != "" {
 		decoy.ServeCustom(w, r, customPath, name, seed)

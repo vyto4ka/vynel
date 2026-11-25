@@ -94,6 +94,8 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 			problems = append(problems, fmt.Sprintf("%s: caddy: %v", r.Tag, err))
 			continue
 		}
+		dn, dp := nodeDecoy(r.Tag, cm, n.DecoyPath, &problems)
+		decoyRoute := caddyconf.Route{Kind: caddyconf.KindDecoy, Decoy: dn, DecoyPath: dp}
 		switch str(cm["role"]) {
 		case "selfsteal":
 			// Only when this inbound's Reality target really is the local Caddy.
@@ -107,7 +109,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 				continue // e.g. a profile override points Reality at a foreign site
 			}
 			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: front.localPort, ProxyProtocol: true,
-				Routes: []caddyconf.Route{{Kind: caddyconf.KindDecoy, Decoy: decoyName(str(cm["decoy"]))}}})
+				Routes: []caddyconf.Route{decoyRoute}})
 		case "certificate":
 			// The inbound needs Caddy's certificate for the domain (Hysteria2 uses it directly).
 			// The site lives on 127.0.0.1 only: the certificate comes over HTTP-01 on :80, and when a
@@ -117,7 +119,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 				port = 8443
 			}
 			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), LocalPort: port,
-				Routes: []caddyconf.Route{{Kind: caddyconf.KindDecoy, Decoy: decoyName(str(cm["decoy"]))}}})
+				Routes: []caddyconf.Route{decoyRoute}})
 		case "reverse_proxy_xhttp":
 			bind := str(vals["LISTEN_IP"])
 			if bind == "0.0.0.0" {
@@ -125,7 +127,7 @@ func (s *Service) caddySpec(ctx context.Context, n *store.Node, inbounds []*xray
 			}
 			sites = append(sites, caddyconf.Site{Domain: str(cm["domain"]), Bind: bind, Port: 443, Routes: []caddyconf.Route{
 				{Kind: caddyconf.KindStream, Upstream: str(cm["upstream"]), PathPrefix: str(cm["path"])},
-				{Kind: caddyconf.KindDecoy, Decoy: "cloud"},
+				decoyRoute,
 			}})
 		}
 	}
@@ -228,20 +230,10 @@ func (s *Service) panelSites(ctx context.Context) ([]caddyconf.Site, []string, e
 		webBind = bind
 	}
 	d, _ := s.Setting(ctx, SettingSubDecoy, "docs")
-	dp, _ := s.Setting(ctx, SettingSubDecoyPath, "")
-	if cleaned, err := decoy.ValidateCustomPath(dp); err == nil {
-		dp = cleaned
-	} else {
-		dp = ""
-	}
+	dp := s.EffectiveSubDecoyPath(ctx)
 	decoyRoute := caddyconf.Route{Kind: caddyconf.KindDecoy, Decoy: decoyName(d), DecoyPath: dp}
 	wd, _ := s.Setting(ctx, SettingWebDecoy, "")
-	wdp, _ := s.Setting(ctx, SettingWebDecoyPath, "")
-	if cleaned, err := decoy.ValidateCustomPath(wdp); err == nil {
-		wdp = cleaned
-	} else {
-		wdp = ""
-	}
+	wdp := s.EffectiveWebDecoyPath(ctx)
 	webDecoyRoute := decoyRoute
 	if wdp != "" {
 		webDecoyRoute.DecoyPath = wdp
@@ -318,6 +310,27 @@ func (s *Service) PanelCaddyConfig(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	return caddyconf.Build(spec)
+}
+
+// nodeDecoy is the decoy route of a node site: the inbound's own decoy_path first, then the
+// node-level DecoyPath, then the built-in site; a bad path becomes a problem and falls back.
+func nodeDecoy(tag string, cm map[string]any, nodePath string, problems *[]string) (name, path string) {
+	name = decoyName(str(cm["decoy"]))
+	if raw := strings.TrimSpace(str(cm["decoy_path"])); raw != "" {
+		p, err := decoy.ValidateCustomPath(raw)
+		if err == nil {
+			return name, p
+		}
+		*problems = append(*problems, fmt.Sprintf("%s: decoy_path: %v", tag, err))
+	}
+	if raw := strings.TrimSpace(nodePath); raw != "" {
+		p, err := decoy.ValidateCustomPath(raw)
+		if err == nil {
+			return name, p
+		}
+		*problems = append(*problems, fmt.Sprintf("%s: node decoy_path: %v", tag, err))
+	}
+	return name, ""
 }
 
 func decoyName(n string) string {

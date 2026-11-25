@@ -259,13 +259,27 @@ type caddyDecoy struct {
 // Routes with a path prefix go first, so a catch-all decoy never shadows them.
 func siteRoutes(rs []Route) ([]any, caddyDecoy, error) {
 	rs = append([]Route(nil), rs...)
-	sort.SliceStable(rs, func(i, j int) bool { return rs[i].PathPrefix != "" && rs[j].PathPrefix == "" })
+	// Like nginx: real routes before decoys, and the admin's own decoy before built-in ones, so a
+	// merged site serves (and answers 404 with) the custom page.
+	rank := func(r Route) int {
+		switch {
+		case r.PathPrefix != "":
+			return 0
+		case r.Kind != KindDecoy:
+			return 1
+		case r.DecoyPath != "":
+			return 2
+		}
+		return 3
+	}
+	sort.SliceStable(rs, func(i, j int) bool { return rank(rs[i]) < rank(rs[j]) })
 	var out []any
 	var dt caddyDecoy
 	for _, r := range rs {
 		var handlers []any
 		switch r.Kind {
 		case KindDecoy:
+			var cur caddyDecoy
 			if r.DecoyPath != "" {
 				cleaned, err := decoy.ValidateCustomPath(r.DecoyPath)
 				if err != nil {
@@ -273,21 +287,25 @@ func siteRoutes(rs []Route) ([]any, caddyDecoy, error) {
 				}
 				if decoy.IsHTMLFile(cleaned) {
 					uri := "/" + filepath.Base(cleaned)
-					dt = caddyDecoy{root: filepath.Dir(cleaned), errURI: uri}
+					cur = caddyDecoy{root: filepath.Dir(cleaned), errURI: uri}
 					handlers = []any{
 						map[string]any{"handler": "rewrite", "uri": uri},
-						map[string]any{"handler": "file_server", "root": dt.root},
+						map[string]any{"handler": "file_server", "root": cur.root},
 					}
 				} else {
-					dt = caddyDecoy{root: cleaned, errURI: "/404.html"}
-					handlers = []any{map[string]any{"handler": "file_server", "root": dt.root}}
+					cur = caddyDecoy{root: cleaned, errURI: "/404.html"}
+					handlers = []any{map[string]any{"handler": "file_server", "root": cur.root}}
 				}
 			} else {
 				if !validCaddyDecoy(r.Decoy) {
 					return nil, caddyDecoy{}, fmt.Errorf("invalid decoy site %q", r.Decoy)
 				}
-				dt = caddyDecoy{root: DecoyDirPlaceholder + "/" + r.Decoy, errURI: "/404.html"}
-				handlers = []any{map[string]any{"handler": "file_server", "root": dt.root}}
+				cur = caddyDecoy{root: DecoyDirPlaceholder + "/" + r.Decoy, errURI: "/404.html"}
+				handlers = []any{map[string]any{"handler": "file_server", "root": cur.root}}
+			}
+
+			if dt.root == "" {
+				dt = cur
 			}
 		case KindProxy:
 			if err := checkCaddyUpstream(r.Upstream); err != nil {

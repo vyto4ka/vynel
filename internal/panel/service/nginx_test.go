@@ -529,3 +529,84 @@ func TestNginxTwoRealitySameSNIProblem(t *testing.T) {
 	}
 	contains(t, ds.Nginx, "ssl_preread on;", "nl.example.com 127.0.0.1:10443;", "default 127.0.0.1:8443;", "location ^~ /s/ {")
 }
+
+// A node's own decoy (DECOY_PATH) replaces the built-in site; a bad path is a problem and the built-in stays.
+func TestNginxNodeCustomDecoy(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		ok   bool
+	}{{"/var/www/site", true}, {"/var/www/../x", false}, {"/etc/x", false}} {
+		f := newFixture(t)
+		n := must(f.s.EnsureLocalNode(f.ctx, NodeInput{Name: "NL", Country: "nl", Domain: "nl.example.com"}))
+		prof := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+		must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: prof.ID, Values: map[string]any{"DECOY_PATH": tc.path}}))
+		f.nginxNode(t, n)
+		ds := must(f.s.DesiredState(f.ctx, n.ID))
+		if tc.ok {
+			if len(ds.Problems) > 0 {
+				t.Fatalf("%s: problems %v", tc.path, ds.Problems)
+			}
+			contains(t, ds.Nginx, "root "+tc.path+";", "location = /404.html { root "+tc.path+";")
+		} else {
+			if len(ds.Problems) == 0 || !strings.Contains(strings.Join(ds.Problems, "\n"), "decoy_path") {
+				t.Fatalf("%s: want decoy_path problem, got %v", tc.path, ds.Problems)
+			}
+			if strings.Contains(ds.Nginx, "root "+tc.path+";") {
+				t.Fatalf("%s: bad path rendered:\n%s", tc.path, ds.Nginx)
+			}
+			contains(t, ds.Nginx, "root @@DECOY@@")
+		}
+	}
+}
+
+// Hysteria2 (built-in decoy) attached before Reality with DECOY_PATH on the same domain: the merged
+// site must serve and answer 404 with the custom decoy.
+func TestNginxMergedSiteCustomDecoyWins(t *testing.T) {
+	f := newFixture(t)
+	n := must(f.s.EnsureLocalNode(f.ctx, NodeInput{Name: "NL", Country: "nl", Domain: "nl.example.com"}))
+	hy := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Hy", TemplateID: "hysteria2"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: hy.ID}))
+	re := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+	must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: re.ID, Values: map[string]any{"DECOY_PATH": "/var/www/site"}}))
+	f.nginxNode(t, n)
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	contains(t, ds.Nginx, "root /var/www/site;", "location = /404.html { root /var/www/site;")
+	if strings.Contains(ds.Nginx, "root @@DECOY@@") {
+		t.Fatalf("built-in decoy rendered:\n%s", ds.Nginx)
+	}
+}
+
+// Node-level DecoyPath applies to all sites on the node (including panel/subscription sites on
+// the local node), and an inbound's DECOY_PATH overrides the node-level path.
+func TestNginxNodeLevelDecoyPathAndOverride(t *testing.T) {
+	f := newFixture(t)
+	nodePath := "/var/www/node-decoy"
+	n, _, err := f.s.CreateNode(f.ctx, ActorCLI, NodeInput{Name: "DE", Country: "de", Domain: "de.example.com", DecoyPath: &nodePath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := must(f.s.CreateProfile(f.ctx, ActorCLI, ProfileInput{Name: "Reality", TemplateID: "vless-reality-selfsteal"}))
+	ni := must(f.s.AttachProfile(f.ctx, ActorCLI, AttachInput{NodeID: n.ID, ProfileID: re.ID}))
+	f.nginxNode(t, n)
+
+	// Without inbound DECOY_PATH, the node-level DecoyPath is used.
+	ds := must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	contains(t, ds.Nginx, "root /var/www/node-decoy;", "location = /404.html { root /var/www/node-decoy;")
+
+	// Inbound DECOY_PATH overrides the node-level DecoyPath.
+	must(f.s.UpdateNodeInbound(f.ctx, ActorCLI, ni.ID, NodeInboundInput{Values: map[string]any{"DECOY_PATH": "/var/www/inbound-decoy"}}))
+	ds = must(f.s.DesiredState(f.ctx, n.ID))
+	if len(ds.Problems) > 0 {
+		t.Fatal(ds.Problems)
+	}
+	contains(t, ds.Nginx, "root /var/www/inbound-decoy;", "location = /404.html { root /var/www/inbound-decoy;")
+	if strings.Contains(ds.Nginx, "root /var/www/node-decoy;") {
+		t.Fatalf("node-level decoy should be overridden by inbound DECOY_PATH:\n%s", ds.Nginx)
+	}
+}

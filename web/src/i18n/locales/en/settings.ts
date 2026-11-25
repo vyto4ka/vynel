@@ -38,4 +38,7 @@ export default {
   what_a_stranger_who_found: 'what a stranger who found the server sees',
   where_addresses_are_chosen: 'Where addresses are chosen',
   which_ip_serves_what_and: 'which IP serves what and where the domains point',
+  custom_decoy_in_panel_node: 'Custom HTML decoy is configured in {link}.',
+  custom_decoy_in_nodes: 'Custom HTML decoy is configured in the panel node settings ({link}).',
+  panel_node_settings: 'panel node settings',
 }

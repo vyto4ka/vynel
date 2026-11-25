@@ -195,4 +195,8 @@ export default {
   certs_update_node_hint: 'This node agent version does not support forced certificate reissue — update the node first.',
   certs_offline_hint: 'The node is offline: reissue will be available once it reconnects.',
   certs_le_rate_hint: 'Certificates renew automatically 30 days before expiry. Use forced reissue if renewal failed or you need a fresh certificate.',
+  decoy_path: 'Custom HTML decoy',
+  decoy_path_help: 'Path to a folder with index.html or an HTML file on the node server; empty — built-in site.',
+  decoy_path_info: 'Absolute path on this node’s server, e.g. /var/www/site or /var/www/stub.html. Applies to all sites on the node (self-steal, XHTTP); an inbound’s DECOY_PATH variable overrides this path. Files must be readable by the node’s web server.',
+  decoy_path_local_info: 'Absolute path on the panel server, e.g. /var/www/site or /var/www/stub.html. Applies to the panel, subscription domain, and local node sites; an inbound’s DECOY_PATH variable overrides this path. Files must be readable by the web server.',
 }
