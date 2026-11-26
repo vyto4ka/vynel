@@ -26,6 +26,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/certs"
 	"github.com/vyto4ka/vynel/internal/node/caddy"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
+	"github.com/vyto4ka/vynel/internal/node/inventory"
 	"github.com/vyto4ka/vynel/internal/node/metrics"
 	"github.com/vyto4ka/vynel/internal/node/nginx"
 	"github.com/vyto4ka/vynel/internal/node/state"
@@ -88,6 +89,8 @@ type Config struct {
 	FactsInterval time.Duration
 	// CheckFacts overrides sysctl.Check in tests.
 	CheckFacts func() []string
+	// Inventory overrides inventory.Collect in tests.
+	Inventory func(ctx context.Context) inventory.Snapshot
 	// FetchGeo streams panel-managed .dat files (gRPC FetchGeoAsset or direct local read).
 	FetchGeo GeoFetcher
 }
@@ -110,6 +113,7 @@ type Agent struct {
 	caddyVer     string
 	nginxVer     string
 	warnings     []string
+	invJSON      []byte
 	metrics      metrics.Collector
 	statsCh      chan struct{} // a batch was queued
 	certKick     chan struct{} // a new web config may need certificates: issue now, not at the next tick
@@ -166,6 +170,11 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.CheckFacts == nil {
 		cfg.CheckFacts = sysctl.Check
+	}
+	if cfg.Inventory == nil {
+		cfg.Inventory = func(ctx context.Context) inventory.Snapshot {
+			return inventory.Collect(ctx, cfg.DataDir)
+		}
 	}
 	if cfg.Reboot == nil {
 		cfg.Reboot = func() error { return exec.Command("systemctl", "reboot").Run() }
@@ -263,6 +272,18 @@ func (a *Agent) refreshFacts(ctx context.Context) bool {
 	return true
 }
 
+func (a *Agent) collectInventoryJSON(ctx context.Context) ([]byte, error) {
+	snap := a.cfg.Inventory(ctx)
+	b, err := json.Marshal(snap)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	a.invJSON = b
+	a.mu.Unlock()
+	return b, nil
+}
+
 func (a *Agent) buildHello() *nodev1.Hello {
 	addrs := a.cfg.Addresses()
 	a.mu.Lock()
@@ -272,18 +293,28 @@ func (a *Agent) buildHello() *nodev1.Hello {
 	}
 	warnings := slices.Clone(a.warnings)
 	nginxVer := a.nginxVer
+	invJSON := a.invJSON
 	a.mu.Unlock()
+	if invJSON == nil {
+		cctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		invJSON, _ = a.collectInventoryJSON(cctx)
+		cancel()
+	}
 	hello := &nodev1.Hello{
 		AgentVersion: a.cfg.Version, XrayVersion: a.xrayVer, AppliedHash: applied,
 		Os: runtime.GOOS, Arch: runtime.GOARCH, Addresses: addrs,
 		CaddyVersion: a.caddyVer, Warnings: warnings, NginxVersion: nginxVer,
+		InventoryJson: invJSON,
 	}
-	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit, CapGeo, CapWarp)
+	hello.Capabilities = append(hello.Capabilities, CapChunks, CapIPLimit, CapGeo, CapWarp, CapInventory)
 	if !a.cfg.Manual && nginxVer != "" {
 		hello.Capabilities = append(hello.Capabilities, CapNginx, CapCerts)
 	}
 	return hello
 }
+
+// CapInventory is the capability of agents that report host inventory and handle ACTION_INVENTORY.
+const CapInventory = "inventory"
 
 // CapCerts is the capability of agents that report certificate statuses and accept ACTION_RENEW_CERTS.
 const CapCerts = "certs"
@@ -687,6 +718,12 @@ func (a *Agent) command(ctx context.Context, c *nodev1.Command) (res *nodev1.Com
 		res.Detail, err = a.handleWarpProvision(ctx, c.Payload)
 	case nodev1.Command_ACTION_WARP_CHECK:
 		res.Detail, err = a.handleWarpCheck(ctx, c.Payload)
+	case nodev1.Command_ACTION_INVENTORY:
+		var raw []byte
+		raw, err = a.collectInventoryJSON(ctx)
+		if err == nil {
+			res.Detail = string(raw)
+		}
 	case nodev1.Command_ACTION_REBOOT:
 		res.Detail = "the server reboots now"
 		after = func() {

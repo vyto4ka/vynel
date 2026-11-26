@@ -16,8 +16,8 @@ import (
 	"github.com/vyto4ka/vynel/internal/xray/xraytest"
 )
 
-// Regression: the old KeqDroid response contained only the two local servers, because all
-// external transports not understood by ParseLinks were filtered out of Xray subscriptions.
+// Regression: when KeqDroid is configured for Xray JSON, external transports not understood by
+// ParseLinks are kept alongside full local client configs in mixed mode; by default KeqDroid gets base64 links.
 func TestKeqDroidMixedExternalServers(t *testing.T) {
 	e := newEnv(t)
 	external := []string{
@@ -45,6 +45,32 @@ func TestKeqDroidMixedExternalServers(t *testing.T) {
 	if err := e.svc.SetClientRouting(e.ctx, actor, &r); err != nil {
 		t.Fatal(err)
 	}
+	// Default rule gives KeqDroid base64 links (local + external) and Routing header.
+	for _, ua := range []string{"KeqDroid/0.34.1", "Happ/4.1", "INCY/3.6.5"} {
+		rec := e.get(e.path(), ua, "hw-1")
+		ls := links(t, rec)
+		if len(ls) != 12 {
+			t.Fatalf("%s: got %d links", ua, len(ls))
+		}
+		for _, link := range external {
+			if !slices.Contains(ls, link) {
+				t.Fatal("external link lost in base64")
+			}
+		}
+		if rec.Header().Get("Routing") == "" {
+			t.Fatalf("%s: missing Routing header", ua)
+		}
+	}
+	// When the admin switches KeqDroid's rule to Xray JSON, mixed payload preserves both local JSON configs and external links.
+	rules, _ := e.svc.SubRules(e.ctx)
+	for i := range rules {
+		if strings.Contains(rules[i].Pattern, "keqdroid") {
+			rules[i].Format = "xray"
+		}
+	}
+	if err := e.svc.SetSubRules(e.ctx, actor, rules); err != nil {
+		t.Fatal(err)
+	}
 	for _, ua := range []string{"KeqDroid/0.34.1", "keqdis/0.34.0"} {
 		rec := e.get(e.path(), ua, "hw-1")
 		if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
@@ -70,17 +96,6 @@ func TestKeqDroidMixedExternalServers(t *testing.T) {
 		}
 		if rec.Header().Get("Routing") == "" {
 			t.Fatal("raw links need provider routing")
-		}
-	}
-	for _, ua := range []string{"Happ/4.1", "INCY/3.6.5"} {
-		ls := links(t, e.get(e.path(), ua, "hw-1"))
-		if len(ls) != 12 {
-			t.Fatalf("%s: got %d links", ua, len(ls))
-		}
-		for _, link := range external {
-			if !slices.Contains(ls, link) {
-				t.Fatal("external link lost in base64")
-			}
 		}
 	}
 	// Explicit JSON for other clients remains valid JSON, and the HWID refusal never
@@ -124,7 +139,7 @@ func TestProviderRoutingHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ua := range []string{"Happ/4.1", "INCY/3.6.5", "KeqDroid/0.34.1"} {
-		rec := e.get(e.path()+"/base64", ua, "hw-1")
+		rec := e.get(e.path(), ua, "hw-1")
 		value := rec.Header().Get("Routing")
 		p := decodeRouting(t, value)
 		if keqClient.MatchString(ua) {
@@ -166,7 +181,7 @@ func TestProviderRoutingHeaders(t *testing.T) {
 	if got := e.get(e.path(), "v2rayNG/1.9", "hw-1").Header().Get("Routing"); got != "" {
 		t.Fatal("unrelated client got routing header")
 	}
-	if got := e.get(e.path(), "KeqDroid/0.34.1", "hw-1").Header().Get("Routing"); got != "" {
+	if got := e.get(e.path()+"/json", "KeqDroid/0.34.1", "hw-1").Header().Get("Routing"); got != "" {
 		t.Fatal("full JSON already has per-server routing")
 	}
 	// Saved headers may replace, disable or limit auto routing to selected clients.

@@ -14,6 +14,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/certs"
 	"github.com/vyto4ka/vynel/internal/geostore"
 	"github.com/vyto4ka/vynel/internal/i18n"
+	"github.com/vyto4ka/vynel/internal/node/inventory"
 	"github.com/vyto4ka/vynel/internal/panel/store"
 	"github.com/vyto4ka/vynel/internal/warp"
 )
@@ -130,6 +131,8 @@ type Service struct {
 	WarpProvision func(ctx context.Context, nodeID int64, transport, licenseKey string, existing *warp.Credentials) (*warp.Credentials, error)
 	// WarpCheck runs a live cdn-cgi/trace check through a node's WARP tunnel.
 	WarpCheck func(ctx context.Context, nodeID int64, req warp.CheckRequest) (*warp.CheckResult, error)
+	// NodeInventoryFetch collects a fresh host inventory snapshot from a connected node.
+	NodeInventoryFetch func(ctx context.Context, nodeID int64) (*inventory.Snapshot, error)
 }
 
 // New creates a service over a store.

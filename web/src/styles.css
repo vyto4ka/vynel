@@ -1146,6 +1146,39 @@ a.chip { text-decoration: none; cursor: pointer; }
 }
 
 /* ---------- Инспектор Ноды и интерактивное дерево оверрайдов ---------- */
+.node-head-col { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.node-title-btn {
+  display: inline-flex; align-items: center; gap: 12px; max-width: 100%; min-width: 0;
+  padding: 8px 12px; margin: -4px 0 -4px -8px; border-radius: var(--shape-md);
+  background: color-mix(in srgb, var(--container-high) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--outline-variant) 85%, transparent);
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: background-color .16s var(--ease), border-color .16s var(--ease);
+}
+.node-title-btn:hover {
+  background: var(--container-high);
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--outline-variant));
+}
+.node-title-main { min-width: 0; flex: 1; }
+.node-title-name { transition: color .16s var(--ease); }
+.node-title-btn:hover .node-title-name { color: var(--primary); }
+.node-title-arrow {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  color: var(--muted); transition: color .16s var(--ease), transform .16s var(--ease);
+}
+.node-title-btn:hover .node-title-arrow { color: var(--primary); transform: translateX(2px); }
+.node-provider-row { padding-left: 4px; }
+.inv-kv { grid-template-columns: 164px minmax(0, 1fr); align-items: baseline; }
+.num { font-variant-numeric: tabular-nums; }
+.iface-addr-btn {
+  font-family: "JetBrains Mono", "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: pointer; transition: border-color .15s var(--ease), color .15s var(--ease), background-color .15s var(--ease);
+}
+.iface-addr-btn:hover { border-color: color-mix(in srgb, var(--primary) 55%, var(--outline-variant)); color: var(--on-surface); background: var(--container-highest); }
+@media (max-width: 600px) {
+  .node-title-btn { margin: 0; width: 100%; }
+  .inv-kv { grid-template-columns: 1fr; }
+}
 .inspector-head {
   display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
   margin-bottom: 18px;

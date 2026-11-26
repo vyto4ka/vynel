@@ -1,48 +1,72 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { CertInfo, del, get, Group, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, Provider, SelfHost, SourceMap, Variable } from '../api'
+import { del, get, Group, Inbound, InboundDetails, JoinInfo, Node, NodeWizard, patch, post, Profile, ProfileTemplate, SelfHost, SourceMap, Variable } from '../api'
+import { prefetch } from '../cache'
 import { LogTarget, UpdateChip, UpdateLog, useCheckUpdates, useRunUpdate, useUpdates } from '../updates'
 import { CodeEditor, parseObject, pretty } from '../code'
 import { VariableTable } from './Profiles'
 import { ProviderIcon } from './Billing'
 import { ago, bps, bytes, fmtVersion, nodeStateInfo, uptime } from '../format'
-import { Badge, Bar, CopyField, Empty, Field, Icon, Info, Loading, Menu, Modal, Switch, Tabs, useAction, useConfirm, useLoad } from '../ui'
+import { Badge, Bar, CopyField, Empty, Field, Icon, Loading, Menu, MenuItem, Modal, Switch, useAction, useConfirm, useLoad } from '../ui'
 import { t, Trans, Key } from '../i18n'
 import { useAdvanced } from '../mode'
 import { LinkProvider, pathsWith, useActiveLink } from '../jsonlink'
-import { NodeInspector } from './NodeInspector'
-import { NodeWarpModal } from '../components/NodeWarpModal'
+import { CertsList, NodeDetailTab, NodeInspector, summarizeCerts } from './NodeInspector'
+
+function openNodeIdFromHash(): number | null {
+  const m = location.hash.match(/^#\/nodes\/(\d+)/)
+  return m ? Number(m[1]) : null
+}
 
 export function Nodes() {
   const nodes = useLoad(() => get<Node[]>('nodes'), [], 10000, 'nodes')
   const selfHost = useLoad(() => get<SelfHost>('self-host'), [], 30000, 'self-host')
   const profiles = useLoad(() => get<Profile[]>('profiles'), [], 0, 'profiles')
   const [adding, setAdding] = useState(() => location.hash.startsWith('#/nodes/new'))
-  const [inspectId, setInspectId] = useState<number | null>(null)
+  const [inspectId, setInspectId] = useState<number | null>(openNodeIdFromHash)
+  const [inspectTab, setInspectTab] = useState<NodeDetailTab>('system')
   const [join, setJoin] = useState<JoinInfo | null>(null)
   const [checkOf, setCheckOf] = useState<Node | null>(null)
-  const [editNode, setEditNode] = useState<{ node: Node; tab?: 'general' | 'certs' } | null>(null)
-  const [warpOf, setWarpOf] = useState<Node | null>(null)
   const [attachTo, setAttachTo] = useState<Node | null>(null)
   const [wizardOf, setWizardOf] = useState<Node | null>(null)
   const [hostOf, setHostOf] = useState<Inbound | null>(null)
   const [configOf, setConfigOf] = useState<Inbound | null>(null)
   const act = useAction()
   const confirm = useConfirm()
-  const reload = nodes.reload
+  const reload = () => { nodes.reload(); selfHost.reload() }
   const updates = useUpdates(15000)
   const checkUpd = useCheckUpdates()
   const [updLog, setUpdLog] = useState<LogTarget[] | null>(null)
-  const upd = useRunUpdate(updates.data, () => { updates.reload(); reload(); selfHost.reload() }, (targets) => setUpdLog(targets))
+  const upd = useRunUpdate(updates.data, () => { updates.reload(); reload() }, (targets) => setUpdLog(targets))
   const engineer = useAdvanced()
   const light = false
   // У локальной ноды версия панели: она обновляется вместе с панелью.
   const updOf = (n: Node) => n.local ? updates.data?.panel : updates.data?.nodes.find((x) => x.id === n.id)
 
+  const openNode = (id: number | null, tab: NodeDetailTab = 'system') => {
+    setInspectTab(tab)
+    setInspectId(id)
+    history.replaceState(null, '', id != null ? `#/nodes/${id}` : '#/nodes')
+  }
+
+  useEffect(() => {
+    const onHash = () => {
+      if (location.hash.startsWith('#/nodes/new')) {
+        setAdding(true)
+        return
+      }
+      const id = openNodeIdFromHash()
+      if (id !== null) setInspectId(id)
+      else if (location.hash === '#/nodes') setInspectId(null)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
   useEffect(() => {
     if (location.hash !== '#/nodes/edit-local' || !nodes.data) return
     const local = nodes.data.find((x) => x.local)
-    if (local) setEditNode({ node: local, tab: 'general' })
-    history.replaceState(null, '', '#/nodes')
+    if (local) openNode(local.id, 'settings')
+    else history.replaceState(null, '', '#/nodes')
   }, [nodes.data])
 
   // Действия с нодой через её живое соединение с панелью.
@@ -52,21 +76,80 @@ export function Nodes() {
     reload()
   }
 
+  const nodeMenuItems = (n: Node): MenuItem[] => {
+    const online = n.state === 'in sync' || n.state === 'syncing'
+    return [
+      { label: t('nodes.open_node_card'), icon: 'nodes', onClick: () => openNode(n.id, 'system') },
+      { label: t('nodes.check_connection_config_dns'), icon: 'search', onClick: () => setCheckOf(n) },
+      { label: t('nodes.tab_settings'), icon: 'edit', onClick: () => openNode(n.id, 'settings') },
+      { label: t('warp.title'), icon: 'cloud', onClick: () => openNode(n.id, 'warp') },
+      ...(!n.manual ? [{ label: t('nodes.certs_title'), icon: 'shield', onClick: () => openNode(n.id, 'certs') }] : []),
+      { label: n.enabled ? t('nodes.node_turned_off') : t('nodes.node_turned_on'), icon: 'power', onClick: async () => {
+        if (n.enabled && !(await confirm(`${n.name}: ${t('nodes.node_turned_off')}?`, t('common.yes')))) return
+        act(() => patch(`nodes/${n.id}`, { enabled: !n.enabled }), !n.enabled ? t('nodes.node_turned_on') : t('nodes.node_turned_off')).then(reload)
+      } },
+      'divider',
+      { label: t('nodes.restart_xray'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'xray', t('nodes.xray_restarted')) },
+      ...(!n.manual ? [{ label: t('nodes.restart_the_web_server'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', t('nodes.web_server_restarted')) }] : []),
+      { label: t('nodes.resend_the_config'), icon: 'nodes', disabled: !online, onClick: () => nodeAction(n, 'resync', t('nodes.config_sent')) },
+      'divider',
+      { label: updOf(n)?.available ? t('nodes.update_to', { latest: updates.data?.latest }) : t('nodes.update_vynel_xray_and_nginx'), icon: 'refresh', disabled: !online || !!updOf(n)?.updating,
+        onClick: async () => {
+          if (await confirm(n.local ? t('nodes.update_the_panel_and_the') : <><Trans k="nodes.update_the_node_it_will" v={{ name: n.name }} /></>, t('nodes.update'), false))
+            upd.run(n.local ? 'panel' : 'node', n.id)
+        } },
+      { label: t('nodes.update_log'), icon: 'audit', onClick: () => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? (updates.data?.panel.name || t('common.panel')) : n.name, initial: updOf(n) }]) },
+      { label: n.local ? t('nodes.restart_the_service_and_the') : t('nodes.restart_the_vynel_service'), icon: 'power', disabled: !online,
+        onClick: () => nodeAction(n, 'service', t('nodes.the_service_is_restarting'),
+          n.local ? t('nodes.restart_the_vynel_service_the') : t('nodes.restart_the_vynel_service_on'), t('nodes.restart')) },
+      { label: t('nodes.reboot_the_server'), icon: 'power', danger: true, disabled: !online,
+        onClick: () => nodeAction(n, 'reboot', t('nodes.the_server_is_rebooting'),
+          <><Trans k="nodes.reboot_the_server_2" v={{ name: n.name }} />{n.local ? t('nodes.this_is_the_panel_server') : t('nodes.the_vpn_on_it_goes')}</>, t('nodes.reboot')) },
+      ...(!n.local ? ['divider' as const,
+        { label: t('nodes.new_join_token'), icon: 'key', onClick: async () => {
+          if (await confirm(t('nodes.issue_a_new_token_the'), t('nodes.issue'))) {
+            const j = await act(() => post<JoinInfo>(`nodes/${n.id}/token`))
+            if (j) { setJoin(j); reload() }
+          }
+        } },
+        { label: t('nodes.delete_the_node'), icon: 'trash', danger: true, onClick: async () => {
+          if (await confirm(<><Trans k="nodes.delete_the_node_its_inbounds" v={{ name: n.name }} /></>, t('common.delete'))) {
+            await act(() => del(`nodes/${n.id}`), t('nodes.node_deleted'))
+            if (inspectId === n.id) openNode(null)
+            reload()
+          }
+        } }] : []),
+    ]
+  }
+
+  const sharedModals = (
+    <>
+      {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setAdding(false); setJoin(j); reload() }} />}
+      {join && <NodeSetup j={join} onClose={() => { setJoin(null); reload() }} onDone={(n) => { setJoin(null); setWizardOf(n); reload() }} />}
+      {wizardOf && <NodeWizardModal node={wizardOf} profiles={profiles.data || []} onClose={() => { setWizardOf(null); reload() }} onProfilesChanged={profiles.reload} />}
+      {updLog && updLog.length > 0 && <UpdateLog id={updLog[0].id} name={updLog[0].name} targets={updLog} onClose={() => { setUpdLog(null); updates.reload() }} />}
+      {checkOf && <NodeSetup node={checkOf} onClose={() => { setCheckOf(null); reload() }} />}
+      {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}
+      {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
+      {configOf && <InboundEditor i={configOf} onClose={() => setConfigOf(null)} onSaved={reload} />}
+    </>
+  )
+
   const inspectedNode = inspectId != null ? nodes.data?.find((x) => x.id === inspectId) : null
   if (inspectedNode) {
     return (
       <>
         <NodeInspector
           node={inspectedNode}
-          onBack={() => setInspectId(null)}
+          initialTab={inspectTab}
+          actionsMenu={nodeMenuItems(inspectedNode).slice(1)}
+          onBack={() => openNode(null)}
           onAttach={() => setAttachTo(inspectedNode)}
           onEditHost={(inb) => setHostOf(inb)}
           onEditConfig={(inb) => setConfigOf(inb)}
           onReload={reload}
         />
-        {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}
-        {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
-        {configOf && <InboundEditor i={configOf} onClose={() => setConfigOf(null)} onSaved={() => { setConfigOf(null); reload() }} />}
+        {sharedModals}
       </>
     )
   }
@@ -99,7 +182,7 @@ export function Nodes() {
             if (await confirm(t('nodes.update_the_panel_and_the'), t('nodes.update'), false)) upd.run('panel')
           }}
           onLog={() => setUpdLog([{ id: 0, name: updates.data?.panel.name || t('common.panel'), initial: updates.data?.panel }])}
-          onReload={() => { selfHost.reload(); reload() }}
+          onReload={reload}
         />
       )}
 
@@ -109,40 +192,47 @@ export function Nodes() {
         <div className="cards">
           {nodes.data.map((n) => {
             const st = nodeStateInfo[n.state] || { label: n.state, color: '' }
-            const online = n.state === 'in sync' || n.state === 'syncing'
             const m = n.metrics
             const certsSummary = summarizeCerts(n.certs)
             return (
               <div key={n.id} className="card">
                 <div className="card-head">
-                  <div className="node-head">
-                    <span className="flag">{n.flag || '🌐'}</span>
-                    <div>
-                      <h3>
-                        {engineer ? (
-                          <button type="button" className="btn ghost sm" style={{ padding: '0 4px', marginLeft: -4, height: 'auto', fontSize: 15.5, fontWeight: 600, color: 'var(--on-surface)' }}
-                            onClick={() => setInspectId(n.id)}>{n.name}</button>
-                        ) : n.name}
-                        {' '}<span className="muted small">{n.code}</span>{' '}
-                        {!n.enabled && <Badge color="amber">{t('nodes.node_turned_off')}</Badge>}{' '}
-                        {n.local && <Badge>{t('nodes.on_the_panel_server')}</Badge>}{' '}
-                        {n.manual && <Badge>{t('nodes.manual_node')}</Badge>}
-                      </h3>
-                      <div className="card-sub">{n.domain || t('nodes.no_domain')}{' '}<Trans k="nodes.contact" v={{ v: ago(n.lastSeenAt) }} /></div>
-                      {n.provider && (
-                        <div className="row small" style={{ gap: 8, marginTop: 4 }}>
-                          <a className="provider-chip" href={n.provider.loginUrl || n.provider.url || '#/billing'} target={n.provider.loginUrl || n.provider.url ? '_blank' : undefined}
-                            rel="noreferrer" title={n.provider.loginUrl ? t('nodes.sign_in_to_the_provider') : t('nodes.provider_s_site')}>
-                            <ProviderIcon p={n.provider} size={16} />{n.provider.name}
-                          </a>
-                        </div>
-                      )}
-                    </div>
+                  <div className="node-head-col">
+                    <button
+                      type="button"
+                      className="node-title-btn"
+                      title={t('nodes.open_node_card')}
+                      onMouseEnter={() => prefetch(`node-inv:${n.id}`, () => get(`nodes/${n.id}/inventory`), 15000)}
+                      onClick={() => openNode(n.id, 'system')}
+                    >
+                      <span className="flag">{n.flag || '🌐'}</span>
+                      <div className="node-title-main">
+                        <h3>
+                          <span className="node-title-name">{n.name}</span>
+                          {' '}<span className="muted small">{n.code}</span>{' '}
+                          {!n.enabled && <Badge color="amber">{t('nodes.node_turned_off')}</Badge>}{' '}
+                          {n.local && <Badge>{t('nodes.on_the_panel_server')}</Badge>}{' '}
+                          {n.manual && <Badge>{t('nodes.manual_node')}</Badge>}
+                        </h3>
+                        <div className="card-sub">{n.domain || t('nodes.no_domain')}{' '}<Trans k="nodes.contact" v={{ v: ago(n.lastSeenAt) }} /></div>
+                      </div>
+                      <span className="node-title-arrow" aria-hidden>
+                        <Icon name="expand" size={16} />
+                      </span>
+                    </button>
+                    {n.provider && (
+                      <div className="row small node-provider-row">
+                        <a className="provider-chip" href={n.provider.loginUrl || n.provider.url || '#/billing'} target={n.provider.loginUrl || n.provider.url ? '_blank' : undefined}
+                          rel="noreferrer" title={n.provider.loginUrl ? t('nodes.sign_in_to_the_provider') : t('nodes.provider_s_site')}>
+                          <ProviderIcon p={n.provider} size={16} />{n.provider.name}
+                        </a>
+                      </div>
+                    )}
                   </div>
                   <div className="row" style={{ gap: 6 }}>
                     {updOf(n) && <UpdateChip n={updOf(n)!} latest={updates.data!.latest} onLog={() => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? (updates.data?.panel.name || t('common.panel')) : n.name, initial: updOf(n) }])} />}
                     {certsSummary && (
-                      <button type="button" className="chip-btn" onClick={() => setEditNode({ node: n, tab: 'certs' })} title={t('nodes.certs_title')}>
+                      <button type="button" className="chip-btn" onClick={() => openNode(n.id, 'certs')} title={t('nodes.certs_title')}>
                         <Badge color={certsSummary.color} dot>{certsSummary.label}</Badge>
                       </button>
                     )}
@@ -150,7 +240,7 @@ export function Nodes() {
                       <button
                         type="button"
                         className="chip-btn"
-                        onClick={() => setWarpOf(n)}
+                        onClick={() => openNode(n.id, 'warp')}
                         title={n.warp.colo ? `WARP · ${n.warp.colo}` : 'WARP'}
                       >
                         <Badge color="green" dot>
@@ -161,48 +251,11 @@ export function Nodes() {
                     {n.setupStep > 0 && <Badge color="amber" dot>{t('nodes.without_profiles')}</Badge>}
                     <Badge color={st.color} dot>{st.label}</Badge>
                     {engineer && (
-                      <button className="btn sm" onClick={() => setInspectId(n.id)}>
+                      <button className="btn sm" onClick={() => openNode(n.id, 'compiled')}>
                         <Icon name="code" /> Xray / Nginx
                       </button>
                     )}
-                    <Menu title={t('common.actions')} items={[
-                      { label: t('nodes.check_connection_config_dns'), icon: 'search', onClick: () => setCheckOf(n) },
-                      { label: t('common.edit'), icon: 'edit', onClick: () => setEditNode({ node: n, tab: 'general' }) },
-                      { label: t('warp.title'), icon: 'cloud', onClick: () => setWarpOf(n) },
-                      ...(!n.manual ? [{ label: t('nodes.certs_title'), icon: 'shield', onClick: () => setEditNode({ node: n, tab: 'certs' }) }] : []),
-                      { label: n.enabled ? t('nodes.node_turned_off') : t('nodes.node_turned_on'), icon: 'power', onClick: async () => {
-                        if (n.enabled && !(await confirm(`${n.name}: ${t('nodes.node_turned_off')}?`, t('common.yes')))) return
-                        act(() => patch(`nodes/${n.id}`, { enabled: !n.enabled }), !n.enabled ? t('nodes.node_turned_on') : t('nodes.node_turned_off')).then(reload)
-                      } },
-                      'divider',
-                      { label: t('nodes.restart_xray'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'xray', t('nodes.xray_restarted')) },
-                      ...(!n.manual ? [{ label: t('nodes.restart_the_web_server'), icon: 'refresh', disabled: !online, onClick: () => nodeAction(n, 'caddy', t('nodes.web_server_restarted')) }] : []),
-                      { label: t('nodes.resend_the_config'), icon: 'nodes', disabled: !online, onClick: () => nodeAction(n, 'resync', t('nodes.config_sent')) },
-                      'divider',
-                      { label: updOf(n)?.available ? t('nodes.update_to', { latest: updates.data?.latest }) : t('nodes.update_vynel_xray_and_nginx'), icon: 'refresh', disabled: !online || !!updOf(n)?.updating,
-                        onClick: async () => {
-                          if (await confirm(n.local ? t('nodes.update_the_panel_and_the') : <><Trans k="nodes.update_the_node_it_will" v={{ name: n.name }} /></>, t('nodes.update'), false))
-                            upd.run(n.local ? 'panel' : 'node', n.id)
-                        } },
-                      { label: t('nodes.update_log'), icon: 'audit', onClick: () => setUpdLog([{ id: n.local ? 0 : n.id, name: n.local ? (updates.data?.panel.name || t('common.panel')) : n.name, initial: updOf(n) }]) },
-                      { label: n.local ? t('nodes.restart_the_service_and_the') : t('nodes.restart_the_vynel_service'), icon: 'power', disabled: !online,
-                        onClick: () => nodeAction(n, 'service', t('nodes.the_service_is_restarting'),
-                          n.local ? t('nodes.restart_the_vynel_service_the') : t('nodes.restart_the_vynel_service_on'), t('nodes.restart')) },
-                      { label: t('nodes.reboot_the_server'), icon: 'power', danger: true, disabled: !online,
-                        onClick: () => nodeAction(n, 'reboot', t('nodes.the_server_is_rebooting'),
-                          <><Trans k="nodes.reboot_the_server_2" v={{ name: n.name }} />{n.local ? t('nodes.this_is_the_panel_server') : t('nodes.the_vpn_on_it_goes')}</>, t('nodes.reboot')) },
-                      ...(!n.local ? ['divider' as const,
-                        { label: t('nodes.new_join_token'), icon: 'key', onClick: async () => {
-                          if (await confirm(t('nodes.issue_a_new_token_the'), t('nodes.issue'))) {
-                            const j = await act(() => post<JoinInfo>(`nodes/${n.id}/token`))
-                            if (j) { setJoin(j); reload() }
-                          }
-                        } },
-                        { label: t('nodes.delete_the_node'), icon: 'trash', danger: true, onClick: async () => {
-                          if (await confirm(<><Trans k="nodes.delete_the_node_its_inbounds" v={{ name: n.name }} /></>, t('common.delete')))
-                            act(() => del(`nodes/${n.id}`), t('nodes.node_deleted')).then(reload)
-                        } }] : []),
-                    ]} />
+                    <Menu title={t('common.actions')} items={nodeMenuItems(n)} />
                   </div>
                 </div>
                 <div className="card-pad">
@@ -296,99 +349,8 @@ export function Nodes() {
         </div>
       )}
 
-      {adding && <AddNode profiles={profiles.data || []} onClose={() => setAdding(false)} onAdded={(j) => { setAdding(false); setJoin(j); reload() }} />}
-      {join && <NodeSetup j={join} onClose={() => { setJoin(null); reload() }} onDone={(n) => { setJoin(null); setWizardOf(n); reload() }} />}
-      {wizardOf && <NodeWizardModal node={wizardOf} profiles={profiles.data || []} onClose={() => { setWizardOf(null); reload() }} onProfilesChanged={profiles.reload} />}
-      {updLog && updLog.length > 0 && <UpdateLog id={updLog[0].id} name={updLog[0].name} targets={updLog} onClose={() => { setUpdLog(null); updates.reload() }} />}
-      {checkOf && <NodeSetup node={checkOf} onClose={() => { setCheckOf(null); reload() }} />}
-      {warpOf && <NodeWarpModal node={warpOf} onClose={() => setWarpOf(null)} onSaved={reload} />}
-      {editNode && (
-        <EditNode
-          n={nodes.data?.find((x) => x.id === editNode.node.id) || editNode.node}
-          initialTab={editNode.tab}
-          onClose={() => setEditNode(null)}
-          onSaved={() => { setEditNode(null); reload(); selfHost.reload() }}
-          onReload={() => { reload(); selfHost.reload() }}
-        />
-      )}
-      {attachTo && <Attach node={attachTo} profiles={profiles.data || []} onClose={() => setAttachTo(null)} onDone={() => { setAttachTo(null); reload() }} />}
-      {hostOf && <HostForm i={hostOf} onClose={() => setHostOf(null)} onSaved={() => { setHostOf(null); reload() }} />}
-      {configOf && <InboundEditor i={configOf} onClose={() => setConfigOf(null)} onSaved={reload} />}
+      {sharedModals}
     </>
-  )
-}
-
-function certRoleLabel(role: string): string {
-  if (role === 'panel') return t('nodes.cert_role_panel')
-  if (role === 'sub') return t('nodes.cert_role_sub')
-  if (role === 'node') return t('nodes.cert_role_node')
-  return role
-}
-
-function certStatusBadge(c: CertInfo): { color: string; label: string } {
-  if (!c.ok) return { color: 'red', label: t('nodes.cert_missing') }
-  if (c.placeholder) return { color: 'amber', label: t('nodes.panel_cert_placeholder') }
-  if (c.daysLeft <= 7) return { color: 'red', label: t('nodes.cert_days_left', { n: Math.max(0, c.daysLeft) }) }
-  if (c.daysLeft < 30) return { color: 'amber', label: t('nodes.cert_days_left', { n: c.daysLeft }) }
-  return { color: 'green', label: t('nodes.cert_days_left', { n: c.daysLeft }) }
-}
-
-function summarizeCerts(certs?: CertInfo[]): { color: string; label: string } | null {
-  if (!certs || certs.length === 0) return null
-  const bad = certs.find((c) => !c.ok || c.placeholder)
-  if (bad) {
-    return { color: bad.ok ? 'amber' : 'red', label: bad.ok ? t('nodes.cert_badge_pending') : t('nodes.cert_badge_missing') }
-  }
-  const minDays = Math.min(...certs.map((c) => c.daysLeft))
-  const color = minDays <= 7 ? 'red' : minDays < 30 ? 'amber' : 'green'
-  return { color, label: t('nodes.cert_badge_days', { n: Math.max(0, minDays) }) }
-}
-
-function CertsList({ certs, canRenew, busyDomain, onRenew }: {
-  certs: CertInfo[]
-  canRenew: boolean
-  busyDomain: string | null
-  onRenew: (domain: string) => void
-}) {
-  if (certs.length === 0) {
-    return <div className="muted small">{t('nodes.certs_empty')}</div>
-  }
-  return (
-    <div className="cert-list">
-      {certs.map((c) => {
-        const st = certStatusBadge(c)
-        const busy = busyDomain === c.domain || busyDomain === '*'
-        return (
-          <div key={c.domain} className="cert-row">
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                <b className="mono">{c.domain}</b>
-                <Badge color={st.color} dot>{st.label}</Badge>
-                {(c.roles || []).map((r) => <span key={r} className="chip static">{certRoleLabel(r)}</span>)}
-              </div>
-              <div className="muted small cert-meta">
-                {c.ok && !c.placeholder && c.notAfter > 0 && (
-                  <>
-                    <Trans k="nodes.panel_cert_expires" v={{ v: new Date(c.notAfter * 1000).toLocaleDateString() }} />
-                    {c.issuer ? ` · ${c.issuer}` : ''}
-                  </>
-                )}
-                {c.ok && c.placeholder && t('nodes.cert_placeholder_hint')}
-                {!c.ok && t('nodes.cert_missing_hint')}
-              </div>
-              {c.lastError && (
-                <div className="small pink-text" style={{ marginTop: 4 }}>{c.lastError}</div>
-              )}
-            </div>
-            {canRenew && (
-              <button type="button" className="btn sm" disabled={busyDomain !== null} onClick={() => onRenew(c.domain)}>
-                {busy ? <span className="spinner" /> : <Icon name="refresh" />} {t('nodes.cert_reissue')}
-              </button>
-            )}
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -850,117 +812,6 @@ function NodeSetup({ j, node, onClose, onDone }: { j?: JoinInfo; node?: Node; on
         ))}
       </div>
       {done && !j && <div className="alert green" style={{ marginTop: 12 }}>{t('nodes.the_node_works_users_get')}</div>}
-    </Modal>
-  )
-}
-
-function EditNode({ n, initialTab = 'general', onClose, onSaved, onReload }: {
-  n: Node
-  initialTab?: 'general' | 'certs'
-  onClose: () => void
-  onSaved: () => void
-  onReload: () => void
-}) {
-  const [tab, setTab] = useState<'general' | 'certs'>(!n.manual && initialTab === 'certs' ? 'certs' : 'general')
-  const [name, setName] = useState(n.name)
-  const [country, setCountry] = useState(n.country)
-  const [domain, setDomain] = useState(n.domain)
-  const [decoyPath, setDecoyPath] = useState(n.decoyPath || '')
-  const [providerId, setProviderId] = useState(n.provider?.id || 0)
-  const [busyDomain, setBusyDomain] = useState<string | null>(null)
-  const [liveCerts, setLiveCerts] = useState<CertInfo[] | null>(null)
-  const providers = useLoad(() => get<{ providers: Provider[] }>('billing'))
-  const act = useAction()
-  const confirm = useConfirm()
-  const certs = liveCerts ?? n.certs ?? []
-  const online = n.state === 'in sync' || n.state === 'syncing'
-  const canRenew = !n.manual && !!n.certsSupported && (n.local || online)
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    const r = await act(async () => {
-      await patch(`nodes/${n.id}`, { name, country, domain, ...(!n.manual ? { decoyPath } : {}) })
-      if (providerId !== (n.provider?.id || 0)) await patch(`nodes/${n.id}/billing`, { providerId })
-      return true
-    }, t('common.saved'))
-    if (r !== undefined) onSaved()
-  }
-
-  const renew = async (targetDomain: string) => {
-    const label = targetDomain || certs.map((c) => c.domain).join(', ')
-    if (!(await confirm(t('nodes.cert_reissue_confirm', { v: label }), t('nodes.cert_reissue'), false))) return
-    setBusyDomain(targetDomain || '*')
-    const r = await act(() => post<{ detail?: string; certs?: CertInfo[] }>(`nodes/${n.id}/certs/renew`, { domain: targetDomain }), t('nodes.cert_reissued'))
-    setBusyDomain(null)
-    if (r) {
-      if (r.certs) setLiveCerts(r.certs)
-      onReload()
-    }
-  }
-
-  return (
-    <Modal title={t('nodes.node', { code: n.code })} onClose={onClose} wide={tab === 'certs'}
-      footer={tab === 'general' ? (
-        <><button className="btn ghost" onClick={onClose}>{t('common.cancel')}</button><button className="btn primary" form="edit-node">{t('common.save')}</button></>
-      ) : (
-        <>
-          {canRenew && certs.length > 1 && (
-            <button type="button" className="btn" disabled={busyDomain !== null} onClick={() => renew('')}>
-              {busyDomain === '*' ? <span className="spinner" /> : <Icon name="refresh" />} {t('nodes.cert_reissue_all')}
-            </button>
-          )}
-          <button className="btn primary" onClick={onClose}>{t('common.close')}</button>
-        </>
-      )}>
-      {!n.manual && (
-        <Tabs
-          value={tab}
-          onChange={(v) => setTab(v as 'general' | 'certs')}
-          items={[
-            { id: 'general', label: t('nodes.tab_general') },
-            { id: 'certs', label: t('nodes.certs_title'), count: certs.length },
-          ]}
-        />
-      )}
-      {tab === 'general' ? (
-        <form id="edit-node" onSubmit={submit}>
-          <div className="grid2">
-            <Field label={t('common.name')}><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            <Field label={t('nodes.country_code')}><input className="input" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase())} /></Field>
-          </div>
-          <Field label={t('nodes.domain')} info={t('nodes.changing_the_domain_changes')}>
-            <input className="input" value={domain} onChange={(e) => setDomain(e.target.value)} />
-          </Field>
-          {!n.manual && (
-            <Field
-              label={t('nodes.decoy_path')}
-              info={n.local ? t('nodes.decoy_path_local_info') : t('nodes.decoy_path_info')}
-              help={t('nodes.decoy_path_help')}
-            >
-              <input className="input mono" value={decoyPath} onChange={(e) => setDecoyPath(e.target.value)} placeholder="/var/www/site" />
-            </Field>
-          )}
-          <Field label={t('common.provider')} help={<><Trans k="nodes.price_payment_and_traffic_limit" v={{ v: <a href="#/billing" onClick={onClose}>{t('nodes.billing')}</a> }} /></>}>
-            <select className="input" value={providerId} onChange={(e) => setProviderId(Number(e.target.value))}>
-              <option value={0}>{t('common.not_set')}</option>
-              {(providers.data?.providers || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </Field>
-        </form>
-      ) : (
-        <div>
-          {!n.certsSupported && (
-            <div className="alert amber" style={{ marginBottom: 14 }}>{t('nodes.certs_update_node_hint')}</div>
-          )}
-          {n.certsSupported && !n.local && !online && (
-            <div className="alert amber" style={{ marginBottom: 14 }}>{t('nodes.certs_offline_hint')}</div>
-          )}
-          <CertsList certs={certs} canRenew={canRenew} busyDomain={busyDomain} onRenew={renew} />
-          {certs.length > 0 && (
-            <div className="muted small" style={{ marginTop: 12 }}>{t('nodes.certs_le_rate_hint')}</div>
-          )}
-        </div>
-      )}
     </Modal>
   )
 }

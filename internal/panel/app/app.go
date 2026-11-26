@@ -20,6 +20,7 @@ import (
 	"github.com/vyto4ka/vynel/internal/node/agent"
 	"github.com/vyto4ka/vynel/internal/node/caddy"
 	"github.com/vyto4ka/vynel/internal/node/firewall"
+	"github.com/vyto4ka/vynel/internal/node/inventory"
 	"github.com/vyto4ka/vynel/internal/node/nginx"
 	"github.com/vyto4ka/vynel/internal/panel/bot"
 	"github.com/vyto4ka/vynel/internal/panel/ca"
@@ -120,6 +121,7 @@ func Open(ctx context.Context, cfg Config) (*Panel, func(), error) {
 	svc.NodeConnected = rec.Connected
 	svc.WarpProvision = nodeWarpProvision(rec)
 	svc.WarpCheck = nodeWarpCheck(rec)
+	svc.NodeInventoryFetch = nodeInventoryFetch(rec)
 
 	geoDir := filepath.Join(cfg.DataDir, "geo")
 	sysAssetDir := cfg.Xray.AssetDir
@@ -185,6 +187,25 @@ func nodeWarpCheck(rec *reconciler.Reconciler) func(ctx context.Context, nodeID 
 			return nil, fmt.Errorf("parse warp check result: %w", err)
 		}
 		return &out, nil
+	}
+}
+
+func nodeInventoryFetch(rec *reconciler.Reconciler) func(ctx context.Context, nodeID int64) (*inventory.Snapshot, error) {
+	return func(ctx context.Context, nodeID int64) (*inventory.Snapshot, error) {
+		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		res, err := rec.Command(cctx, nodeID, &nodev1.Command{Action: nodev1.Command_ACTION_INVENTORY})
+		if err != nil {
+			return nil, err
+		}
+		if res.Error != "" {
+			return nil, errors.New(res.Error)
+		}
+		var snap inventory.Snapshot
+		if err := json.Unmarshal([]byte(res.Detail), &snap); err != nil {
+			return nil, fmt.Errorf("parse node inventory: %w", err)
+		}
+		return &snap, nil
 	}
 }
 

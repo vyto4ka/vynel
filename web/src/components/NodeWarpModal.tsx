@@ -39,7 +39,19 @@ function transportShortLabel(tr: WarpTransport): string {
   return 'MASQUE H3'
 }
 
-export function NodeWarpModal({ node, onClose, onSaved }: Props) {
+export function NodeWarpPanel({
+  node,
+  onSaved,
+  formId = 'node-warp-form',
+  inlineActions = true,
+  onBusyChange,
+}: {
+  node: Node
+  onSaved: () => void
+  formId?: string
+  inlineActions?: boolean
+  onBusyChange?: (busy: boolean) => void
+}) {
   const act = useAction()
   const confirm = useConfirm()
   const toast = useToast()
@@ -59,6 +71,10 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
   const [checking, setChecking] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [wgConf, setWgConf] = useState('')
+
+  useEffect(() => {
+    onBusyChange?.(loading || saving)
+  }, [loading, saving, onBusyChange])
 
   const syncFromView = (v: NodeWarpView) => {
     const tr: WarpTransport = v.transport === 'masque-h2' || v.transport === 'wireguard' ? v.transport : 'masque-h3'
@@ -175,6 +191,168 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
 
   const endpointOptions = transport === 'wireguard' ? WG_ENDPOINTS : MASQUE_ENDPOINTS
 
+  if (loading || !data) return <Loading />
+
+  return (
+    <form id={formId} onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ padding: 14, borderRadius: 'var(--shape-md)', border: '1px solid var(--outline-variant)', background: 'var(--container-low)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <label className="row" style={{ gap: 10, alignItems: 'center', cursor: 'pointer', fontWeight: 500 }}>
+            <Switch checked={enabled} onChange={setEnabled} />
+            <span>{t('warp.enable_label')}</span>
+          </label>
+          <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Badge>{transportShortLabel(transport)}</Badge>
+            {data.hasCredentials ? (
+              <Badge color={data.lastCheckOk ? 'green' : undefined} dot>
+                {data.lastCheckOk && data.lastCheckColo
+                  ? `${data.lastCheckIp} · ${data.lastCheckColo} · ${data.lastCheckMs} ms`
+                  : t('warp.status_ready', { type: data.accountType || 'free' })}
+              </Badge>
+            ) : (
+              <span className="muted small">{t('warp.status_auto_on_save')}</span>
+            )}
+            {data.hasCredentials && (
+              <button
+                type="button"
+                className="btn sm"
+                disabled={checking || !data.connected || !data.canWarp}
+                onClick={runCheck}
+              >
+                <Icon name="refresh" /> {checking ? t('warp.checking') : t('warp.check_btn')}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="muted small">{t('warp.enable_hint')}</div>
+        {data.lastCheckAt > 0 && !data.lastCheckOk && data.lastCheckErr && (
+          <div className="small" style={{ color: 'var(--red)' }}>{data.lastCheckErr}</div>
+        )}
+        {data.connected && !data.canWarp && (
+          <div className="small" style={{ color: 'var(--amber)' }}>{t('warp.agent_old_warp')}</div>
+        )}
+        {data.connected && !data.canGeo && (
+          <div className="small" style={{ color: 'var(--amber)' }}>{t('warp.agent_old_geo')}</div>
+        )}
+      </div>
+
+      <div className="seg">
+        <button
+          type="button"
+          className={ruleMode === 'rules' ? 'on' : ''}
+          onClick={() => setRuleMode('rules')}
+        >
+          {t('warp.mode_rules')}
+        </button>
+        <button
+          type="button"
+          className={ruleMode === 'all' ? 'on' : ''}
+          onClick={() => setRuleMode('all')}
+        >
+          {t('warp.mode_all')}
+        </button>
+      </div>
+
+      {ruleMode === 'rules' && (
+        <>
+          <div>
+            <div className="label" style={{ marginBottom: 8 }}>{t('warp.presets')}</div>
+            <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              {PRESETS.map((p) => (
+                <button key={p.id} type="button" className="btn sm" onClick={() => appendPreset(p.rules)}>
+                  <Icon name="plus" size={13} /> {t(p.labelKey as any)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Field label={t('warp.rules_label')} help={t('warp.rules_hint')}>
+            <RuleListInput value={rulesText} onChange={setRulesText} rows={7} />
+          </Field>
+        </>
+      )}
+
+      <details className="form-section" style={{ margin: 0 }}>
+        <summary>{t('warp.advanced_title')}</summary>
+        <div className="form-section-body" style={{ paddingLeft: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Field label={t('warp.transport_label')}>
+            <select className="input" value={transport} onChange={(e) => handleTransportChange(e.target.value as WarpTransport)}>
+              <option value="masque-h3">{t('warp.transport_masque_h3')}</option>
+              <option value="masque-h2">{t('warp.transport_masque_h2')}</option>
+              <option value="wireguard">{t('warp.transport_wireguard')}</option>
+            </select>
+          </Field>
+          <div className="grid2">
+            <Field label={t('warp.endpoint')}>
+              <input className="input mono" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} list="warp-endpoints" />
+              <datalist id="warp-endpoints">
+                {endpointOptions.map((ep) => <option key={ep} value={ep} />)}
+              </datalist>
+            </Field>
+            <Field label={t('warp.domain_strategy')}>
+              <select className="input" value={domainStrategy} onChange={(e) => setDomainStrategy(e.target.value)}>
+                <option value="ForceIPv4v6">ForceIPv4v6 (IPv4 + IPv6)</option>
+                <option value="ForceIPv4">ForceIPv4</option>
+                <option value="ForceIPv6">ForceIPv6</option>
+                <option value="ForceIPv6v4">ForceIPv6v4</option>
+              </select>
+            </Field>
+          </div>
+          <div className="grid2">
+            <Field label={t('warp.license_key')}>
+              <input className="input mono" value={licenseKey} onChange={(e) => setLicenseKey(e.target.value)} placeholder={t('warp.license_placeholder')} />
+            </Field>
+            <Field label={t('warp.mtu')}>
+              <input className="input" type="number" min={576} max={9000} value={mtu} onChange={(e) => setMtu(Number(e.target.value))} />
+            </Field>
+          </div>
+          {data.hasCredentials && (
+            <div className="muted small mono">
+              {data.addrV4}{data.addrV6 ? ` · ${data.addrV6}` : ''}{data.reserved?.length === 3 ? ` · reserved [${data.reserved.join(', ')}]` : ''}
+            </div>
+          )}
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn sm" onClick={reissue}>
+              <Icon name="refresh" /> {t('warp.reissue_btn')}
+            </button>
+            <button type="button" className="btn sm" onClick={() => setShowImport((v) => !v)}>
+              <Icon name="upload" /> {t('warp.import_conf_btn')}
+            </button>
+          </div>
+
+          {showImport && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <textarea
+                className="input mono"
+                rows={6}
+                value={wgConf}
+                onChange={(e) => setWgConf(e.target.value)}
+                placeholder={t('warp.import_conf_placeholder')}
+              />
+              <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+                <button type="button" className="btn sm" onClick={() => setShowImport(false)}>{t('common.cancel')}</button>
+                <button type="button" className="btn sm primary" onClick={importConf} disabled={!wgConf.trim()}>
+                  {t('warp.import_conf_apply')}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </details>
+
+      {inlineActions && (
+        <div className="row" style={{ justifyContent: 'flex-end', paddingTop: 4 }}>
+          <button type="submit" className="btn primary" disabled={saving}>
+            <Icon name="check" /> {t('common.save')}
+          </button>
+        </div>
+      )}
+    </form>
+  )
+}
+
+export function NodeWarpModal({ node, onClose, onSaved }: Props) {
+  const [busy, setBusy] = useState(true)
   return (
     <Modal
       title={t('warp.modal_title', { name: `${node.flag ? node.flag + ' ' : ''}${node.name}` })}
@@ -183,163 +361,13 @@ export function NodeWarpModal({ node, onClose, onSaved }: Props) {
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>{t('common.cancel')}</button>
-          <button type="submit" form="node-warp-form" className="btn primary" disabled={saving || loading}>
+          <button type="submit" form="node-warp-modal-form" className="btn primary" disabled={busy}>
             <Icon name="check" /> {t('common.save')}
           </button>
         </>
       }
     >
-      {loading || !data ? <Loading /> : (
-        <form id="node-warp-form" onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Enable bar + status + check */}
-          <div style={{ padding: 12, borderRadius: 10, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <label className="row" style={{ gap: 10, alignItems: 'center', cursor: 'pointer', fontWeight: 500 }}>
-                <Switch checked={enabled} onChange={setEnabled} />
-                <span>{t('warp.enable_label')}</span>
-              </label>
-              <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <Badge>{transportShortLabel(transport)}</Badge>
-                {data.hasCredentials ? (
-                  <Badge color={data.lastCheckOk ? 'green' : undefined} dot>
-                    {data.lastCheckOk && data.lastCheckColo
-                      ? `${data.lastCheckIp} · ${data.lastCheckColo} · ${data.lastCheckMs} ms`
-                      : t('warp.status_ready', { type: data.accountType || 'free' })}
-                  </Badge>
-                ) : (
-                  <span className="muted small">{t('warp.status_auto_on_save')}</span>
-                )}
-                {data.hasCredentials && (
-                  <button
-                    type="button"
-                    className="btn sm"
-                    disabled={checking || !data.connected || !data.canWarp}
-                    onClick={runCheck}
-                  >
-                    <Icon name="refresh" /> {checking ? t('warp.checking') : t('warp.check_btn')}
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="muted small">{t('warp.enable_hint')}</div>
-            {data.lastCheckAt > 0 && !data.lastCheckOk && data.lastCheckErr && (
-              <div className="small" style={{ color: 'var(--red)' }}>{data.lastCheckErr}</div>
-            )}
-            {data.connected && !data.canWarp && (
-              <div className="small" style={{ color: 'var(--amber)' }}>{t('warp.agent_old_warp')}</div>
-            )}
-            {data.connected && !data.canGeo && (
-              <div className="small" style={{ color: 'var(--amber)' }}>{t('warp.agent_old_geo')}</div>
-            )}
-          </div>
-
-          {/* Rule mode */}
-          <div className="row" style={{ gap: 8 }}>
-            <button
-              type="button"
-              className={ruleMode === 'rules' ? 'btn sm primary' : 'btn sm'}
-              onClick={() => setRuleMode('rules')}
-            >
-              {t('warp.mode_rules')}
-            </button>
-            <button
-              type="button"
-              className={ruleMode === 'all' ? 'btn sm primary' : 'btn sm'}
-              onClick={() => setRuleMode('all')}
-            >
-              {t('warp.mode_all')}
-            </button>
-          </div>
-
-          {ruleMode === 'rules' && (
-            <>
-              <div>
-                <div className="label" style={{ marginBottom: 6 }}>{t('warp.presets')}</div>
-                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                  {PRESETS.map((p) => (
-                    <button key={p.id} type="button" className="btn sm" onClick={() => appendPreset(p.rules)}>
-                      <Icon name="plus" size={13} /> {t(p.labelKey as any)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <Field label={t('warp.rules_label')} help={t('warp.rules_hint')}>
-                <RuleListInput value={rulesText} onChange={setRulesText} rows={7} />
-              </Field>
-            </>
-          )}
-
-          {/* Advanced tunnel settings */}
-          <details style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-            <summary style={{ cursor: 'pointer', fontWeight: 500 }}>{t('warp.advanced_title')}</summary>
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <Field label={t('warp.transport_label')}>
-                <select value={transport} onChange={(e) => handleTransportChange(e.target.value as WarpTransport)}>
-                  <option value="masque-h3">{t('warp.transport_masque_h3')}</option>
-                  <option value="masque-h2">{t('warp.transport_masque_h2')}</option>
-                  <option value="wireguard">{t('warp.transport_wireguard')}</option>
-                </select>
-              </Field>
-              <div className="grid2">
-                <Field label={t('warp.endpoint')}>
-                  <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} list="warp-endpoints" className="mono" />
-                  <datalist id="warp-endpoints">
-                    {endpointOptions.map((ep) => <option key={ep} value={ep} />)}
-                  </datalist>
-                </Field>
-                <Field label={t('warp.domain_strategy')}>
-                  <select value={domainStrategy} onChange={(e) => setDomainStrategy(e.target.value)}>
-                    <option value="ForceIPv4v6">ForceIPv4v6 (IPv4 + IPv6)</option>
-                    <option value="ForceIPv4">ForceIPv4</option>
-                    <option value="ForceIPv6">ForceIPv6</option>
-                    <option value="ForceIPv6v4">ForceIPv6v4</option>
-                  </select>
-                </Field>
-              </div>
-              <div className="grid2">
-                <Field label={t('warp.license_key')}>
-                  <input value={licenseKey} onChange={(e) => setLicenseKey(e.target.value)} placeholder={t('warp.license_placeholder')} className="mono" />
-                </Field>
-                <Field label={t('warp.mtu')}>
-                  <input type="number" min={576} max={9000} value={mtu} onChange={(e) => setMtu(Number(e.target.value))} />
-                </Field>
-              </div>
-              {data.hasCredentials && (
-                <div className="muted small mono">
-                  {data.addrV4}{data.addrV6 ? ` · ${data.addrV6}` : ''}{data.reserved?.length === 3 ? ` · reserved [${data.reserved.join(', ')}]` : ''}
-                </div>
-              )}
-              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn sm" onClick={reissue}>
-                  <Icon name="refresh" /> {t('warp.reissue_btn')}
-                </button>
-                <button type="button" className="btn sm" onClick={() => setShowImport((v) => !v)}>
-                  <Icon name="upload" /> {t('warp.import_conf_btn')}
-                </button>
-              </div>
-
-              {showImport && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <textarea
-                    className="mono"
-                    rows={6}
-                    value={wgConf}
-                    onChange={(e) => setWgConf(e.target.value)}
-                    placeholder={t('warp.import_conf_placeholder')}
-                  />
-                  <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-                    <button type="button" className="btn sm" onClick={() => setShowImport(false)}>{t('common.cancel')}</button>
-                    <button type="button" className="btn sm primary" onClick={importConf} disabled={!wgConf.trim()}>
-                      {t('warp.import_conf_apply')}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </details>
-        </form>
-      )}
+      <NodeWarpPanel node={node} onSaved={onSaved} formId="node-warp-modal-form" inlineActions={false} onBusyChange={setBusy} />
     </Modal>
   )
 }
