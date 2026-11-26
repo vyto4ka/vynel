@@ -95,14 +95,17 @@ func TestKeqDroid(t *testing.T) {
 	e := newEnv(t)
 	sub := "/s/" + e.user.SubToken
 	w := e.get(sub, "keqdroid/0.25.1", "keq-phone", "x-device-os", "Android", "x-device-model", "Pixel 8")
-	// Full Xray configs with routing: KeqDroid shows them as regular servers, not "custom".
-	var configs []map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &configs); err != nil || len(configs) == 0 || configs[0]["routing"] == nil {
-		t.Fatalf("keqdroid did not get Xray JSON: %v %q", err, w.Body.String())
+	// By default KeqDroid receives VLESS links (base64) plus the Routing header, not custom JSON configs.
+	if links := decodeB64Links(t, w.Body.String()); len(links) == 0 || !strings.HasPrefix(links[0], "vless://") {
+		t.Fatalf("keqdroid did not get VLESS links by default: %v %q", links, w.Body.String())
 	}
-	// Links stay one suffix away.
-	if links := decodeB64Links(t, e.get(sub+"/base64", "keqdroid/0.25.1", "keq-phone").Body.String()); len(links) == 0 || !strings.HasPrefix(links[0], "vless://") {
-		t.Fatalf("keqdroid /base64: %v", links)
+	if w.Header().Get("Routing") == "" {
+		t.Fatal("keqdroid links lacked Routing header")
+	}
+	// Full Xray configs stay one suffix (/json) away.
+	var configs []map[string]any
+	if err := json.Unmarshal(e.get(sub+"/json", "keqdroid/0.25.1", "keq-phone").Body.Bytes(), &configs); err != nil || len(configs) == 0 || configs[0]["routing"] == nil {
+		t.Fatalf("keqdroid /json did not get Xray JSON: %v", err)
 	}
 	ds, _ := e.svc.Devices(e.ctx, e.user.ID)
 	if len(ds) != 1 || ds[0].Model != "Pixel 8" {

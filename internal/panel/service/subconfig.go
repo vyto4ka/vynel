@@ -18,13 +18,14 @@ import (
 // Subscription look and response headers (docs/USER_GUIDE.md §5). Stored as JSON settings so
 // they are edited in the web panel and need no migrations.
 const (
-	SettingSubKaringDNS   = "sub.karing_dns"   // JSON resolvers for proxy node hostnames only
-	SettingSubHeaders     = "sub.headers"      // JSON []SubHeader; empty = DefaultSubHeaders
-	SettingSubPage        = "sub.page"         // JSON SubPage; empty = DefaultSubPage
-	SettingSubAnnounce    = "sub.announce"     // text shown by apps (announce header) and on the page
-	SettingSubAnnounceURL = "sub.announce_url" // link of the announcement
-	SettingSubPageURL     = "sub.page_url"     // profile-web-page-url; empty = the subscription page itself
-	SettingSubRules       = "sub.ua_rules"     // JSON []SubRule; empty = DefaultSubRules
+	SettingSubKaringDNS     = "sub.karing_dns"        // JSON resolvers for proxy node hostnames only
+	SettingSubHeaders       = "sub.headers"           // JSON []SubHeader; empty = DefaultSubHeaders
+	SettingSubPage          = "sub.page"              // JSON SubPage; empty = DefaultSubPage
+	SettingSubAnnounce      = "sub.announce"          // text shown by apps (announce header) and on the page
+	SettingSubAnnounceURL   = "sub.announce_url"      // link of the announcement
+	SettingSubPageURL       = "sub.page_url"          // profile-web-page-url; empty = the subscription page itself
+	SettingSubRules         = "sub.ua_rules"          // JSON []SubRule; empty = DefaultSubRules
+	SettingSubKeqDroidLinks = "sub.keqdroid_links_v1" // "1" once untouched KeqDroid xray default moved to base64
 )
 
 // SubRule maps a User-Agent to a subscription format; the first enabled match wins.
@@ -44,7 +45,7 @@ var SubFormats = []string{"base64", "mihomo", "singbox", "karing", "xray", "html
 // DefaultSubRules are the built-in rules (docs/ARCHITECTURE.md §8.3).
 func DefaultSubRules() []SubRule {
 	return []SubRule{
-		{Pattern: `(?i)keqdroid|keqdis`, Format: "xray", Enabled: true, Note: "KeqDroid"},
+		{Pattern: `(?i)keqdroid|keqdis`, Format: "base64", Enabled: true, Note: "KeqDroid"},
 		{Pattern: `(?i)karing`, Format: "karing", Enabled: true, Note: "Karing"},
 		{Pattern: `(?i)clash|mihomo|stash|flclash|koala`, Format: "mihomo", Enabled: true, Note: "Clash / Mihomo"},
 		{Pattern: `(?i)sing-?box|\bSF[AIMT]\b`, Format: "singbox", Enabled: true, Note: "sing-box"},
@@ -65,14 +66,24 @@ var oldRuleNotes = map[string]string{
 	"Приложения на ядре Xray":   "Xray-приложения",
 }
 
-// migrateKeqDroidRule moves the KeqDroid rule saved with the old default (links) to Xray JSON,
-// which KeqDroid takes as a regular profile with routing. A rule the admin changed is left alone.
+// migrateKeqDroidRule moves an untouched KeqDroid rule saved with the previous Xray JSON default
+// to base64 VLESS links once (guarded by SettingSubKeqDroidLinks so later admin choices stick).
 // Karing's unchanged built-in links rule moves to its import format with remote rule sets.
 // The built-in rules' old notes become short client names.
 func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
-	raw, ok, err := store.GetSetting(ctx, q, SettingSubRules)
-	if err != nil || !ok || strings.TrimSpace(raw) == "" {
+	migrated, _, err := store.GetSetting(ctx, q, SettingSubKeqDroidLinks)
+	if err != nil {
 		return err
+	}
+	raw, ok, err := store.GetSetting(ctx, q, SettingSubRules)
+	if err != nil {
+		return err
+	}
+	if !ok || strings.TrimSpace(raw) == "" {
+		if migrated != "1" {
+			return store.SetSetting(ctx, q, SettingSubKeqDroidLinks, "1")
+		}
+		return nil
 	}
 	var rs []SubRule
 	if json.Unmarshal([]byte(raw), &rs) != nil {
@@ -84,18 +95,24 @@ func migrateKeqDroidRule(ctx context.Context, q store.DBTX) error {
 			(rs[i].Note == "Karing" || rs[i].Note == "Karing сам собирает sing-box из ссылок; XHTTP ему не отдаётся") {
 			rs[i].Format, changed = "karing", true
 		}
-		if rs[i].Pattern == `(?i)keqdroid|keqdis` && rs[i].Format == "base64" && rs[i].Note == oldKeqdroidNote {
-			rs[i].Format, changed = "xray", true
+		if migrated != "1" && rs[i].Pattern == `(?i)keqdroid|keqdis` && rs[i].Format == "xray" && strings.TrimSpace(rs[i].Template) == "" &&
+			(rs[i].Note == "KeqDroid" || rs[i].Note == "KeqDroid: полный конфиг Xray с маршрутами и DNS" || rs[i].Note == oldKeqdroidNote) {
+			rs[i].Format, changed = "base64", true
 		}
 		if name, ok := oldRuleNotes[rs[i].Note]; ok {
 			rs[i].Note, changed = name, true
 		}
 	}
-	if !changed {
-		return nil
+	if changed {
+		b, _ := json.Marshal(rs)
+		if err := store.SetSetting(ctx, q, SettingSubRules, string(b)); err != nil {
+			return err
+		}
 	}
-	b, _ := json.Marshal(rs)
-	return store.SetSetting(ctx, q, SettingSubRules, string(b))
+	if migrated != "1" {
+		return store.SetSetting(ctx, q, SettingSubKeqDroidLinks, "1")
+	}
+	return nil
 }
 
 // SubRules returns the configured User-Agent rules (the defaults until changed).

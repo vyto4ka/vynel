@@ -17,7 +17,7 @@ func TestDetectRules(t *testing.T) {
 		rules                []service.SubRule
 		want                 Format
 	}{
-		{ua: "keqdroid/0.25.1", rules: def, want: FormatXray},
+		{ua: "keqdroid/0.25.1", rules: def, want: FormatBase64},
 		{ua: "karing/1.2.25.2802 android", rules: def, want: FormatKaring},
 		{ua: "clash-verge/v2.2.3", rules: def, want: FormatMihomo},
 		{ua: "SFA/1.14.0", rules: def, want: FormatSingBox},

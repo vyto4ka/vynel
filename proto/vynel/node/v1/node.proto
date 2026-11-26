@@ -105,6 +105,8 @@ message Hello {
   // What this agent understands beyond the original protocol, e.g. "nginx" (Snapshot.nginx_config).
   // The panel sends old agents only what they know.
   repeated string capabilities = 10;
+  // JSON-encoded host inventory (OS, hardware, disks, network interfaces) collected on connect.
+  bytes inventory_json = 11;
 }
 
 message Address {
@@ -158,6 +160,7 @@ message Command {
     ACTION_RENEW_CERTS = 6;    // force-renew TLS certificates (all or one domain)
     ACTION_WARP_PROVISION = 7; // register Cloudflare WARP account or bind WARP+ license from the node
     ACTION_WARP_CHECK = 8;     // live-check WARP tunnel via cdn-cgi/trace from the node
+    ACTION_INVENTORY = 9;      // collect fresh OS, hardware, disk and network interface inventory
   }
   string id = 1;
   Action action = 2;

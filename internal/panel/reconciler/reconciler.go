@@ -362,6 +362,11 @@ func (s *session) handle(ctx context.Context, msg *nodev1.NodeMessage) error {
 		if err := store.SetNodeFacts(ctx, svc.Store().DB, s.nodeID, facts); err != nil {
 			return err
 		}
+		if !refresh && len(h.InventoryJson) > 0 {
+			if ierr := svc.SaveNodeInventory(ctx, s.nodeID, h.InventoryJson); ierr != nil {
+				s.r.log.Warn("node inventory", "node", s.nodeID, "err", ierr)
+			}
+		}
 		capsChanged := prev.NginxVersion != h.NginxVersion || !slices.Equal(prev.Capabilities, h.Capabilities)
 		// What the node can run decides its config (nginx or Caddy). If that changed, the
 		// first snapshot must already be built for it, not the old web server.

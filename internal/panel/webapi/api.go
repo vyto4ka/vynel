@@ -77,6 +77,7 @@ func (s *Server) routes() {
 	s.handle("POST /api/nodes/{id}/confirm-requirements", s.confirmRequirements)
 	s.handle("POST /api/nodes/{id}/action", s.nodeAction)
 	s.handle("POST /api/nodes/{id}/certs/renew", s.renewNodeCerts)
+	s.handle("GET /api/nodes/{id}/inventory", s.nodeInventory)
 	s.handle("GET /api/updates", s.getUpdates)
 	s.handle("POST /api/updates/check", s.checkUpdates)
 	s.handle("POST /api/updates/channel", s.setUpdateChannel)
@@ -927,6 +928,15 @@ func (s *Server) renewNodeCerts(r *http.Request) (any, error) {
 		reported = s.cfg.CertStatus(id)
 	}
 	return map[string]any{"detail": detail, "certs": s.svc.NodeCerts(ctx, n, reported)}, nil
+}
+
+func (s *Server) nodeInventory(r *http.Request) (any, error) {
+	id, err := pathID(r, "id")
+	if err != nil {
+		return nil, err
+	}
+	live := r.URL.Query().Get("live") == "1"
+	return s.svc.NodeInventory(r.Context(), id, live)
 }
 
 func (s *Server) nodeList(r *http.Request, details bool) ([]Node, error) {

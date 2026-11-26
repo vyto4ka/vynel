@@ -236,6 +236,7 @@ func (s *Service) DeleteNode(ctx context.Context, actor Actor, id int64) error {
 			if err := store.DeleteAccessRulesByRef(ctx, q, store.AccessNode, id); err != nil {
 				return err
 			}
+			_, _ = q.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, nodeInventoryKey(id))
 			return store.DeleteNode(ctx, q, id)
 		})
 }

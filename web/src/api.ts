@@ -221,6 +221,91 @@ export interface Node {
   warp?: NodeWarpSummary
 }
 
+export interface NodeOSInfo {
+  distro: string
+  id?: string
+  versionId?: string
+  kernel: string
+  arch: string
+  hostname?: string
+  virtualization?: string
+  installedAt?: number
+  installedSource?: string
+  bootedAt?: number
+  uptime: number
+  timezone?: string
+  ntpSync?: boolean
+  congestionControl?: string
+  qdisc?: string
+  tcpFastopen?: string
+}
+
+export interface NodeHardwareInfo {
+  cpuModel: string
+  cpuCores: number
+  cpuPhysical?: number
+  cpuMhz?: number
+  cpuCache?: string
+  aesHardware: boolean
+  vendor?: string
+  product?: string
+  memTotal: number
+  memUsed: number
+  memAvailable: number
+  swapTotal: number
+  swapUsed: number
+  load1: number
+  load5: number
+  load15: number
+}
+
+export interface NodeDiskInfo {
+  mount: string
+  device?: string
+  fsType?: string
+  kind?: string
+  totalBytes: number
+  usedBytes: number
+  freeBytes: number
+}
+
+export interface NodeNetInterface {
+  name: string
+  kind: 'physical' | 'virtual' | 'loopback'
+  up: boolean
+  operState?: string
+  mac?: string
+  mtu: number
+  speedMbps?: number
+  primary: boolean
+  defaultGateway?: string
+  addresses: string[]
+  rxBytes: number
+  txBytes: number
+  rxPackets: number
+  txPackets: number
+  rxErrors: number
+  txErrors: number
+  rxDrops: number
+  txDrops: number
+}
+
+export interface NodeInventorySnapshot {
+  collectedAt: number
+  os: NodeOSInfo
+  hardware: NodeHardwareInfo
+  disks: NodeDiskInfo[]
+  interfaces: NodeNetInterface[]
+}
+
+export interface NodeInventoryView {
+  nodeId: number
+  supported: boolean
+  live: boolean
+  connected: boolean
+  snapshot?: NodeInventorySnapshot
+}
+
 export type WarpTransport = 'masque-h3' | 'masque-h2' | 'wireguard'
 
 export interface NodeWarpSummary {

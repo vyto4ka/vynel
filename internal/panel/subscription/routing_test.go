@@ -224,10 +224,13 @@ func TestCheckClientRouting(t *testing.T) {
 	}
 }
 
-// A KeqDroid rule saved with the old default (links) moves to Xray JSON; an edited one stays.
+// An untouched KeqDroid rule saved with the previous Xray JSON default moves once to base64 links;
+// manual admin choices (own template, custom note, or switching back to xray afterwards) stay.
 func TestKeqDroidRuleMigration(t *testing.T) {
 	e := newEnv(t)
-	old := `[{"pattern":"(?i)keqdroid|keqdis","format":"base64","enabled":true,"note":"KeqDroid лучше всего читает ссылки vless://"},` +
+	// Simulate an existing database from before the migration ran.
+	_ = store.SetSetting(e.ctx, e.svc.Store().DB, service.SettingSubKeqDroidLinks, "")
+	old := `[{"pattern":"(?i)keqdroid|keqdis","format":"xray","enabled":true,"note":"KeqDroid: полный конфиг Xray с маршрутами и DNS"},` +
 		`{"pattern":"(?i)happ","format":"base64","enabled":true}]`
 	if err := e.svc.SetSetting(e.ctx, actor, service.SettingSubRules, old); err != nil {
 		t.Fatal(err)
@@ -236,14 +239,27 @@ func TestKeqDroidRuleMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	rs, _ := e.svc.SubRules(e.ctx)
-	if rs[0].Format != "xray" || rs[1].Format != "base64" || rs[0].Note != "KeqDroid" {
+	if rs[0].Format != "base64" || rs[1].Format != "base64" || rs[0].Note != "KeqDroid" {
 		t.Fatalf("rules %+v", rs)
 	}
-	edited := strings.Replace(old, "ссылки vless://", "ссылки", 1)
-	_ = e.svc.SetSetting(e.ctx, actor, service.SettingSubRules, edited)
+	// If the admin later chooses Xray JSON manually, another EnsureDefaults leaves it alone.
+	rs[0].Format = "xray"
+	if err := e.svc.SetSubRules(e.ctx, actor, rs); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.EnsureDefaults(e.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if rs, _ := e.svc.SubRules(e.ctx); rs[0].Format != "xray" {
+		t.Fatalf("admin choice overwritten on restart: %+v", rs)
+	}
+	// A pre-existing rule with a custom template or edited note is not migrated either.
+	_ = store.SetSetting(e.ctx, e.svc.Store().DB, service.SettingSubKeqDroidLinks, "")
+	withTpl := `[{"pattern":"(?i)keqdroid|keqdis","format":"xray","enabled":true,"note":"KeqDroid","template":"{\"outbounds\":[{\"tag\":\"proxy\"}]}"}]`
+	_ = e.svc.SetSetting(e.ctx, actor, service.SettingSubRules, withTpl)
 	_ = e.svc.EnsureDefaults(e.ctx)
-	if rs, _ := e.svc.SubRules(e.ctx); rs[0].Format != "base64" {
-		t.Fatalf("edited rule changed: %+v", rs)
+	if rs, _ := e.svc.SubRules(e.ctx); rs[0].Format != "xray" {
+		t.Fatalf("templated rule changed: %+v", rs)
 	}
 	_ = store.StatusActive
 }

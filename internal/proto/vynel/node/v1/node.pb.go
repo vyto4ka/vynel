@@ -36,6 +36,7 @@ const (
 	Command_ACTION_RENEW_CERTS    Command_Action = 6 // force-renew TLS certificates (all or one domain)
 	Command_ACTION_WARP_PROVISION Command_Action = 7 // register Cloudflare WARP account or bind WARP+ license from the node
 	Command_ACTION_WARP_CHECK     Command_Action = 8 // live-check WARP tunnel via cdn-cgi/trace from the node
+	Command_ACTION_INVENTORY      Command_Action = 9 // collect fresh OS, hardware, disk and network interface inventory
 )
 
 // Enum value maps for Command_Action.
@@ -50,6 +51,7 @@ var (
 		6: "ACTION_RENEW_CERTS",
 		7: "ACTION_WARP_PROVISION",
 		8: "ACTION_WARP_CHECK",
+		9: "ACTION_INVENTORY",
 	}
 	Command_Action_value = map[string]int32{
 		"ACTION_UNSPECIFIED":    0,
@@ -61,6 +63,7 @@ var (
 		"ACTION_RENEW_CERTS":    6,
 		"ACTION_WARP_PROVISION": 7,
 		"ACTION_WARP_CHECK":     8,
+		"ACTION_INVENTORY":      9,
 	}
 )
 
@@ -888,7 +891,9 @@ type Hello struct {
 	NginxVersion string   `protobuf:"bytes,9,opt,name=nginx_version,json=nginxVersion,proto3" json:"nginx_version,omitempty"`
 	// What this agent understands beyond the original protocol, e.g. "nginx" (Snapshot.nginx_config).
 	// The panel sends old agents only what they know.
-	Capabilities  []string `protobuf:"bytes,10,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	Capabilities []string `protobuf:"bytes,10,rep,name=capabilities,proto3" json:"capabilities,omitempty"`
+	// JSON-encoded host inventory (OS, hardware, disks, network interfaces) collected on connect.
+	InventoryJson []byte `protobuf:"bytes,11,opt,name=inventory_json,json=inventoryJson,proto3" json:"inventory_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -989,6 +994,13 @@ func (x *Hello) GetNginxVersion() string {
 func (x *Hello) GetCapabilities() []string {
 	if x != nil {
 		return x.Capabilities
+	}
+	return nil
+}
+
+func (x *Hello) GetInventoryJson() []byte {
+	if x != nil {
+		return x.InventoryJson
 	}
 	return nil
 }
@@ -2339,7 +2351,7 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\vfinished_at\x18\x04 \x01(\x03R\n" +
 	"finishedAt\x12\x18\n" +
 	"\aversion\x18\x05 \x01(\tR\aversion\x12\x10\n" +
-	"\x03log\x18\x06 \x01(\tR\x03log\"\xd6\x02\n" +
+	"\x03log\x18\x06 \x01(\tR\x03log\"\xfd\x02\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12!\n" +
 	"\fxray_version\x18\x02 \x01(\tR\vxrayVersion\x12!\n" +
@@ -2351,7 +2363,8 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\bwarnings\x18\b \x03(\tR\bwarnings\x12#\n" +
 	"\rnginx_version\x18\t \x01(\tR\fnginxVersion\x12\"\n" +
 	"\fcapabilities\x18\n" +
-	" \x03(\tR\fcapabilities\"Q\n" +
+	" \x03(\tR\fcapabilities\x12%\n" +
+	"\x0einventory_json\x18\v \x01(\fR\rinventoryJson\"Q\n" +
 	"\aAddress\x12\x0e\n" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x1c\n" +
 	"\tinterface\x18\x02 \x01(\tR\tinterface\x12\x18\n" +
@@ -2373,14 +2386,14 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\x06blocks\x18\x01 \x03(\v2\x16.vynel.node.v1.IPBlockR\x06blocks\"4\n" +
 	"\aIPBlock\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x10\n" +
-	"\x03ips\x18\x02 \x03(\tR\x03ips\"\x8e\x03\n" +
+	"\x03ips\x18\x02 \x03(\tR\x03ips\"\xa4\x03\n" +
 	"\aCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
 	"\x06action\x18\x02 \x01(\x0e2\x1d.vynel.node.v1.Command.ActionR\x06action\x12\x18\n" +
 	"\arelease\x18\x03 \x01(\tR\arelease\x12\x10\n" +
 	"\x03ref\x18\x04 \x01(\tR\x03ref\x12\x16\n" +
 	"\x06domain\x18\x05 \x01(\tR\x06domain\x12\x18\n" +
-	"\apayload\x18\x06 \x01(\fR\apayload\"\xdd\x01\n" +
+	"\apayload\x18\x06 \x01(\fR\apayload\"\xf3\x01\n" +
 	"\x06Action\x12\x16\n" +
 	"\x12ACTION_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13ACTION_RESTART_XRAY\x10\x01\x12\x18\n" +
@@ -2390,7 +2403,8 @@ const file_vynel_node_v1_node_proto_rawDesc = "" +
 	"\rACTION_UPDATE\x10\x05\x12\x16\n" +
 	"\x12ACTION_RENEW_CERTS\x10\x06\x12\x19\n" +
 	"\x15ACTION_WARP_PROVISION\x10\a\x12\x15\n" +
-	"\x11ACTION_WARP_CHECK\x10\b\"M\n" +
+	"\x11ACTION_WARP_CHECK\x10\b\x12\x14\n" +
+	"\x10ACTION_INVENTORY\x10\t\"M\n" +
 	"\rCommandResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x16\n" +
