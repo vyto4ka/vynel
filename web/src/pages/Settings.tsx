@@ -133,8 +133,8 @@ function NetworkCard({ data, error, reload }: { data: Network | null; error: str
                   <Badge color={d.ok ? 'green' : 'red'} dot>{d.ok ? t('settings.dns_is_fine') : d.error || t('common.error')}</Badge>
                   <span className="mono">{d.name}</span>
                   <span className="muted small">{purposeNames[d.purpose]}{d.purpose === 'node' ? ` ${d.node}` : ''}</span>
-                  <span className="small text-2 grow" style={{ textAlign: 'right' }}>
-                    {d.resolved.length > 0 ? <>→ <span className="mono">{d.resolved.join(', ')}</span></> : null}
+                  <span className="small text-2" style={{ flex: '1 1 auto', textAlign: 'right' }}>
+                    {d.resolved.length > 0 ? <>→{'\u00a0'}<span className="mono">{d.resolved.join(', ')}</span></> : null}
                     {!d.ok && d.expected.length > 0 && <>{' '}<Trans k="settings.needs" v={{ join: d.expected.join(t('settings.or')) }} /></>}
                   </span>
                 </div>
